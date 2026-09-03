@@ -1,91 +1,81 @@
 # Quivr V2
 
-Quivr V2 est un backend open source pour l’ingestion, le retrieval et la veille multimodale. Il accepte du texte, des images, de l’audio et de la vidéo, rend rapidement les contenus recherchables, puis les enrichit progressivement grâce à des plugins externes.
+**Transformez n’importe quel flux de contenu en recherche et veille multimodales.**
 
-Son premier cas d’usage est **Agency Customer**, projet dans lequel l’Agency construit son démonstrateur sur les APIs Quivr V2 et apporte ses formats ou règles métier via des plugins privés. Quivr V2 reste générique et utilisable dans d’autres contextes.
+Quivr V2 est un backend open source qui ingère du texte, des images, de l’audio et de la vidéo, les rend rapidement recherchables, puis les enrichit au fil du traitement. Vous pouvez ensuite rechercher l’information, suivre un sujet en continu ou déclencher une alerte lorsqu’un contenu pertinent arrive.
 
-![Architecture de Quivr V2 : sources multimodales, API, plugins, orchestration, stockage et produits](./docs/assets/quivr-v2-architecture-overview.png)
+Le cœur reste volontairement générique. Les formats, modèles d’IA et règles métier sont ajoutés sous forme de plugins : chacun peut adapter Quivr à son contexte sans forker toute la plateforme.
 
-> Le projet est actuellement en phase de conception. Ce repository rassemble le scope, le modèle de domaine, les décisions d’architecture et les recherches préparatoires.
+[Voir l’architecture animée](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA) · [Explorer l’architecture](./docs/quivr-v2-architecture-overview.md) · [Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md)
 
-## Architecture en bref
+[![Architecture animée de Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA.svg)](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA)
 
-```mermaid
-flowchart LR
-    Sources[Sources<br/>texte · image · audio · vidéo]
-    Plugins[Plugins<br/>connecteurs · IA · règles métier]
-    API[API Quivr V2]
-    Temporal[Temporal<br/>orchestration]
-    PG[(PostgreSQL<br/>catalogue)]
-    S3[(S3<br/>contenus)]
-    WV[(Weaviate<br/>recherche)]
-    Product[Produit ou<br/>démonstrateur Agency]
+_Cliquez sur le schéma pour voir le parcours d’un contenu, l’ajout d’un plugin et son exécution pas à pas._
 
-    Sources --> Plugins --> API
-    API --> Temporal
-    Temporal --> Plugins
-    Temporal --> PG
-    Temporal --> S3
-    Temporal --> WV
-    Product <--> API
-```
+## Comment un contenu traverse Quivr
 
-Les données canoniques vivent dans PostgreSQL et S3. Weaviate est une projection de recherche reconstruisible. Temporal exécute les traitements durables. Les intégrations et modèles s’exécutent comme plugins externes versionnés.
+1. **Accepter** — l’API reçoit le contenu avec une clé d’idempotence et confirme sa prise en charge durable.
+2. **Orchestrer** — Temporal enchaîne les étapes, retente les erreurs et reprend après une panne.
+3. **Comprendre** — les plugins normalisent ou enrichissent le contenu : OCR, transcription, embeddings, règles métier.
+4. **Conserver** — PostgreSQL et S3 portent les versions canoniques, les blobs et leur provenance.
+5. **Rendre utile** — Weaviate sert la recherche hybride ; les Saved Queries transforment ensuite le retrieval en veille continue.
 
-## Principes
+Un contenu n’attend pas la fin de tous les traitements pour devenir utile. Une vidéo peut être visible avec ses métadonnées, puis gagner une transcription, des timecodes et des embeddings au fur et à mesure.
 
-- **Disponibilité progressive** : searchable d’abord, enrichi ensuite.
-- **Cœur générique** : les concepts Agency restent dans des plugins.
-- **Vérité durable** : les index et embeddings peuvent être reconstruits.
-- **Plugins sans arrêt global** : activation par génération et drainage de l’ancienne.
-- **DevX d’abord** : REST/OpenAPI, SDK Python et TypeScript, Docker Compose local.
-- **Scale par mesure** : aucune brique distribuée supplémentaire sans besoin observé.
-- **Open source permissif** : aucune dépendance obligatoire copyleft ou source-available.
+## Les plugins sont le produit d’extension
 
-## Documentation
+Un plugin peut apporter une ou plusieurs capacités :
 
-- **[Comprendre le projet et son architecture](./docs/quivr-v2-architecture-overview.md)** — point d’entrée haut niveau avec les flux et diagrammes.
-- **[Scope détaillé du MVP](./docs/quivr-v2-backend-mvp-scope.md)** — comportement, APIs, données, critères d’acceptation, tests et rollout.
-- **[Vocabulaire et modèle de domaine](./CONTEXT.md)** — langage commun du produit et invariants.
-- **[Transcript de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)** — historique des questions, arbitrages et corrections ayant mené au scope.
-- **[Recherches techniques](./research/)** — Temporal, NATS, Weaviate, Qdrant, Meilisearch, Windmill et architectures de plugins.
+- `Connector` — récupérer une source ou comprendre son protocole ;
+- `Normalizer` — convertir un format vers le modèle canonique ;
+- `Enricher` — produire OCR, transcript, captions, embeddings ou relations ;
+- `Retriever` — ajouter une stratégie de recherche ou de reranking ;
+- `Delivery` — envoyer un match vers un webhook ou un canal métier.
 
-## Périmètre du MVP
+Chaque plugin est un worker externe distribué comme package OCI. Il utilise le SDK Quivr, déclare sa compatibilité avec le moteur en SemVer et ne dépend pas des détails internes de Temporal ou Weaviate.
 
-Le MVP fournit une chaîne complète plutôt qu’un assemblage de briques inachevées :
+Lors d’une mise à jour, une nouvelle génération reçoit les nouveaux travaux pendant que l’ancienne termine les siens. Pas besoin d’arrêter toute la plateforme pour ajouter une capacité ou revenir à la version précédente.
+
+## Pourquoi cette architecture
+
+- **Utile rapidement** — le contenu devient recherchable avant la fin des enrichissements coûteux.
+- **Données récupérables** — PostgreSQL et S3 permettent de reconstruire index et embeddings.
+- **Extensible sans fork** — intégrations, modèles et règles métier évoluent hors du cœur.
+- **Pensé pour les développeurs** — REST/OpenAPI, SDK Python et TypeScript, Docker Compose local et licence permissive.
+
+## Stack de référence
+
+| Besoin | Choix actuel |
+| --- | --- |
+| Orchestration durable | Temporal |
+| Catalogue transactionnel | PostgreSQL |
+| Médias et artefacts lourds | Stockage S3-compatible |
+| Recherche lexicale et vectorielle | Weaviate |
+| Distribution des plugins | OCI |
+| Local → distribué | Docker Compose → Kubernetes |
+
+Ces choix forment la stack de départ, pas des dépendances exposées aux produits clients. Les briques internes pourront donc évoluer sans casser leurs intégrations.
+
+## Premier terrain : Agency Customer
+
+Agency Customer est le premier cas d’usage. Il confronte Quivr à l’ingestion continue de millions d’articles, à la multimodalité, aux corrections et à la rétention, tandis que les formats et règles propres à l’Agency restent dans des plugins privés.
+
+## Où en est le projet ?
+
+Quivr V2 est en phase de conception active. Le MVP vise d’abord une chaîne complète :
 
 ```text
 ingérer → normaliser → rendre searchable → enrichir → rechercher → matcher → notifier
 ```
 
-Il comprend notamment :
+L’optimisation extrême du scale viendra ensuite, guidée par la mesure plutôt que par l’anticipation.
 
-- ingestion idempotente unitaire, upload média et batch manifest ;
-- versions immuables, corrections, retraits et provenance ;
-- traitement progressif du texte, des images, de l’audio et de la vidéo ;
-- recherche lexicale, sémantique, hybride et cross-modale ;
-- Saved Queries, Subscriptions, Matches et deliveries ;
-- plugins OCI avec SDK, SemVer, activation, rollback et backfill ;
-- politiques de rétention, stockage froid et garbage collection sûr ;
-- reconstruction des projections depuis les données canoniques.
+## Aller plus loin
 
-Le démonstrateur Agency, la marketplace, le billing, l’exécution de plugins hostiles et le scale maximal anticipé sont hors du MVP.
+- [Vue d’ensemble de l’architecture](./docs/quivr-v2-architecture-overview.md)
+- [Scope détaillé du backend MVP](./docs/quivr-v2-backend-mvp-scope.md)
+- [Vocabulaire et modèle de domaine](./CONTEXT.md)
+- [Historique de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)
+- [Recherches et comparatifs techniques](./research/)
 
-## Stack de référence
-
-| Besoin | Technologie |
-| --- | --- |
-| Orchestration durable | Temporal |
-| Catalogue transactionnel | PostgreSQL |
-| Contenus et artefacts lourds | Stockage S3-compatible |
-| Recherche lexicale et vectorielle | Weaviate |
-| Distribution des plugins | OCI |
-| Développement local | Docker Compose |
-| Déploiement distribué lorsque nécessaire | Kubernetes |
-
-## Repositories de référence
-
-- [`Agency-doc/`](./Agency-doc/) contient la documentation de cadrage Agency utilisée comme source de contexte. Elle reste indépendante de cette conception.
-- [`multimodal-rag/`](./multimodal-rag/) est un prototype historique exploratoire, pas l’architecture cible.
-
-Les décisions consolidées et leurs questions ouvertes sont documentées dans le [scope MVP](./docs/quivr-v2-backend-mvp-scope.md).
+Les dossiers [`Agency-doc/`](./Agency-doc/) et [`multimodal-rag/`](./multimodal-rag/) restent des références de cadrage et d’exploration, pas l’architecture cible.
