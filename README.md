@@ -4,7 +4,7 @@ Quivr V2 est un backend open source pour l’ingestion, le retrieval et la veill
 
 Son premier cas d’usage est **Agency Customer**, projet dans lequel l’Agency construit son démonstrateur sur les APIs Quivr V2 et apporte ses formats ou règles métier via des plugins privés. Quivr V2 reste générique et utilisable dans d’autres contextes.
 
-![Illustration de l’architecture multimodale et du système de plugins de Quivr V2](./docs/assets/quivr-v2-plugin-architecture-hero.png)
+![Architecture de Quivr V2 : sources multimodales, API, plugins, orchestration, stockage et produits](./docs/assets/quivr-v2-architecture-overview.png)
 
 > Le projet est actuellement en phase de conception. Ce repository rassemble le scope, le modèle de domaine, les décisions d’architecture et les recherches préparatoires.
 
