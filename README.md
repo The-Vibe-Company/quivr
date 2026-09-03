@@ -6,11 +6,11 @@ Quivr V2 est un backend open source qui ingère du texte, des images, de l’aud
 
 Le cœur reste volontairement générique. Les formats, modèles d’IA et règles métier sont ajoutés sous forme de plugins : chacun peut adapter Quivr à son contexte sans forker toute la plateforme.
 
-[Explorer l’architecture animée](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA) · [Voir le film Remotion — 25 s](./docs/assets/quivr-v2-explainer.mp4) · [Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md)
+[Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md) · [Comprendre l’architecture en détail](./docs/quivr-v2-architecture-overview.md)
 
-[![Architecture animée de Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA.svg)](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA)
+![Architecture animée de Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](./docs/assets/quivr-v2-explainer-loop.gif)
 
-_Cliquez sur le schéma pour explorer le parcours d’un contenu et voir comment un plugin rejoint le flux._
+_Cette animation est générée depuis le code Remotion inclus dans le dépôt._
 
 ## Comment un contenu traverse Quivr
 
