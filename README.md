@@ -6,11 +6,11 @@ Quivr V2 est un backend open source qui ingère du texte, des images, de l’aud
 
 Le cœur reste volontairement générique. Les formats, modèles d’IA et règles métier sont ajoutés sous forme de plugins : chacun peut adapter Quivr à son contexte sans forker toute la plateforme.
 
-[Voir le film complet — 25 s](./docs/assets/quivr-v2-explainer.mp4) · [Explorer le canvas technique](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA) · [Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md)
+[Explorer l’architecture animée](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA) · [Voir le film Remotion — 25 s](./docs/assets/quivr-v2-explainer.mp4) · [Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md)
 
-[![Animation Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](./docs/assets/quivr-v2-explainer-loop.gif)](./docs/assets/quivr-v2-explainer.mp4)
+[![Architecture animée de Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA.svg)](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA)
 
-_Cliquez sur l’animation pour voir le film complet. Le [canvas PR Lens](https://prlens.dev/c/Cff5W9_hqnDIwiBtsp1MYA) reste disponible pour explorer l’architecture technique._
+_Cliquez sur le schéma pour explorer le parcours d’un contenu et voir comment un plugin rejoint le flux._
 
 ## Comment un contenu traverse Quivr
 
