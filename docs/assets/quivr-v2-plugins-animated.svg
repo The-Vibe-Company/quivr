@@ -1,111 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title description">
-  <title id="title">Architecture de plugins Quivr V2</title>
-  <desc id="description">Le cœur Quivr reste stable pendant qu’un plugin externe ajoute une capacité de transcription au trajet du document.</desc>
-  <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#071914"/>
-      <stop offset="0.48" stop-color="#070a14"/>
-      <stop offset="1" stop-color="#100d24"/>
-    </linearGradient>
-    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
-      <path d="M44 0H0V44" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
-    </pattern>
-    <filter id="shadow" x="-30%" y="-50%" width="160%" height="200%">
-      <feDropShadow dx="0" dy="14" stdDeviation="17" flood-color="#000000" flood-opacity="0.3"/>
-    </filter>
-    <filter id="green-glow" x="-250%" y="-250%" width="500%" height="500%">
-      <feGaussianBlur stdDeviation="7" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#35d07f"/>
-    </marker>
-    <style>
-      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .label { fill: #9aa6c1; font-size: 12px; font-weight: 750; letter-spacing: 1.6px; }
-      .title { fill: #f7f9ff; font-size: 31px; font-weight: 820; letter-spacing: -1.1px; }
-      .node-title { fill: #f7f9ff; font-size: 17px; font-weight: 780; }
-      .node-copy { fill: #9aa6c1; font-size: 12px; font-weight: 500; }
-    </style>
-  </defs>
-
-  <rect width="1200" height="560" rx="24" fill="url(#background)"/>
-  <rect width="1200" height="560" rx="24" fill="url(#grid)"/>
-
-  <g transform="translate(42 34)">
-    <rect width="39" height="39" rx="12" fill="#8b6cff"/>
-    <text x="19.5" y="26" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="850">Q</text>
-    <text x="53" y="27" fill="#f7f9ff" font-size="22" font-weight="810" letter-spacing="-0.6">Quivr V2</text>
-  </g>
-  <text x="1158" y="57" text-anchor="end" class="label">PLUGIN-FIRST · CONTRATS STABLES</text>
-  <text x="600" y="112" text-anchor="middle" class="title">Ajoutez une capacité. Gardez le cœur stable.</text>
-
-  <g filter="url(#shadow)">
-    <rect x="112" y="153" width="976" height="220" rx="28" fill="#101426" stroke="#8b6cff" stroke-opacity="0.56"/>
-    <text x="141" y="185" class="label" fill="#a997ff">CŒUR QUIVR</text>
-
-    <rect x="146" y="218" width="164" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
-    <text x="168" y="253" class="node-title">API</text>
-    <text x="168" y="281" class="node-copy">Accepte · déduplique</text>
-    <rect x="371" y="218" width="184" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
-    <text x="393" y="253" class="node-title">Temporal</text>
-    <text x="393" y="281" class="node-copy">Planifie · retente</text>
-    <rect x="616" y="218" width="184" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
-    <text x="638" y="253" class="node-title">Contrats</text>
-    <text x="638" y="281" class="node-copy">SDK · capacités · SemVer</text>
-    <rect x="861" y="218" width="193" height="108" rx="18" fill="#18151c" stroke="#f5b942" stroke-opacity="0.66"/>
-    <text x="883" y="253" class="node-title">Données</text>
-    <text x="883" y="281" class="node-copy">Persiste · indexe</text>
-
-    <path d="M310 272H371M555 272H616M800 272H861" fill="none" stroke="#637092" stroke-width="2.5" stroke-dasharray="8 9">
-      <animate attributeName="stroke-dashoffset" from="34" to="0" dur="1.2s" repeatCount="indefinite"/>
-    </path>
-  </g>
-
-  <path id="plugin-route" d="M463 326C463 397 502 447 600 447C712 447 786 397 903 326" fill="none" stroke="#35d07f" stroke-width="3" stroke-linecap="round" stroke-dasharray="10 11" marker-end="url(#arrow-green)">
-    <animate attributeName="stroke-dashoffset" from="42" to="0" dur="1.05s" repeatCount="indefinite"/>
-    <animate attributeName="stroke-opacity" values=".25;1;.55;1;.25" dur="5s" repeatCount="indefinite"/>
-  </path>
-
-  <g filter="url(#shadow)">
-    <rect x="420" y="405" width="360" height="112" rx="22" fill="#0d241e" stroke="#35d07f" stroke-width="1.5">
-      <animate attributeName="stroke-opacity" values=".5;1;.5" dur="2.2s" repeatCount="indefinite"/>
-    </rect>
-    <g transform="translate(445 431)">
-      <path d="M0 16h12V7a7 7 0 0114 0v9h12v20H0zM6 0L2-4M32 0l4-4M19-3v-6" fill="none" stroke="#35d07f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="57" y="18" class="node-title">Plugin · Transcription vidéo</text>
-      <text x="57" y="45" class="node-copy">Worker externe · package OCI · versionné</text>
-    </g>
-    <g transform="translate(681 390)">
-      <rect width="78" height="25" rx="9" fill="#35d07f"/>
-      <text x="39" y="17" text-anchor="middle" fill="#06130d" font-size="10" font-weight="850">NOUVEAU</text>
-      <animateTransform attributeName="transform" type="scale" values="1;1.06;1" additive="sum" dur="1.5s" repeatCount="indefinite"/>
-    </g>
-  </g>
-
-  <g filter="url(#green-glow)">
-    <circle r="9" transform="translate(463 326)" fill="#ffffff" stroke="#35d07f" stroke-width="5">
-      <animateMotion dur="5s" repeatCount="indefinite" keyTimes="0;.08;.92;1" keyPoints="0;0;1;1" calcMode="linear">
-        <mpath href="#plugin-route"/>
-      </animateMotion>
-      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.06;.94;1" dur="5s" repeatCount="indefinite"/>
-    </circle>
-  </g>
-
-  <g transform="translate(131 418)">
-    <text x="0" y="0" class="label">LE MÊME DOCUMENT</text>
-    <rect y="18" width="203" height="78" rx="17" fill="#42c8ff" fill-opacity="0.08" stroke="#42c8ff" stroke-opacity="0.45"/>
-    <path d="M20 34h15l8 8v29H20zM35 34v9h8M25 53h12M25 60h9" fill="none" stroke="#42c8ff" stroke-width="2" stroke-linecap="round"/>
-    <text x="59" y="49" fill="#f7f9ff" font-size="14" font-weight="740">Vidéo reçue</text>
-    <text x="59" y="69" class="node-copy">+ transcript ajouté</text>
-  </g>
-
-  <g transform="translate(866 418)">
-    <text x="0" y="0" class="label">UNE CAPACITÉ EN PLUS</text>
-    <rect y="18" width="203" height="78" rx="17" fill="#35d07f" fill-opacity="0.08" stroke="#35d07f" stroke-opacity="0.45"/>
-    <circle cx="28" cy="55" r="13" fill="none" stroke="#35d07f" stroke-width="2"/>
-    <path d="M37 65l10 10" stroke="#35d07f" stroke-width="2" stroke-linecap="round"/>
-    <text x="59" y="49" fill="#f7f9ff" font-size="14" font-weight="740">Recherche enrichie</text>
-    <text x="59" y="69" class="node-copy">Sans modifier le cœur</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 646" width="1284" height="646" role="img" aria-label="2 — Ajouter un plugin sans modifier le cœur">
+<title>2 — Ajouter un plugin sans modifier le cœur</title>
+<desc>Le SDK définit le contrat, OCI distribue le package, le gestionnaire l’active et Temporal lui confie les nouveaux documents.</desc>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif}.lanebox{fill:rgba(110,118,129,.07)}.lanelabel{font-size:10px;font-weight:700;letter-spacing:.12em;fill:#9198a1}.card{fill:#1c2128;stroke:#3d444d;stroke-width:1}.card-added{stroke:#3fb950;stroke-opacity:.55}.card-modified{stroke:#d29922;stroke-opacity:.5}.ghost{opacity:.55}.ghost .card{stroke:#f85149;stroke-dasharray:4 3;stroke-opacity:.6}.context{opacity:.82}.ntitle{font-weight:600;fill:#e6edf3}.strike{text-decoration:line-through}.nsub{font-size:9.5px;fill:#9198a1;font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace}.chip{fill:rgba(110,118,129,.18)}.glyph{fill:#9198a1}.glyph-stroke{stroke:#9198a1;stroke-width:1.4;fill:none}.bdg text{font-size:8.5px;font-weight:700;letter-spacing:.06em}.bdg rect{stroke-width:1}.bdg-added rect{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.bdg-added text{fill:#3fb950}.bdg-modified rect{fill:rgba(187,128,9,.15);stroke:rgba(210,153,34,.4)}.bdg-modified text{fill:#d29922}.bdg-removed rect{fill:rgba(248,81,73,.12);stroke:rgba(248,81,73,.4)}.bdg-removed text{fill:#f85149}.bdg-neutral rect{fill:rgba(110,118,129,.18);stroke:#3d444d}.bdg-neutral text{fill:#9198a1}.edge{fill:none;stroke-width:1.5}.edge-added{stroke:#3fb950}.edge-modified{stroke:#d29922}.edge-removed{stroke:#f85149;stroke-dasharray:5 4;opacity:.7}.edge-neutral{stroke:#6e7681}.hero{stroke-width:2.25}.faded{opacity:.45}.glow{fill:none;stroke-width:7;opacity:.14}.msg-self{font-size:11px;fill:#e6edf3}.lpill{fill:#0d1117;stroke:#21262d;stroke-width:1}.ltext{font-size:9.5px;font-weight:600;fill:#9198a1}.ltext-added{fill:#3fb950}.ltext-modified{fill:#d29922}.ltext-removed{fill:#f85149}.cardsh{filter:drop-shadow(0 1px 2px rgba(0,0,0,.28))}.lifeline{stroke:#30363d;stroke-width:1;stroke-dasharray:3 4}.actbar{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.msg{fill:none;stroke-width:1.5}.msg-return{stroke-dasharray:4 3;opacity:.8}.msg-strong{stroke-width:2.25}</style>
+<defs><pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="rgba(110,118,129,.22)"/></pattern><marker id="mk-added" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3fb950"/></marker><marker id="mko-added" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#3fb950" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-modified" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d29922"/></marker><marker id="mko-modified" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#d29922" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-removed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f85149"/></marker><marker id="mko-removed" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#f85149" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-neutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6e7681"/></marker><marker id="mko-neutral" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#6e7681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="0" y="0" width="1284" height="646" rx="12" fill="#0d1117"/>
+<rect x="0" y="0" width="1284" height="646" rx="12" fill="url(#dots)"/>
+<g><rect class="lanebox" x="16" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="32" y="68">2 · ENTRÉE QUIVR · CONTRAT STABLE</text>
+<rect class="lanebox" x="440" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="456" y="68">3 · ORCHESTRATION · LE CŒUR DURABLE</text>
+<rect class="lanebox" x="864" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="880" y="68">4 · PLUGINS · CAPACITÉS EXTERNES</text></g>
+<g><path class="edge edge-added" d="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,151.5 C430,167.24 442.76,180 458.5,180 L809.5,180 C823.03,180 834,190.97 834,204.5 L834,206 C834,218.7 844.3,229 857,229 L880,229" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,151.5 C430,167.24 442.76,180 458.5,180 L809.5,180 C823.03,180 834,190.97 834,204.5 L834,206 C834,218.7 844.3,229 857,229 L880,229"/></circle>
+<path class="edge edge-added" d="M880,245 L862,245 C852.06,245 844,253.06 844,263 L844,335 C844,339.42 840.42,343 836,343 L828,343" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M880,245 L862,245 C852.06,245 844,253.06 844,263 L844,335 C844,339.42 840.42,343 836,343 L828,343"/></circle>
+<path class="glow" stroke="#3fb950" d="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/>
+<path class="edge edge-added hero" d="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449" marker-end="url(#mk-added)"/>
+<circle r="3" fill="#3fb950"><animateMotion dur="2.1s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<circle r="3" fill="#3fb950"><animateMotion dur="2.1s" begin="-1.4s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<circle r="3" fill="#3fb950"><animateMotion dur="2.1s" begin="-0.7s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<path class="edge edge-added" d="M828,571 L851,571 C863.7,571 874,560.7 874,548 L874,468 C874,466.34 875.34,465 877,465 L880,465" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M828,571 L851,571 C863.7,571 874,560.7 874,548 L874,468 C874,466.34 875.34,465 877,465 L880,465"/></circle>
+<path class="edge edge-added" d="M880,481 L872,481 C867.58,481 864,484.58 864,489 L864,569 C864,578.94 855.94,587 846,587 L828,587" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M880,481 L872,481 C867.58,481 864,484.58 864,489 L864,569 C864,578.94 855.94,587 846,587 L828,587"/></circle></g>
+<g><g class="cardsh context"><rect class="card" x="32" y="92" width="372" height="62" rx="10"/>
+<rect class="chip" x="46" y="110" width="26" height="26" rx="7"/><g><path class="glyph-stroke" d="M59,116 l6.5,3.5 v7 l-6.5,3.5 l-6.5,-3.5 v-7 Z"/>
+<path class="glyph-stroke" d="M52.5,119.5 l6.5,3.5 l6.5,-3.5"/>
+<path class="glyph-stroke" d="M59,123 v7"/></g>
+<text class="ntitle" x="82" y="119" font-size="13">Contrat plugin</text>
+<text class="nsub" x="82" y="137">SDK · schémas · SemVer</text>
+<g class="bdg bdg-neutral"><rect x="330.34" y="84" width="66.66" height="16" rx="8"/><text x="363.67" y="95" text-anchor="middle">compatible</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="320" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="338" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="344.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="351" r="2"/></g>
+<text class="ntitle" x="506" y="347" font-size="13">Gestionnaire de plugins</text>
+<text class="nsub" x="506" y="365">Installe · valide · active</text>
+<g class="bdg bdg-neutral"><rect x="767.88" y="312" width="53.12" height="16" rx="8"/><text x="794.44" y="323" text-anchor="middle">rollback</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="548" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="566" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="572.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="579" r="2"/></g>
+<text class="ntitle" x="506" y="575" font-size="13">Workflow durable</text>
+<text class="nsub" x="506" y="593">Temporal</text>
+<g class="bdg bdg-neutral"><rect x="727.33" y="540" width="38.57" height="16" rx="8"/><text x="746.62" y="551" text-anchor="middle">retry</text></g>
+<g class="bdg bdg-neutral"><rect x="771.9" y="540" width="49.1" height="16" rx="8"/><text x="796.45" y="551" text-anchor="middle">reprise</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="880" y="206" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="224" width="26" height="26" rx="7"/><g><path class="glyph-stroke" d="M907,230 l6.5,3.5 v7 l-6.5,3.5 l-6.5,-3.5 v-7 Z"/>
+<path class="glyph-stroke" d="M900.5,233.5 l6.5,3.5 l6.5,-3.5"/>
+<path class="glyph-stroke" d="M907,237 v7"/></g>
+<text class="ntitle" x="930" y="233" font-size="13">Package OCI</text>
+<text class="nsub" x="930" y="251">Image figée par digest</text>
+<g class="bdg bdg-neutral"><rect x="1136.41" y="198" width="62.04" height="16" rx="8"/><text x="1167.43" y="209" text-anchor="middle">versionné</text></g>
+<g class="bdg bdg-added"><rect x="1204.45" y="198" width="40.55" height="16" rx="8"/><text x="1224.73" y="209" text-anchor="middle">NEW</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="880" y="434" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="452" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="900.5" y="458.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="907" cy="465" r="2"/></g>
+<text class="ntitle" x="930" y="461" font-size="13">Nouveau plugin</text>
+<text class="nsub" x="930" y="479">OCR · transcription · règle métier</text>
+<g class="bdg bdg-neutral"><rect x="1152.45" y="426" width="46" height="16" rx="8"/><text x="1175.45" y="437" text-anchor="middle">ajouté</text></g>
+<g class="bdg bdg-added"><rect x="1204.45" y="426" width="40.55" height="16" rx="8"/><text x="1224.73" y="437" text-anchor="middle">NEW</text></g></g></g>
+<g><g><rect class="lpill" x="584.58" y="172.5" width="98.84" height="15" rx="7.5"/><text class="ltext ltext-added" x="634" y="183.5" text-anchor="middle">respecte le contrat</text></g>
+<g><rect class="lpill" x="795.15" y="291.5" width="97.71" height="15" rx="7.5"/><text class="ltext ltext-added" x="844" y="302.5" text-anchor="middle">installer par digest</text></g>
+<g><rect class="lpill" x="800.22" y="396.5" width="107.56" height="15" rx="7.5"/><text class="ltext ltext-added" x="854" y="407.5" text-anchor="middle">activer la génération</text></g>
+<g><rect class="lpill" x="818.14" y="500.5" width="111.72" height="15" rx="7.5"/><text class="ltext ltext-added" x="874" y="511.5" text-anchor="middle">nouveaux documents</text></g>
+<g><rect class="lpill" x="815.82" y="521.5" width="96.36" height="15" rx="7.5"/><text class="ltext ltext-added" x="864" y="532.5" text-anchor="middle">résultat versionné</text></g></g>
 </svg>

@@ -10,7 +10,7 @@ Le cœur reste volontairement générique. Les formats, modèles d’IA et règl
 
 ![Flux animé de Quivr V2 : un contenu multimodal traverse l’API, Temporal, les plugins, le stockage et la recherche](./docs/assets/quivr-v2-flow-animated.svg)
 
-_SVG animé, versionné avec le projet et sans dépendance externe._
+_SVG animé généré avec le renderer PR Lens, versionné avec le projet et sans lien externe._
 
 ## Comment un contenu traverse Quivr
 

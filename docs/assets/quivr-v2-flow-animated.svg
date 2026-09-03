@@ -1,141 +1,85 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title description">
-  <title id="title">Flux d’ingestion et de recherche Quivr V2</title>
-  <desc id="description">Un contenu multimodal traverse l’API, Temporal, les enrichissements, les données et la recherche. Un point animé matérialise sa progression.</desc>
-  <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0e1025"/>
-      <stop offset="0.55" stop-color="#070a14"/>
-      <stop offset="1" stop-color="#071521"/>
-    </linearGradient>
-    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#42c8ff"/>
-      <stop offset="0.42" stop-color="#8b6cff"/>
-      <stop offset="0.7" stop-color="#35d07f"/>
-      <stop offset="1" stop-color="#ff7474"/>
-    </linearGradient>
-    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
-      <path d="M44 0H0V44" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
-    </pattern>
-    <filter id="shadow" x="-30%" y="-40%" width="160%" height="180%">
-      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
-    </filter>
-    <filter id="glow" x="-250%" y="-250%" width="500%" height="500%">
-      <feGaussianBlur stdDeviation="7" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#7f8db0"/>
-    </marker>
-    <style>
-      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .label { fill: #9aa6c1; font-size: 12px; font-weight: 750; letter-spacing: 1.6px; }
-      .title { fill: #f7f9ff; font-size: 31px; font-weight: 820; letter-spacing: -1.1px; }
-      .node-title { fill: #f7f9ff; font-size: 17px; font-weight: 780; }
-      .node-copy { fill: #9aa6c1; font-size: 12px; font-weight: 500; }
-      .chip { fill: #cbd5ec; font-size: 11px; font-weight: 680; }
-    </style>
-  </defs>
-
-  <rect width="1200" height="560" rx="24" fill="url(#background)"/>
-  <rect width="1200" height="560" rx="24" fill="url(#grid)"/>
-
-  <g transform="translate(42 34)">
-    <rect width="39" height="39" rx="12" fill="#8b6cff"/>
-    <text x="19.5" y="26" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="850">Q</text>
-    <text x="53" y="27" fill="#f7f9ff" font-size="22" font-weight="810" letter-spacing="-0.6">Quivr V2</text>
-  </g>
-  <text x="1158" y="57" text-anchor="end" class="label">MULTIMODAL · TEMPS RÉEL</text>
-  <text x="600" y="115" text-anchor="middle" class="title">Du contenu brut à une information utile.</text>
-
-  <text x="40" y="181" class="label">ENTRÉES</text>
-  <text x="256" y="181" class="label">MOTEUR QUIVR</text>
-  <text x="1002" y="181" class="label">USAGES</text>
-
-  <path d="M194 296H1016" fill="none" stroke="#34415e" stroke-width="3" marker-end="url(#arrow)"/>
-  <path d="M194 296H1016" fill="none" stroke="url(#flow)" stroke-width="3" stroke-linecap="round" stroke-dasharray="10 12">
-    <animate attributeName="stroke-dashoffset" from="44" to="0" dur="1.15s" repeatCount="indefinite"/>
-  </path>
-
-  <g filter="url(#shadow)">
-    <rect x="40" y="218" width="154" height="156" rx="22" fill="#0f1729" stroke="#42c8ff" stroke-opacity="0.72"/>
-    <path d="M64 245h16l8 8v25H64zM80 245v9h8M69 264h13" fill="none" stroke="#42c8ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="100" y="266" class="node-title">Contenus</text>
-    <g transform="translate(57 298)">
-      <rect width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="29" y="17" text-anchor="middle" class="chip">Texte</text>
-      <rect x="65" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="94" y="17" text-anchor="middle" class="chip">Image</text>
-      <rect y="32" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="29" y="49" text-anchor="middle" class="chip">Audio</text>
-      <rect x="65" y="32" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="94" y="49" text-anchor="middle" class="chip">Vidéo</text>
-    </g>
-    <animate attributeName="opacity" values="0;1;1" keyTimes="0;.08;1" dur="7s" repeatCount="indefinite"/>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="246" y="238" width="132" height="116" rx="19" fill="#11162a" stroke="#8b6cff" stroke-opacity="0.68">
-      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.13;.2;.28;1" dur="7s" repeatCount="indefinite"/>
-    </rect>
-    <path d="M268 258h22v18h-22zM273 253v5M285 253v5M274 267h10" fill="none" stroke="#8b6cff" stroke-width="2" stroke-linecap="round"/>
-    <text x="300" y="274" class="node-title">API</text>
-    <text x="264" y="312" class="node-copy">Accepte</text>
-    <text x="264" y="330" class="node-copy">Déduplique</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="422" y="238" width="144" height="116" rx="19" fill="#11162a" stroke="#8b6cff" stroke-opacity="0.68">
-      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.31;.39;.47;1" dur="7s" repeatCount="indefinite"/>
-    </rect>
-    <circle cx="447" cy="266" r="10" fill="none" stroke="#8b6cff" stroke-width="2"/>
-    <path d="M447 260v7l5 3" fill="none" stroke="#8b6cff" stroke-width="2" stroke-linecap="round"/>
-    <text x="464" y="273" class="node-title">Temporal</text>
-    <text x="440" y="312" class="node-copy">Orchestre</text>
-    <text x="440" y="330" class="node-copy">Reprend</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="610" y="238" width="148" height="116" rx="19" fill="#101a25" stroke="#35d07f" stroke-opacity="0.68">
-      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.49;.57;.65;1" dur="7s" repeatCount="indefinite"/>
-    </rect>
-    <path d="M632 270h12v-10a7 7 0 0114 0v10h12v10h-38z" fill="none" stroke="#35d07f" stroke-width="2" stroke-linejoin="round"/>
-    <text x="631" y="310" class="node-title">Plugins</text>
-    <text x="631" y="330" class="node-copy">Comprennent</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="802" y="218" width="160" height="156" rx="22" fill="#191713" stroke="#f5b942" stroke-opacity="0.68">
-      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.66;.74;.82;1" dur="7s" repeatCount="indefinite"/>
-    </rect>
-    <ellipse cx="830" cy="252" rx="13" ry="6" fill="none" stroke="#f5b942" stroke-width="2"/>
-    <path d="M817 252v20c0 3 6 6 13 6s13-3 13-6v-20M817 262c0 3 6 6 13 6s13-3 13-6" fill="none" stroke="#f5b942" stroke-width="2"/>
-    <text x="855" y="259" class="node-title">Données</text>
-    <text x="821" y="305" class="node-copy">PostgreSQL · S3</text>
-    <text x="821" y="326" class="node-copy">Index Weaviate</text>
-    <rect x="821" y="340" width="118" height="21" rx="7" fill="#f5b942" fill-opacity="0.12"/>
-    <text x="880" y="354" text-anchor="middle" fill="#f5b942" font-size="10" font-weight="740">RECONSTRUISIBLES</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="1006" y="218" width="154" height="156" rx="22" fill="#18131d" stroke="#ff7474" stroke-opacity="0.68">
-      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.83;.91;.98;1" dur="7s" repeatCount="indefinite"/>
-    </rect>
-    <circle cx="1033" cy="254" r="11" fill="none" stroke="#ff7474" stroke-width="2"/>
-    <path d="M1041 262l9 9" stroke="#ff7474" stroke-width="2" stroke-linecap="round"/>
-    <text x="1056" y="261" class="node-title">Valeur</text>
-    <text x="1025" y="305" class="node-copy">Recherche</text>
-    <text x="1025" y="326" class="node-copy">Veille · alertes</text>
-    <rect x="1025" y="340" width="104" height="21" rx="7" fill="#ff7474" fill-opacity="0.12"/>
-    <text x="1077" y="354" text-anchor="middle" fill="#ff9292" font-size="10" font-weight="740">TEMPS RÉEL</text>
-  </g>
-
-  <g filter="url(#glow)">
-    <circle r="9" transform="translate(194 296)" fill="#ffffff" stroke="#42c8ff" stroke-width="5">
-      <animateMotion path="M194 296H1016" dur="7s" keyTimes="0;.08;.92;1" keyPoints="0;0;1;1" calcMode="linear" repeatCount="indefinite"/>
-      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.06;.94;1" dur="7s" repeatCount="indefinite"/>
-    </circle>
-  </g>
-
-  <g transform="translate(217 427)">
-    <rect width="766" height="68" rx="18" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.07"/>
-    <circle cx="35" cy="34" r="5" fill="#8b6cff"/><text x="50" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Durable dès l’acceptation</text>
-    <circle cx="274" cy="34" r="5" fill="#35d07f"/><text x="289" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Enrichi progressivement</text>
-    <circle cx="529" cy="34" r="5" fill="#f5b942"/><text x="544" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Recherchable rapidement</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2556 874" width="2556" height="874" role="img" aria-label="1 — Le parcours simple d’un contenu">
+<title>1 — Le parcours simple d’un contenu</title>
+<desc>Texte, image, audio ou vidéo : un seul chemin lisible jusqu’à la recherche, la veille et les alertes.</desc>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif}.lanebox{fill:rgba(110,118,129,.07)}.lanelabel{font-size:10px;font-weight:700;letter-spacing:.12em;fill:#9198a1}.card{fill:#1c2128;stroke:#3d444d;stroke-width:1}.card-added{stroke:#3fb950;stroke-opacity:.55}.card-modified{stroke:#d29922;stroke-opacity:.5}.ghost{opacity:.55}.ghost .card{stroke:#f85149;stroke-dasharray:4 3;stroke-opacity:.6}.context{opacity:.82}.ntitle{font-weight:600;fill:#e6edf3}.strike{text-decoration:line-through}.nsub{font-size:9.5px;fill:#9198a1;font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace}.chip{fill:rgba(110,118,129,.18)}.glyph{fill:#9198a1}.glyph-stroke{stroke:#9198a1;stroke-width:1.4;fill:none}.bdg text{font-size:8.5px;font-weight:700;letter-spacing:.06em}.bdg rect{stroke-width:1}.bdg-added rect{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.bdg-added text{fill:#3fb950}.bdg-modified rect{fill:rgba(187,128,9,.15);stroke:rgba(210,153,34,.4)}.bdg-modified text{fill:#d29922}.bdg-removed rect{fill:rgba(248,81,73,.12);stroke:rgba(248,81,73,.4)}.bdg-removed text{fill:#f85149}.bdg-neutral rect{fill:rgba(110,118,129,.18);stroke:#3d444d}.bdg-neutral text{fill:#9198a1}.edge{fill:none;stroke-width:1.5}.edge-added{stroke:#3fb950}.edge-modified{stroke:#d29922}.edge-removed{stroke:#f85149;stroke-dasharray:5 4;opacity:.7}.edge-neutral{stroke:#6e7681}.hero{stroke-width:2.25}.faded{opacity:.45}.glow{fill:none;stroke-width:7;opacity:.14}.msg-self{font-size:11px;fill:#e6edf3}.lpill{fill:#0d1117;stroke:#21262d;stroke-width:1}.ltext{font-size:9.5px;font-weight:600;fill:#9198a1}.ltext-added{fill:#3fb950}.ltext-modified{fill:#d29922}.ltext-removed{fill:#f85149}.cardsh{filter:drop-shadow(0 1px 2px rgba(0,0,0,.28))}.lifeline{stroke:#30363d;stroke-width:1;stroke-dasharray:3 4}.actbar{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.msg{fill:none;stroke-width:1.5}.msg-return{stroke-dasharray:4 3;opacity:.8}.msg-strong{stroke-width:2.25}</style>
+<defs><pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="rgba(110,118,129,.22)"/></pattern><marker id="mk-added" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3fb950"/></marker><marker id="mko-added" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#3fb950" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-modified" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d29922"/></marker><marker id="mko-modified" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#d29922" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-removed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f85149"/></marker><marker id="mko-removed" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#f85149" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-neutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6e7681"/></marker><marker id="mko-neutral" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#6e7681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="0" y="0" width="2556" height="874" rx="12" fill="#0d1117"/>
+<rect x="0" y="0" width="2556" height="874" rx="12" fill="url(#dots)"/>
+<g><rect class="lanebox" x="16" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="32" y="68">1 · CONTENU · TOUT FORMAT</text>
+<rect class="lanebox" x="440" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="456" y="68">2 · ENTRÉE QUIVR · CONTRAT STABLE</text>
+<rect class="lanebox" x="864" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="880" y="68">3 · ORCHESTRATION · LE CŒUR DURABLE</text>
+<rect class="lanebox" x="1288" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="1304" y="68">4 · PLUGINS · CAPACITÉS EXTERNES</text>
+<rect class="lanebox" x="1712" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="1728" y="68">5 · DONNÉES · VÉRITÉ ET INDEX</text>
+<rect class="lanebox" x="2136" y="44" width="404" height="814" rx="12"/>
+<text class="lanelabel" x="2152" y="68">6 · USAGES · VALEUR PRODUIT</text></g>
+<g><path class="edge edge-neutral context" d="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,224 C430,231.18 435.82,237 443,237 L456,237" marker-end="url(#mk-neutral)"/>
+<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,224 C430,231.18 435.82,237 443,237 L456,237"/></circle>
+<path class="glow" stroke="#6e7681" d="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/>
+<path class="edge edge-neutral hero context" d="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351" marker-end="url(#mk-neutral)"/>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-1.4s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-0.7s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
+<path class="edge edge-added" d="M1252,351 L1265,351 C1272.18,351 1278,356.82 1278,364 L1278,452 C1278,459.18 1283.82,465 1291,465 L1304,465" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1252,351 L1265,351 C1272.18,351 1278,356.82 1278,364 L1278,452 C1278,459.18 1283.82,465 1291,465 L1304,465"/></circle>
+<path class="edge edge-added" d="M1676,465 L1689,465 C1696.18,465 1702,470.82 1702,478 L1702,566 C1702,573.18 1707.82,579 1715,579 L1728,579" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1676,465 L1689,465 C1696.18,465 1702,470.82 1702,478 L1702,566 C1702,573.18 1707.82,579 1715,579 L1728,579"/></circle>
+<path class="edge edge-neutral context" d="M1914,610 L1914,662" marker-end="url(#mk-neutral)"/>
+<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1914,610 L1914,662"/></circle>
+<path class="edge edge-neutral context" d="M2100,693 L2113,693 C2120.18,693 2126,698.82 2126,706 L2126,794 C2126,801.18 2131.82,807 2139,807 L2152,807" marker-end="url(#mk-neutral)"/>
+<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M2100,693 L2113,693 C2120.18,693 2126,698.82 2126,706 L2126,794 C2126,801.18 2131.82,807 2139,807 L2152,807"/></circle></g>
+<g><g class="cardsh context"><rect class="card" x="32" y="92" width="372" height="62" rx="10"/>
+<rect class="chip" x="46" y="110" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="51" y="117" width="16" height="12" rx="2"/>
+<path class="glyph-stroke" d="M51,119 l8,6 8,-6"/></g>
+<text class="ntitle" x="82" y="119" font-size="13">Un contenu arrive</text>
+<text class="nsub" x="82" y="137">Texte · image · audio · vidéo</text>
+<g class="bdg bdg-neutral"><rect x="330.35" y="84" width="66.65" height="16" rx="8"/><text x="363.68" y="95" text-anchor="middle">multimodal</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="206" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="224" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="230.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="237" r="2"/></g>
+<text class="ntitle" x="506" y="233" font-size="13">API Quivr V2</text>
+<text class="nsub" x="506" y="251">Accepte et répond immédiatement</text>
+<g class="bdg bdg-neutral"><rect x="762.36" y="198" width="58.64" height="16" rx="8"/><text x="791.68" y="209" text-anchor="middle">accepted</text></g></g>
+<g class="cardsh context"><rect class="card" x="880" y="320" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="338" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="900.5" y="344.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="907" cy="351" r="2"/></g>
+<text class="ntitle" x="930" y="347" font-size="13">Workflow durable</text>
+<text class="nsub" x="930" y="365">Temporal</text>
+<g class="bdg bdg-neutral"><rect x="1151.33" y="312" width="38.57" height="16" rx="8"/><text x="1170.62" y="323" text-anchor="middle">retry</text></g>
+<g class="bdg bdg-neutral"><rect x="1195.9" y="312" width="49.1" height="16" rx="8"/><text x="1220.45" y="323" text-anchor="middle">reprise</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="1304" y="434" width="372" height="62" rx="10"/>
+<rect class="chip" x="1318" y="452" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="1324.5" y="458.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="1331" cy="465" r="2"/></g>
+<text class="ntitle" x="1354" y="461" font-size="13">Nouveau plugin</text>
+<text class="nsub" x="1354" y="479">OCR · transcription · règle métier</text>
+<g class="bdg bdg-neutral"><rect x="1576.45" y="426" width="46" height="16" rx="8"/><text x="1599.45" y="437" text-anchor="middle">ajouté</text></g>
+<g class="bdg bdg-added"><rect x="1628.45" y="426" width="40.55" height="16" rx="8"/><text x="1648.73" y="437" text-anchor="middle">NEW</text></g></g>
+<g class="cardsh context"><rect class="card" x="1728" y="548" width="372" height="62" rx="10"/>
+<rect class="chip" x="1742" y="566" width="26" height="26" rx="7"/><g><ellipse class="glyph-stroke" cx="1755" cy="574.5" rx="6.5" ry="2.6"/>
+<path class="glyph-stroke" d="M1748.5,574.5 v9 a6.5,2.6 0 0 0 13 0 v-9"/></g>
+<text class="ntitle" x="1778" y="575" font-size="13">Vérité durable</text>
+<text class="nsub" x="1778" y="593">PostgreSQL + S3</text>
+<g class="bdg bdg-neutral"><rect x="2001.95" y="540" width="91.05" height="16" rx="8"/><text x="2047.48" y="551" text-anchor="middle">source de vérité</text></g></g>
+<g class="cardsh context"><rect class="card" x="1728" y="662" width="372" height="62" rx="10"/>
+<rect class="chip" x="1742" y="680" width="26" height="26" rx="7"/><g><ellipse class="glyph-stroke" cx="1755" cy="688.5" rx="6.5" ry="2.6"/>
+<path class="glyph-stroke" d="M1748.5,688.5 v9 a6.5,2.6 0 0 0 13 0 v-9"/></g>
+<text class="ntitle" x="1778" y="689" font-size="13">Index de recherche</text>
+<text class="nsub" x="1778" y="707">Weaviate · reconstruisible</text>
+<g class="bdg bdg-neutral"><rect x="2025.83" y="654" width="67.17" height="16" rx="8"/><text x="2059.42" y="665" text-anchor="middle">searchable</text></g></g>
+<g class="cardsh context"><rect class="card" x="2152" y="776" width="372" height="62" rx="10"/>
+<rect class="chip" x="2166" y="794" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="2172" y="801" width="14" height="12" rx="2"/>
+<path class="glyph-stroke" d="M2176.5,801 v12"/></g>
+<text class="ntitle" x="2202" y="803" font-size="13">Recherche · veille · alertes</text>
+<text class="nsub" x="2202" y="821">Agency Customer ou autre produit</text>
+<g class="bdg bdg-neutral"><rect x="2471.41" y="768" width="45.59" height="16" rx="8"/><text x="2494.21" y="779" text-anchor="middle">valeur</text></g></g></g>
+<g><g><rect class="lpill" x="360.57" y="172.5" width="138.86" height="15" rx="7.5"/><text class="ltext" x="430" y="183.5" text-anchor="middle">contenu + idempotency key</text></g>
+<g><rect class="lpill" x="807.17" y="286.5" width="93.67" height="15" rx="7.5"/><text class="ltext" x="854" y="297.5" text-anchor="middle">workflow accepté</text></g>
+<g><rect class="lpill" x="1228.31" y="400.5" width="99.39" height="15" rx="7.5"/><text class="ltext ltext-added" x="1278" y="411.5" text-anchor="middle">traiter le document</text></g>
+<g><rect class="lpill" x="1633.98" y="514.5" width="136.05" height="15" rx="7.5"/><text class="ltext ltext-added" x="1702" y="525.5" text-anchor="middle">contenu + enrichissements</text></g>
+<g><rect class="lpill" x="1884.18" y="628.5" width="59.65" height="15" rx="7.5"/><text class="ltext" x="1914" y="639.5" text-anchor="middle">projection</text></g>
+<g><rect class="lpill" x="2072.73" y="742.5" width="106.55" height="15" rx="7.5"/><text class="ltext" x="2126" y="753.5" text-anchor="middle">résultats et matches</text></g></g>
 </svg>
