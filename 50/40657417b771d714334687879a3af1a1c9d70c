@@ -1,0 +1,30 @@
+docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md
+  s_0a386fc571f8fe::t_d9efd22244ebce 4270-4393
+  s_0a386fc571f8fe::t_487f79a73e0615 1978-2532
+  s_0a386fc571f8fe::t_cc888f6bf2dfdc 3-4,762,898-899,901,1070,1239
+  s_0a386fc571f8fe::t_02ef79b1b9bd4a 1-2,5-15
+  s_0a386fc571f8fe::t_a448fb0a7997f1 1717-1977
+  s_0a386fc571f8fe::t_b63a4741ca7c1c 16-761,763-773
+  s_0a386fc571f8fe::t_34e67741e6664c 1068-1069,1071-1238,1240-1716
+  s_0a386fc571f8fe::t_8a461562512b12 774-897,900,902-1067
+  s_0a386fc571f8fe::t_2c4a80b96354d3 3799-4269
+  s_0a386fc571f8fe::t_fdb0529c8c9013 2533-3798
+README.md
+  s_0a386fc571f8fe::t_efda329334d227 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "5040657417b771d714334687879a3af1a1c9d70c",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
