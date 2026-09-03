@@ -1,0 +1,25 @@
+docs/agents/issue-tracker.md
+  s_0a386fc571f8fe::t_c6d74091976d0e 1-55
+docs/agents/domain.md
+  s_0a386fc571f8fe::t_c6d74091976d0e 1-38
+docs/agents/triage-labels.md
+  s_0a386fc571f8fe::t_c6d74091976d0e 1-13
+AGENTS.md
+  s_0a386fc571f8fe::t_c6d74091976d0e 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "ef89cfbbc1021ee860d6febe4edf047f04edb2f1",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
