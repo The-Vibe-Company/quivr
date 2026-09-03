@@ -45,6 +45,7 @@ Les données canoniques vivent dans PostgreSQL et S3. Weaviate est une projectio
 - **[Comprendre le projet et son architecture](./docs/quivr-v2-architecture-overview.md)** — point d’entrée haut niveau avec les flux et diagrammes.
 - **[Scope détaillé du MVP](./docs/quivr-v2-backend-mvp-scope.md)** — comportement, APIs, données, critères d’acceptation, tests et rollout.
 - **[Vocabulaire et modèle de domaine](./CONTEXT.md)** — langage commun du produit et invariants.
+- **[Transcript de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)** — historique des questions, arbitrages et corrections ayant mené au scope.
 - **[Recherches techniques](./research/)** — Temporal, NATS, Weaviate, Qdrant, Meilisearch, Windmill et architectures de plugins.
 
 ## Périmètre du MVP
