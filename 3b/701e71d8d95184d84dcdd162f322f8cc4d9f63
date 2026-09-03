@@ -1,0 +1,19 @@
+docs/assets/quivr-v2-flow-animated.svg
+  s_0a386fc571f8fe::t_807009dc267f39 1-3,6-26,33-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "3b701e71d8d95184d84dcdd162f322f8cc4d9f63",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
