@@ -8,9 +8,9 @@ Le cœur reste volontairement générique. Les formats, modèles d’IA et règl
 
 [Lire le scope du MVP](./docs/quivr-v2-backend-mvp-scope.md) · [Comprendre l’architecture en détail](./docs/quivr-v2-architecture-overview.md)
 
-![Architecture animée de Quivr V2 : un contenu traverse l’API, Temporal, un plugin, le stockage et la recherche](./docs/assets/quivr-v2-explainer-loop.gif)
+![Flux animé de Quivr V2 : un contenu multimodal traverse l’API, Temporal, les plugins, le stockage et la recherche](./docs/assets/quivr-v2-flow-animated.svg)
 
-_Cette animation est générée depuis le code Remotion inclus dans le dépôt._
+_SVG animé, versionné avec le projet et sans dépendance externe._
 
 ## Comment un contenu traverse Quivr
 
@@ -23,6 +23,8 @@ _Cette animation est générée depuis le code Remotion inclus dans le dépôt._
 Un contenu n’attend pas la fin de tous les traitements pour devenir utile. Une vidéo peut être visible avec ses métadonnées, puis gagner une transcription, des timecodes et des embeddings au fur et à mesure.
 
 ## Les plugins sont le produit d’extension
+
+![Architecture animée des plugins Quivr V2 : un plugin de transcription enrichit le document sans modifier le cœur](./docs/assets/quivr-v2-plugins-animated.svg)
 
 Un plugin peut apporter une ou plusieurs capacités :
 
@@ -77,6 +79,5 @@ L’optimisation extrême du scale viendra ensuite, guidée par la mesure plutô
 - [Vocabulaire et modèle de domaine](./CONTEXT.md)
 - [Historique de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)
 - [Recherches et comparatifs techniques](./research/)
-- [Sources et commandes de l’animation Remotion](./video/)
 
 Les dossiers [`Agency-doc/`](./Agency-doc/) et [`multimodal-rag/`](./multimodal-rag/) restent des références de cadrage et d’exploration, pas l’architecture cible.

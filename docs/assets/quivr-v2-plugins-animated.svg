@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title description">
+  <title id="title">Architecture de plugins Quivr V2</title>
+  <desc id="description">Le cœur Quivr reste stable pendant qu’un plugin externe ajoute une capacité de transcription au trajet du document.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071914"/>
+      <stop offset="0.48" stop-color="#070a14"/>
+      <stop offset="1" stop-color="#100d24"/>
+    </linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M44 0H0V44" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-50%" width="160%" height="200%">
+      <feDropShadow dx="0" dy="14" stdDeviation="17" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+    <filter id="green-glow" x="-250%" y="-250%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#35d07f"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #9aa6c1; font-size: 12px; font-weight: 750; letter-spacing: 1.6px; }
+      .title { fill: #f7f9ff; font-size: 31px; font-weight: 820; letter-spacing: -1.1px; }
+      .node-title { fill: #f7f9ff; font-size: 17px; font-weight: 780; }
+      .node-copy { fill: #9aa6c1; font-size: 12px; font-weight: 500; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="560" rx="24" fill="url(#background)"/>
+  <rect width="1200" height="560" rx="24" fill="url(#grid)"/>
+
+  <g transform="translate(42 34)">
+    <rect width="39" height="39" rx="12" fill="#8b6cff"/>
+    <text x="19.5" y="26" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="850">Q</text>
+    <text x="53" y="27" fill="#f7f9ff" font-size="22" font-weight="810" letter-spacing="-0.6">Quivr V2</text>
+  </g>
+  <text x="1158" y="57" text-anchor="end" class="label">PLUGIN-FIRST · CONTRATS STABLES</text>
+  <text x="600" y="112" text-anchor="middle" class="title">Ajoutez une capacité. Gardez le cœur stable.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="112" y="153" width="976" height="220" rx="28" fill="#101426" stroke="#8b6cff" stroke-opacity="0.56"/>
+    <text x="141" y="185" class="label" fill="#a997ff">CŒUR QUIVR</text>
+
+    <rect x="146" y="218" width="164" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
+    <text x="168" y="253" class="node-title">API</text>
+    <text x="168" y="281" class="node-copy">Accepte · déduplique</text>
+    <rect x="371" y="218" width="184" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
+    <text x="393" y="253" class="node-title">Temporal</text>
+    <text x="393" y="281" class="node-copy">Planifie · retente</text>
+    <rect x="616" y="218" width="184" height="108" rx="18" fill="#151832" stroke="#8b6cff" stroke-opacity="0.66"/>
+    <text x="638" y="253" class="node-title">Contrats</text>
+    <text x="638" y="281" class="node-copy">SDK · capacités · SemVer</text>
+    <rect x="861" y="218" width="193" height="108" rx="18" fill="#18151c" stroke="#f5b942" stroke-opacity="0.66"/>
+    <text x="883" y="253" class="node-title">Données</text>
+    <text x="883" y="281" class="node-copy">Persiste · indexe</text>
+
+    <path d="M310 272H371M555 272H616M800 272H861" fill="none" stroke="#637092" stroke-width="2.5" stroke-dasharray="8 9">
+      <animate attributeName="stroke-dashoffset" from="34" to="0" dur="1.2s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <path id="plugin-route" d="M463 326C463 397 502 447 600 447C712 447 786 397 903 326" fill="none" stroke="#35d07f" stroke-width="3" stroke-linecap="round" stroke-dasharray="10 11" marker-end="url(#arrow-green)">
+    <animate attributeName="stroke-dashoffset" from="42" to="0" dur="1.05s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-opacity" values=".25;1;.55;1;.25" dur="5s" repeatCount="indefinite"/>
+  </path>
+
+  <g filter="url(#shadow)">
+    <rect x="420" y="405" width="360" height="112" rx="22" fill="#0d241e" stroke="#35d07f" stroke-width="1.5">
+      <animate attributeName="stroke-opacity" values=".5;1;.5" dur="2.2s" repeatCount="indefinite"/>
+    </rect>
+    <g transform="translate(445 431)">
+      <path d="M0 16h12V7a7 7 0 0114 0v9h12v20H0zM6 0L2-4M32 0l4-4M19-3v-6" fill="none" stroke="#35d07f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="57" y="18" class="node-title">Plugin · Transcription vidéo</text>
+      <text x="57" y="45" class="node-copy">Worker externe · package OCI · versionné</text>
+    </g>
+    <g transform="translate(681 390)">
+      <rect width="78" height="25" rx="9" fill="#35d07f"/>
+      <text x="39" y="17" text-anchor="middle" fill="#06130d" font-size="10" font-weight="850">NOUVEAU</text>
+      <animateTransform attributeName="transform" type="scale" values="1;1.06;1" additive="sum" dur="1.5s" repeatCount="indefinite"/>
+    </g>
+  </g>
+
+  <g filter="url(#green-glow)">
+    <circle r="9" transform="translate(463 326)" fill="#ffffff" stroke="#35d07f" stroke-width="5">
+      <animateMotion dur="5s" repeatCount="indefinite" keyTimes="0;.08;.92;1" keyPoints="0;0;1;1" calcMode="linear">
+        <mpath href="#plugin-route"/>
+      </animateMotion>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.06;.94;1" dur="5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <g transform="translate(131 418)">
+    <text x="0" y="0" class="label">LE MÊME DOCUMENT</text>
+    <rect y="18" width="203" height="78" rx="17" fill="#42c8ff" fill-opacity="0.08" stroke="#42c8ff" stroke-opacity="0.45"/>
+    <path d="M20 34h15l8 8v29H20zM35 34v9h8M25 53h12M25 60h9" fill="none" stroke="#42c8ff" stroke-width="2" stroke-linecap="round"/>
+    <text x="59" y="49" fill="#f7f9ff" font-size="14" font-weight="740">Vidéo reçue</text>
+    <text x="59" y="69" class="node-copy">+ transcript ajouté</text>
+  </g>
+
+  <g transform="translate(866 418)">
+    <text x="0" y="0" class="label">UNE CAPACITÉ EN PLUS</text>
+    <rect y="18" width="203" height="78" rx="17" fill="#35d07f" fill-opacity="0.08" stroke="#35d07f" stroke-opacity="0.45"/>
+    <circle cx="28" cy="55" r="13" fill="none" stroke="#35d07f" stroke-width="2"/>
+    <path d="M37 65l10 10" stroke="#35d07f" stroke-width="2" stroke-linecap="round"/>
+    <text x="59" y="49" fill="#f7f9ff" font-size="14" font-weight="740">Recherche enrichie</text>
+    <text x="59" y="69" class="node-copy">Sans modifier le cœur</text>
+  </g>
+</svg>

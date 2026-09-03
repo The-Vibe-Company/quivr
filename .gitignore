@@ -4,7 +4,5 @@
 .env
 .env.*
 !.env.example
-node_modules/
-
 # PR Lens writes its previews here. They are rebuilt on demand.
 .pr-lens/

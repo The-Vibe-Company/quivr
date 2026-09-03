@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title description">
+  <title id="title">Flux d’ingestion et de recherche Quivr V2</title>
+  <desc id="description">Un contenu multimodal traverse l’API, Temporal, les enrichissements, les données et la recherche. Un point animé matérialise sa progression.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e1025"/>
+      <stop offset="0.55" stop-color="#070a14"/>
+      <stop offset="1" stop-color="#071521"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#42c8ff"/>
+      <stop offset="0.42" stop-color="#8b6cff"/>
+      <stop offset="0.7" stop-color="#35d07f"/>
+      <stop offset="1" stop-color="#ff7474"/>
+    </linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M44 0H0V44" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-40%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="glow" x="-250%" y="-250%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#7f8db0"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #9aa6c1; font-size: 12px; font-weight: 750; letter-spacing: 1.6px; }
+      .title { fill: #f7f9ff; font-size: 31px; font-weight: 820; letter-spacing: -1.1px; }
+      .node-title { fill: #f7f9ff; font-size: 17px; font-weight: 780; }
+      .node-copy { fill: #9aa6c1; font-size: 12px; font-weight: 500; }
+      .chip { fill: #cbd5ec; font-size: 11px; font-weight: 680; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="560" rx="24" fill="url(#background)"/>
+  <rect width="1200" height="560" rx="24" fill="url(#grid)"/>
+
+  <g transform="translate(42 34)">
+    <rect width="39" height="39" rx="12" fill="#8b6cff"/>
+    <text x="19.5" y="26" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="850">Q</text>
+    <text x="53" y="27" fill="#f7f9ff" font-size="22" font-weight="810" letter-spacing="-0.6">Quivr V2</text>
+  </g>
+  <text x="1158" y="57" text-anchor="end" class="label">MULTIMODAL · TEMPS RÉEL</text>
+  <text x="600" y="115" text-anchor="middle" class="title">Du contenu brut à une information utile.</text>
+
+  <text x="40" y="181" class="label">ENTRÉES</text>
+  <text x="256" y="181" class="label">MOTEUR QUIVR</text>
+  <text x="1002" y="181" class="label">USAGES</text>
+
+  <path d="M194 296H1016" fill="none" stroke="#34415e" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M194 296H1016" fill="none" stroke="url(#flow)" stroke-width="3" stroke-linecap="round" stroke-dasharray="10 12">
+    <animate attributeName="stroke-dashoffset" from="44" to="0" dur="1.15s" repeatCount="indefinite"/>
+  </path>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="218" width="154" height="156" rx="22" fill="#0f1729" stroke="#42c8ff" stroke-opacity="0.72"/>
+    <path d="M64 245h16l8 8v25H64zM80 245v9h8M69 264h13" fill="none" stroke="#42c8ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="100" y="266" class="node-title">Contenus</text>
+    <g transform="translate(57 298)">
+      <rect width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="29" y="17" text-anchor="middle" class="chip">Texte</text>
+      <rect x="65" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="94" y="17" text-anchor="middle" class="chip">Image</text>
+      <rect y="32" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="29" y="49" text-anchor="middle" class="chip">Audio</text>
+      <rect x="65" y="32" width="58" height="25" rx="8" fill="#42c8ff" fill-opacity="0.12"/><text x="94" y="49" text-anchor="middle" class="chip">Vidéo</text>
+    </g>
+    <animate attributeName="opacity" values="0;1;1" keyTimes="0;.08;1" dur="7s" repeatCount="indefinite"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="246" y="238" width="132" height="116" rx="19" fill="#11162a" stroke="#8b6cff" stroke-opacity="0.68">
+      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.13;.2;.28;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <path d="M268 258h22v18h-22zM273 253v5M285 253v5M274 267h10" fill="none" stroke="#8b6cff" stroke-width="2" stroke-linecap="round"/>
+    <text x="300" y="274" class="node-title">API</text>
+    <text x="264" y="312" class="node-copy">Accepte</text>
+    <text x="264" y="330" class="node-copy">Déduplique</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="422" y="238" width="144" height="116" rx="19" fill="#11162a" stroke="#8b6cff" stroke-opacity="0.68">
+      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.31;.39;.47;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <circle cx="447" cy="266" r="10" fill="none" stroke="#8b6cff" stroke-width="2"/>
+    <path d="M447 260v7l5 3" fill="none" stroke="#8b6cff" stroke-width="2" stroke-linecap="round"/>
+    <text x="464" y="273" class="node-title">Temporal</text>
+    <text x="440" y="312" class="node-copy">Orchestre</text>
+    <text x="440" y="330" class="node-copy">Reprend</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="610" y="238" width="148" height="116" rx="19" fill="#101a25" stroke="#35d07f" stroke-opacity="0.68">
+      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.49;.57;.65;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <path d="M632 270h12v-10a7 7 0 0114 0v10h12v10h-38z" fill="none" stroke="#35d07f" stroke-width="2" stroke-linejoin="round"/>
+    <text x="631" y="310" class="node-title">Plugins</text>
+    <text x="631" y="330" class="node-copy">Comprennent</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="802" y="218" width="160" height="156" rx="22" fill="#191713" stroke="#f5b942" stroke-opacity="0.68">
+      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.66;.74;.82;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <ellipse cx="830" cy="252" rx="13" ry="6" fill="none" stroke="#f5b942" stroke-width="2"/>
+    <path d="M817 252v20c0 3 6 6 13 6s13-3 13-6v-20M817 262c0 3 6 6 13 6s13-3 13-6" fill="none" stroke="#f5b942" stroke-width="2"/>
+    <text x="855" y="259" class="node-title">Données</text>
+    <text x="821" y="305" class="node-copy">PostgreSQL · S3</text>
+    <text x="821" y="326" class="node-copy">Index Weaviate</text>
+    <rect x="821" y="340" width="118" height="21" rx="7" fill="#f5b942" fill-opacity="0.12"/>
+    <text x="880" y="354" text-anchor="middle" fill="#f5b942" font-size="10" font-weight="740">RECONSTRUISIBLES</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1006" y="218" width="154" height="156" rx="22" fill="#18131d" stroke="#ff7474" stroke-opacity="0.68">
+      <animate attributeName="stroke-opacity" values=".45;.45;1;.45;.45" keyTimes="0;.83;.91;.98;1" dur="7s" repeatCount="indefinite"/>
+    </rect>
+    <circle cx="1033" cy="254" r="11" fill="none" stroke="#ff7474" stroke-width="2"/>
+    <path d="M1041 262l9 9" stroke="#ff7474" stroke-width="2" stroke-linecap="round"/>
+    <text x="1056" y="261" class="node-title">Valeur</text>
+    <text x="1025" y="305" class="node-copy">Recherche</text>
+    <text x="1025" y="326" class="node-copy">Veille · alertes</text>
+    <rect x="1025" y="340" width="104" height="21" rx="7" fill="#ff7474" fill-opacity="0.12"/>
+    <text x="1077" y="354" text-anchor="middle" fill="#ff9292" font-size="10" font-weight="740">TEMPS RÉEL</text>
+  </g>
+
+  <g filter="url(#glow)">
+    <circle r="9" transform="translate(194 296)" fill="#ffffff" stroke="#42c8ff" stroke-width="5">
+      <animateMotion path="M194 296H1016" dur="7s" keyTimes="0;.08;.92;1" keyPoints="0;0;1;1" calcMode="linear" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.06;.94;1" dur="7s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <g transform="translate(217 427)">
+    <rect width="766" height="68" rx="18" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.07"/>
+    <circle cx="35" cy="34" r="5" fill="#8b6cff"/><text x="50" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Durable dès l’acceptation</text>
+    <circle cx="274" cy="34" r="5" fill="#35d07f"/><text x="289" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Enrichi progressivement</text>
+    <circle cx="529" cy="34" r="5" fill="#f5b942"/><text x="544" y="39" fill="#cbd5ec" font-size="13" font-weight="620">Recherchable rapidement</text>
+  </g>
+</svg>
