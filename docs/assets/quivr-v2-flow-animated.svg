@@ -1,85 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2556 874" width="2556" height="874" role="img" aria-label="1 — Le parcours simple d’un contenu">
-<title>1 — Le parcours simple d’un contenu</title>
-<desc>Texte, image, audio ou vidéo : un seul chemin lisible jusqu’à la recherche, la veille et les alertes.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 760" width="1284" height="760" role="img" aria-label="Le parcours d’un contenu">
+<title>Le parcours d’un contenu</title>
+<desc>Trois frontières lisibles : accepter, traiter, rendre utile.</desc>
 <style>text{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif}.lanebox{fill:rgba(110,118,129,.07)}.lanelabel{font-size:10px;font-weight:700;letter-spacing:.12em;fill:#9198a1}.card{fill:#1c2128;stroke:#3d444d;stroke-width:1}.card-added{stroke:#3fb950;stroke-opacity:.55}.card-modified{stroke:#d29922;stroke-opacity:.5}.ghost{opacity:.55}.ghost .card{stroke:#f85149;stroke-dasharray:4 3;stroke-opacity:.6}.context{opacity:.82}.ntitle{font-weight:600;fill:#e6edf3}.strike{text-decoration:line-through}.nsub{font-size:9.5px;fill:#9198a1;font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace}.chip{fill:rgba(110,118,129,.18)}.glyph{fill:#9198a1}.glyph-stroke{stroke:#9198a1;stroke-width:1.4;fill:none}.bdg text{font-size:8.5px;font-weight:700;letter-spacing:.06em}.bdg rect{stroke-width:1}.bdg-added rect{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.bdg-added text{fill:#3fb950}.bdg-modified rect{fill:rgba(187,128,9,.15);stroke:rgba(210,153,34,.4)}.bdg-modified text{fill:#d29922}.bdg-removed rect{fill:rgba(248,81,73,.12);stroke:rgba(248,81,73,.4)}.bdg-removed text{fill:#f85149}.bdg-neutral rect{fill:rgba(110,118,129,.18);stroke:#3d444d}.bdg-neutral text{fill:#9198a1}.edge{fill:none;stroke-width:1.5}.edge-added{stroke:#3fb950}.edge-modified{stroke:#d29922}.edge-removed{stroke:#f85149;stroke-dasharray:5 4;opacity:.7}.edge-neutral{stroke:#6e7681}.hero{stroke-width:2.25}.faded{opacity:.45}.glow{fill:none;stroke-width:7;opacity:.14}.msg-self{font-size:11px;fill:#e6edf3}.lpill{fill:#0d1117;stroke:#21262d;stroke-width:1}.ltext{font-size:9.5px;font-weight:600;fill:#9198a1}.ltext-added{fill:#3fb950}.ltext-modified{fill:#d29922}.ltext-removed{fill:#f85149}.cardsh{filter:drop-shadow(0 1px 2px rgba(0,0,0,.28))}.lifeline{stroke:#30363d;stroke-width:1;stroke-dasharray:3 4}.actbar{fill:rgba(46,160,67,.15);stroke:rgba(63,185,80,.4)}.msg{fill:none;stroke-width:1.5}.msg-return{stroke-dasharray:4 3;opacity:.8}.msg-strong{stroke-width:2.25}</style>
 <defs><pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="rgba(110,118,129,.22)"/></pattern><marker id="mk-added" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3fb950"/></marker><marker id="mko-added" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#3fb950" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-modified" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d29922"/></marker><marker id="mko-modified" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#d29922" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-removed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f85149"/></marker><marker id="mko-removed" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#f85149" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-neutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6e7681"/></marker><marker id="mko-neutral" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#6e7681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
-<rect x="0" y="0" width="2556" height="874" rx="12" fill="#0d1117"/>
-<rect x="0" y="0" width="2556" height="874" rx="12" fill="url(#dots)"/>
-<g><rect class="lanebox" x="16" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="32" y="68">1 · CONTENU · TOUT FORMAT</text>
-<rect class="lanebox" x="440" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="456" y="68">2 · ENTRÉE QUIVR · CONTRAT STABLE</text>
-<rect class="lanebox" x="864" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="880" y="68">3 · ORCHESTRATION · LE CŒUR DURABLE</text>
-<rect class="lanebox" x="1288" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="1304" y="68">4 · PLUGINS · CAPACITÉS EXTERNES</text>
-<rect class="lanebox" x="1712" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="1728" y="68">5 · DONNÉES · VÉRITÉ ET INDEX</text>
-<rect class="lanebox" x="2136" y="44" width="404" height="814" rx="12"/>
-<text class="lanelabel" x="2152" y="68">6 · USAGES · VALEUR PRODUIT</text></g>
-<g><path class="edge edge-neutral context" d="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,224 C430,231.18 435.82,237 443,237 L456,237" marker-end="url(#mk-neutral)"/>
-<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,224 C430,231.18 435.82,237 443,237 L456,237"/></circle>
-<path class="glow" stroke="#6e7681" d="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/>
-<path class="edge edge-neutral hero context" d="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351" marker-end="url(#mk-neutral)"/>
-<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
-<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-1.4s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
-<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-0.7s" repeatCount="indefinite" path="M828,237 L841,237 C848.18,237 854,242.82 854,250 L854,338 C854,345.18 859.82,351 867,351 L880,351"/></circle>
-<path class="edge edge-added" d="M1252,351 L1265,351 C1272.18,351 1278,356.82 1278,364 L1278,452 C1278,459.18 1283.82,465 1291,465 L1304,465" marker-end="url(#mk-added)"/>
-<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1252,351 L1265,351 C1272.18,351 1278,356.82 1278,364 L1278,452 C1278,459.18 1283.82,465 1291,465 L1304,465"/></circle>
-<path class="edge edge-added" d="M1676,465 L1689,465 C1696.18,465 1702,470.82 1702,478 L1702,566 C1702,573.18 1707.82,579 1715,579 L1728,579" marker-end="url(#mk-added)"/>
-<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1676,465 L1689,465 C1696.18,465 1702,470.82 1702,478 L1702,566 C1702,573.18 1707.82,579 1715,579 L1728,579"/></circle>
-<path class="edge edge-neutral context" d="M1914,610 L1914,662" marker-end="url(#mk-neutral)"/>
-<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1914,610 L1914,662"/></circle>
-<path class="edge edge-neutral context" d="M2100,693 L2113,693 C2120.18,693 2126,698.82 2126,706 L2126,794 C2126,801.18 2131.82,807 2139,807 L2152,807" marker-end="url(#mk-neutral)"/>
-<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M2100,693 L2113,693 C2120.18,693 2126,698.82 2126,706 L2126,794 C2126,801.18 2131.82,807 2139,807 L2152,807"/></circle></g>
+<rect x="0" y="0" width="1284" height="760" rx="12" fill="#0d1117"/>
+<rect x="0" y="0" width="1284" height="760" rx="12" fill="url(#dots)"/>
+<g><rect class="lanebox" x="16" y="44" width="404" height="700" rx="12"/>
+<text class="lanelabel" x="32" y="68">1 · ENTRÉE · TOUT FORMAT</text>
+<rect class="lanebox" x="440" y="44" width="404" height="700" rx="12"/>
+<text class="lanelabel" x="456" y="68">2 · CŒUR QUIVR · DURABLE ET EXTENSIBLE</text>
+<rect class="lanebox" x="864" y="44" width="404" height="700" rx="12"/>
+<text class="lanelabel" x="880" y="68">3 · DONNÉES ET USAGES · RECHERCHE ET VEILLE</text></g>
+<g><path class="edge edge-neutral context" d="M218,154 L218,206" marker-end="url(#mk-neutral)"/>
+<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M218,154 L218,206"/></circle>
+<path class="glow" stroke="#6e7681" d="M404,237 L417,237 C424.18,237 430,242.82 430,250 L430,338 C430,345.18 435.82,351 443,351 L456,351"/>
+<path class="edge edge-neutral hero context" d="M404,237 L417,237 C424.18,237 430,242.82 430,250 L430,338 C430,345.18 435.82,351 443,351 L456,351" marker-end="url(#mk-neutral)"/>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" repeatCount="indefinite" path="M404,237 L417,237 C424.18,237 430,242.82 430,250 L430,338 C430,345.18 435.82,351 443,351 L456,351"/></circle>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-1.4s" repeatCount="indefinite" path="M404,237 L417,237 C424.18,237 430,242.82 430,250 L430,338 C430,345.18 435.82,351 443,351 L456,351"/></circle>
+<circle r="3" fill="#6e7681"><animateMotion dur="2.1s" begin="-0.7s" repeatCount="indefinite" path="M404,237 L417,237 C424.18,237 430,242.82 430,250 L430,338 C430,345.18 435.82,351 443,351 L456,351"/></circle>
+<path class="edge edge-added" d="M642,382 L642,434" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M642,382 L642,434"/></circle>
+<path class="edge edge-added" d="M828,465 L841,465 C848.18,465 854,470.82 854,478 L854,566 C854,573.18 859.82,579 867,579 L880,579" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#3fb950"><animateMotion dur="1.6s" repeatCount="indefinite" path="M828,465 L841,465 C848.18,465 854,470.82 854,478 L854,566 C854,573.18 859.82,579 867,579 L880,579"/></circle>
+<path class="edge edge-neutral context" d="M1066,610 L1066,662" marker-end="url(#mk-neutral)"/>
+<circle r="2.6" fill="#6e7681"><animateMotion dur="1.6s" repeatCount="indefinite" path="M1066,610 L1066,662"/></circle></g>
 <g><g class="cardsh context"><rect class="card" x="32" y="92" width="372" height="62" rx="10"/>
 <rect class="chip" x="46" y="110" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="51" y="117" width="16" height="12" rx="2"/>
 <path class="glyph-stroke" d="M51,119 l8,6 8,-6"/></g>
 <text class="ntitle" x="82" y="119" font-size="13">Un contenu arrive</text>
 <text class="nsub" x="82" y="137">Texte · image · audio · vidéo</text>
 <g class="bdg bdg-neutral"><rect x="330.35" y="84" width="66.65" height="16" rx="8"/><text x="363.68" y="95" text-anchor="middle">multimodal</text></g></g>
-<g class="cardsh context"><rect class="card" x="456" y="206" width="372" height="62" rx="10"/>
-<rect class="chip" x="470" y="224" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="230.5" width="13" height="13" rx="3"/>
-<circle class="glyph" cx="483" cy="237" r="2"/></g>
-<text class="ntitle" x="506" y="233" font-size="13">API Quivr V2</text>
-<text class="nsub" x="506" y="251">Accepte et répond immédiatement</text>
-<g class="bdg bdg-neutral"><rect x="762.36" y="198" width="58.64" height="16" rx="8"/><text x="791.68" y="209" text-anchor="middle">accepted</text></g></g>
-<g class="cardsh context"><rect class="card" x="880" y="320" width="372" height="62" rx="10"/>
-<rect class="chip" x="894" y="338" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="900.5" y="344.5" width="13" height="13" rx="3"/>
-<circle class="glyph" cx="907" cy="351" r="2"/></g>
-<text class="ntitle" x="930" y="347" font-size="13">Workflow durable</text>
-<text class="nsub" x="930" y="365">Temporal</text>
-<g class="bdg bdg-neutral"><rect x="1151.33" y="312" width="38.57" height="16" rx="8"/><text x="1170.62" y="323" text-anchor="middle">retry</text></g>
-<g class="bdg bdg-neutral"><rect x="1195.9" y="312" width="49.1" height="16" rx="8"/><text x="1220.45" y="323" text-anchor="middle">reprise</text></g></g>
-<g class="cardsh"><rect class="card card-added" x="1304" y="434" width="372" height="62" rx="10"/>
-<rect class="chip" x="1318" y="452" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="1324.5" y="458.5" width="13" height="13" rx="3"/>
-<circle class="glyph" cx="1331" cy="465" r="2"/></g>
-<text class="ntitle" x="1354" y="461" font-size="13">Nouveau plugin</text>
-<text class="nsub" x="1354" y="479">OCR · transcription · règle métier</text>
-<g class="bdg bdg-neutral"><rect x="1576.45" y="426" width="46" height="16" rx="8"/><text x="1599.45" y="437" text-anchor="middle">ajouté</text></g>
-<g class="bdg bdg-added"><rect x="1628.45" y="426" width="40.55" height="16" rx="8"/><text x="1648.73" y="437" text-anchor="middle">NEW</text></g></g>
-<g class="cardsh context"><rect class="card" x="1728" y="548" width="372" height="62" rx="10"/>
-<rect class="chip" x="1742" y="566" width="26" height="26" rx="7"/><g><ellipse class="glyph-stroke" cx="1755" cy="574.5" rx="6.5" ry="2.6"/>
-<path class="glyph-stroke" d="M1748.5,574.5 v9 a6.5,2.6 0 0 0 13 0 v-9"/></g>
-<text class="ntitle" x="1778" y="575" font-size="13">Vérité durable</text>
-<text class="nsub" x="1778" y="593">PostgreSQL + S3</text>
-<g class="bdg bdg-neutral"><rect x="2001.95" y="540" width="91.05" height="16" rx="8"/><text x="2047.48" y="551" text-anchor="middle">source de vérité</text></g></g>
-<g class="cardsh context"><rect class="card" x="1728" y="662" width="372" height="62" rx="10"/>
-<rect class="chip" x="1742" y="680" width="26" height="26" rx="7"/><g><ellipse class="glyph-stroke" cx="1755" cy="688.5" rx="6.5" ry="2.6"/>
-<path class="glyph-stroke" d="M1748.5,688.5 v9 a6.5,2.6 0 0 0 13 0 v-9"/></g>
-<text class="ntitle" x="1778" y="689" font-size="13">Index de recherche</text>
-<text class="nsub" x="1778" y="707">Weaviate · reconstruisible</text>
-<g class="bdg bdg-neutral"><rect x="2025.83" y="654" width="67.17" height="16" rx="8"/><text x="2059.42" y="665" text-anchor="middle">searchable</text></g></g>
-<g class="cardsh context"><rect class="card" x="2152" y="776" width="372" height="62" rx="10"/>
-<rect class="chip" x="2166" y="794" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="2172" y="801" width="14" height="12" rx="2"/>
-<path class="glyph-stroke" d="M2176.5,801 v12"/></g>
-<text class="ntitle" x="2202" y="803" font-size="13">Recherche · veille · alertes</text>
-<text class="nsub" x="2202" y="821">Agency Customer ou autre produit</text>
-<g class="bdg bdg-neutral"><rect x="2471.41" y="768" width="45.59" height="16" rx="8"/><text x="2494.21" y="779" text-anchor="middle">valeur</text></g></g></g>
-<g><g><rect class="lpill" x="360.57" y="172.5" width="138.86" height="15" rx="7.5"/><text class="ltext" x="430" y="183.5" text-anchor="middle">contenu + idempotency key</text></g>
-<g><rect class="lpill" x="807.17" y="286.5" width="93.67" height="15" rx="7.5"/><text class="ltext" x="854" y="297.5" text-anchor="middle">workflow accepté</text></g>
-<g><rect class="lpill" x="1228.31" y="400.5" width="99.39" height="15" rx="7.5"/><text class="ltext ltext-added" x="1278" y="411.5" text-anchor="middle">traiter le document</text></g>
-<g><rect class="lpill" x="1633.98" y="514.5" width="136.05" height="15" rx="7.5"/><text class="ltext ltext-added" x="1702" y="525.5" text-anchor="middle">contenu + enrichissements</text></g>
-<g><rect class="lpill" x="1884.18" y="628.5" width="59.65" height="15" rx="7.5"/><text class="ltext" x="1914" y="639.5" text-anchor="middle">projection</text></g>
-<g><rect class="lpill" x="2072.73" y="742.5" width="106.55" height="15" rx="7.5"/><text class="ltext" x="2126" y="753.5" text-anchor="middle">résultats et matches</text></g></g>
+<g class="cardsh context"><rect class="card" x="32" y="206" width="372" height="62" rx="10"/>
+<rect class="chip" x="46" y="224" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="52.5" y="230.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="59" cy="237" r="2"/></g>
+<text class="ntitle" x="82" y="233" font-size="13">API Quivr V2</text>
+<text class="nsub" x="82" y="251">Accepte · déduplique · répond</text>
+<g class="bdg bdg-neutral"><rect x="338.36" y="198" width="58.64" height="16" rx="8"/><text x="367.68" y="209" text-anchor="middle">accepted</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="320" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="338" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="344.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="351" r="2"/></g>
+<text class="ntitle" x="506" y="347" font-size="13">Workflow durable</text>
+<text class="nsub" x="506" y="365">Temporal · reprise · retry</text>
+<g class="bdg bdg-neutral"><rect x="769.38" y="312" width="51.62" height="16" rx="8"/><text x="795.19" y="323" text-anchor="middle">durable</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="456" y="434" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="452" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="458.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="465" r="2"/></g>
+<text class="ntitle" x="506" y="461" font-size="13">Plugins actifs</text>
+<text class="nsub" x="506" y="479">OCR · transcription · règles</text>
+<g class="bdg bdg-neutral"><rect x="710.79" y="426" width="63.66" height="16" rx="8"/><text x="742.62" y="437" text-anchor="middle">extensible</text></g>
+<g class="bdg bdg-added"><rect x="780.45" y="426" width="40.55" height="16" rx="8"/><text x="800.72" y="437" text-anchor="middle">NEW</text></g></g>
+<g class="cardsh context"><rect class="card" x="880" y="548" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="566" width="26" height="26" rx="7"/><g><ellipse class="glyph-stroke" cx="907" cy="574.5" rx="6.5" ry="2.6"/>
+<path class="glyph-stroke" d="M900.5,574.5 v9 a6.5,2.6 0 0 0 13 0 v-9"/></g>
+<text class="ntitle" x="930" y="575" font-size="13">Vérité durable et index</text>
+<text class="nsub" x="930" y="593">PostgreSQL · S3 · Weaviate</text>
+<g class="bdg bdg-neutral"><rect x="1161.27" y="540" width="83.73" height="16" rx="8"/><text x="1203.14" y="551" text-anchor="middle">reconstruisible</text></g></g>
+<g class="cardsh context"><rect class="card" x="880" y="662" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="680" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="900" y="687" width="14" height="12" rx="2"/>
+<path class="glyph-stroke" d="M904.5,687 v12"/></g>
+<text class="ntitle" x="930" y="689" font-size="13">Recherche · veille · alertes</text>
+<text class="nsub" x="930" y="707">Disponible progressivement</text>
+<g class="bdg bdg-neutral"><rect x="1179.44" y="654" width="65.56" height="16" rx="8"/><text x="1212.22" y="665" text-anchor="middle">temps réel</text></g></g></g>
+<g><g><rect class="lpill" x="194.11" y="172.5" width="47.78" height="15" rx="7.5"/><text class="ltext" x="218" y="183.5" text-anchor="middle">ingérer</text></g>
+<g><rect class="lpill" x="373.31" y="286.5" width="113.39" height="15" rx="7.5"/><text class="ltext" x="430" y="297.5" text-anchor="middle">accepter durablement</text></g>
+<g><rect class="lpill" x="617.5" y="400.5" width="49.01" height="15" rx="7.5"/><text class="ltext ltext-added" x="642" y="411.5" text-anchor="middle">enrichir</text></g>
+<g><rect class="lpill" x="803.19" y="514.5" width="101.63" height="15" rx="7.5"/><text class="ltext ltext-added" x="854" y="525.5" text-anchor="middle">persister et indexer</text></g>
+<g><rect class="lpill" x="1045.7" y="628.5" width="40.61" height="15" rx="7.5"/><text class="ltext" x="1066" y="639.5" text-anchor="middle">servir</text></g></g>
 </svg>
