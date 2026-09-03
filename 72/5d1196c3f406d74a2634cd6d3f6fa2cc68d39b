@@ -1,0 +1,21 @@
+video/src/QuivrReadmeLoop.tsx
+  s_0a386fc571f8fe::t_6919cca3aa318b 1-130,133-165,167-245
+README.md
+  s_0a386fc571f8fe::t_6919cca3aa318b 9,11,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "725d1196c3f406d74a2634cd6d3f6fa2cc68d39b",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
