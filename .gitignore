@@ -4,3 +4,6 @@
 .env
 .env.*
 !.env.example
+
+# PR Lens writes its previews here. They are rebuilt on demand.
+.pr-lens/
