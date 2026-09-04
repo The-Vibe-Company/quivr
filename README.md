@@ -49,6 +49,7 @@ Lors d’une mise à jour, une nouvelle génération reçoit les nouveaux travau
 
 | Besoin | Choix actuel |
 | --- | --- |
+| Cœur du moteur | Go, en monolithe modulaire |
 | Orchestration durable | Temporal |
 | Catalogue transactionnel | PostgreSQL |
 | Médias et artefacts lourds | Stockage S3-compatible |
@@ -56,7 +57,7 @@ Lors d’une mise à jour, une nouvelle génération reçoit les nouveaux travau
 | Distribution des plugins | OCI |
 | Local → distribué | Docker Compose → Kubernetes |
 
-Ces choix forment la stack de départ, pas des dépendances exposées aux produits clients. Les briques internes pourront donc évoluer sans casser leurs intégrations.
+Le cœur Go possède l'API, le domaine, les transactions et les workers Temporal. Python et TypeScript restent les langages prioritaires des SDK et plugins externes. Ces choix forment la stack de départ, pas des dépendances exposées aux produits clients : les briques internes pourront évoluer sans casser leurs intégrations.
 
 ## Premier terrain : Agency Customer
 
