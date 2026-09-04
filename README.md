@@ -77,6 +77,7 @@ L’optimisation extrême du scale viendra ensuite, guidée par la mesure plutô
 
 - [Vue d’ensemble de l’architecture](./docs/quivr-v2-architecture-overview.md)
 - [Scope détaillé du backend MVP](./docs/quivr-v2-backend-mvp-scope.md)
+- [Modèle de données canonique et cycles de vie](./docs/quivr-v2-canonical-data-model.md)
 - [Vocabulaire et modèle de domaine](./CONTEXT.md)
 - [Historique de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)
 - [Recherches et comparatifs techniques](./research/)

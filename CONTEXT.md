@@ -9,19 +9,19 @@ A logical collection of records that share an access and retrieval boundary.
 _Avoid_: Index, database
 
 **Record**:
-A stable, typed logical item known to the engine, independent of any particular representation or revision.
+A stable, typed logical item owned by exactly one corpus, independent of any particular representation or revision.
 _Avoid_: Document as a universal term, publication, signal
 
 **Record Version**:
-An immutable representation of a record observed at a particular point in its history.
+An immutable representation of a record observed at a particular point in its history. A source correction creates a new version, while progressive enrichment does not; distinct ingestion receipts may converge on the same version when source revision and content agree.
 _Avoid_: Mutable record, overwrite
 
 **Record Version Manifest**:
-The immutable description of a record version's parts, artifacts, checksums, provenance, and plugin-produced structure.
+The atomically published, immutable description of a record version's verified parts, blobs, checksums, provenance, and plugin-produced structure.
 _Avoid_: Database row set, search projection
 
 **Part**:
-A typed, potentially hierarchical component of a record version, such as text, structured data, an image, audio, or video.
+A typed, potentially hierarchical component owned by exactly one record version, with at most one parent and a key unique within its manifest.
 _Avoid_: Attachment as a universal term
 
 **Normalized Content**:
@@ -29,15 +29,15 @@ A source-faithful representation of content independent of retrieval-specific se
 _Avoid_: Chunked content, search projection
 
 **Segmentation**:
-A versioned derivation that divides normalized content into retrieval or processing units without changing the record version.
+A versioned derivation that divides normalized content into retrieval or processing units without changing the record version; multiple segmentations may coexist.
 _Avoid_: Record version, source structure
 
 **Derivation**:
-A reproducible output whose plugin, model, parameters, inputs, checksums, and supersession lineage are recorded.
+A reproducible output whose identity is determined by its inputs, capability, producer digest, model, parameters, and output role. Identical executions converge; divergent output for the same identity is a conflict rather than an overwrite.
 _Avoid_: Untracked generated file
 
 **Blob**:
-Immutable stored bytes that may be referenced by one or more parts without sharing their provenance or business context.
+Immutable stored bytes whose identity and deduplication scope never cross an organization boundary; one blob may be referenced by multiple parts without sharing their provenance or business context.
 _Avoid_: File when referring to stored content
 
 **Relation**:
@@ -61,7 +61,7 @@ A durable derived representation of a part in a vector space, retained independe
 _Avoid_: Vector index entry
 
 **Projection Generation**:
-An internally consistent, rebuildable search representation that can coexist with another generation during validation and cutover.
+An internally consistent, rebuildable search representation that pins its derivations and vector spaces and can coexist with another generation during validation and cutover.
 _Avoid_: In-place index migration
 
 **Archive Projection**:
@@ -83,43 +83,71 @@ _Avoid_: Search engine configuration
 ## Continuous retrieval
 
 **Saved Query**:
-A versioned retrieval request retained for repeated or automated evaluation.
+A stable, organization-owned identity for a retrieval request retained for repeated or automated evaluation.
 _Avoid_: Subscription, alert
 
+**Saved Query Version**:
+An immutable definition of a saved query that fixes its query expression, corpus scope, retrieval profile, and temporal policy.
+_Avoid_: Mutable saved query, subscription version
+
 **Subscription**:
-A durable instruction to evaluate a saved query against eligible new record versions.
+A stable, organization-owned instruction to evaluate a saved query continuously.
 _Avoid_: Saved query, notification channel
 
+**Subscription Version**:
+An immutable subscription configuration that pins one saved query version and its evaluation and delivery policy.
+_Avoid_: Match, delivery attempt
+
 **Match**:
-A durable determination that one record version satisfies one version of a subscription.
+A durable, idempotent determination that one record version satisfies one version of a subscription. Reevaluation after progressive enrichment converges on the same match; a materially relevant source correction may create a linked match for the new record version.
 _Avoid_: Delivery, search result
 
 **Delivery**:
-An external effect attempted for a match through a configured channel.
-_Avoid_: Match, subscription
+A stable logical external notification for one match, destination, and event kind; transport attempts may repeat without creating another delivery.
+_Avoid_: Match, delivery attempt
+
+**Delivery Attempt**:
+One transport attempt for a delivery, recorded separately because external effects are at-least-once rather than transactional with Quivr.
+_Avoid_: Logical delivery, match
 
 **Record Key**:
-The stable identity of a record within a corpus and connector namespace, preserved across all of its versions.
+The source-provided stable identity of a record within an organization, corpus, and source namespace, preserved across all of its versions.
 _Avoid_: Version identifier, blob hash
 
+**Source Namespace**:
+A durable identity partition for record keys that survives connector replacement or reconfiguration.
+_Avoid_: Connector instance, transport endpoint
+
+**Source Position**:
+An optional monotonic position supplied within a source namespace to order record revisions independently of delivery time; durable acceptance order is the fallback when none exists.
+_Avoid_: Arbitrary source timestamp, ingestion receipt identifier
+
+**Current Record Version**:
+The eligible version selected for a record, replaced atomically only after a successor becomes searchable.
+_Avoid_: Latest submitted version, latest created row
+
+**Version Availability**:
+The canonical readiness of a record version for retrieval, tracked independently from whether it is the record's current version and from optional enrichment progress.
+_Avoid_: Receipt state, workflow status
+
 **Ingestion Receipt**:
-The durable acknowledgement that the engine has accepted responsibility for a submitted record or blob reference.
+The immutable acknowledgement that the engine has durably accepted responsibility for one submission; it resolves exactly once as created, duplicate, withdrawal applied, or conflict. Processing and search availability belong to the associated record version rather than being copied onto the receipt.
 _Avoid_: Processing completion, search availability
 
 **Operation**:
-A durable, trackable execution of a long-running administrative command such as a backfill, rebuild, restoration, or purge.
+A durable, trackable execution of a long-running administrative command such as a backfill, rebuild, cold-data restoration, or purge. Technical retries and restarts preserve its identity; rerunning a terminal operation creates a new linked operation.
 _Avoid_: Workflow, ingestion receipt
 
 **Change Event**:
-A compact public fact describing a committed domain change for clients that consume the resumable change feed.
+An immutable, uniquely identified public fact describing a committed domain change, ordered within its organization for clients that consume the resumable change feed.
 _Avoid_: Temporal history event, internal task
 
 **Change Cursor**:
-An opaque position from which a client can resume consumption of the public change feed within its retention window.
+An opaque organization-scoped position from which a client can resume at-least-once consumption of the public change feed within its retention window; an expired cursor requires explicit resynchronization.
 _Avoid_: Database offset, page number
 
 **Tombstone**:
-An explicit durable marker that a record is withdrawn from active use without erasing its identity or history.
+An explicit durable marker that immediately and permanently withdraws a record from retrieval, monitoring, and new delivery without erasing its identity or history; physical deletion remains a separate retention operation.
 _Avoid_: Hard delete, missing record
 
 ## Governance
@@ -133,7 +161,7 @@ A versioned set of lifecycle rules governing the availability, tiering, and even
 _Avoid_: Garbage collection policy
 
 **Legal Hold**:
-An explicit override that prevents destructive retention actions on protected content.
+An explicit override that prevents destructive retention actions on protected content and the canonical artifacts it still references.
 _Avoid_: Permanent retention policy
 
 **Lifecycle State**:
@@ -141,12 +169,16 @@ The current logical availability of content or an artifact, independent of the s
 _Avoid_: S3 storage class
 
 **Purge Candidate**:
-An unreferenced, unprotected item awaiting verification and a recovery grace period before physical deletion.
+An item with no canonical reference, active use, or legal hold that has satisfied its retention policy and is awaiting verification and a recovery grace period before physical deletion.
 _Avoid_: Deleted item
 
 **Searchable Record**:
-A materialized record version for which the engine has published the minimum retrieval projection, independently of optional enrichments.
+A materialized record version for which the engine has published the mandatory retrieval baseline, independently of optional multimodal enrichments that may arrive later.
 _Avoid_: Fully processed record
+
+**Progressive Enrichment**:
+The availability model in which a record version becomes searchable as soon as its mandatory retrieval baseline is ready, then gains optional text, image, audio, or video derivations without changing its identity.
+_Avoid_: Waiting for full processing, creating a new record version for derived output
 
 **Backfill**:
 The controlled processing or reprocessing of an existing historical range without changing the identity of its records.
@@ -195,7 +227,7 @@ The immutable set and ordering of contributions resolved for one bounded process
 _Avoid_: Live plugin registry, mutable workflow configuration
 
 **Quarantine**:
-A durable state that withholds a record from normal availability because a mandatory contribution could not safely complete.
+A durable hold that withholds an accepted submission or record version from normal availability because a mandatory contribution could not safely complete.
 _Avoid_: Retry queue, deletion
 
 **Plugin Worker**:
