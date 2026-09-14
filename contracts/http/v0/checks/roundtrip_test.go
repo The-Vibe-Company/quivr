@@ -38,6 +38,24 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &Version{}
 			case "Operation":
 				target = &Operation{}
+			case "SavedQueryCreate":
+				target = &SavedQueryCreate{}
+			case "SavedQuery":
+				target = &SavedQuery{}
+			case "SubscriptionCreate":
+				target = &SubscriptionCreate{}
+			case "Subscription":
+				target = &Subscription{}
+			case "Match":
+				target = &Match{}
+			case "WebhookEvent":
+				target = &WebhookEvent{}
+			case "Delivery":
+				target = &Delivery{}
+			case "DeliveryAttemptPage":
+				target = &DeliveryAttemptPage{}
+			case "ChangeEvent":
+				target = &ChangeEvent{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

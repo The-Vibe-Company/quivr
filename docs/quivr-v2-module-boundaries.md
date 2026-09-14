@@ -162,7 +162,8 @@ The combined PostgreSQL operation may insert both rows; this is an explicit
 cross-module transaction, not permission for arbitrary cross-module writes.
 
 Each new Delivery Attempt, including a retry, checks eligibility against canonical
-state at admission. A committed withdrawal blocks new content notifications; an
+state at admission. A disabled Subscription blocks new attempts, including retries
+of pending notifications, as resolved in THE-547. A committed withdrawal blocks new content notifications; an
 already admitted/in-flight attempt cannot be recalled transactionally. A failed
 or interrupted attempt is retried through admission again. Withdrawal notices
 are distinguished by event kind, because they can legitimately follow a Tombstone.

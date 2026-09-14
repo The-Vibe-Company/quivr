@@ -172,6 +172,7 @@ The two diagrams are connected by `Organization`, `Record Version`, and `Change 
 - Every Corpus in a Saved Query Version belongs to the same Organization.
 - A Subscription has stable identity and immutable versions. A Subscription Version pins one Saved Query Version plus its evaluation and delivery policy.
 - Only the active Subscription Version is evaluated. Activating a new immutable version does not rewrite earlier Matches; disabling a Subscription stops new evaluations without deleting its history.
+- Disabling a Subscription also blocks admission of new Delivery Attempts, including retries of pending notifications. Already admitted/in-flight attempts may finish. This admission rule was resolved in THE-547.
 - Activation starts from now by default. Evaluating an earlier time range is an explicit Backfill with its own scope and priority.
 - A Match is unique on:
 

@@ -46,6 +46,11 @@ invalid = [
     ("IngestCommand", {**examples["structured_inline"], "unexpected": True}),
     ("IngestCommand", {**examples["structured_inline"],
                        "content": {"kind": "text", "blob_id": "b"}}),
+    ("WebhookEvent", {**examples["reference_webhook"], "content": "must not be embedded"}),
+    ("WebhookEvent", {**examples["reference_webhook"], "type": "delivery.updated"}),
+    ("SubscriptionCreate", {**examples["subscription_create"], "signing_secret": "not accepted"}),
+    ("Match", {k: v for k, v in examples["positive_match"].items() if k != "evidence"}),
+    ("Delivery", {**examples["delivery"], "state": "failed"}),
 ]
 for schema, value in invalid:
     check(schema, value, False)

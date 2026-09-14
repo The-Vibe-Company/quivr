@@ -1,11 +1,10 @@
 openapi: 3.1.0
 info:
-  title: Quivr V2 public ingestion contract
+  title: Quivr V2 ingestion and thin monitoring contract
   version: 0.0.0-draft
-  description: THE-543 public ingestion contract for evaluation. Product decisions, convergent resynchronization
-    and cancellation semantics accepted in interview. Routes/limits are versioned v0 defaults; endpoints
-    are not implemented by this contract change. OpenAPI is authoritative for transport; generated types
-    are not domain aggregates. Detailed monitoring events belong to THE-547.
+  description: THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching
+    criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent
+    at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes.
 security:
 - ApiKey: []
 paths:
@@ -661,6 +660,353 @@ paths:
               $ref: '#/components/schemas/ActionRequest'
       x-required-permissions:
       - operations:write
+  /v0/saved-queries:
+    post:
+      operationId: createSavedQuery
+      description: Persist definition and first immutable version. Replay same key/request returns same
+        IDs; conflict on changed request. Query creation alone evaluates nothing.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavedQueryCreate'
+  /v0/saved-queries/{saved_query_id}:
+    get:
+      operationId: getSavedQuery
+      description: Authorized current query view.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: saved_query_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/saved-queries/{saved_query_id}/versions/{version_id}:
+    get:
+      operationId: getSavedQueryVersion
+      description: Read pinned immutable query definition.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQueryVersion'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: saved_query_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/subscriptions:
+    post:
+      operationId: createSubscription
+      description: Atomically create enabled Subscription/Version and activation boundary in commit-ordered
+        journal. Evaluate future eligible transitions, not existing history. Replay same key/request returns
+        same identity and does not reactivate a disabled Subscription.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreate'
+  /v0/subscriptions/{subscription_id}:
+    get:
+      operationId: getSubscription
+      description: Read enabled state and pinned current configuration.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/subscriptions/{subscription_id}/versions/{version_id}:
+    get:
+      operationId: getSubscriptionVersion
+      description: Read immutable configuration used by historical Matches.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionVersion'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/subscriptions/{subscription_id}/disable:
+    post:
+      operationId: disableSubscription
+      description: Commit disable. Block new evaluation commits and new Delivery Attempt admissions, including
+        queued retries and update notices. In-flight attempts may complete. Repeat is idempotent; history
+        remains. Re-enable/reconfiguration workflows are outside the tracer.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+  /v0/matches:
+    get:
+      operationId: listMatches
+      description: Authorized historical Matches for a Subscription. Stable keyset page cursor, not a
+        Change Cursor. Absence of a Match does not distinguish an evaluator still working from a negative
+        result.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchPage'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: page_cursor
+        in: query
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+  /v0/matches/{match_id}:
+    get:
+      operationId: getMatch
+      description: Authorized historical positive result, explanation and provenance. Recheck current
+        access to Subscription and content; disabled state alone does not erase history. Historical content
+        retention remains separate from search eligibility.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: match_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/deliveries/{delivery_id}:
+    get:
+      operationId: getDelivery
+      description: Read logical notification status and current admission view. Rights on the referenced
+        Subscription/Corpus are still required for withdrawal-notice metadata.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Delivery'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/deliveries/{delivery_id}/attempts:
+    get:
+      operationId: listDeliveryAttempts
+      description: Paginated append-only transport history, without secrets or receiver bodies.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryAttemptPage'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: delivery_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: page_cursor
+        in: query
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
 components:
   securitySchemes:
     ApiKey:
@@ -1367,6 +1713,8 @@ components:
         cursor:
           type: string
           minLength: 1
+        monitoring:
+          $ref: '#/components/schemas/MonitoringReferences'
       required:
       - event_id
       - type
@@ -1376,7 +1724,9 @@ components:
       - cursor
       description: Every change to a Record catalog entry emits an event with resource.kind=record and
         resource.id=the affected Record ID. Additional resource-specific events do not replace this invalidation.
-        Consumers reread current state; payload detail belongs to THE-547.
+        Consumers reread current state; payload detail belongs to THE-547. Monitoring notice types mirror
+        WebhookEvent and include monitoring references; event_id identifies that same committed notice.
+        Delivery status changes emit delivery.updated events only to the feed, never recursive webhooks.
     ChangePage:
       type: object
       additionalProperties: false
@@ -1456,3 +1806,463 @@ components:
         an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently
         pending, not a promise of final enrichment. Phase is omitted when idle; required and optional
         progress do not override Version Availability.
+    SavedQueryDefinition:
+      type: object
+      additionalProperties: false
+      properties:
+        corpus_ids:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          uniqueItems: true
+        expression:
+          type: object
+          additionalProperties: true
+        retrieval_profile:
+          type: string
+          minLength: 1
+        temporal_policy:
+          type: string
+          enum:
+          - from_activation
+      required:
+      - corpus_ids
+      - expression
+      - retrieval_profile
+      - temporal_policy
+      description: Immutable query definition. Expression semantics belong to the evaluator plugin; no
+        core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
+    SavedQueryCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        definition:
+          $ref: '#/components/schemas/SavedQueryDefinition'
+      required:
+      - idempotency_key
+      - name
+      - definition
+    SavedQueryVersion:
+      type: object
+      additionalProperties: false
+      properties:
+        saved_query_id:
+          type: string
+          minLength: 1
+        version_id:
+          type: string
+          minLength: 1
+        definition:
+          $ref: '#/components/schemas/SavedQueryDefinition'
+      required:
+      - saved_query_id
+      - version_id
+      - definition
+    SavedQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        saved_query_id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        current_version:
+          $ref: '#/components/schemas/SavedQueryVersion'
+      required:
+      - saved_query_id
+      - name
+      - current_version
+    EvaluatorConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        plugin_id:
+          type: string
+          minLength: 1
+        version:
+          type: string
+          minLength: 1
+        configuration:
+          type: object
+          additionalProperties: true
+      required:
+      - plugin_id
+      - version
+      - configuration
+      description: Pins an installed evaluator implementation/version and its configuration. Production
+        algorithm and native plugin execution contract are deferred. The foundation uses a deterministic
+        fixture adapter behind the same logical port.
+    SubscriptionCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        saved_query_id:
+          type: string
+          minLength: 1
+        saved_query_version_id:
+          type: string
+          minLength: 1
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorConfig'
+        destination_id:
+          type: string
+          minLength: 1
+      required:
+      - idempotency_key
+      - name
+      - saved_query_id
+      - saved_query_version_id
+      - evaluator
+      - destination_id
+      description: Create enabled from-now Subscription. One deployment-configured destination per version;
+        destination belongs to this Organization. URL and signing key are provisioned outside this API
+        and not returned. No inline secret or dynamic destination registry in the tracer.
+    SubscriptionVersion:
+      type: object
+      additionalProperties: false
+      properties:
+        subscription_id:
+          type: string
+          minLength: 1
+        version_id:
+          type: string
+          minLength: 1
+        saved_query_id:
+          type: string
+          minLength: 1
+        saved_query_version_id:
+          type: string
+          minLength: 1
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorConfig'
+        destination_id:
+          type: string
+          minLength: 1
+      required:
+      - subscription_id
+      - version_id
+      - saved_query_id
+      - saved_query_version_id
+      - evaluator
+      - destination_id
+    Subscription:
+      type: object
+      additionalProperties: false
+      properties:
+        subscription_id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        enabled:
+          type: boolean
+        current_version:
+          $ref: '#/components/schemas/SubscriptionVersion'
+      required:
+      - subscription_id
+      - name
+      - enabled
+      - current_version
+    MatchEvidence:
+      type: object
+      additionalProperties: false
+      properties:
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorConfig'
+        explanation:
+          type: string
+          maxLength: 4096
+        part_keys:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          maxItems: 100
+        details:
+          type: object
+          additionalProperties: true
+      required:
+      - evaluator
+      - explanation
+      description: Immutable evidence for a positive result, including evaluator version/configuration.
+        Details are plugin-defined, bounded to 16 KiB and schema-validated by its adapter; core checks
+        referenced Parts. Access is rechecked on reads.
+    Match:
+      type: object
+      additionalProperties: false
+      properties:
+        match_id:
+          type: string
+          minLength: 1
+        subscription_id:
+          type: string
+          minLength: 1
+        subscription_version_id:
+          type: string
+          minLength: 1
+        saved_query_id:
+          type: string
+          minLength: 1
+        saved_query_version_id:
+          type: string
+          minLength: 1
+        record_id:
+          type: string
+          minLength: 1
+        record_version_id:
+          type: string
+          minLength: 1
+        previous_match_id:
+          type: string
+          minLength: 1
+        evidence:
+          $ref: '#/components/schemas/MatchEvidence'
+      required:
+      - match_id
+      - subscription_id
+      - subscription_version_id
+      - saved_query_id
+      - saved_query_version_id
+      - record_id
+      - record_version_id
+      - evidence
+      description: Immutable positive historical determination, not a claim of current eligibility. Unique
+        subscription-version/record-version. Correction/withdrawal notifications reference history; no
+        Match is fabricated for negative decisions.
+    MatchPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Match'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
+    MonitoringReferences:
+      type: object
+      additionalProperties: false
+      properties:
+        match_id:
+          type: string
+          minLength: 1
+        record_id:
+          type: string
+          minLength: 1
+        record_version_id:
+          type: string
+          minLength: 1
+        subscription_id:
+          type: string
+          minLength: 1
+        subscription_version_id:
+          type: string
+          minLength: 1
+        delivery_id:
+          type: string
+          minLength: 1
+        previous_match_id:
+          type: string
+          minLength: 1
+      required:
+      - match_id
+      - record_id
+      - record_version_id
+      - subscription_id
+      - subscription_version_id
+      - delivery_id
+      description: match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn.
+        record_version_id is the causal correction version for corrected/no_longer_matches, otherwise
+        the matched version. References alone confer no access.
+    WebhookEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        event_id:
+          type: string
+          pattern: ^[A-Za-z0-9_-]+$
+        type:
+          type: string
+          enum:
+          - match.created
+          - match.corrected
+          - match.no_longer_matches
+          - match.withdrawn
+        schema_version:
+          type: string
+          enum:
+          - '1'
+        occurred_at:
+          type: string
+          format: date-time
+        references:
+          $ref: '#/components/schemas/MonitoringReferences'
+      required:
+      - event_id
+      - type
+      - schema_version
+      - occurred_at
+      - references
+      description: Immutable reference-only notification. Retries preserve event_id and the exact stored
+        body bytes; signing timestamp changes per attempt. No document content, excerpt, explanation,
+        cursor or secret is embedded.
+    DeliveryAdmission:
+      type: object
+      additionalProperties: false
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type: string
+          enum:
+          - subscription_disabled
+          - record_withdrawn
+          - superseded
+          - access_denied
+          - terminal
+      required:
+      - allowed
+      description: Current derived admission view, separate from durable Delivery state. A disallowed
+        pending Delivery makes no new network attempt; it does not become a new lifecycle state.
+    Delivery:
+      type: object
+      additionalProperties: false
+      properties:
+        delivery_id:
+          type: string
+          minLength: 1
+        match_id:
+          type: string
+          minLength: 1
+        destination_id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+          - pending
+          - delivering
+          - delivered
+          - exhausted
+        event:
+          $ref: '#/components/schemas/WebhookEvent'
+        attempt_count:
+          type: integer
+          minimum: 0
+        admission:
+          $ref: '#/components/schemas/DeliveryAdmission'
+        last_error:
+          $ref: '#/components/schemas/Error'
+      required:
+      - delivery_id
+      - match_id
+      - destination_id
+      - state
+      - event
+      - attempt_count
+      - admission
+    DeliveryAttempt:
+      type: object
+      additionalProperties: false
+      properties:
+        attempt_id:
+          type: string
+          minLength: 1
+        delivery_id:
+          type: string
+          minLength: 1
+        number:
+          type: integer
+          minimum: 1
+        outcome:
+          type: string
+          enum:
+          - in_flight
+          - acknowledged
+          - retryable_error
+          - permanent_error
+          - unknown
+        http_status:
+          type: integer
+          minimum: 100
+          maximum: 599
+        error:
+          $ref: '#/components/schemas/Error'
+      required:
+      - attempt_id
+      - delivery_id
+      - number
+      - outcome
+      description: Read view of append-only admission/outcome facts. Unknown network result can be retried
+        with the same event ID; no response body, signature or signing key is exposed.
+    DeliveryAttemptPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryAttempt'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
+webhooks:
+  monitoringNotification:
+    post:
+      operationId: receiveMonitoringNotification
+      description: Receiver endpoint, not a Quivr API route. Verify Standard Webhooks v1 HMAC-SHA256 over
+        webhook-id + dot + webhook-timestamp + dot + raw body before parsing. Timestamp refreshed per
+        attempt; body event_id equals webhook-id. See monitoring contract for retry defaults.
+      security: []
+      parameters:
+      - name: webhook-id
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: webhook-timestamp
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: webhook-signature
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        2XX:
+          description: Receiver durably accepted/deduplicated this event.
+        default:
+          description: Transport retry policy applies; do not create another Match.

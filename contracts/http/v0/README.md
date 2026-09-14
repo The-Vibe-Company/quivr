@@ -1,7 +1,8 @@
-# Ingestion transport contract
+# Public HTTP transport contract
 
-`openapi.yaml` is the public transport source of truth for THE-543. The design
-and its scope are in [the ingestion contract](../../../docs/quivr-v2-ingestion-contracts.md).
+`openapi.yaml` is the public transport source of truth for THE-543 and THE-547.
+Design and scope are recorded in [ingestion](../../../docs/quivr-v2-ingestion-contracts.md)
+and [thin monitoring](../../../docs/quivr-v2-monitoring-tracer.md).
 Generated code belongs in transport/SDK packages when implementation starts;
 it is deliberately not checked into this design change.
 
@@ -9,10 +10,10 @@ it is deliberately not checked into this design change.
 
 | Target | Pinned tool | Verified |
 | --- | --- | --- |
-| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and 10 JSON round trips |
-| Python client | OpenAPI Generator v7.25.0, `python` | Import and 10 JSON round trips |
-| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and 10 JSON round trips |
-| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, 10 examples, 17 boundary checks |
+| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and 19 JSON round trips |
+| Python client | OpenAPI Generator v7.25.0, `python` | Import and 19 JSON round trips |
+| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and 19 JSON round trips |
+| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, 19 examples, 22 boundary checks |
 
 The generator image used was
 `openapitools/openapi-generator-cli:v7.25.0@sha256:2ab0a9680222de65dc9d3baf861aa02b99e1b80c211d8221ebf3ae8f8a102524`.
@@ -33,6 +34,22 @@ idempotency persistence, polling, authenticated SSE parsing, or resynchronizatio
 In particular, use a streaming helper for SSE rather than the generated method
 that reads an entire response as a string.
 
+OpenAPI Generator 7.25.0 also emits invalid Python/TypeScript methods for the
+outgoing top-level `webhooks` receiver surface. `client_schema.py` mechanically
+excludes only that surface for transport generation; it preserves every API path
+and component schema, including WebhookEvent. This derived input is not another
+source of truth. Validate the full original document, and use the derived view
+for both client and engine server bindings.
+
+TypeScript Date serialization adds `.000Z` to zero-millisecond timestamps. Its
+round-trip check compares the known transport timestamp fields as instants and
+all other fields exactly; plugin JSON is never normalized. Webhook signatures
+are verified against raw bytes before parsing, never reserialized SDK objects.
+The public `webhook-vector.json` was computed with Python HMAC-SHA256 and checked
+with Node crypto, including changes to the ID, timestamp and body. It is test
+data, not a deployed signing key; timestamp-age policy requires receiver runtime
+tests in the later harness.
+
 ## Reproduce locally
 
 Run from the repository root with Python, Go, Node/npm and Docker available.
@@ -45,13 +62,14 @@ python -m venv .scratch/ingestion-checks
 .scratch/ingestion-checks/bin/pip install -r contracts/http/v0/checks/requirements.txt
 .scratch/ingestion-checks/bin/python contracts/http/v0/checks/validate.py
 mkdir -p .scratch/ingestion-codegen/python .scratch/ingestion-codegen/typescript-fetch
+.scratch/ingestion-checks/bin/python contracts/http/v0/client_schema.py > .scratch/ingestion-codegen/client-openapi.yaml
+node contracts/http/v0/checks/webhook.cjs
 
 for generator in python typescript-fetch; do
   docker run --rm --network none --user "$(id -u):$(id -g)" \
-    -v "$contract_root/contracts/http/v0:/spec:ro" \
     -v "$contract_root/.scratch/ingestion-codegen:/out" \
     openapitools/openapi-generator-cli:v7.25.0@sha256:2ab0a9680222de65dc9d3baf861aa02b99e1b80c211d8221ebf3ae8f8a102524 \
-    generate -i /spec/openapi.yaml -g "$generator" -o "/out/$generator" \
+    generate -i /out/client-openapi.yaml -g "$generator" -o "/out/$generator" \
     --additional-properties packageName=quivr_client,npmName=quivr-client,npmVersion=0.0.0
 done
 
@@ -72,7 +90,7 @@ cp contracts/http/v0/checks/roundtrip_test.go .scratch/ingestion-codegen/go/
   test -f go.mod || go mod init example.invalid/quivr-contract-validation
   go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 \
     -generate types,std-http,strict-server -package transport \
-    "$contract_root/contracts/http/v0/openapi.yaml" > transport.gen.go
+    "$contract_root/.scratch/ingestion-codegen/client-openapi.yaml" > transport.gen.go
   go get github.com/oapi-codegen/runtime@v1.7.0
   EXAMPLES="$contract_root/contracts/http/v0/examples.json" go test -v ./...
 )
