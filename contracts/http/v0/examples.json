@@ -1,0 +1,422 @@
+[
+  {
+    "name": "structured_inline",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "text",
+        "text": "Le texte de la dépêche…"
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "structured_manifest",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "Texte"
+            },
+            "extensions": {
+              "example.editorial": {
+                "schema_version": "1",
+                "data": {
+                  "headline": "Titre échantillon",
+                  "subjects": [
+                    {
+                      "code": "science",
+                      "score": 0.75
+                    }
+                  ],
+                  "flags": {
+                    "urgent": true
+                  },
+                  "extra": null
+                }
+              }
+            }
+          },
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_original",
+              "media_type": "application/xml"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          }
+        ]
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_original"
+        ],
+        "producer": "example.plugin",
+        "producer_version": "sha256:pinned"
+      }
+    }
+  },
+  {
+    "name": "blob_input",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "blob",
+        "blob_id": "blob_text",
+        "media_type": "text/plain"
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "pending_receipt",
+    "schema": "Receipt",
+    "value": {
+      "receipt_id": "receipt_1",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "state": "pending",
+      "processing": {
+        "state": "queued",
+        "phase": "materialization"
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "resolved_receipt",
+    "schema": "Receipt",
+    "value": {
+      "receipt_id": "receipt_1",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "state": "resolved",
+      "processing": {
+        "state": "running",
+        "phase": "baseline"
+      },
+      "diagnostics": [],
+      "outcome": "created",
+      "record_id": "record_1",
+      "version_id": "version_2",
+      "availability": {
+        "state": "building_baseline",
+        "is_current": false,
+        "searchable": false
+      }
+    }
+  },
+  {
+    "name": "mixed_batch_input",
+    "schema": "BatchRequest",
+    "value": {
+      "items": [
+        {
+          "idempotency_key": "import-42:item-7",
+          "source": {
+            "corpus_id": "corpus_news",
+            "namespace": "example-feed",
+            "record_key": "article-123"
+          },
+          "source_revision": "2",
+          "content": {
+            "kind": "text",
+            "text": "Le texte de la dépêche…"
+          },
+          "extensions": {
+            "example.editorial": {
+              "schema_version": "1",
+              "data": {
+                "headline": "Titre échantillon",
+                "subjects": [
+                  {
+                    "code": "science",
+                    "score": 0.75
+                  }
+                ],
+                "flags": {
+                  "urgent": true
+                },
+                "extra": null
+              }
+            }
+          }
+        },
+        {
+          "source": {
+            "corpus_id": "corpus_news",
+            "namespace": "example-feed",
+            "record_key": "article-123"
+          }
+        },
+        42
+      ]
+    }
+  },
+  {
+    "name": "mixed_batch_result",
+    "schema": "BatchResult",
+    "value": {
+      "items": [
+        {
+          "index": 0,
+          "receipt": {
+            "receipt_id": "receipt_1",
+            "source": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "article-123"
+            },
+            "state": "pending",
+            "processing": {
+              "state": "queued",
+              "phase": "materialization"
+            },
+            "diagnostics": []
+          }
+        },
+        {
+          "index": 1,
+          "error": {
+            "code": "invalid_input",
+            "message": "content is required",
+            "retryable": false,
+            "field": "content"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "verified_upload",
+    "schema": "Upload",
+    "value": {
+      "upload_id": "upload_1",
+      "state": "verified",
+      "blob_id": "blob_text"
+    }
+  },
+  {
+    "name": "version_relations",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_1",
+      "version_id": "version_2",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "Texte"
+            },
+            "extensions": {
+              "example.editorial": {
+                "schema_version": "1",
+                "data": {
+                  "headline": "Titre échantillon",
+                  "subjects": [
+                    {
+                      "code": "science",
+                      "score": 0.75
+                    }
+                  ],
+                  "flags": {
+                    "urgent": true
+                  },
+                  "extra": null
+                }
+              }
+            }
+          },
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_original",
+              "media_type": "application/xml"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          }
+        ]
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      },
+      "availability": {
+        "state": "retrieval_ready",
+        "is_current": true,
+        "searchable": true
+      },
+      "processing": {
+        "state": "idle"
+      },
+      "relations": [
+        {
+          "source_reference": {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          },
+          "status": "available",
+          "target_record_id": "photo_record",
+          "target_version_id": "photo_version_2"
+        },
+        {
+          "source_reference": {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-missing"
+            },
+            "source_target_revision": "1"
+          },
+          "status": "unavailable"
+        }
+      ]
+    }
+  },
+  {
+    "name": "administrative_operation",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "op_1",
+      "kind": "projection_rebuild",
+      "state": "cancel_requested",
+      "counters": {
+        "processed": 42
+      },
+      "errors": []
+    }
+  }
+]

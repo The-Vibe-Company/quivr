@@ -1,0 +1,1458 @@
+openapi: 3.1.0
+info:
+  title: Quivr V2 public ingestion contract
+  version: 0.0.0-draft
+  description: THE-543 public ingestion contract for evaluation. Product decisions, convergent resynchronization
+    and cancellation semantics accepted in interview. Routes/limits are versioned v0 defaults; endpoints
+    are not implemented by this contract change. OpenAPI is authoritative for transport; generated types
+    are not domain aggregates. Detailed monitoring events belong to THE-547.
+security:
+- ApiKey: []
+paths:
+  /v0/records:
+    post:
+      operationId: ingestRecord
+      description: Commit durable input, Receipt and dispatch intent before responding. Same key and canonical
+        request returns same Receipt; changed request conflicts. A new source revision corrects the Record.
+        All accepted/replayed submissions use 202, even when a replayed Receipt has resolved.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestCommand'
+      x-required-permissions:
+      - content:write
+    get:
+      operationId: listRecords
+      description: Stable keyset traversal of authorized canonical Records, including withdrawn Records.
+        Not an atomic historical snapshot. Capture a Change Cursor before scanning, then reconcile changes
+        as invalidations by rereading current resources; see resynchronization procedure.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordPage'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: corpus_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      x-required-permissions:
+      - content:read
+  /v0/records/batch:
+    post:
+      operationId: ingestBatch
+      description: 'Initial bound: 100, envelope 10 MiB. Validate envelope structure/size first, then
+        each entry independently against IngestCommand, including wrong types or missing fields. HTTP
+        200 carries Receipt or Error per entry. Same ingestion family/key as single submission. Reuse
+        entry keys after unknown transport outcomes.'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      x-required-permissions:
+      - content:write
+  /v0/records/withdrawals:
+    post:
+      operationId: withdrawRecord
+      description: Durably commit withdrawal and Receipt before responding. Terminal identity fence, including
+        before first materialization; no physical purge and no cascade. Uses a distinct withdrawal route
+        family.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalCommand'
+      x-required-permissions:
+      - content:write
+  /v0/records/{record_id}:
+    get:
+      operationId: getRecord
+      description: Authorized canonical currentness and withdrawal view.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - content:read
+  /v0/records/{record_id}/versions/{version_id}:
+    get:
+      operationId: getVersion
+      description: Authorized immutable source Manifest plus separate live availability and relation expansion.
+        Available links supply current eligible target Record and Version IDs; unavailable links reveal
+        no resolved target IDs or absence/access reason. Historical lookup grants no new rights.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - content:read
+  /v0/ingestion-receipts/{receipt_id}:
+    get:
+      operationId: getReceipt
+      description: Return outcome and separately authorized linked availability/diagnostics. Omit unavailable
+        linked content rather than bypassing rights through the Receipt. Linked Version/Record details
+        require current content:read permission and target Corpus authorization.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: receipt_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - content:read
+  /v0/uploads:
+    post:
+      operationId: createUpload
+      description: 'Create a transfer session with a single presigned PUT URL, required headers and expiry.
+        Initial limits: 1 GiB Blob, configurable; oversized uploads are rejected before a session is issued.'
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      x-required-permissions:
+      - blobs:write
+  /v0/uploads/{upload_id}/confirm:
+    post:
+      operationId: confirmUpload
+      description: Start or observe checksum/size verification; SDK polls until verified before referencing
+        the Blob in ingestion. Confirmation is repeatable for this session.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - blobs:write
+  /v0/uploads/{upload_id}:
+    get:
+      operationId: getUpload
+      description: Observe upload verification independently of Ingestion Receipt.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - blobs:read
+  /v0/blobs/{blob_id}:
+    get:
+      operationId: getBlob
+      description: Inspect verified Blob metadata within authorized Organization scope; ID possession
+        does not grant access.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Blob'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: blob_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - blobs:read
+  /v0/operations/{operation_id}:
+    get:
+      operationId: getOperation
+      description: Administrative progress only. This read schema does not specify every administrative
+        command.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404
+            absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503
+            temporary failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - operations:read
+  /v0/corpora:
+    post:
+      operationId: createCorpus
+      description: Explicit Corpus creation. Same creation route-family key and canonical request replays
+        the same Corpus. Requires corpora:write.
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corpus'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpusRequest'
+      x-required-permissions:
+      - corpora:write
+    get:
+      operationId: listCorpora
+      description: Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a Change
+        Cursor.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorpusPage'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      x-required-permissions:
+      - corpora:read
+  /v0/corpora/{corpus_id}:
+    get:
+      operationId: getCorpus
+      description: Read effective resolved configuration.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corpus'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - corpora:read
+  /v0/corpora/{corpus_id}/retrieval:
+    put:
+      operationId: configureRetrieval
+      description: Resolve mapping and schedule a new immutable Projection Generation. Existing active
+        config remains in effect until validated cutover. Does not require a separate per-Corpus physical
+        collection.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdate'
+      x-required-permissions:
+      - corpora:write
+      - operations:write
+  /v0/changes:
+    get:
+      operationId: pollChanges
+      description: Same durable journal as SSE. Without cursor, return empty items and current committed
+        position as next_cursor (start now). With cursor, return authorized events after it, in commit
+        order; duplicates possible. Cursor binds Organization, Corpus filter and authorization scope.
+        Expiry is 410 cursor_expired with resync_url, never silent reset; changed scope/filter is 409
+        cursor_scope_changed. next_cursor advances over scanned events even when none are visible. Public
+        events are invalidations; reread current state, do not replay historical content into a current
+        mirror.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangePage'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: corpus_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      x-required-permissions:
+      - changes:read
+  /v0/changes/stream:
+    get:
+      operationId: streamChanges
+      description: 'SSE over the same journal. Last-Event-ID takes precedence over query cursor on reconnect.
+        id is an opaque Change Cursor; data.event_id is deduplication identity. Named change events carry
+        ChangeEvent JSON. checkpoint events carry a cursor when no visible event is emitted, including
+        initial start-now checkpoint. Resume cursor expires or scope changes: before headers use HTTP
+        410/409; after headers send stream_error with Error JSON then close, without advancing id. Use
+        authenticated streaming fetch/http client. See contract for checkpoint framing and resync.'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: 'id: opaque-cursor
+
+                event: change
+
+                data: {"event_id":"event_1","type":"record.searchable","schema_version":"1","occurred_at":"2026-09-14T12:00:00Z","resource":{"kind":"record","id":"record_1","corpus_id":"corpus_1"},"cursor":"opaque-cursor"}
+
+
+                '
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: corpus_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - changes:read
+  /v0/operations/{operation_id}/cancel:
+    post:
+      operationId: cancelOperation
+      description: Idempotent cancellation request; does not undo committed effects. Terminal operation
+        returns its existing state. A racing completion may win. Cancellation becomes terminal only after
+        work stops safely; no partial active projection cutover.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      x-required-permissions:
+      - operations:write
+  /v0/operations/{operation_id}/rerun:
+    post:
+      operationId: rerunOperation
+      description: Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal.
+        A request key replays the same new linked Operation. Revalidate current scope and command eligibility;
+        completed effects remain subject to domain idempotency.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      x-required-permissions:
+      - operations:write
+components:
+  securitySchemes:
+    ApiKey:
+      type: http
+      scheme: bearer
+      description: API key, not necessarily a JWT. Server derives Organization, permitted actions and
+        Corpus scope; every resource access is authorized.
+  schemas:
+    SourceIdentity:
+      type: object
+      additionalProperties: false
+      properties:
+        corpus_id:
+          type: string
+          minLength: 1
+        namespace:
+          type: string
+          minLength: 1
+        record_key:
+          type: string
+          minLength: 1
+      required:
+      - corpus_id
+      - namespace
+      - record_key
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+        retryable:
+          type: boolean
+        field:
+          type: string
+          minLength: 1
+        resync_url:
+          type: string
+          format: uri-reference
+      required:
+      - code
+      - message
+      - retryable
+    Extensions:
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties: false
+        properties:
+          schema_version:
+            type: string
+            minLength: 1
+          data:
+            type: object
+            additionalProperties: true
+        required:
+        - schema_version
+        - data
+      description: Keys are plugin namespaces. Data is validated against the installed schema version;
+        source data is not a computed Annotation.
+    TextContent:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum:
+          - text
+        text:
+          type: string
+          minLength: 1
+      required:
+      - kind
+      - text
+    BlobContent:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum:
+          - blob
+        blob_id:
+          type: string
+          minLength: 1
+        media_type:
+          type: string
+          minLength: 1
+      required:
+      - kind
+      - blob_id
+      - media_type
+    Part:
+      type: object
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          minLength: 1
+        parent_key:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          minLength: 1
+        content:
+          oneOf:
+          - $ref: '#/components/schemas/TextContent'
+          - $ref: '#/components/schemas/BlobContent'
+        extensions:
+          $ref: '#/components/schemas/Extensions'
+      required:
+      - key
+      - role
+      - content
+    RelationInput:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          minLength: 1
+        target:
+          $ref: '#/components/schemas/SourceIdentity'
+        source_target_revision:
+          type: string
+          minLength: 1
+      required:
+      - type
+      - target
+      description: Source-provided link to an independently identified Record in the same Organization.
+        Optional source revision preserves provenance; ordinary expansion resolves the current eligible
+        target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise
+        Part-target syntax remains outside this initial draft.
+    ManifestContent:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum:
+          - manifest
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Part'
+          minItems: 1
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelationInput'
+      required:
+      - kind
+      - parts
+      description: Unique Part keys, acyclic parent references within this Manifest, and verified same-Organization
+        Blobs are checked before atomic publication. These semantic constraints need server validation
+        in addition to JSON Schema.
+    Provenance:
+      type: object
+      additionalProperties: false
+      properties:
+        source_blob_ids:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        producer:
+          type: string
+          minLength: 1
+        producer_version:
+          type: string
+          minLength: 1
+      required: []
+    IngestCommand:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        source:
+          $ref: '#/components/schemas/SourceIdentity'
+        source_revision:
+          type: string
+          minLength: 1
+        source_position:
+          type: string
+          pattern: ^[0-9]+$
+          description: Optional monotonic source position, encoded as decimal text to avoid JSON numeric
+            precision loss.
+        content:
+          oneOf:
+          - $ref: '#/components/schemas/TextContent'
+          - $ref: '#/components/schemas/BlobContent'
+          - $ref: '#/components/schemas/ManifestContent'
+          discriminator:
+            propertyName: kind
+            mapping:
+              text: '#/components/schemas/TextContent'
+              blob: '#/components/schemas/BlobContent'
+              manifest: '#/components/schemas/ManifestContent'
+        extensions:
+          $ref: '#/components/schemas/Extensions'
+        provenance:
+          $ref: '#/components/schemas/Provenance'
+      required:
+      - idempotency_key
+      - source
+      - content
+      description: Initial request shape. Same source identity creates or corrects a Record. Same external
+        revision with different canonical content conflicts. No revision means canonical Manifest digest
+        identity; no source position means durable acceptance order. Single and batch entry replay share
+        route_family=ingestion.
+    WithdrawalCommand:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        source:
+          $ref: '#/components/schemas/SourceIdentity'
+        reason:
+          type: string
+          minLength: 1
+      required:
+      - idempotency_key
+      - source
+    Availability:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+          - materialized
+          - building_baseline
+          - retrieval_ready
+          - quarantined
+        is_current:
+          type: boolean
+        searchable:
+          type: boolean
+      required:
+      - state
+      - is_current
+      - searchable
+    Receipt:
+      type: object
+      additionalProperties: false
+      properties:
+        receipt_id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+          - pending
+          - resolved
+        outcome:
+          type: string
+          enum:
+          - created
+          - duplicate
+          - withdrawal_applied
+          - conflict
+        record_id:
+          type: string
+          minLength: 1
+        version_id:
+          type: string
+          minLength: 1
+        availability:
+          $ref: '#/components/schemas/Availability'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Error'
+          maxItems: 20
+        source:
+          $ref: '#/components/schemas/SourceIdentity'
+        processing:
+          $ref: '#/components/schemas/ProcessingSummary'
+      required:
+      - receipt_id
+      - state
+      - diagnostics
+      - source
+      - processing
+      description: Durable acceptance outcome, not workflow state. Availability is a separate authorized
+        live read view; omitted before a linked version exists. Infrastructure retry never resolves a
+        Receipt as failed.
+      if:
+        properties:
+          state:
+            const: pending
+      then:
+        not:
+          required:
+          - outcome
+      else:
+        required:
+        - outcome
+    BatchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: {}
+          minItems: 1
+          maxItems: 100
+      required:
+      - items
+      description: Envelope validation checks items array and batch/body limits only. Each raw entry is
+        independently validated as IngestCommand; even a missing required field or wrong JSON type returns
+        an entry error. SDK convenience builders may type valid entries as IngestCommand, but server envelope
+        validation must not reject the entire batch for an invalid entry.
+    BatchItem:
+      type: object
+      additionalProperties: false
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        receipt:
+          $ref: '#/components/schemas/Receipt'
+        error:
+          $ref: '#/components/schemas/Error'
+      required:
+      - index
+      if:
+        required:
+        - receipt
+      then:
+        not:
+          required:
+          - error
+      else:
+        required:
+        - error
+    BatchResult:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchItem'
+          maxItems: 100
+      required:
+      - items
+    Record:
+      type: object
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          minLength: 1
+        source:
+          $ref: '#/components/schemas/SourceIdentity'
+        withdrawn:
+          type: boolean
+        current_version_id:
+          type: string
+          minLength: 1
+      required:
+      - record_id
+      - source
+      - withdrawn
+    Version:
+      type: object
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          minLength: 1
+        version_id:
+          type: string
+          minLength: 1
+        manifest:
+          $ref: '#/components/schemas/ManifestContent'
+        extensions:
+          $ref: '#/components/schemas/Extensions'
+        provenance:
+          $ref: '#/components/schemas/Provenance'
+        availability:
+          $ref: '#/components/schemas/Availability'
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedRelation'
+        processing:
+          $ref: '#/components/schemas/ProcessingSummary'
+      required:
+      - record_id
+      - version_id
+      - manifest
+      - availability
+      - relations
+      - processing
+    UploadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 1073741824
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        media_type:
+          type: string
+          minLength: 1
+      required:
+      - size_bytes
+      - sha256
+      - media_type
+    Upload:
+      type: object
+      additionalProperties: false
+      properties:
+        upload_id:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+          - awaiting_upload
+          - verifying
+          - verified
+          - rejected
+          - expired
+        upload_url:
+          type: string
+          format: uri
+        upload_headers:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+        blob_id:
+          type: string
+          minLength: 1
+        error:
+          $ref: '#/components/schemas/Error'
+        upload_method:
+          type: string
+          enum:
+          - PUT
+      required:
+      - upload_id
+      - state
+      description: Upload URL and headers are transfer capabilities. Only verified uploads expose a usable
+        Blob ID. Repeated confirmation of the same session observes the same verification, never a second
+        upload.
+      allOf:
+      - if:
+          properties:
+            state:
+              const: verified
+        then:
+          required:
+          - blob_id
+        else:
+          not:
+            required:
+            - blob_id
+    Blob:
+      type: object
+      additionalProperties: false
+      properties:
+        blob_id:
+          type: string
+          minLength: 1
+        size_bytes:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        media_type:
+          type: string
+          minLength: 1
+      required:
+      - blob_id
+      - size_bytes
+      - sha256
+      - media_type
+    Operation:
+      type: object
+      additionalProperties: false
+      properties:
+        operation_id:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+          - queued
+          - running
+          - succeeded
+          - failed
+          - cancel_requested
+          - canceled
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Approximate fraction, omitted when unknown.
+        counters:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/Error'
+          maxItems: 20
+        previous_operation_id:
+          type: string
+          minLength: 1
+      required:
+      - operation_id
+      - kind
+      - state
+      - counters
+      - errors
+      description: Administrative execution only. Retries keep identity. Intentional terminal rerun has
+        a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal
+        state and racing completion may win.
+    FieldMapping:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        source_pointer:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+          - string
+          - number
+          - boolean
+          - datetime
+          - string_array
+        roles:
+          type: array
+          items:
+            type: string
+            enum:
+            - search
+            - filter
+          minItems: 1
+      required:
+      - name
+      - source_pointer
+      - type
+      - roles
+      description: Proposed v0 logical field mapping. source_pointer is a JSON Pointer into the canonical
+        source representation. Core validates role/type compatibility. This is not a search-engine field
+        name.
+    RetrievalConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        plugin_profile:
+          type: string
+          minLength: 1
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldMapping'
+      required: []
+      description: Pin a plugin-provided profile when resolving config. Explicit fields override default
+        fields by logical name; unmapped source data remains preserved. Effective resolved fields are
+        returned.
+    CorpusRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        retrieval:
+          $ref: '#/components/schemas/RetrievalConfig'
+      required:
+      - idempotency_key
+      - name
+    Corpus:
+      type: object
+      additionalProperties: false
+      properties:
+        corpus_id:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        effective_retrieval:
+          $ref: '#/components/schemas/RetrievalConfig'
+      required:
+      - corpus_id
+      - name
+      - effective_retrieval
+    CorpusPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Corpus'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
+    RecordPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Record'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
+    ConfigUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        retrieval:
+          $ref: '#/components/schemas/RetrievalConfig'
+      required:
+      - idempotency_key
+      - retrieval
+    ActionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+      required:
+      - idempotency_key
+    ResourceReference:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          minLength: 1
+        id:
+          type: string
+          minLength: 1
+        corpus_id:
+          type: string
+          minLength: 1
+      required:
+      - kind
+      - id
+    ChangeEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        schema_version:
+          type: string
+          minLength: 1
+        occurred_at:
+          type: string
+          format: date-time
+        resource:
+          $ref: '#/components/schemas/ResourceReference'
+        cursor:
+          type: string
+          minLength: 1
+      required:
+      - event_id
+      - type
+      - schema_version
+      - occurred_at
+      - resource
+      - cursor
+      description: Every change to a Record catalog entry emits an event with resource.kind=record and
+        resource.id=the affected Record ID. Additional resource-specific events do not replace this invalidation.
+        Consumers reread current state; payload detail belongs to THE-547.
+    ChangePage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeEvent'
+        next_cursor:
+          type: string
+          minLength: 1
+        has_more:
+          type: boolean
+      required:
+      - items
+      - next_cursor
+      - has_more
+    ResolvedRelation:
+      type: object
+      additionalProperties: false
+      required:
+      - source_reference
+      - status
+      properties:
+        source_reference:
+          $ref: '#/components/schemas/RelationInput'
+        status:
+          type: string
+          enum:
+          - available
+          - unavailable
+        target_record_id:
+          type: string
+        target_version_id:
+          type: string
+      description: Separate live view, not a mutation of the source Manifest. Unavailable covers missing,
+        unready, withdrawn and inaccessible without distinguishing existence or revealing resolved target
+        IDs.
+      if:
+        properties:
+          status:
+            const: available
+      then:
+        required:
+        - target_record_id
+        - target_version_id
+      else:
+        not:
+          anyOf:
+          - required:
+            - target_record_id
+          - required:
+            - target_version_id
+    ProcessingSummary:
+      type: object
+      additionalProperties: false
+      required:
+      - state
+      properties:
+        state:
+          type: string
+          enum:
+          - queued
+          - running
+          - retrying
+          - blocked
+          - idle
+        phase:
+          type: string
+          enum:
+          - materialization
+          - baseline
+          - enrichment
+        message:
+          type: string
+      description: Live read view, not a Receipt lifecycle or public workflow identifier. blocked means
+        an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently
+        pending, not a promise of final enrichment. Phase is omitted when idle; required and optional
+        progress do not override Version Availability.

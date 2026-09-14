@@ -301,12 +301,20 @@ stateDiagram-v2
     queued --> cancel_requested
     running --> cancel_requested
     cancel_requested --> canceled
+    cancel_requested --> succeeded: completion wins the race
+    cancel_requested --> failed: terminal failure wins the race
     succeeded --> [*]
     failed --> [*]
     canceled --> [*]
 ```
 
 Activities may retry or workers may restart while the Operation remains `running`. There is no pause/resume state in the MVP.
+
+A cancellation request stops remaining work without rolling back committed
+effects. Completion may win a race with cancellation; a request against a terminal
+Operation returns that terminal state. Safe activation constraints still apply,
+including preserving the prior state when cold restoration is canceled before
+activation. These public cancellation semantics were resolved in THE-543.
 
 ### Projection Generation
 
