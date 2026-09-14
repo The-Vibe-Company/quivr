@@ -5,6 +5,11 @@
 > Scope: technical foundation and first text-monitoring vertical slice
 >
 > Status: accepted foundation, 4 September 2026
+>
+> Routing clarification, 14 September 2026: the accepted
+> [runtime spike](https://github.com/The-Vibe-Company/quivr-v2/blob/4196f51/prototype/runtime-spike/evidence/report.md)
+> establishes PostgreSQL as the physical-generation query router; the Weaviate
+> alias is operational metadata.
 
 This document defines the durable identities, ownership boundaries, and lifecycle rules that the Quivr V2 foundation must preserve. It is deliberately conceptual: table names and Go package layouts may change, but these invariants must remain observable through the public contracts.
 
@@ -23,7 +28,7 @@ The design follows two existing decisions:
 6. Availability is progressive. The mandatory retrieval baseline makes a version eligible to become current; optional text, image, audio, and video derivations may arrive later.
 7. A correction replaces the current pointer only after its baseline is ready. A `Tombstone` withdraws the Record immediately and is absorbing in the MVP.
 8. Re-evaluation after enrichment converges on one `Match`. A source correction may create a new, linked Match and alert.
-9. `Projection Generations` are immutable rebuild units. PostgreSQL records cutover intent; an alias selects the active Weaviate collection.
+9. `Projection Generations` are immutable rebuild units. PostgreSQL selects the active physical Weaviate collection; an alias is operational metadata.
 10. PostgreSQL constraints protect local truth, application rules protect semantic transitions, and reconcilers repair cross-system drift. Reconciliation is never the only barrier against withdrawn or unauthorized content.
 
 ## Canonical authority
@@ -208,9 +213,9 @@ The two diagrams are connected by `Organization`, `Record Version`, and `Change 
 - A Projection Generation pins schema, derivations, vector spaces, and exact engine/client compatibility metadata.
 - A Generation is a whole rebuild unit, not an in-place schema migration.
 - For the initial text projection, at most one Generation is `active` globally for the projection family. Per-Organization generations remain a measured scale escape hatch, not an MVP default.
-- Reads use the active alias. Writers always name physical Generations.
+- Reads resolve the active physical Generation in PostgreSQL, then query that collection. Writers always name physical Generations.
 - Building starts from a canonical snapshot at high-water mark H, then consumes the durable projection journal from H+1 until caught up.
-- PostgreSQL owns cutover intent and checkpoints. The Weaviate alias owns traffic routing. Their agreement is recovered by an idempotent controller.
+- PostgreSQL owns active-generation routing, cutover intent, and checkpoints. The Weaviate alias can mirror the active collection for operations, but alias drift cannot override canonical query routing.
 - The old Generation remains updated while `draining`, allowing rollback during a bounded grace period.
 - Once a Generation is active, its manifest is immutable. A changed schema or vector space requires another Generation.
 
@@ -310,7 +315,7 @@ stateDiagram-v2
     [*] --> building
     building --> validating: snapshot and journal caught up
     building --> failed
-    validating --> active: alias cutover completed
+    validating --> active: canonical routing cutover committed
     validating --> failed
     active --> draining: successor activated
     draining --> active: rollback within grace
@@ -320,7 +325,7 @@ stateDiagram-v2
     purge_candidate --> [*]: physical collection removed
 ```
 
-The database prevents two Generations of one projection family from being canonically active. Because alias movement is external, a controller compares PostgreSQL intent with the real alias after every ambiguous result or crash.
+The database prevents two Generations of one projection family from being canonically active. Query routing reads this canonical state. If an operational alias is maintained, reconciliation repairs it from PostgreSQL after an ambiguous result or crash; alias movement does not select what clients query.
 
 ### Logical Delivery
 
@@ -419,7 +424,7 @@ Delivery Attempts happen later and never recreate the Match.
 | Change order | Unique Organization/position allocated under stream-head lock | Encode and validate opaque cursor | Monitor consumer lag; explicit resync after expiry |
 | One logical Match | Unique Subscription Version/Record Version | Re-evaluate progressive enrichment against pinned policy | Replay Change Events safely |
 | One logical Delivery | Unique Match/destination/event kind | Stable event ID and retry policy | Retry or park attempts; receiver deduplicates |
-| One active projection | Unique active Generation per projection family | Validate coverage and execute cutover saga | Reconcile PostgreSQL intent with Weaviate alias |
+| One active projection | Unique active Generation per projection family | Validate coverage and atomically select canonical query routing | Reconcile operational alias from PostgreSQL |
 | Projection completeness | Coverage/checkpoint rows and compare-and-set cutover | Inspect every object result; canonical hydration | Repair missing/stray objects or rebuild generation |
 | Physical purge safety | Protected/candidate state committed before deletion | Resolve references, active work, retention, grace, and Legal Hold | Recheck after object deletion and report drift |
 
