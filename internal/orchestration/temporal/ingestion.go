@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -27,7 +28,7 @@ type Input struct {
 
 func materializeWorkflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
-	return workflow.ExecuteActivity(ctx, "materialize-inline-text", input).Get(ctx, nil)
+	return workflow.ExecuteActivity(ctx, "process-short-text", input).Get(ctx, nil)
 }
 
 type Runtime struct {
@@ -36,7 +37,7 @@ type Runtime struct {
 	Store  DispatchStore
 }
 
-func Start(ctx context.Context, address string, service content.Service, store DispatchStore) (*Runtime, error) {
+func Start(ctx context.Context, address string, service processing.Service, store DispatchStore) (*Runtime, error) {
 	// The application retries startup after transient connection failures.
 	connect, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -45,10 +46,10 @@ func Start(ctx context.Context, address string, service content.Service, store D
 		return nil, err
 	}
 	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
-	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "materialize-inline-text-v0"})
+	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-short-text-v1"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		return service.Materialize(ctx, in.Organization, in.ReceiptID)
-	}, activity.RegisterOptions{Name: "materialize-inline-text"})
+		return service.Run(ctx, in.Organization, in.ReceiptID)
+	}, activity.RegisterOptions{Name: "process-short-text"})
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
 		c.Close()
@@ -71,7 +72,7 @@ func (r *Runtime) dispatch(ctx context.Context) {
 		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
 		d, err := r.Store.Claim(attempt)
 		if err == nil {
-			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "materialize-inline-text-v0", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
+			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-lexical-v1", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-short-text-v1", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
 			var already *serviceerror.WorkflowExecutionAlreadyStarted
 			if err == nil || errors.As(err, &already) {
 				err = r.Store.Dispatched(attempt, d)

@@ -45,7 +45,24 @@ services:
     logging:
       driver: json-file
       options: {max-size: 1m, max-file: '3'}
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.37.15@sha256:cede92f9f43f9b4be25a9f453e756173bbe171d2e88210a0e5b7ab72e8b96d96
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      AUTOSCHEMA_ENABLED: 'false'
+      CLUSTER_HOSTNAME: quivr-local
+      DEFAULT_VECTORIZER_MODULE: none
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+    ports:
+      - "127.0.0.1::8080"
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+
 volumes:
   data:
   temporal-data:
   seaweed-data:
+  weaviate-data:

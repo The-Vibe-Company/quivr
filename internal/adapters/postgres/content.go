@@ -151,10 +151,16 @@ func (s ContentStore) Receipt(ctx context.Context, org, id string) (content.Rece
 		r.Processing.Phase = "materialization"
 	}
 	if r.VersionID != "" {
-		r.Availability = &content.Availability{State: "materialized"}
+		a, p, statusCode, statusErr := s.VersionStatus(ctx, org, r.VersionID)
+		if statusErr != nil {
+			return r, statusErr
+		}
+		r.Availability = &a
+		r.Processing = p
+		code = statusCode
 	}
 	if code != "" {
-		r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: code, Message: "Materialization requires attention or retry", Retryable: r.State == "pending"})
+		r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: code, Message: "Processing requires attention or retry", Retryable: r.Processing.State == "retrying"})
 	}
 	return r, nil
 }
@@ -169,6 +175,9 @@ func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (co
 	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance)
 	if err == nil {
 		err = json.Unmarshal(provenance, &v.Provenance)
+	}
+	if err == nil {
+		v.Availability, v.Processing, _, err = s.VersionStatus(ctx, org, id)
 	}
 	return v, notFound(err)
 }

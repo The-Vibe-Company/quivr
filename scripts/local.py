@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux local Corpus slice: host Go processes and an isolated Compose PostgreSQL."""
+"""Linux local text slice: host Go processes and isolated real dependencies."""
 import argparse, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -37,14 +37,15 @@ class Stack:
     def config(self):
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()
         s=self.state
+        weaviate=self.compose('port','weaviate','8080',capture_output=True,text=True).stdout.strip()
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
-        cfg=dict(temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write'],['*']),
+        cfg=dict(weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write'],[s.get('scoped_id','corpus_not_granted')]),
+            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*'])})
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
@@ -90,10 +91,13 @@ class Stack:
     def ingestion_outages(self):
         s=self.state
         base=f"http://127.0.0.1:{s['api_port']}"
-        def call(method,path,body=None):
+        def call(method,path,body=None,expected=None):
             data=json.dumps(body).encode() if body is not None else None
             req=urllib.request.Request(base+path,data=data,method=method,headers={'Authorization':'Bearer '+s['admin'],'Content-Type':'application/json'})
-            with urllib.request.urlopen(req,timeout=8) as response:
+            try: response=urllib.request.urlopen(req,timeout=8)
+            except urllib.error.HTTPError as error: response=error
+            with response:
+                assert response.status==(expected or (202 if path=='/v0/records' else 201 if method=='POST' and path=='/v0/corpora' else 200)),response.status
                 result=json.load(response)
                 capture=dict(path=path,method=method,status=response.status,body=result)
                 (self.directory/('response-'+uuid.uuid4().hex+'.json')).write_text(json.dumps(capture))
@@ -125,9 +129,46 @@ class Stack:
             assert receipt['outcome']=='created',receipt
             version=call('GET','/v0/records/'+receipt['record_id']+'/versions/'+receipt['version_id'])
             assert version['manifest']['parts'][0]['content']['text']=='Durable '+dependency+' input'
-        (self.directory/'outages.json').write_text(json.dumps({'temporal':'passed','seaweed':'passed','worker_kill_and_replay':'passed'}))
+        def await_ready(rid):
+            deadline=time.monotonic()+45
+            while True:
+                receipt=call('GET','/v0/ingestion-receipts/'+rid)
+                if receipt.get('availability',{}).get('searchable'): return receipt
+                assert time.monotonic()<deadline,receipt
+                time.sleep(.2)
+        command={'idempotency_key':'search-before-outage','source':{'corpus_id':corpus,'namespace':'faults','record_key':'search'},'content':{'kind':'text','text':'Ancienne comète'}}
+        first=await_ready(call('POST','/v0/records',command)['receipt_id'])
+        self.compose('stop','weaviate')
+        command['idempotency_key']='search-during-outage';command['content']['text']='Nouvelle galaxie 🌌'
+        rid=call('POST','/v0/records',command)['receipt_id']
+        deadline=time.monotonic()+30
+        while True:
+            receipt=call('GET','/v0/ingestion-receipts/'+rid)
+            if receipt['state']=='resolved' and receipt['processing']['state']=='retrying':break
+            assert time.monotonic()<deadline,receipt
+            time.sleep(.2)
+        assert receipt['outcome']=='created' and receipt['diagnostics'],receipt
+        assert not receipt['availability']['is_current'] and not receipt['availability']['searchable'],receipt
+        record=call('GET','/v0/records/'+receipt['record_id'])
+        assert record['current_version_id']==first['version_id'],record
+        version=call('GET','/v0/records/'+receipt['record_id']+'/versions/'+receipt['version_id'])
+        assert version['manifest']['parts'][0]['content']['text']=='Nouvelle galaxie 🌌'
+        query={'query':'galaxie','corpus_ids':[corpus],'mode':'lexical'}
+        error=call('POST','/v0/search',query,expected=503)
+        assert error['retryable'] and error['code']=='search_unavailable',error
+        for pid in s['pids']:
+            try:os.kill(pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+        s['pids']=[];self.save();self.compose('start','weaviate');self.config();self.start_processes()
+        assert call('POST','/v0/records',command)['receipt_id']==rid
+        ready=await_ready(rid);assert ready['version_id']==receipt['version_id'],ready
+        results=call('POST','/v0/search',query)['items']
+        assert len(results)==1 and results[0]['excerpt']['text']=='Nouvelle galaxie 🌌',results
+        query['query']='comète'
+        assert call('POST','/v0/search',query)['items']==[] # Old projection remains, canonical hydration suppresses it.
+        (self.directory/'outages.json').write_text(json.dumps({'temporal':'passed','seaweed':'passed','weaviate':'passed','worker_kill_and_replay':'passed','delayed_promotion_and_stale_candidate':'passed'}))
     def capture(self):
-        for service in ['postgres','temporal','seaweed']:
+        for service in ['postgres','temporal','seaweed','weaviate']:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
     def down(self,reset=False):
         self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
@@ -154,7 +195,7 @@ def main():
                 stack.tests('TestCorpusPersistsAndReplays')
                 req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora",headers={'Authorization':'Bearer '+stack.state['admin']})
                 with urllib.request.urlopen(req,timeout=5) as r:stack.state['scoped_id']=json.load(r)['items'][0]['corpus_id']
-                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline')
+                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestLexical')
                 stack.stop_processes()
                 with (stack.directory/'adapters.log').open('w') as log:
                     run([GO,'test','-count=1','-v','./internal/adapters/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
@@ -169,6 +210,6 @@ def main():
         if verification:
             try:stack.capture()
             finally:stack.down(True)
-            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus HTTP acceptance; local Linux processes + real PostgreSQL','artifacts':str(stack.directory)},indent=2))
+            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion and lexical HTTP acceptance; real PostgreSQL, Temporal, S3 and Weaviate','artifacts':str(stack.directory)},indent=2))
             print('Verification artifacts:',stack.directory)
 if __name__=='__main__':main()

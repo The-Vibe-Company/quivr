@@ -32,6 +32,7 @@ jobs:
             .scratch/quivr-verify-*/postgres.log
             .scratch/quivr-verify-*/temporal.log
             .scratch/quivr-verify-*/seaweed.log
+            .scratch/quivr-verify-*/weaviate.log
             .scratch/quivr-verify-*/adapters.log
             .scratch/quivr-verify-*/outages.json
             .scratch/quivr-verify-*/response-*.json

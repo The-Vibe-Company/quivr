@@ -1,6 +1,6 @@
 # Quivr V2
 
-## Parcours implémentés : Corpora et ingestion de texte
+## Parcours implémentés : Corpora, ingestion et recherche lexicale
 
 Le cœur Go permet de créer, lister et lire des Corpora avec contrôle d'accès,
 rejeu idempotent et persistance PostgreSQL. Il accepte aussi du texte en ligne,
@@ -47,8 +47,41 @@ accepte un entier décimal de 1 à 1000 chiffres ; les zéros initiaux sont norm
 Les commandes sont limitées à 1 MiB. Uploads, Manifests explicites et extensions
 non vides sont refusés jusqu'à leurs tickets dédiés, sans fausse acceptation.
 
-Une Version matérialisée reste non courante et non recherchable : le ticket de
-baseline lexicale gérera sa promotion. PostgreSQL conserve les faits et références ;
+Les Parts de texte court (au plus 256 octets UTF-8, sans NUL) passent par le
+traitement local `quivr.normalized-text.short-whole-part.v1` : une Segmentation
+immuable couvre toute la Part, sans transformation ni titre inféré. Cette limite
+conservatrice est propre à THE-644 ; le découpage au tokenizer épinglé et les
+textes longs arrivent avec THE-645. Les textes plus longs restent acceptés et
+lisibles, avec traitement bloqué, diagnostic `short_text_limit` et disponibilité
+`quarantined` ; ils ne sont jamais tronqués.
+
+Après publication vérifiée dans Weaviate, Content commit atomiquement la couverture
+lexicale, la promotion de la révision souhaitée et son événement. Une panne laisse
+l’ancienne Version courante utilisable et la nouvelle en reprise. Les modes sémantique
+et hybride (y compris le mode hybride par défaut) répondent explicitement 422.
+
+```http
+POST /v0/search
+Authorization: Bearer <clé avec content:read et search:query>
+Content-Type: application/json
+
+{"query":"éclipse","corpus_ids":["<corpus_id>"],"mode":"lexical","profile":"balanced","limit":10}
+```
+
+Le profil résolu `balanced.lexical-short.v1` accepte des requêtes non vides de
+256 octets UTF-8 maximum, sans troncature. Le mode lexical doit être explicite ;
+`balanced` et 10 résultats sont les valeurs par défaut, 50 le maximum. Les autres
+profils renvoient 422. Toute la liste de Corpora doit être autorisée. PostgreSQL
+sélectionne la génération logique et le routage physique ; la réhydratation relit
+les octets S3, valide les extraits et revérifie accès, version courante, quarantaine
+et Tombstone. Les coordonnées sont en points de code Unicode ; aucun score brut,
+nom de collection physique ou faux vecteur n’est exposé. Une panne renvoie 503.
+
+La migration 003 nécessite de redémarrer API/workers. Elle remet les Receipts
+existants dans l’outbox sous une nouvelle identité de workflow pour indexer aussi
+les Versions déjà matérialisées. Les anciens workflows ne doivent plus être servis
+par d’anciens workers pendant cette migration d’évaluation.
+ PostgreSQL conserve les faits et références ;
 les lectures vérifient le checksum des objets S3. L'initialiseur crée le bucket,
 et lui seul applique les migrations. Le journal interne sérialise les commits
 par Organization ; `record.accepted` invalide le catalogue dès l'acceptation,
@@ -59,8 +92,8 @@ son propre ticket.
 trois langages et exécute le parcours HTTP contre un PostgreSQL isolé, incluant
 redémarrage, isolation, pagination et concurrence, puis ingestion, doublons,
 conflits de révision et reprise après arrêt de Temporal/S3 et interruption du
-worker. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
-de publication PostgreSQL. Les rapports restent dans
+worker, puis recherche lexicale, extraits Unicode, droits, limites et panne Weaviate. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
+de publication et de promotion PostgreSQL, ainsi que les barrières de réhydratation. Les rapports restent dans
 `.scratch/quivr-verify-…` après suppression des processus, conteneurs et volumes
 du test. La première préparation télécharge les dépendances et images épinglées.
 Les requêtes/réponses synthétiques peuvent être exportées ; jamais les fichiers

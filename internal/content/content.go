@@ -95,6 +95,8 @@ type StoredVersion struct {
 	RecordID, ID, CorpusID string
 	ManifestBlob, TextBlob Blob
 	Provenance             map[string]any
+	Availability           Availability
+	Processing             Processing
 }
 type Work struct {
 	Organization, ReceiptID, RecordID, VersionID, Digest, Slot string
@@ -118,6 +120,7 @@ type Blobs interface {
 type Service struct {
 	Repository Repository
 	Blobs      Blobs
+	Baseline   BaselineRepository
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
@@ -197,7 +200,7 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if len(manifest.Parts) != 1 || manifest.Parts[0].Content.Text != string(text) {
 		return Version{}, errors.New("canonical artifact mismatch")
 	}
-	return Version{RecordID: recordID, ID: id, Manifest: manifest, Provenance: stored.Provenance, Availability: Availability{State: "materialized"}, Relations: []any{}, Processing: Processing{State: "idle"}}, nil
+	return Version{RecordID: recordID, ID: id, Manifest: manifest, Provenance: stored.Provenance, Availability: stored.Availability, Relations: []any{}, Processing: stored.Processing}, nil
 }
 func ManifestFor(c Command) Manifest {
 	return Manifest{Kind: "manifest", Parts: []Part{{Key: "body", Role: "body", Content: c.Content}}}

@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
@@ -24,6 +27,7 @@ import (
 )
 
 type Config struct {
+	WeaviateURL     string                  `json:"weaviate_url"`
 	TemporalAddress string                  `json:"temporal_address"`
 	S3              s3store.Config          `json:"s3"`
 	LogDirectory    string                  `json:"log_directory"`
@@ -70,11 +74,15 @@ func Run(command string) error {
 		return errors.New("invalid database configuration")
 	}
 	defer pool.Close()
-	if cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
+	if cfg.WeaviateURL == "" || cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
 		return errors.New("Temporal and S3 configuration required")
 	}
 	blobs := s3store.New(cfg.S3)
-	contents := content.Service{Repository: postgres.ContentStore{Pool: pool}, Blobs: blobs}
+	store := postgres.ContentStore{Pool: pool}
+	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store}
+	projection := weaviate.New(cfg.WeaviateURL)
+	search := retrieval.Service{Routing: store, Projection: projection, Content: contents}
+	processor := processing.Service{Content: contents, Processor: processing.ShortText{}, Retrieval: search}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -91,13 +99,26 @@ func Run(command string) error {
 			case <-time.After(200 * time.Millisecond):
 			}
 		}
+		for {
+			if err = projection.Bootstrap(ctx); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return errors.New("projection bootstrap deadline exceeded")
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		if err = store.BootstrapGeneration(ctx, weaviate.InitialCollection); err != nil {
+			return errors.New("projection routing bootstrap failed")
+		}
 		slog.Info("migrations complete")
 		return nil
 	}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='002_inline_ingestion.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='003_lexical_search.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
@@ -112,6 +133,9 @@ func Run(command string) error {
 			}
 			if _, err = rt.Client.CheckHealth(ctx, nil); err == nil {
 				err = blobs.Ready(ctx)
+				if err == nil {
+					err = projection.Ready(ctx)
+				}
 			}
 		}
 		return err
@@ -135,7 +159,7 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, cfg.Keys, []byte(cfg.CursorKey))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, cfg.Keys, []byte(cfg.CursorKey))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
@@ -152,7 +176,7 @@ func Run(command string) error {
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, contents, postgres.ContentStore{Pool: pool})
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, postgres.ContentStore{Pool: pool})
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()
