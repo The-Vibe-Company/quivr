@@ -1,4 +1,4 @@
-name: Corpus foundation
+name: Text foundation
 on: [push, pull_request]
 permissions:
   contents: read
@@ -30,6 +30,10 @@ jobs:
             .scratch/quivr-verify-*/worker*.log*
             .scratch/quivr-verify-*/migrate*.log*
             .scratch/quivr-verify-*/postgres.log
+            .scratch/quivr-verify-*/temporal.log
+            .scratch/quivr-verify-*/seaweed.log
+            .scratch/quivr-verify-*/adapters.log
+            .scratch/quivr-verify-*/outages.json
             .scratch/quivr-verify-*/response-*.json
             contracts/http/v0/openapi.yaml
           if-no-files-found: warn

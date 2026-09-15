@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
@@ -15,17 +18,20 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 type Config struct {
-	LogDirectory string                  `json:"log_directory"`
-	DatabaseURL  string                  `json:"database_url"`
-	Listen       string                  `json:"listen"`
-	ProbeListen  string                  `json:"probe_listen"`
-	CursorKey    string                  `json:"cursor_key"`
-	Keys         map[string]corpus.Scope `json:"keys"`
+	TemporalAddress string                  `json:"temporal_address"`
+	S3              s3store.Config          `json:"s3"`
+	LogDirectory    string                  `json:"log_directory"`
+	DatabaseURL     string                  `json:"database_url"`
+	Listen          string                  `json:"listen"`
+	ProbeListen     string                  `json:"probe_listen"`
+	CursorKey       string                  `json:"cursor_key"`
+	Keys            map[string]corpus.Scope `json:"keys"`
 }
 
 func Run(command string) error {
@@ -64,25 +70,54 @@ func Run(command string) error {
 		return errors.New("invalid database configuration")
 	}
 	defer pool.Close()
+	if cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
+		return errors.New("Temporal and S3 configuration required")
+	}
+	blobs := s3store.New(cfg.S3)
+	contents := content.Service{Repository: postgres.ContentStore{Pool: pool}, Blobs: blobs}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		if err = postgres.Migrate(ctx, pool); err != nil {
 			return errors.New("migration failed; check database connectivity and schema")
 		}
+		for {
+			if err = blobs.Bootstrap(ctx); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return errors.New("S3 bootstrap deadline exceeded")
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
 		slog.Info("migrations complete")
 		return nil
 	}
-	ready := func(ctx context.Context) error {
+	var runtime atomic.Pointer[orchestration.Runtime]
+	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='001_corpora.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='002_inline_ingestion.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
 		return err
 	}
+	ready := func(ctx context.Context) error {
+		err := schemaReady(ctx)
+		if err == nil && command == "worker" {
+			rt := runtime.Load()
+			if rt == nil {
+				return errors.New("worker dependencies unavailable")
+			}
+			if _, err = rt.Client.CheckHealth(ctx, nil); err == nil {
+				err = blobs.Ready(ctx)
+			}
+		}
+		return err
+	}
 	startup, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = ready(startup)
+	err = schemaReady(startup)
 	cancel()
 	if err != nil {
 		return errors.New("database/schema unavailable; run migrate")
@@ -100,13 +135,38 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, cfg.Keys, []byte(cfg.CursorKey))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, cfg.Keys, []byte(cfg.CursorKey))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
 		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
 	} else {
-		slog.Info("worker idle", "reason", "no background tasks in Corpus slice")
+		workerDone := make(chan struct{})
+		defer func() {
+			stop()
+			select {
+			case <-workerDone:
+			case <-time.After(5 * time.Second):
+			}
+		}()
+		go func() {
+			defer close(workerDone)
+			for ctx.Err() == nil {
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, contents, postgres.ContentStore{Pool: pool})
+				if err == nil {
+					runtime.Store(rt)
+					<-ctx.Done()
+					rt.Close()
+					return
+				}
+				slog.Warn("worker dependencies unavailable; retrying")
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
+			}
+		}()
 	}
 	failures := make(chan error, len(servers))
 	for _, server := range servers {

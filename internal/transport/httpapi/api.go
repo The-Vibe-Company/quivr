@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -17,8 +18,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 
@@ -27,13 +30,15 @@ import (
 )
 
 type API struct {
-	Service   corpus.Service
-	Keys      map[string]corpus.Scope
-	CursorKey []byte
-	schema    *jsonschema.Schema
+	Content      content.Service
+	ingestSchema *jsonschema.Schema
+	Service      corpus.Service
+	Keys         map[string]corpus.Scope
+	CursorKey    []byte
+	schema       *jsonschema.Schema
 }
 
-func New(store corpus.Store, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
+func New(store corpus.Store, contents content.Service, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(contract.OpenAPI, &doc); err != nil {
 		return nil, err
@@ -46,7 +51,11 @@ func New(store corpus.Store, keys map[string]corpus.Scope, cursorKey []byte) (ht
 	if err != nil {
 		return nil, err
 	}
-	a := &API{corpus.Service{Store: store}, keys, cursorKey, schema}
+	ingestSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/IngestCommand")
+	if err != nil {
+		return nil, err
+	}
+	a := &API{Content: contents, ingestSchema: ingestSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	return http.HandlerFunc(a.serve), nil
 }
 func send(w http.ResponseWriter, status int, v any) {
@@ -81,6 +90,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if a.contentRoutes(w, r, scope) {
+		return
+	}
 	if r.URL.Path == "/v0/corpora" {
 		switch r.Method {
 		case "POST":
@@ -123,30 +135,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	failure(w, 404, "not_found")
 }
 func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
-	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || media != "application/json" {
-		failure(w, 415, "unsupported_media_type")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	decoder := json.NewDecoder(r.Body)
-	decoder.UseNumber()
-	var raw any
-	if err := decoder.Decode(&raw); err != nil {
-		var large *http.MaxBytesError
-		if errors.As(err, &large) {
-			failure(w, 413, "request_too_large")
-		} else {
-			failure(w, 400, "malformed_json")
-		}
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		failure(w, 400, "malformed_json")
-		return
-	}
-	if err := a.schema.Validate(raw); err != nil {
-		failure(w, 422, "invalid_schema")
+	raw, ok := decodeRequest(w, r, a.schema)
+	if !ok {
 		return
 	}
 	data := raw.(map[string]any)
@@ -252,4 +242,48 @@ type responseWriter struct {
 func (w *responseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Schema) (any, bool) {
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "application/json" {
+		failure(w, 415, "unsupported_media_type")
+		return nil, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		var large *http.MaxBytesError
+		if errors.As(err, &large) {
+			failure(w, 413, "request_too_large")
+		} else {
+			failure(w, 400, "malformed_json")
+		}
+		return nil, false
+	}
+	if !utf8.Valid(payload) {
+		failure(w, 400, "malformed_json")
+		return nil, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var raw any
+	if err := decoder.Decode(&raw); err != nil {
+		var large *http.MaxBytesError
+		if errors.As(err, &large) {
+			failure(w, 413, "request_too_large")
+		} else {
+			failure(w, 400, "malformed_json")
+		}
+		return nil, false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		failure(w, 400, "malformed_json")
+		return nil, false
+	}
+	if err := schema.Validate(raw); err != nil {
+		failure(w, 422, "invalid_schema")
+		return nil, false
+	}
+	return raw, true
 }

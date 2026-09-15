@@ -1,10 +1,11 @@
 # Quivr V2
 
-## Premier parcours implémenté : les Corpora
+## Parcours implémentés : Corpora et ingestion de texte
 
 Le cœur Go permet de créer, lister et lire des Corpora avec contrôle d'accès,
-rejeu idempotent et persistance PostgreSQL. Les autres parcours décrits ci-dessous
-restent la cible produit. Le worker démarre mais n'a pas encore de tâche métier.
+rejeu idempotent et persistance PostgreSQL. Il accepte aussi du texte en ligne,
+le matérialise via Temporal et S3, et expose des Versions immuables. La recherche
+et la veille décrites plus bas restent la cible produit.
 
 Sur Linux, installer Go 1.27.1, Docker avec Compose v2, Python avec `venv`, et
 Node/npm (22 ou ultérieur pour les vérifications de contrats), puis lancer :
@@ -15,7 +16,7 @@ make verify
 make down
 ```
 
-`dev` compile un seul binaire `quivr`, démarre PostgreSQL via Compose, applique les
+`dev` compile un seul binaire `quivr`, démarre PostgreSQL, Temporal et SeaweedFS via Compose, applique les
 migrations et lance API/worker comme processus locaux. L'adresse de l'API et le
 chemin de configuration s'affichent au démarrage. Les ports sont dynamiques et
 liés à loopback. Les clés jetables, paramètres et logs restent dans le répertoire
@@ -31,13 +32,39 @@ la demande sous la même clé produit un conflit. Les champs de mapping explicit
 sont conservés et validés ; un `plugin_profile` non installé est refusé. Cette
 première tranche ne construit pas encore d'index de recherche.
 
+Pour ingérer, envoyer `POST /v0/records` avec `idempotency_key`, `source`
+(`corpus_id`, `namespace`, `record_key`) et `content` (`kind: "text"`, `text`).
+L'API renvoie 202 après commit du Receipt et du travail à déclencher, même si
+Temporal ou S3 sont indisponibles. Lire ensuite l'URL `Location` du Receipt,
+puis `/v0/records/{record_id}/versions/{version_id}` pour le Manifest et son texte.
+Les permissions sont `content:write` et `content:read`, limitées aux Corpora autorisés.
+
+Le Receipt résout `created`, `duplicate` ou `conflict` pour cette tranche ; il ne
+passe jamais à un état « failed » pour une panne technique. Sans révision source,
+le digest canonique fournit l'identité de Version. Réutiliser une révision avec
+un contenu différent conserve l'historique et signale un conflit. `source_position`
+accepte un entier décimal de 1 à 1000 chiffres ; les zéros initiaux sont normalisés.
+Les commandes sont limitées à 1 MiB. Uploads, Manifests explicites et extensions
+non vides sont refusés jusqu'à leurs tickets dédiés, sans fausse acceptation.
+
+Une Version matérialisée reste non courante et non recherchable : le ticket de
+baseline lexicale gérera sa promotion. PostgreSQL conserve les faits et références ;
+les lectures vérifient le checksum des objets S3. L'initialiseur crée le bucket,
+et lui seul applique les migrations. Le journal interne sérialise les commits
+par Organization ; `record.accepted` invalide le catalogue dès l'acceptation,
+puis `record.materialized` à la publication. L'exposition polling/SSE arrive dans
+son propre ticket.
+
 `make verify` régénère/compare les transports, contrôle les exemples dans les
 trois langages et exécute le parcours HTTP contre un PostgreSQL isolé, incluant
-redémarrage, isolation, pagination et concurrence. Les rapports restent dans
+redémarrage, isolation, pagination et concurrence, puis ingestion, doublons,
+conflits de révision et reprise après arrêt de Temporal/S3 et interruption du
+worker. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
+de publication PostgreSQL. Les rapports restent dans
 `.scratch/quivr-verify-…` après suppression des processus, conteneurs et volumes
 du test. La première préparation télécharge les dépendances et images épinglées.
 Les requêtes/réponses synthétiques peuvent être exportées ; jamais les fichiers
-`state.json`, `config.json` ou `worker.json`, qui contiennent les clés.
+`state.json`, `config.json`, `worker.json` ou `s3.json`, qui contiennent les clés.
 
 `make down` conserve les volumes de développement ; `make reset` les supprime
 explicitement. `make migrate` applique les migrations versionnées à cette pile.
@@ -45,7 +72,7 @@ Les migrations à chaud peuvent casser des processus pendant l'évaluation ; not
 les redémarrages requis. `GO=/chemin/vers/go` sélectionne un outil Go local.
 `make generate` met à jour les bindings après une modification du contrat.
 Les logs locaux sont bornés à quatre fichiers de 1 MiB par processus ; PostgreSQL
-conserve trois fichiers de 1 MiB. Les probes privées `/healthz` et `/readyz` utilisent un port séparé ; elles ne
+et les autres services Compose conservent trois fichiers de 1 MiB chacun. Les probes privées `/healthz` et `/readyz` utilisent un port séparé ; elles ne
 font pas partie de l'API publique. Aucun service de modèle ni clé externe n'est
 nécessaire pour cette tranche.
 

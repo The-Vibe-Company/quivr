@@ -19,5 +19,33 @@ services:
       interval: 1s
       timeout: 2s
       retries: 40
+  temporal:
+    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
+    command: [server, start-dev, --ip, 0.0.0.0, --headless, --db-filename, /home/temporal/temporal.db]
+    ports:
+      - "127.0.0.1::7233"
+    volumes:
+      - temporal-data:/home/temporal
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, '127.0.0.1:7233']
+      interval: 1s
+      timeout: 2s
+      retries: 40
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+  seaweed:
+    image: chrislusf/seaweedfs:4.45@sha256:fc9f76fa993ad69966ffeb2f65d0318fcae39c6f8e20cf68ef7b3a5cb97769e5
+    command: [mini, '-dir=/data', '-s3.config=/etc/seaweedfs/s3.json']
+    ports:
+      - "127.0.0.1::8333"
+    volumes:
+      - ${QUIVR_LOCAL_ROOT:?}/s3.json:/etc/seaweedfs/s3.json:ro
+      - seaweed-data:/data
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
 volumes:
   data:
+  temporal-data:
+  seaweed-data:
