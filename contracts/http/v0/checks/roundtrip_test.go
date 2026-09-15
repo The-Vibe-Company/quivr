@@ -24,6 +24,10 @@ func TestContractRoundTrips(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			var target any
 			switch c.Schema {
+			case "SearchRequest":
+				target = &SearchRequest{}
+			case "SearchResponse":
+				target = &SearchResponse{}
 			case "IngestCommand":
 				target = &IngestCommand{}
 			case "Receipt":

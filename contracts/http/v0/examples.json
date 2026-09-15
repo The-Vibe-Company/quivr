@@ -416,7 +416,8 @@
       "counters": {
         "processed": 42
       },
-      "errors": []
+      "errors": [],
+      "corpus_id": "corpus_news"
     }
   },
   {
@@ -631,6 +632,114 @@
         "subscription_id": "subscription_1",
         "subscription_version_id": "subscription_version_1",
         "delivery_id": "delivery_1"
+      }
+    }
+  },
+  {
+    "name": "text_search",
+    "schema": "SearchRequest",
+    "value": {
+      "query": "énergie solaire 🌞",
+      "corpus_ids": [
+        "corpus_news"
+      ],
+      "mode": "hybrid",
+      "profile": "balanced",
+      "limit": 10
+    }
+  },
+  {
+    "name": "canonical_search_results",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_1",
+          "version_id": "version_1",
+          "part_key": "body",
+          "segment_id": "segment_1",
+          "segmentation_id": "segmentation_1",
+          "projection_generation_id": "generation_1",
+          "embedding_artifact_id": "embedding_1",
+          "vector_space_id": "vectorspace_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "énergie 🌞",
+            "start": 3,
+            "end": 12,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          }
+        }
+      ],
+      "retrieval_profile": {
+        "name": "balanced",
+        "version": "quivr.text.fixture.v1"
+      }
+    }
+  },
+  {
+    "name": "lexical_search_without_embedding",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_2",
+          "version_id": "version_2",
+          "part_key": "body",
+          "segment_id": "segment_2",
+          "segmentation_id": "segmentation_2",
+          "projection_generation_id": "generation_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "lune",
+            "start": 0,
+            "end": 4,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          }
+        }
+      ],
+      "retrieval_profile": {
+        "name": "balanced",
+        "version": "quivr.text.fixture.v1"
+      }
+    }
+  },
+  {
+    "name": "rebuild_queued",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_1",
+      "kind": "projection_rebuild",
+      "corpus_id": "corpus_news",
+      "state": "queued",
+      "counters": {},
+      "errors": []
+    }
+  },
+  {
+    "name": "rebuild_succeeded",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_1",
+      "kind": "projection_rebuild",
+      "corpus_id": "corpus_news",
+      "state": "succeeded",
+      "counters": {
+        "indexed": 24
+      },
+      "errors": [],
+      "result": {
+        "projection_generation_id": "generation_2"
       }
     }
   }

@@ -52,6 +52,20 @@ invalid = [
     ("Match", {k: v for k, v in examples["positive_match"].items() if k != "evidence"}),
     ("Delivery", {**examples["delivery"], "state": "failed"}),
 ]
+search = examples["text_search"]
+hit = examples["canonical_search_results"]["items"][0]
+rebuild = examples["rebuild_succeeded"]
+invalid.extend([
+    ("SearchRequest", {**search, "corpus_ids": []}),
+    ("SearchRequest", {**search, "corpus_ids": ["c", "c"]}),
+    ("SearchRequest", {**search, "limit": 51}),
+    ("SearchRequest", {**search, "engine_filter": {}}),
+    ("SearchHit", {**hit, "score": 0.99}),
+    ("SearchHit", {k: v for k, v in hit.items() if k != "vector_space_id"}),
+    ("SearchHit", {k: v for k, v in hit.items() if k != "embedding_artifact_id"}),
+    ("Operation", {k: v for k, v in rebuild.items() if k != "result"}),
+    ("Operation", {k: v for k, v in rebuild.items() if k != "corpus_id"}),
+])
 for schema, value in invalid:
     check(schema, value, False)
 

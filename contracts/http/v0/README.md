@@ -1,8 +1,9 @@
 # Public HTTP transport contract
 
-`openapi.yaml` is the public transport source of truth for THE-543 and THE-547.
+`openapi.yaml` is the public transport source of truth for THE-543, THE-547 and THE-640.
 Design and scope are recorded in [ingestion](../../../docs/quivr-v2-ingestion-contracts.md)
-and [thin monitoring](../../../docs/quivr-v2-monitoring-tracer.md).
+[thin monitoring](../../../docs/quivr-v2-monitoring-tracer.md), and
+[search/rebuild](../../../docs/quivr-v2-search-contracts.md).
 Generated code belongs in transport/SDK packages when implementation starts;
 it is deliberately not checked into this design change.
 
@@ -10,10 +11,10 @@ it is deliberately not checked into this design change.
 
 | Target | Pinned tool | Verified |
 | --- | --- | --- |
-| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and 19 JSON round trips |
-| Python client | OpenAPI Generator v7.25.0, `python` | Import and 19 JSON round trips |
-| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and 19 JSON round trips |
-| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, 19 examples, 22 boundary checks |
+| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and 24 JSON round trips |
+| Python client | OpenAPI Generator v7.25.0, `python` | Import and 24 JSON round trips |
+| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and 24 JSON round trips |
+| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, 24 examples, 31 boundary checks |
 
 The generator image used was
 `openapitools/openapi-generator-cli:v7.25.0@sha256:2ab0a9680222de65dc9d3baf861aa02b99e1b80c211d8221ebf3ae8f8a102524`.
@@ -49,6 +50,12 @@ The public `webhook-vector.json` was computed with Python HMAC-SHA256 and checke
 with Node crypto, including changes to the ID, timestamp and body. It is test
 data, not a deployed signing key; timestamp-age policy requires receiver runtime
 tests in the later harness.
+
+Search fixtures include non-ASCII canonical excerpts, paired embedding provenance,
+and lexical hits without embeddings. Rebuild Operations now carry their target
+Corpus and, on success, a logical generation result. These tighten the draft v0
+rebuild shape; the existing cancellation fixture was updated accordingly. Runtime
+checks must additionally verify excerpt bounds, ranks and authorization.
 
 ## Reproduce locally
 

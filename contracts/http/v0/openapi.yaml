@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
-  title: Quivr V2 ingestion and thin monitoring contract
+  title: Quivr V2 public text foundation contract
   version: 0.0.0-draft
   description: THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching
     criterion is plugin-owned and deferred. One configured webhook destination, immutable Matches, independent
     at-least-once Delivery and reference-only notifications. OpenAPI is authoritative for transport shapes.
+    THE-640 adds text search and asynchronous Corpus projection rebuild initiation.
 security:
 - ApiKey: []
 paths:
@@ -1007,6 +1008,83 @@ paths:
           minimum: 1
           maximum: 100
           default: 100
+  /v0/search:
+    post:
+      operationId: searchRecords
+      description: Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain
+        candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records
+        remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection
+        does not change access/currentness rules.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action,
+            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency
+            unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-required-permissions:
+      - content:read
+      - search:query
+  /v0/corpora/{corpus_id}/rebuilds:
+    post:
+      operationId: rebuildCorpusProjection
+      description: Durably commit a projection_rebuild Operation and dispatch intent before returning.
+        Rebuild the requested Corpus from canonical text and durable artifacts, then activate its validated
+        logical generation. Same Organization + Corpus + rebuild route + idempotency key and canonical
+        request returns the same Operation, including after terminal completion; changed request conflicts.
+        HTTP does not wait for reconstruction. Retries/restarts keep identity and target generation. Preserve
+        other Corpora when physical storage is shared. Normal ingestion/withdrawal guards still apply.
+        Live evaluation schema migrations remain a separate mechanism.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+          headers:
+            Location:
+              description: Authorized Operation read URL.
+              schema:
+                type: string
+                format: uri-reference
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action,
+            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency
+            unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-required-permissions:
+      - projections:rebuild
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
 components:
   securitySchemes:
     ApiKey:
@@ -1540,6 +1618,11 @@ components:
         previous_operation_id:
           type: string
           minLength: 1
+        corpus_id:
+          type: string
+          minLength: 1
+        result:
+          $ref: '#/components/schemas/ProjectionRebuildResult'
       required:
       - operation_id
       - kind
@@ -1548,7 +1631,27 @@ components:
       - errors
       description: Administrative execution only. Retries keep identity. Intentional terminal rerun has
         a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal
-        state and racing completion may win.
+        state and racing completion may win. projection_rebuild Operations require corpus_id; succeeded
+        rebuilds require result naming the activated logical generation. This result shape covers the
+        initial rebuild command only.
+      if:
+        properties:
+          kind:
+            const: projection_rebuild
+        required:
+        - kind
+      then:
+        required:
+        - corpus_id
+        if:
+          properties:
+            state:
+              const: succeeded
+          required:
+          - state
+        then:
+          required:
+          - result
     FieldMapping:
       type: object
       additionalProperties: false
@@ -2228,6 +2331,180 @@ components:
           minLength: 1
       required:
       - items
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        corpus_ids:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+        mode:
+          type: string
+          enum:
+          - lexical
+          - semantic
+          - hybrid
+          default: hybrid
+        profile:
+          type: string
+          enum:
+          - fast
+          - balanced
+          - deep
+          default: balanced
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+      required:
+      - query
+      - corpus_ids
+      description: Text-only top-k query. Resolve all Corpora in the authenticated Organization and require
+        read/search permission for every requested Corpus before querying. Never silently drop an unauthorized
+        Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not
+        an empty successful result. Query token limits are checked against the resolved profile; no silent
+        truncation. Metadata filter syntax and pagination are outside this initial surface.
+    SearchProfile:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        version:
+          type: string
+          minLength: 1
+      required:
+      - name
+      - version
+      description: Resolved immutable retrieval profile identity. Version describes query normalization,
+        ranking seed and model/segmentation configuration; no user-facing engine parameters.
+    SearchExcerpt:
+      type: object
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          maxLength: 4096
+        start:
+          type: integer
+          minimum: 0
+        end:
+          type: integer
+          minimum: 0
+        coordinate_system:
+          type: string
+          enum:
+          - unicode_codepoint
+      required:
+      - text
+      - start
+      - end
+      - coordinate_system
+      description: Exact canonical normalized Part text slice [start,end), using Unicode code points,
+        not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point
+        length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten
+        snippets.
+    SearchHit:
+      type: object
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          minLength: 1
+        version_id:
+          type: string
+          minLength: 1
+        part_key:
+          type: string
+          minLength: 1
+        segment_id:
+          type: string
+          minLength: 1
+        segmentation_id:
+          type: string
+          minLength: 1
+        projection_generation_id:
+          type: string
+          minLength: 1
+        embedding_artifact_id:
+          type: string
+          minLength: 1
+        vector_space_id:
+          type: string
+          minLength: 1
+        rank:
+          type: integer
+          minimum: 1
+        excerpt:
+          $ref: '#/components/schemas/SearchExcerpt'
+        availability:
+          $ref: '#/components/schemas/Availability'
+      required:
+      - record_id
+      - version_id
+      - part_key
+      - segment_id
+      - segmentation_id
+      - projection_generation_id
+      - rank
+      - excerpt
+      - availability
+      description: One authorized segment hit. Rehydrate from canonical storage and recheck Organization/Corpus
+        access, currentness, quarantine and Tombstone before returning. Rank is contiguous and one-based
+        after hydration/filtering. Projection Generation, segmentation, segment and optional Embedding
+        Artifact/Vector Space are logical durable IDs, not physical collection names or workflow IDs.
+        Embedding references are omitted when that segment has lexical coverage only. They do not assert
+        that the dense branch contributed to its rank. All hits inherit the response retrieval profile.
+        Raw scores/explainScore stay internal.
+      if:
+        required:
+        - embedding_artifact_id
+      then:
+        required:
+        - vector_space_id
+      else:
+        not:
+          required:
+          - vector_space_id
+    SearchResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+          maxItems: 50
+        retrieval_profile:
+          $ref: '#/components/schemas/SearchProfile'
+      required:
+      - items
+      - retrieval_profile
+      description: Bounded top-k results after canonical rechecks. May contain fewer hits than requested;
+        no total count, completeness promise or stable pagination snapshot. Empty results still name the
+        resolved profile.
+    ProjectionRebuildResult:
+      type: object
+      additionalProperties: false
+      properties:
+        projection_generation_id:
+          type: string
+          minLength: 1
+      required:
+      - projection_generation_id
+      description: Logical generation activated for the requested Corpus. Opaque ID, never a physical
+        search collection name.
 webhooks:
   monitoringNotification:
     post:
