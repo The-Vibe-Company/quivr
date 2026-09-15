@@ -1,0 +1,126 @@
+{
+  "project_id": "74b1e669-ead7-48c0-9f39-e807bb662826",
+  "environment_id": "16ca09a5-197d-4611-ba69-1fe070306a08",
+  "url": "https://web-production-7a373.up.railway.app",
+  "custom_domain": "quivr.thevibecompany.co",
+  "dns_status": "awaiting Cloudflare CNAME and ownership TXT",
+  "runtime_source": "afed5af",
+  "services": [
+    {
+      "name": "api",
+      "id": "82feeaca-892c-4a95-ad67-940548fa8369",
+      "deployment_id": "74e24ba3-1f12-4c23-b267-8755f3c6dd59"
+    },
+    {
+      "name": "postgres",
+      "id": "ad90b7d4-5304-47b1-b8da-8c5d56111aba",
+      "deployment_id": "421a6bd8-b461-4f34-8337-ded0bbe16644"
+    },
+    {
+      "name": "seaweed",
+      "id": "2b24dea2-88cd-4f23-9d79-0a3f6ab4aed5",
+      "deployment_id": "e600a950-7e3b-4eb4-bae9-8630c63d04e2"
+    },
+    {
+      "name": "tei",
+      "id": "f11b0ae4-f04d-4de7-87aa-f5bcb223e1de",
+      "deployment_id": "017ec398-0376-432b-afbe-64cb1d0ac0b7"
+    },
+    {
+      "name": "temporal",
+      "id": "31b71a63-32c2-4c78-be37-70cd4389ee8c",
+      "deployment_id": "f932649c-6cb2-455b-9fd1-1d807a2d50a7"
+    },
+    {
+      "name": "weaviate",
+      "id": "0579bbda-e23f-4592-a4f6-52138e721038",
+      "deployment_id": "05db93a8-4992-43d3-ba0d-fad6b49f2962"
+    },
+    {
+      "name": "web",
+      "id": "8ba64a1e-2f5a-4bbb-84ae-ea6b64b5ba60",
+      "deployment_id": "2e951981-2e42-41fb-81b5-632a8b032eb7"
+    },
+    {
+      "name": "worker",
+      "id": "321fa5bd-e8e5-48ec-abcb-a7a02988aa5d",
+      "deployment_id": "d4ddc9ef-ac03-4e76-9b29-48c3fff026b1"
+    }
+  ],
+  "retention": {
+    "corpus_id": "corpus_5e14804d04f01af24fd1a3e7236d67e1",
+    "record_id": "record_8de642df029e3f28f2fa8eeb544fd54c9775ef87c5a5771b01bb4a1fda2382c2",
+    "version_id": "version_6fa6d810f046f21638f2ba33df71845a89f93b902d690330dbeae99baad9a005",
+    "receipt_id": "receipt_21eb9de2494045fab5e8d178d93976221bce000ac1f097c6a478e286d68362c1",
+    "before": {
+      "status": "passed",
+      "checked_at": "2026-09-15T12:19:53Z",
+      "source_sha256": "1a331c8df790ddf8443ad224c86072d78c25933c897e6b6529c68282edc91a25",
+      "modes": [
+        "lexical",
+        "semantic",
+        "hybrid"
+      ],
+      "secure_session": true
+    },
+    "after": {
+      "status": "passed",
+      "checked_at": "2026-09-15T12:25:15Z",
+      "source_sha256": "1a331c8df790ddf8443ad224c86072d78c25933c897e6b6529c68282edc91a25",
+      "modes": [
+        "lexical",
+        "semantic",
+        "hybrid"
+      ],
+      "secure_session": true
+    }
+  },
+  "resource_snapshot": {
+    "window": {
+      "since": "2026-09-15T11:24:11.760980536+00:00",
+      "until": "2026-09-15T12:24:20.660816379+00:00"
+    },
+    "services": [
+      {
+        "name": "tei",
+        "memory_mb": 1123.15072512,
+        "cpu_vcpu": 0.016249633333333333
+      },
+      {
+        "name": "temporal",
+        "memory_mb": 107.042832384,
+        "cpu_vcpu": 0.005294366666666667
+      },
+      {
+        "name": "seaweed",
+        "memory_mb": 86.4026624,
+        "cpu_vcpu": 0.0038698
+      },
+      {
+        "name": "worker",
+        "memory_mb": 37.45513472,
+        "cpu_vcpu": 0.002216766666666667
+      },
+      {
+        "name": "weaviate",
+        "memory_mb": 64.168656896,
+        "cpu_vcpu": 0.0017335333333333334
+      },
+      {
+        "name": "postgres",
+        "memory_mb": 31.096569856,
+        "cpu_vcpu": 0.0016073
+      },
+      {
+        "name": "api",
+        "memory_mb": 18.270388224,
+        "cpu_vcpu": 6.1e-06
+      },
+      {
+        "name": "web",
+        "memory_mb": 22.926065664,
+        "cpu_vcpu": 3.1e-06
+      }
+    ]
+  }
+}

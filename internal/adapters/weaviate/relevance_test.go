@@ -41,7 +41,9 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// The complete CPU fixture includes ingestion and 72 real searches. Shared CI
+	// runners can exceed two minutes without any individual request being stuck.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	model := tei.Encoder{Endpoint: cfg.TEIURL}
 	windows := processing.TokenWindows{Tokenizer: tokenizer.Encoder{Config: cfg.Tokenizer}}

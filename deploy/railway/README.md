@@ -1,0 +1,109 @@
+# Railway evaluation demo (THE-664)
+
+This deployment runs the real THE-663 UI and V2 core. One dedicated Railway project,
+`quivr-v2-demo`, contains eight single-replica services. Only `web` is exposed publicly.
+
+| Service | Runtime / responsibility | Persistence |
+| --- | --- | --- |
+| web | Node facade, static React bundle, shared-password session | Stateless |
+| api | Go HTTP API; applies migrations before serving | PostgreSQL/S3 |
+| worker | Go/Temporal processing and optional E5 enrichment | PostgreSQL/S3/Temporal |
+| postgres | Pinned PostgreSQL 17 | `/data/pgdata` on `/data` volume |
+| seaweed | Pinned SeaweedFS mini, authenticated S3 | `/data` volume |
+| temporal | Pinned Temporal dev server, headless | SQLite `/data/temporal.db` volume |
+| weaviate | Pinned standalone search projection | `/var/lib/weaviate` volume |
+| tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
+
+This is a single-node evaluation deployment, with the accepted Temporal dev server
+and no high availability. Redeploying a volume-backed service can interrupt requests.
+No Railway TCP proxies or public dependency domains are needed.
+
+## Provision and deploy
+
+Authenticate `railway login`, then create/link a dedicated project in the intended
+workspace. The provisioner refuses any project not named `quivr-v2-demo` or whose ID
+does not match the explicit argument.
+
+```sh
+railway init --name quivr-v2-demo --workspace YOUR_WORKSPACE_ID --json
+python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID
+python3 deploy/railway/provision.py --project-id YOUR_PROJECT_ID --apply
+```
+
+The first command previews the service plan. Applying creates missing services and
+volumes and configures runtime variables through stdin, without deploying code or
+adding public domains. Generated credentials are kept in Railway and an ignored 0600
+file under `.scratch/railway/PROJECT_ID/secrets.json`. Keep this file privately for
+repeated provisioning; do not rotate the database or S3 password by rerunning with a
+new file against an existing deployment. The web password is `demo_password` in that
+file. It is a shared evaluation space, not per-user access.
+
+The deployment helper connects pinned image sources or uploads Dockerfile services
+from the repository root. It starts deployment but does not wait for readiness:
+
+```sh
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID postgres temporal seaweed weaviate tei
+# Wait for dependencies to start successfully, then:
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID api
+# Wait for API readiness, then:
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID worker web
+```
+
+The provisioner sets each Dockerfile path. Deploy in order:
+
+1. postgres, seaweed, temporal, weaviate and tei; inspect deployment status/logs.
+2. api; its startup migration bootstraps schema, bucket and projection, then readiness.
+3. worker and web; verify readiness before publishing.
+
+Core readiness uses `PORT=8081`; internal API traffic uses port 8080. The worker
+also probes on 8081. Only the web service uses its port 3000 for public traffic.
+All core connections use fixed service DNS names within this project environment.
+
+The tokenizer and model are downloaded and checksum-verified at **build time** from
+accepted locks. TEI's image contains the complete snapshot and `HF_HUB_OFFLINE=1`;
+runtime startup does not download a model. Startup migration failure exits instead
+of exposing a partially initialized API. Logs go to service stdout/stderr; runtime
+configuration is generated privately in `/tmp`, never printed.
+
+## Domain and HTTPS
+
+```sh
+railway domain --service web --port 3000 --json
+railway domain quivr.thevibecompany.co --service web --port 3000 --json
+railway domain status quivr.thevibecompany.co --service web --json
+```
+
+Use the exact CNAME and ownership TXT records returned by Railway; do not guess a
+`*.up.railway.app` target. `thevibecompany.co` currently has Cloudflare authoritative
+nameservers, so changes in Vercel's DNS UI alone do not publish those records.
+Keep the facade `DEMO_SECURE_COOKIE=true` for HTTPS and preserve the original Host
+header. TLS terminates at Railway; no public API key belongs in the browser bundle.
+
+## Verification and operations
+
+- Inspect `railway service list --json` and scoped logs for readiness/failures.
+- Open the public HTTPS URL, sign in, add a unique synthetic text, search in hybrid
+  and lexical modes, and read the unchanged source. Check the cookie is Secure and
+  HttpOnly. Anonymous `/demo/session` must return 401.
+- Save that Record/Version/Receipt identity, restart application and dependency
+  services, then repeat search/source reads. Volumes must remain attached; never use
+  service/volume deletion for this persistence check.
+- Browser checks can target the public deployment with `QUIVR_DEMO_URL` and
+  `QUIVR_DEMO_PASSWORD` set in the test process environment. Do not publish traces
+  containing passwords or submitted text.
+- Inspect actual memory/CPU/storage usage after startup and during an ingestion;
+  idle estimates are not a monthly bill. Keep this single-replica demo on only while
+  needed. Back up/export valuable content before deleting the demo project.
+
+## Primary references checked
+
+- [Railway private networking](https://docs.railway.com/networking/private-networking/how-it-works): environment-scoped service DNS, private HTTP connections, IPv4/IPv6 for new environments.
+- [Railway volumes](https://docs.railway.com/volumes/reference): persistent mounts and deployment behavior.
+- [Railway domains](https://docs.railway.com/networking/domains/working-with-domains): custom domain records and automatic TLS.
+- [Railway config as code](https://docs.railway.com/config-as-code): deployment configuration.
+- Live CLI help and GraphQL schema introspection were used for the installed CLI;
+  `Builder` does not include `DOCKERFILE`, so the provisioner sets `dockerfilePath`
+  directly rather than supplying an invalid builder enum.
+
+Deployment IDs, final URL/DNS state, restart evidence and observed resource usage
+are recorded on THE-664 and in the deployment evidence once verified.
