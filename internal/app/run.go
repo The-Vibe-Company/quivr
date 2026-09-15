@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -28,6 +29,7 @@ import (
 )
 
 type Config struct {
+	TEIURL          string                  `json:"tei_url"`
 	Tokenizer       tokenizer.Config        `json:"tokenizer"`
 	WeaviateURL     string                  `json:"weaviate_url"`
 	TemporalAddress string                  `json:"temporal_address"`
@@ -81,12 +83,13 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store}
+	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store}
 	projection := weaviate.New(cfg.WeaviateURL)
 	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}
 	windows := processing.TokenWindows{Tokenizer: encoder}
-	search := retrieval.Service{Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
-	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search}
+	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
+	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
+	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -104,7 +107,7 @@ func Run(command string) error {
 			}
 		}
 		for {
-			if err = projection.Bootstrap(ctx); err == nil {
+			if err = projection.Bootstrap(ctx, weaviate.InitialCollection); err == nil {
 				break
 			}
 			select {
@@ -113,7 +116,7 @@ func Run(command string) error {
 			case <-time.After(200 * time.Millisecond):
 			}
 		}
-		if err = store.BootstrapGeneration(ctx, weaviate.InitialCollection); err != nil {
+		if err = store.BootstrapGeneration(ctx, weaviate.InitialCollection, tei.Space().ID); err != nil {
 			return errors.New("projection routing bootstrap failed")
 		}
 		if _, err = encoder.Encode(ctx, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
@@ -125,7 +128,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='004_tokenizer_segments.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='005_embeddings.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}

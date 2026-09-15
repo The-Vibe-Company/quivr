@@ -36,6 +36,10 @@ jobs:
             .scratch/quivr-verify-*/adapters.log
             .scratch/quivr-verify-*/outages.json
             .scratch/quivr-verify-*/tokenizer-provenance.json
+            .scratch/quivr-verify-*/embedding-provenance.json
+            .scratch/quivr-verify-*/embedding-outage.json
+            .scratch/quivr-verify-*/relevance-report.json
+            .scratch/quivr-verify-*/tei.log
             .scratch/quivr-verify-*/response-*.json
             contracts/http/v0/openapi.yaml
           if-no-files-found: warn

@@ -47,8 +47,8 @@ func TestLexicalSearchCanonicalExcerpt(t *testing.T) {
 			t.Fatal("missing provenance", h)
 		}
 	}
-	if h["embedding_artifact_id"] != nil || h["vector_space_id"] != nil {
-		t.Fatal("invented vector provenance", h)
+	if (h["embedding_artifact_id"] == nil) != (h["vector_space_id"] == nil) {
+		t.Fatal("unpaired vector provenance", h)
 	}
 	a := h["availability"].(map[string]any)
 	if a["state"] != "retrieval_ready" || a["is_current"] != true || a["searchable"] != true {
@@ -152,12 +152,12 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 		request(t, "POST", "/v0/search", admin, q, 422)
 	}
 	delete(q, "limit")
-	for _, mode := range []string{"semantic", "hybrid", "unknown"} {
+	for _, mode := range []string{"unknown"} {
 		q["mode"] = mode
 		request(t, "POST", "/v0/search", admin, q, 422)
 	}
 	delete(q, "mode")
-	request(t, "POST", "/v0/search", admin, q, 422) // Default hybrid is explicitly unavailable in this slice.
+	request(t, "POST", "/v0/search", admin, q, 200) // Hybrid is the default.
 	q["mode"] = "lexical"
 	for _, profile := range []string{"fast", "deep"} {
 		q["profile"] = profile

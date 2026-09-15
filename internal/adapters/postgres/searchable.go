@@ -11,13 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s ContentStore) BootstrapGeneration(ctx context.Context, collection string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active) VALUES($1,$2,$3,true) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion)
+func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id) VALUES($1,$2,$3,true,$4) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
 func (s ContentStore) ActiveGeneration(ctx context.Context) (content.Generation, error) {
 	var g content.Generation
-	err := s.Pool.QueryRow(ctx, `SELECT id,collection,profile_version FROM projection_generations WHERE active`).Scan(&g.ID, &g.Collection, &g.ProfileVersion)
+	err := s.Pool.QueryRow(ctx, `SELECT id,collection,profile_version,space_id FROM projection_generations WHERE active`).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID)
 	return g, err
 }
 func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
@@ -153,6 +153,15 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, c content
 	if err == nil && !scope.Contains(corpusID) {
 		err = corpus.ErrNotFound
 	}
+	if err == nil {
+		var embeddingID, spaceID string
+		e := s.Pool.QueryRow(ctx, `SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND g.space_id=a.space_id WHERE ec.organization=$1 AND ec.segment_id=$2 AND ec.generation_id=$3`, scope.Organization, c.SegmentID, c.GenerationID).Scan(&embeddingID, &spaceID)
+		if e == nil {
+			h.EmbeddingID, h.SpaceID = embeddingID, spaceID
+		} else if !errors.Is(e, pgx.ErrNoRows) {
+			err = e
+		}
+	}
 	h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
 	return h, blob, notFound(err)
 }
@@ -174,6 +183,15 @@ func (s ContentStore) VersionStatus(ctx context.Context, org, id string) (conten
 	}
 	a.Current = a.Current && !withdrawn && !quarantine
 	a.Searchable = baseline && a.Current
+	if baseline && !quarantine {
+		if err = s.Pool.QueryRow(ctx, `SELECT enrichment_state,enrichment_error FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&p.State, &code); err != nil {
+			return a, p, code, err
+		}
+		if p.State != "idle" {
+			p.Phase = "enrichment"
+		}
+		return a, p, code, err
+	}
 	if p.State != "idle" {
 		p.Phase = "baseline"
 	}

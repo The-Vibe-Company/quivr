@@ -28,7 +28,10 @@ type Input struct {
 
 func materializeWorkflow(ctx workflow.Context, input Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
-	return workflow.ExecuteActivity(ctx, "process-token-windows", input).Get(ctx, nil)
+	if err := workflow.ExecuteActivity(ctx, "process-token-windows", input).Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, "enrich-e5", input).Get(ctx, nil)
 }
 
 type Runtime struct {
@@ -46,10 +49,11 @@ func Start(ctx context.Context, address string, service processing.Service, stor
 		return nil, err
 	}
 	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
-	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-token-windows-v2"})
+	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
 		return service.Run(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "process-token-windows"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
 		c.Close()
@@ -72,7 +76,7 @@ func (r *Runtime) dispatch(ctx context.Context) {
 		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
 		d, err := r.Store.Claim(attempt)
 		if err == nil {
-			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-lexical-v2", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-token-windows-v2", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
+			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v3", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
 			var already *serviceerror.WorkflowExecutionAlreadyStarted
 			if err == nil || errors.As(err, &already) {
 				err = r.Store.Dispatched(attempt, d)

@@ -18,7 +18,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
-const InitialCollection = "QuivrTextV2"
+const InitialCollection = "QuivrTextV3"
 
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
@@ -61,8 +61,11 @@ func (s *Store) Ready(ctx context.Context) error {
 	_, err := s.call(ctx, "GET", "/v1/.well-known/ready", nil, nil)
 	return err
 }
-func (s *Store) Bootstrap(ctx context.Context) error {
-	status, err := s.call(ctx, "GET", "/v1/schema/"+InitialCollection, nil, nil)
+func (s *Store) Bootstrap(ctx context.Context, collection string) error {
+	if !className.MatchString(collection) {
+		return errors.New("invalid projection route")
+	}
+	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, nil)
 	if err == nil {
 		return nil
 	}
@@ -76,7 +79,7 @@ func (s *Store) Bootstrap(ctx context.Context) error {
 	for _, name := range []string{"title", "body"} {
 		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true})
 	}
-	schema := map[string]any{"class": InitialCollection, "properties": properties, "vectorizer": "none", "vectorIndexConfig": map[string]any{"skip": true}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
+	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": "cosine"}}}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
@@ -131,7 +134,15 @@ func (s *Store) Search(ctx context.Context, g content.Generation, scope corpus.S
 		filters = append(filters, equal("corpusId", id))
 	}
 	where := "{operator:And,operands:[" + equal("organization", scope.Organization) + ",{operator:Or,operands:[" + strings.Join(filters, ",") + "]}]}"
-	query := fmt.Sprintf("{Get{%s(bm25:{query:%s,properties:[\"title^2\",\"body\"]},where:%s,limit:%d){segmentId}}}", g.Collection, quote(q.Query), where, 100)
+	branch := fmt.Sprintf("bm25:{query:%s,properties:[\"title^2\",\"body\"]}", quote(q.Query))
+	vector, _ := json.Marshal(q.Vector)
+	if q.Mode == "semantic" {
+		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[\"semantic_text_v1\"]}", vector)
+	}
+	if q.Mode == "hybrid" {
+		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:0.5,fusionType:relativeScoreFusion,properties:[\"title^2\",\"body\"],targetVectors:[\"semantic_text_v1\"]}", quote(q.Query), vector)
+	}
+	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId}}}", g.Collection, branch, where, 100)
 	var response struct {
 		Data struct {
 			Get map[string][]struct {
@@ -159,4 +170,35 @@ func (s *Store) Search(ctx context.Context, g content.Generation, scope corpus.S
 		result = append(result, content.Candidate{SegmentID: r.SegmentID, GenerationID: g.ID})
 	}
 	return result, nil
+}
+
+func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
+	if !className.MatchString(g.Collection) {
+		return errors.New("invalid embedding projection")
+	}
+	for _, p := range data {
+		e := p.Artifact
+		if e.Organization != org || e.SpaceID != g.SpaceID {
+			return errors.New("incompatible embedding projection")
+		}
+		raw, err := content.VectorBytes(p.Vector)
+		if err != nil || content.Hash(raw) != e.Payload.SHA256 {
+			return errors.New("embedding payload mismatch")
+		}
+		path := "/v1/objects/" + g.Collection + "/" + objectID(org, e.SegmentID)
+		// Merge preserves lexical fields and cannot create a vector-only object.
+		_, _ = s.call(ctx, "PATCH", path, map[string]any{"class": g.Collection, "vectors": map[string]any{"semantic_text_v1": p.Vector}}, nil)
+		var stored struct {
+			Vectors    map[string][]float32 `json:"vectors"`
+			Properties map[string]any       `json:"properties"`
+		}
+		if _, err = s.call(ctx, "GET", path+"?include=vector", nil, &stored); err != nil {
+			return err
+		}
+		recovered, err := content.VectorBytes(stored.Vectors["semantic_text_v1"])
+		if err != nil || content.Hash(recovered) != e.Payload.SHA256 || stored.Properties["segmentId"] != e.SegmentID {
+			return errors.New("embedding projection verification failed")
+		}
+	}
+	return nil
 }

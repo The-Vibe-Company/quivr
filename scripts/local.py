@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Linux local text slice: host Go processes and isolated real dependencies."""
 from prepare_tokenizer import prepare as prepare_tokenizer
+from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import argparse, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -34,7 +35,7 @@ class Stack:
     def save(self):
         self.statefile.write_text(json.dumps(self.state));self.statefile.chmod(0o600)
     def compose(self,*args,**kwargs):
-        return run(['docker','compose','-p',self.name,'-f','deploy/compose/compose.yaml',*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory)},**kwargs)
+        return run(['docker','compose','-p',self.name,'-f','deploy/compose/compose.yaml',*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory),'QUIVR_MODEL_ROOT':str(MODEL)},**kwargs)
     def config(self):
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()
         s=self.state
@@ -42,7 +43,9 @@ class Stack:
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
-        cfg=dict(tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
+        tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
+        tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
+        cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
@@ -82,8 +85,9 @@ class Stack:
     def up(self):
         self.stop_processes()
         prepare_tokenizer()
+        (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
-        self.compose('up','-d','--wait','--wait-timeout','60')
+        self.compose('up','-d','--wait','--wait-timeout','180')
         self.migrate();self.migrate();self.start_processes()
     def tests(self,pattern):
         s=self.state
@@ -171,7 +175,7 @@ class Stack:
         assert call('POST','/v0/search',query)['items']==[] # Old projection remains, canonical hydration suppresses it.
         (self.directory/'outages.json').write_text(json.dumps({'temporal':'passed','seaweed':'passed','weaviate':'passed','worker_kill_and_replay':'passed','delayed_promotion_and_stale_candidate':'passed'}))
     def capture(self):
-        for service in ['postgres','temporal','seaweed','weaviate']:
+        for service in ['postgres','temporal','seaweed','weaviate','tei']:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
     def down(self,reset=False):
         self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
@@ -192,18 +196,20 @@ def main():
                 with urllib.request.urlopen(req,timeout=5) as r: original_id=json.load(r)['items'][0]['corpus_id']
                 (stack.directory/'original-corpus-id.txt').write_text(original_id)
                 # Restart all application processes and PostgreSQL; assert via HTTP again.
-                stack.stop_processes();stack.compose('restart','postgres');stack.compose('up','-d','--wait','--wait-timeout','60');stack.migrate();stack.start_processes()
+                stack.stop_processes();stack.compose('restart','postgres');stack.compose('up','-d','--wait','--wait-timeout','180');stack.migrate();stack.start_processes()
                 req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora/{original_id}",headers={'Authorization':'Bearer '+stack.state['admin']})
                 with urllib.request.urlopen(req,timeout=5) as r: assert json.load(r)['corpus_id']==original_id
                 stack.tests('TestCorpusPersistsAndReplays')
                 req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora",headers={'Authorization':'Bearer '+stack.state['admin']})
                 with urllib.request.urlopen(req,timeout=5) as r:stack.state['scoped_id']=json.load(r)['items'][0]['corpus_id']
-                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestLexical|TestLong')
+                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestLexical|TestLong|TestSemantic')
                 stack.stop_processes()
                 with (stack.directory/'adapters.log').open('w') as log:
                     run([GO,'test','-count=1','-v','./internal/adapters/...','./internal/processing/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
                 stack.start_processes()
                 stack.ingestion_outages()
+                from embedding_outage import verify as verify_embedding_outage
+                verify_embedding_outage(stack)
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()
@@ -213,6 +219,6 @@ def main():
         if verification:
             try:stack.capture()
             finally:stack.down(True)
-            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion and lexical HTTP acceptance; real PostgreSQL, Temporal, S3 and Weaviate','artifacts':str(stack.directory)},indent=2))
+            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion, lexical/semantic/hybrid HTTP acceptance, E5 enrichment/outage and FR/EN relevance; real PostgreSQL, Temporal, S3, Weaviate and TEI','artifacts':str(stack.directory)},indent=2))
             print('Verification artifacts:',stack.directory)
 if __name__=='__main__':main()

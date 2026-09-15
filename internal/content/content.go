@@ -121,6 +121,7 @@ type Service struct {
 	Repository Repository
 	Blobs      Blobs
 	Baseline   BaselineRepository
+	Embeddings EmbeddingRepository
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {

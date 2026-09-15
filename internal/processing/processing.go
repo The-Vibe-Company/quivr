@@ -24,9 +24,11 @@ type Indexer interface {
 	Index(context.Context, string, content.Version, content.Segmentation) error
 }
 type Service struct {
-	Content   content.Service
-	Processor Processor
-	Retrieval Indexer
+	Content    content.Service
+	Processor  Processor
+	Retrieval  Indexer
+	Embedder   Embedder
+	Enrichment EnrichmentIndexer
 }
 
 func (s Service) Run(ctx context.Context, org, receiptID string) error {

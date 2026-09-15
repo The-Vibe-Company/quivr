@@ -1,11 +1,11 @@
 # Quivr V2
 
-## Parcours implémentés : Corpora, ingestion et recherche lexicale
+## Parcours implémentés : Corpora, ingestion et recherche texte
 
 Le cœur Go permet de créer, lister et lire des Corpora avec contrôle d'accès,
 rejeu idempotent et persistance PostgreSQL. Il accepte aussi du texte en ligne,
 le matérialise via Temporal et S3, et expose des Versions immuables. La recherche
-et la veille décrites plus bas restent la cible produit.
+lexicale, sémantique et hybride est disponible ; la veille reste la cible produit.
 
 Sur Linux, installer Go 1.27.1, Docker avec Compose v2, Python avec `venv`, et
 Node/npm (22 ou ultérieur pour les vérifications de contrats), puis lancer :
@@ -16,7 +16,7 @@ make verify
 make down
 ```
 
-`dev` compile un seul binaire `quivr`, démarre PostgreSQL, Temporal et SeaweedFS via Compose, applique les
+`dev` compile un seul binaire `quivr`, démarre PostgreSQL, Temporal, SeaweedFS, Weaviate et TEI via Compose, applique les
 migrations et lance API/worker comme processus locaux. L'adresse de l'API et le
 chemin de configuration s'affichent au démarrage. Les ports sont dynamiques et
 liés à loopback. Les clés jetables, paramètres et logs restent dans le répertoire
@@ -30,7 +30,7 @@ Avec l'adresse et une clé locale, envoyer `POST /v0/corpora` avec un JSON conte
 `GET /v0/corpora/{corpus_id}`. Un rejeu équivalent conserve l'identité ; modifier
 la demande sous la même clé produit un conflit. Les champs de mapping explicites
 sont conservés et validés ; un `plugin_profile` non installé est refusé. Cette
-première tranche ne construit pas encore d'index de recherche.
+configuration reste soumise aux limites de la tranche implémentée.
 
 Pour ingérer, envoyer `POST /v0/records` avec `idempotency_key`, `source`
 (`corpus_id`, `namespace`, `record_key`) et `content` (`kind: "text"`, `text`).
@@ -57,8 +57,8 @@ Le traitement commun prend en charge une Part titre explicite accompagnant les
 Parts corps ; sa vue modèle est plafonnée à 64 tokens, son texte lexical reste
 complet. L’ingestion de Manifests structurés reste dans THE-648.
 
-La préparation installe le wheel vérifié et télécharge seulement le tokenizer,
-pas les poids E5. Le traitement utilise un sous-processus Python local, hors réseau,
+La préparation installe le wheel vérifié et télécharge le snapshot E5 épinglé
+(poids et export ONNX, environ 940 Mo plus tokenizer/configuration). Le traitement utilise un sous-processus Python local, hors réseau,
 pour les offsets et comptes de tokens ; la recette et ses validations sont en Go.
 [Provenance, licence et reproduction](third_party/tokenizer/NOTICE.md).
 
@@ -70,8 +70,22 @@ mais bloque le traitement avec `segmentation_limit` et une disponibilité
 
 Après publication vérifiée dans Weaviate, Content commit atomiquement la couverture
 lexicale, la promotion de la révision souhaitée et son événement. Une panne laisse
-l’ancienne Version courante utilisable et la nouvelle en reprise. Les modes sémantique
-et hybride (y compris le mode hybride par défaut) répondent explicitement 422.
+l’ancienne Version courante utilisable et la nouvelle en reprise. Une activité
+séparée enrichit ensuite les segments avec E5 local. Les payloads float32 little-endian
+(1 536 octets) et leurs manifests immuables sont vérifiés dans S3, puis référencés
+dans PostgreSQL avant projection. Les retries réutilisent les artefacts ; une
+sortie divergente sous la même dérivation bloque l’enrichissement avec
+`derivation_conflict`, sans retirer la couverture lexicale. La publication de la
+couverture vectorielle et de `record.enrichment_available` est atomique.
+
+TEI 1.9.3 utilise mean pooling, normalisation L2, 384 dimensions et `float32`.
+Les entrées sont celles de la segmentation (`passage: …`) et des requêtes
+(`query: …`), sans troncature. L’image et les sept fichiers du snapshot sont
+épinglés ; TEI monte le cache en lecture seule sur un réseau Docker interne sans
+accès sortant. Le cœur Linux le joint par son adresse bridge. Aucun fournisseur
+hébergé ni vecteur factice n’est utilisé. Une panne TEI laisse le lexical disponible
+et fait renvoyer 503 aux recherches sémantique/hybride.
+[Reproduction et provenance E5](third_party/e5/NOTICE.md).
 
 ```http
 POST /v0/search
@@ -81,22 +95,22 @@ Content-Type: application/json
 {"query":"éclipse","corpus_ids":["<corpus_id>"],"mode":"lexical","profile":"balanced","limit":10}
 ```
 
-Le profil résolu `balanced.lexical-e5-token-windows.v1` accepte des requêtes non
+Le profil résolu `balanced.e5-token-windows.v1` accepte des requêtes non
 vides de 256 tokens maximum (8 192 points de code au transport), sans troncature.
 La requête remplace CRLF/CR par LF et retire les espaces de bord, tout en conservant
-casse, accents et langue. Le mode lexical doit être explicite ;
-`balanced` et 10 résultats sont les valeurs par défaut, 50 le maximum. Les autres
+casse, accents et langue. `hybrid`, `balanced` et 10 résultats sont les valeurs
+par défaut, 50 le maximum. Les trois modes sont `lexical`, `semantic` et `hybrid`.
+L’hybride conserve alpha 0,5, fusion relative des scores et poids titre 2/corps 1. Les autres
 profils renvoient 422. Toute la liste de Corpora doit être autorisée. PostgreSQL
 sélectionne la génération logique et le routage physique ; la réhydratation relit
 les octets S3, valide les extraits et revérifie accès, version courante, quarantaine
 et Tombstone. Les coordonnées sont en points de code Unicode ; aucun score brut,
 nom de collection physique ou faux vecteur n’est exposé. Une panne renvoie 503.
 
-La migration 004 nécessite de redémarrer API/workers. Elle désactive l’ancienne
-génération, remet les Versions éligibles en traitement (dont l’ancien blocage
-`short_text_limit`) et redéclenche les Receipts sous une identité de workflow
+La migration 005 nécessite de redémarrer API/workers. Elle désactive l’ancienne
+génération, remet les Versions éligibles en traitement et redéclenche les Receipts sous une identité de workflow
 versionnée. L’initialiseur crée une nouvelle collection et son routage canonique ;
-la recherche est temporairement incomplète jusqu’à la réindexation. Les anciens
+la recherche est temporairement incomplète jusqu’à la réindexation et l’enrichissement. Les anciens
 workers doivent être arrêtés ; il s’agit du cutover potentiellement cassant accepté
 pour l’évaluation, sans contrôleur de migration à chaud ni certification de plateforme.
 
@@ -111,12 +125,29 @@ son propre ticket.
 trois langages et exécute le parcours HTTP contre un PostgreSQL isolé, incluant
 redémarrage, isolation, pagination et concurrence, puis ingestion, doublons,
 conflits de révision et reprise après arrêt de Temporal/S3 et interruption du
-worker, puis recherche lexicale, textes longs, extraits Unicode, droits, limites et panne Weaviate. Les tests de Processing utilisent le tokenizer réel pour les fenêtres 384/385, titres, paragraphes et coupures forcées. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
+worker, puis les trois modes de recherche, textes longs, extraits Unicode, droits,
+limites et panne Weaviate. Le scénario de panne modèle vérifie six nouvelles
+Versions lexicales sans vecteurs, les erreurs 503 et la reprise après redémarrage. Les tests de Processing utilisent le tokenizer réel pour les fenêtres 384/385, titres, paragraphes et coupures forcées. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
 de publication et de promotion PostgreSQL, ainsi que les barrières de réhydratation. Les rapports restent dans
-`.scratch/quivr-verify-…` après suppression des processus, conteneurs et volumes
+`.scratch/quivr-verify-…` (dont `embedding-outage.json`, `embedding-provenance.json`
+et `relevance-report.json`) après suppression des processus, conteneurs et volumes
 du test. La première préparation télécharge les dépendances et images épinglées.
 Les requêtes/réponses synthétiques peuvent être exportées ; jamais les fichiers
 `state.json`, `config.json`, `worker.json` ou `s3.json`, qui contiennent les clés.
+
+Le fixture original CC0 de 24 requêtes FR/EN est mesuré séparément avec des
+Parts titre/corps explicites aux adaptateurs réels, dans une collection réservée
+au fixture pour isoler les statistiques BM25 ; les parcours HTTP vérifient
+indépendamment l’ingestion inline et la réhydratation canonique. Résultat observé :
+
+| Mode | MRR@10 | Recall@3 |
+| --- | ---: | ---: |
+| Lexical | 0,6993 | 0,8333 |
+| Sémantique | 0,9583 | 1,0000 |
+| Hybride | 0,7969 | 0,9583 |
+
+Le déficit hybride connu reste suivi dans THE-641. Ces petits jugements synthétiques
+ne mesurent pas la pertinence Agency ni un objectif de latence en production.
 
 `make down` conserve les volumes de développement ; `make reset` les supprime
 explicitement. `make migrate` applique les migrations versionnées à cette pile.

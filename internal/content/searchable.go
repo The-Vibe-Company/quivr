@@ -39,11 +39,12 @@ type Segmentation struct {
 	Segments              []Segment
 	Provenance            json.RawMessage
 }
-type Generation struct{ ID, Collection, ProfileVersion string }
+type Generation struct{ ID, Collection, ProfileVersion, SpaceID string }
 type Candidate struct{ SegmentID, GenerationID string }
 type Hydrated struct {
 	RecordID, VersionID, SegmentationID string
 	TextSHA256                          string
+	EmbeddingID, SpaceID                string
 	Segment                             Segment
 	Availability                        Availability
 }

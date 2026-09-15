@@ -9,7 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-const ProfileVersion = "balanced.lexical-e5-token-windows.v1"
+const ProfileVersion = "balanced.e5-token-windows.v1"
 
 var ErrUnsupported = errors.New("unsupported_search")
 var ErrUnavailable = errors.New("search_unavailable")
@@ -19,6 +19,7 @@ type Request struct {
 	CorpusIDs     []string
 	Mode, Profile string
 	Limit         int
+	Vector        []float32
 }
 type Result struct {
 	Hits       []content.Hydrated
@@ -30,12 +31,18 @@ type Routing interface {
 }
 type Projection interface {
 	Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error
+	PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error
 	Search(context.Context, content.Generation, corpus.Scope, Request) ([]content.Candidate, error)
 }
 type QueryNormalizer interface {
 	NormalizeQuery(context.Context, string) (string, error)
 }
+type QueryEmbedder interface {
+	Embed(context.Context, string) ([]float32, error)
+	Space() content.VectorSpace
+}
 type Service struct {
+	Embedder        QueryEmbedder
 	QueryNormalizer QueryNormalizer
 	Routing         Routing
 	Projection      Projection
@@ -70,7 +77,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if q.Limit == 0 {
 		q.Limit = 10
 	}
-	if q.Mode != "lexical" || q.Profile != "balanced" || q.Limit < 1 || q.Limit > 50 || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
+	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Profile != "balanced" || q.Limit < 1 || q.Limit > 50 || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
 	seen := map[string]bool{}
@@ -98,10 +105,16 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if err != nil {
 		return out, ErrUnavailable
 	}
-	if g.ProfileVersion != ProfileVersion {
+	if g.ProfileVersion != ProfileVersion || g.SpaceID != s.Embedder.Space().ID {
 		return out, ErrUnsupported
 	}
 	out.Generation = g
+	if q.Mode != "lexical" {
+		q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
+		if err != nil {
+			return out, ErrUnavailable
+		}
+	}
 	candidates, err := s.Projection.Search(ctx, g, scope, q)
 	if err != nil {
 		return out, ErrUnavailable
@@ -120,6 +133,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		if err != nil {
 			return out, ErrUnavailable
 		}
+		if q.Mode == "semantic" && h.EmbeddingID == "" {
+			continue
+		}
 		segments[c.SegmentID] = true
 		out.Hits = append(out.Hits, h)
 		if len(out.Hits) == q.Limit {
@@ -127,4 +143,18 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 	}
 	return out, nil
+}
+
+func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData) error {
+	g, err := s.Routing.ActiveGeneration(ctx)
+	if err != nil {
+		return err
+	}
+	if g.SpaceID != s.Embedder.Space().ID {
+		return ErrUnsupported
+	}
+	if err = s.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
+		return err
+	}
+	return s.Content.CommitEnrichment(ctx, org, seg, g, data)
 }
