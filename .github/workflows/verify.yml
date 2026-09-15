@@ -1,0 +1,35 @@
+name: Corpus foundation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: make verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-verify-*/report.json
+            .scratch/quivr-verify-*/acceptance.log
+            .scratch/quivr-verify-*/api*.log*
+            .scratch/quivr-verify-*/worker*.log*
+            .scratch/quivr-verify-*/migrate*.log*
+            .scratch/quivr-verify-*/postgres.log
+            .scratch/quivr-verify-*/response-*.json
+            contracts/http/v0/openapi.yaml
+          if-no-files-found: warn

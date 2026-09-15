@@ -1,5 +1,54 @@
 # Quivr V2
 
+## Premier parcours implémenté : les Corpora
+
+Le cœur Go permet de créer, lister et lire des Corpora avec contrôle d'accès,
+rejeu idempotent et persistance PostgreSQL. Les autres parcours décrits ci-dessous
+restent la cible produit. Le worker démarre mais n'a pas encore de tâche métier.
+
+Sur Linux, installer Go 1.27.1, Docker avec Compose v2, Python avec `venv`, et
+Node/npm (22 ou ultérieur pour les vérifications de contrats), puis lancer :
+
+```bash
+make dev
+make verify
+make down
+```
+
+`dev` compile un seul binaire `quivr`, démarre PostgreSQL via Compose, applique les
+migrations et lance API/worker comme processus locaux. L'adresse de l'API et le
+chemin de configuration s'affichent au démarrage. Les ports sont dynamiques et
+liés à loopback. Les clés jetables, paramètres et logs restent dans le répertoire
+privé `.scratch/quivr-dev-…` ; ne pas le publier. Le champ `keys` de `config.json`
+associe chaque Bearer token à une Organization, des actions et des Corpora (`*`
+autorise toute l'Organization). Créer un nouveau Corpus requiert `corpora:write`
+et le scope `*` ; une clé bornée à des Corpora existants ne peut en créer d'autres.
+
+Avec l'adresse et une clé locale, envoyer `POST /v0/corpora` avec un JSON contenant
+`name` et `idempotency_key`, puis lire `GET /v0/corpora` et
+`GET /v0/corpora/{corpus_id}`. Un rejeu équivalent conserve l'identité ; modifier
+la demande sous la même clé produit un conflit. Les champs de mapping explicites
+sont conservés et validés ; un `plugin_profile` non installé est refusé. Cette
+première tranche ne construit pas encore d'index de recherche.
+
+`make verify` régénère/compare les transports, contrôle les exemples dans les
+trois langages et exécute le parcours HTTP contre un PostgreSQL isolé, incluant
+redémarrage, isolation, pagination et concurrence. Les rapports restent dans
+`.scratch/quivr-verify-…` après suppression des processus, conteneurs et volumes
+du test. La première préparation télécharge les dépendances et images épinglées.
+Les requêtes/réponses synthétiques peuvent être exportées ; jamais les fichiers
+`state.json`, `config.json` ou `worker.json`, qui contiennent les clés.
+
+`make down` conserve les volumes de développement ; `make reset` les supprime
+explicitement. `make migrate` applique les migrations versionnées à cette pile.
+Les migrations à chaud peuvent casser des processus pendant l'évaluation ; noter
+les redémarrages requis. `GO=/chemin/vers/go` sélectionne un outil Go local.
+`make generate` met à jour les bindings après une modification du contrat.
+Les logs locaux sont bornés à quatre fichiers de 1 MiB par processus ; PostgreSQL
+conserve trois fichiers de 1 MiB. Les probes privées `/healthz` et `/readyz` utilisent un port séparé ; elles ne
+font pas partie de l'API publique. Aucun service de modèle ni clé externe n'est
+nécessaire pour cette tranche.
+
 **Transformez n’importe quel flux de contenu en recherche et veille multimodales.**
 
 Quivr V2 est un backend open source qui ingère du texte, des images, de l’audio et de la vidéo, les rend rapidement recherchables, puis les enrichit au fil du traitement. Vous pouvez ensuite rechercher l’information, suivre un sujet en continu ou déclencher une alerte lorsqu’un contenu pertinent arrive.
