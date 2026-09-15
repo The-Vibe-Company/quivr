@@ -242,3 +242,10 @@ L’optimisation extrême du scale viendra ensuite, guidée par la mesure plutô
 - [Recherches et comparatifs techniques](./research/)
 
 Les dossiers [`Agency-doc/`](./Agency-doc/) et [`multimodal-rag/`](./multimodal-rag/) restent des références de cadrage et d’exploration, pas l’architecture cible.
+
+## Web demo
+
+`make demo` opens the real text ingestion/search demo at http://127.0.0.1:5183.
+It keeps its own local data across restarts; `make demo-reset` deletes that demo's data.
+See [Quivr Search](quivr-search/README.md) for prerequisites, frontend development,
+shared password configuration and `make verify-demo` browser checks.

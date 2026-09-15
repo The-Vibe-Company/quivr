@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
       - run: make verify
       - uses: actions/upload-artifact@v4
         if: always()
@@ -41,5 +42,8 @@ jobs:
             .scratch/quivr-verify-*/relevance-report.json
             .scratch/quivr-verify-*/tei.log
             .scratch/quivr-verify-*/response-*.json
+            .scratch/quivr-demo-verify-*/demo-report.json
+            .scratch/quivr-demo-verify-*/browser.log
+            .scratch/quivr-demo-verify-*/browser/**/*.png
             contracts/http/v0/openapi.yaml
           if-no-files-found: warn

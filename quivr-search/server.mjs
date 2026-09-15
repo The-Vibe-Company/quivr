@@ -1,0 +1,238 @@
+// Same-origin demo entrypoint. Core credentials and corpus scope stay server-side.
+import http from "node:http";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { dirname, extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
+const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
+const key = process.env.QUIVR_API_KEY;
+const password = process.env.DEMO_PASSWORD;
+const host = process.env.HOST || "127.0.0.1";
+const port = Number(process.env.PORT || 5183);
+const secure = process.env.DEMO_SECURE_COOKIE === "true";
+if (!core || !key || (!password && host !== "127.0.0.1"))
+  throw new Error(
+    "Configure QUIVR_API_URL, QUIVR_API_KEY and DEMO_PASSWORD for public serving",
+  );
+let corpusID = process.env.QUIVR_DEMO_CORPUS_ID;
+const equal = (a, b) =>
+  timingSafeEqual(
+    createHash("sha256").update(a).digest(),
+    createHash("sha256").update(b).digest(),
+  );
+const sign = (value) =>
+  createHmac("sha256", key + (password || ""))
+    .update("quivr-demo-session:" + value)
+    .digest("hex");
+const fail = (status, message) => Object.assign(new Error(message), { status });
+async function jsonBody(req) {
+  if (!req.headers["content-type"]?.startsWith("application/json"))
+    throw fail(415, "Requête JSON attendue.");
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1 << 20) throw fail(413, "Le texte est trop volumineux.");
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw fail(400, "Requête invalide.");
+  }
+}
+async function upstream(path, method = "GET", body) {
+  const response = await fetch(core + path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+    redirect: "error",
+  });
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.length;
+    if (size > 2 << 20) throw fail(502, "Réponse du moteur invalide.");
+    chunks.push(chunk);
+  }
+  const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return { status: response.status, data };
+}
+async function readyCorpus() {
+  if (corpusID) return corpusID;
+  const response = await upstream("/v0/corpora", "POST", {
+    name: "Espace démo",
+    idempotency_key: "quivr-web-demo.v1",
+  });
+  if (response.status !== 201)
+    throw fail(503, "La démo se prépare. Réessayez dans un instant.");
+  corpusID = response.data.corpus_id;
+  return corpusID;
+}
+function authenticated(req) {
+  if (!password) return true;
+  const cookie =
+    req.headers.cookie
+      ?.split("; ")
+      .find((value) => value.startsWith("quivr_demo="))
+      ?.slice(11) || "";
+  const [expires, signature = ""] = cookie.split(".");
+  return (
+    Number(expires) > Date.now() &&
+    Number(expires) < Date.now() + 86401000 &&
+    equal(signature, sign(expires))
+  );
+}
+function send(res, status, data) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(data));
+}
+async function authorizeRecord(id) {
+  const record = await upstream(`/v0/records/${id}`);
+  if (record.status >= 500) return record;
+  if (
+    record.status !== 200 ||
+    record.data.source?.corpus_id !== (await readyCorpus())
+  )
+    throw fail(404, "Document introuvable.");
+  return record;
+}
+const server = http.createServer(async (req, res) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  );
+  try {
+    const url = new URL(req.url, "http://localhost");
+    const path = url.pathname;
+    if (
+      req.method === "POST" &&
+      req.headers.origin &&
+      req.headers.origin !==
+        `${secure ? "https" : "http"}://${req.headers.host}`
+    )
+      throw fail(403, "Origine non autorisée.");
+    if (path === "/healthz" && req.method === "GET") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (path === "/demo/login" && req.method === "POST") {
+      const body = await jsonBody(req);
+      if (
+        password &&
+        (typeof body.password !== "string" || !equal(body.password, password))
+      )
+        throw fail(401, "Mot de passe incorrect.");
+      const expires = String(Date.now() + 86400000);
+      res.setHeader(
+        "Set-Cookie",
+        `quivr_demo=${expires}.${sign(expires)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400${secure ? "; Secure" : ""}`,
+      );
+      send(res, 200, { authenticated: true });
+      return;
+    }
+    if (path === "/demo/session" || path.startsWith("/v0/")) {
+      if (!authenticated(req))
+        throw fail(401, "Ouvrez la démo pour continuer.");
+      const id = await readyCorpus();
+      if (path === "/demo/session" && req.method === "GET") {
+        send(res, 200, { corpus_id: id, name: "Espace démo" });
+        return;
+      }
+      let response;
+      if (path === "/v0/search" && req.method === "POST") {
+        const body = await jsonBody(req);
+        if (
+          !Array.isArray(body.corpus_ids) ||
+          body.corpus_ids.length !== 1 ||
+          body.corpus_ids[0] !== id
+        )
+          throw fail(403, "Corpus non autorisé.");
+        response = await upstream(path, "POST", body);
+      } else if (path === "/v0/records" && req.method === "POST") {
+        const body = await jsonBody(req);
+        if (
+          body.source?.corpus_id !== id ||
+          body.source?.namespace !== "web-demo"
+        )
+          throw fail(403, "Corpus non autorisé.");
+        response = await upstream(path, "POST", body);
+      } else if (req.method === "GET") {
+        const record = path.match(
+          /^\/v0\/records\/([\w-]+)(?:\/versions\/([\w-]+))?$/,
+        );
+        const receipt = path.match(/^\/v0\/ingestion-receipts\/([\w-]+)$/);
+        if (record) {
+          response = await authorizeRecord(record[1]);
+          if (record[2] && response.status === 200)
+            response = await upstream(path);
+        } else if (receipt) {
+          response = await upstream(path);
+          if (
+            response.status < 500 &&
+            (response.status !== 200 || response.data.source?.corpus_id !== id)
+          )
+            throw fail(404, "Ajout introuvable.");
+        }
+      }
+      if (!response) throw fail(404, "Page introuvable.");
+      send(res, response.status, response.data);
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "HEAD")
+      throw fail(405, "Méthode non autorisée.");
+    const relative =
+      decodeURIComponent(path) === "/"
+        ? "/index.html"
+        : decodeURIComponent(path);
+    const file = resolve(root, "." + relative);
+    if (!file.startsWith(root + sep)) throw fail(404, "Page introuvable.");
+    let data;
+    try {
+      data = await readFile(file);
+    } catch {
+      throw fail(404, "Page introuvable.");
+    }
+    const mime =
+      {
+        ".html": "text/html; charset=utf-8",
+        ".js": "text/javascript",
+        ".css": "text/css",
+        ".svg": "image/svg+xml",
+        ".woff2": "font/woff2",
+      }[extname(file)] || "application/octet-stream";
+    res.writeHead(200, {
+      "Content-Type": mime,
+      "Cache-Control": relative.startsWith("/assets/")
+        ? "public,max-age=31536000,immutable"
+        : "no-cache",
+    });
+    res.end(req.method === "HEAD" ? undefined : data);
+  } catch (error) {
+    const status = error.status || 503;
+    send(res, status, {
+      code: status === 503 ? "demo_unavailable" : "demo_request_failed",
+      message: error.status
+        ? error.message
+        : "Le moteur est momentanément indisponible. Réessayez.",
+      retryable: status === 503,
+    });
+  }
+});
+server.requestTimeout = 15000;
+server.headersTimeout = 10000;
+server.listen(port, host, () =>
+  console.log(`Quivr demo listening on ${host}:${server.address().port}`),
+);
