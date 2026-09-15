@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -51,11 +52,15 @@ func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result c
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO segmentations VALUES($1,$2,$3,$4,$5)`, org, result.ID, result.VersionID, result.Recipe, digest); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO segmentations VALUES($1,$2,$3,$4,$5,$6)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance); err != nil {
 		return err
 	}
 	for _, p := range result.Segments {
-		if _, err = tx.Exec(ctx, `INSERT INTO segments VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, org, p.ID, result.ID, result.VersionID, p.PartKey, p.Start, p.End, content.Hash([]byte(p.Text))); err != nil {
+		metadata, err := json.Marshal(p.Derivation)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO segments VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, org, p.ID, result.ID, result.VersionID, p.PartKey, p.Start, p.End, content.Hash([]byte(p.Text)), metadata); err != nil {
 			return err
 		}
 	}
@@ -86,7 +91,7 @@ func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code
 	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true WHERE organization=$1 AND id=$2`, org, id, state, code); err != nil {
 		return err
 	}
-	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: id}); err != nil {
+	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: content.StableID("quarantine", id, code)}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -134,7 +139,7 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 		}
 	}
 	if !ready {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: seg.VersionID}); err != nil {
+		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID)}); err != nil {
 			return err
 		}
 	}

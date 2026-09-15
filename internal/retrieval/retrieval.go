@@ -4,14 +4,12 @@ package retrieval
 import (
 	"context"
 	"errors"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-const ProfileVersion = "balanced.lexical-short.v1"
+const ProfileVersion = "balanced.lexical-e5-token-windows.v1"
 
 var ErrUnsupported = errors.New("unsupported_search")
 var ErrUnavailable = errors.New("search_unavailable")
@@ -34,10 +32,14 @@ type Projection interface {
 	Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error
 	Search(context.Context, content.Generation, corpus.Scope, Request) ([]content.Candidate, error)
 }
+type QueryNormalizer interface {
+	NormalizeQuery(context.Context, string) (string, error)
+}
 type Service struct {
-	Routing    Routing
-	Projection Projection
-	Content    content.Service
+	QueryNormalizer QueryNormalizer
+	Routing         Routing
+	Projection      Projection
+	Content         content.Service
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
@@ -68,7 +70,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if q.Limit == 0 {
 		q.Limit = 10
 	}
-	if q.Mode != "lexical" || q.Profile != "balanced" || q.Limit < 1 || q.Limit > 50 || len(q.Query) > 256 || strings.TrimSpace(q.Query) == "" || strings.ContainsRune(q.Query, 0) || !utf8.ValidString(q.Query) || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
+	if q.Mode != "lexical" || q.Profile != "balanced" || q.Limit < 1 || q.Limit > 50 || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
 	seen := map[string]bool{}
@@ -84,6 +86,14 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		return out, err
 	}
+	normalized, err := s.QueryNormalizer.NormalizeQuery(ctx, q.Query)
+	if errors.Is(err, content.ErrInvalid) {
+		return out, ErrUnsupported
+	}
+	if err != nil {
+		return out, ErrUnavailable
+	}
+	q.Query = normalized
 	g, err := s.Routing.ActiveGeneration(ctx)
 	if err != nil {
 		return out, ErrUnavailable

@@ -47,13 +47,26 @@ accepte un entier décimal de 1 à 1000 chiffres ; les zéros initiaux sont norm
 Les commandes sont limitées à 1 MiB. Uploads, Manifests explicites et extensions
 non vides sont refusés jusqu'à leurs tickets dédiés, sans fausse acceptation.
 
-Les Parts de texte court (au plus 256 octets UTF-8, sans NUL) passent par le
-traitement local `quivr.normalized-text.short-whole-part.v1` : une Segmentation
-immuable couvre toute la Part, sans transformation ni titre inféré. Cette limite
-conservatrice est propre à THE-644 ; le découpage au tokenizer épinglé et les
-textes longs arrivent avec THE-645. Les textes plus longs restent acceptés et
-lisibles, avec traitement bloqué, diagnostic `short_text_limit` et disponibilité
-`quarantined` ; ils ne sont jamais tronqués.
+Les Parts texte passent par `quivr.normalized-text.token-windows.v1` avec le
+tokenizer E5 et Hugging Face Tokenizers 0.23.2 épinglés : fenêtres de 384 tokens,
+recouvrement de 48 tokens (jusqu’à 56 pour reculer au début d’un mot), préférence
+aux paragraphes, lignes, fins de phrase puis espaces. Les extraits sont des
+tranches exactes de la Part ; aucune première ligne n’est transformée en titre.
+Les offsets Unicode et UTF-8, coupures forcées et checksums sont persistés.
+Le traitement commun prend en charge une Part titre explicite accompagnant les
+Parts corps ; sa vue modèle est plafonnée à 64 tokens, son texte lexical reste
+complet. L’ingestion de Manifests structurés reste dans THE-648.
+
+La préparation installe le wheel vérifié et télécharge seulement le tokenizer,
+pas les poids E5. Le traitement utilise un sous-processus Python local, hors réseau,
+pour les offsets et comptes de tokens ; la recette et ses validations sont en Go.
+[Provenance, licence et reproduction](third_party/tokenizer/NOTICE.md).
+
+Limites techniques de cette tranche : 256 KiB UTF-8 par entrée de traitement,
+64 Parts, 256 segments, 4 096 points de code par extrait et 512 tokens par entrée
+modèle assemblée. Le lot assemblé est limité à 2 MiB de texte / 4 MiB de JSON. Un dépassement ou un NUL laisse le contenu accepté lisible,
+mais bloque le traitement avec `segmentation_limit` et une disponibilité
+`quarantined` ; aucun résultat partiel n’est publié comme réussi.
 
 Après publication vérifiée dans Weaviate, Content commit atomiquement la couverture
 lexicale, la promotion de la révision souhaitée et son événement. Une panne laisse
@@ -68,8 +81,10 @@ Content-Type: application/json
 {"query":"éclipse","corpus_ids":["<corpus_id>"],"mode":"lexical","profile":"balanced","limit":10}
 ```
 
-Le profil résolu `balanced.lexical-short.v1` accepte des requêtes non vides de
-256 octets UTF-8 maximum, sans troncature. Le mode lexical doit être explicite ;
+Le profil résolu `balanced.lexical-e5-token-windows.v1` accepte des requêtes non
+vides de 256 tokens maximum (8 192 points de code au transport), sans troncature.
+La requête remplace CRLF/CR par LF et retire les espaces de bord, tout en conservant
+casse, accents et langue. Le mode lexical doit être explicite ;
 `balanced` et 10 résultats sont les valeurs par défaut, 50 le maximum. Les autres
 profils renvoient 422. Toute la liste de Corpora doit être autorisée. PostgreSQL
 sélectionne la génération logique et le routage physique ; la réhydratation relit
@@ -77,11 +92,15 @@ les octets S3, valide les extraits et revérifie accès, version courante, quara
 et Tombstone. Les coordonnées sont en points de code Unicode ; aucun score brut,
 nom de collection physique ou faux vecteur n’est exposé. Une panne renvoie 503.
 
-La migration 003 nécessite de redémarrer API/workers. Elle remet les Receipts
-existants dans l’outbox sous une nouvelle identité de workflow pour indexer aussi
-les Versions déjà matérialisées. Les anciens workflows ne doivent plus être servis
-par d’anciens workers pendant cette migration d’évaluation.
- PostgreSQL conserve les faits et références ;
+La migration 004 nécessite de redémarrer API/workers. Elle désactive l’ancienne
+génération, remet les Versions éligibles en traitement (dont l’ancien blocage
+`short_text_limit`) et redéclenche les Receipts sous une identité de workflow
+versionnée. L’initialiseur crée une nouvelle collection et son routage canonique ;
+la recherche est temporairement incomplète jusqu’à la réindexation. Les anciens
+workers doivent être arrêtés ; il s’agit du cutover potentiellement cassant accepté
+pour l’évaluation, sans contrôleur de migration à chaud ni certification de plateforme.
+
+PostgreSQL conserve les faits et références ;
 les lectures vérifient le checksum des objets S3. L'initialiseur crée le bucket,
 et lui seul applique les migrations. Le journal interne sérialise les commits
 par Organization ; `record.accepted` invalide le catalogue dès l'acceptation,
@@ -92,7 +111,7 @@ son propre ticket.
 trois langages et exécute le parcours HTTP contre un PostgreSQL isolé, incluant
 redémarrage, isolation, pagination et concurrence, puis ingestion, doublons,
 conflits de révision et reprise après arrêt de Temporal/S3 et interruption du
-worker, puis recherche lexicale, extraits Unicode, droits, limites et panne Weaviate. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
+worker, puis recherche lexicale, textes longs, extraits Unicode, droits, limites et panne Weaviate. Les tests de Processing utilisent le tokenizer réel pour les fenêtres 384/385, titres, paragraphes et coupures forcées. Les tests d’adaptateurs vérifient aussi perte de réponse S3 et atomicité
 de publication et de promotion PostgreSQL, ainsi que les barrières de réhydratation. Les rapports restent dans
 `.scratch/quivr-verify-…` après suppression des processus, conteneurs et volumes
 du test. La première préparation télécharge les dépendances et images épinglées.

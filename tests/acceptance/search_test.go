@@ -164,7 +164,7 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 		request(t, "POST", "/v0/search", admin, q, 422)
 	}
 	delete(q, "profile")
-	q["query"] = strings.Repeat("x", 257)
+	q["query"] = strings.Repeat("bonjour ", 257)
 	request(t, "POST", "/v0/search", admin, q, 422)
 	q["query"] = "constellation"
 	delete(q, "corpus_ids")
@@ -180,7 +180,7 @@ func TestLexicalUnsupportedTextRemainsReadable(t *testing.T) {
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	c := ingestionCorpus(t)
-	text := strings.Repeat("x", 257)
+	text := strings.Repeat("x", 262145)
 	r := request(t, "POST", "/v0/records", admin, inlineCommand(c, "beyond-short", "beyond-short", text), 202)
 	r = awaitReceipt(t, r["receipt_id"].(string))
 	deadline := time.Now().Add(30 * time.Second)

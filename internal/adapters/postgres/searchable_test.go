@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
@@ -26,7 +27,8 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		DatabaseURL string `json:"database_url"`
+		DatabaseURL string           `json:"database_url"`
+		Tokenizer   tokenizer.Config `json:"tokenizer"`
 	}
 	if err = json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
@@ -58,7 +60,7 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
-	seg, err := (processing.ShortText{}).Process(ctx, processing.Input{Organization: scope.Organization, Version: v})
+	seg, err := (processing.TokenWindows{Tokenizer: tokenizer.Encoder{Config: cfg.Tokenizer}}).Process(ctx, processing.Input{Organization: scope.Organization, Version: v})
 	if err != nil {
 		t.Fatal(err)
 	}

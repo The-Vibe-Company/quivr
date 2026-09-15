@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -27,6 +28,7 @@ import (
 )
 
 type Config struct {
+	Tokenizer       tokenizer.Config        `json:"tokenizer"`
 	WeaviateURL     string                  `json:"weaviate_url"`
 	TemporalAddress string                  `json:"temporal_address"`
 	S3              s3store.Config          `json:"s3"`
@@ -81,8 +83,10 @@ func Run(command string) error {
 	store := postgres.ContentStore{Pool: pool}
 	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store}
 	projection := weaviate.New(cfg.WeaviateURL)
-	search := retrieval.Service{Routing: store, Projection: projection, Content: contents}
-	processor := processing.Service{Content: contents, Processor: processing.ShortText{}, Retrieval: search}
+	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}
+	windows := processing.TokenWindows{Tokenizer: encoder}
+	search := retrieval.Service{Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
+	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -112,13 +116,16 @@ func Run(command string) error {
 		if err = store.BootstrapGeneration(ctx, weaviate.InitialCollection); err != nil {
 			return errors.New("projection routing bootstrap failed")
 		}
+		if _, err = encoder.Encode(ctx, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
+			return errors.New("tokenizer preparation required")
+		}
 		slog.Info("migrations complete")
 		return nil
 	}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='003_lexical_search.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='004_tokenizer_segments.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}

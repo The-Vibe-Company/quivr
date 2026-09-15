@@ -13,10 +13,31 @@ import (
 type Segment struct {
 	ID, PartKey, Text string
 	Start, End        int
+	TitleKey, Title   string
+	Derivation        SegmentDerivation
+}
+type SegmentDerivation struct {
+	Ordinal          int    `json:"ordinal"`
+	UTF8Start        int    `json:"utf8_start"`
+	UTF8End          int    `json:"utf8_end"`
+	TokenStart       int    `json:"token_start"`
+	TokenEnd         int    `json:"token_end"`
+	Overlap          int    `json:"overlap_tokens"`
+	HardStart        bool   `json:"hard_start"`
+	HardEnd          bool   `json:"hard_end"`
+	NormalizedSHA256 string `json:"normalized_content_sha256"`
+	TitleFullSHA256  string `json:"full_title_sha256,omitempty"`
+	TitleUsedSHA256  string `json:"title_used_sha256,omitempty"`
+	TitleTokens      int    `json:"title_tokens"`
+	TitleTruncated   bool   `json:"title_truncated"`
+	ModelInput       string `json:"model_input"`
+	ModelInputSHA256 string `json:"model_input_sha256"`
+	ModelTokens      int    `json:"model_tokens"`
 }
 type Segmentation struct {
 	ID, VersionID, Recipe string
 	Segments              []Segment
+	Provenance            json.RawMessage
 }
 type Generation struct{ ID, Collection, ProfileVersion string }
 type Candidate struct{ SegmentID, GenerationID string }
@@ -57,10 +78,23 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 	for i := range result.Segments {
 		p := &result.Segments[i]
 		text, ok := parts[p.PartKey]
-		if !ok || p.Start < 0 || p.End <= p.Start || p.End > len(text) || string(text[p.Start:p.End]) != p.Text {
+		if !ok || p.Start < 0 || p.End < p.Start || p.End > len(text) || string(text[p.Start:p.End]) != p.Text {
 			return ErrInvalid
 		}
-		expected := StableID("segment", org, result.ID, p.PartKey, strconv.Itoa(p.Start), strconv.Itoa(p.End), Hash([]byte(p.Text)))
+		if p.Start == p.End && p.Title == "" {
+			return ErrInvalid
+		}
+		if p.TitleKey != "" {
+			title, ok := parts[p.TitleKey]
+			if !ok || string(title) != p.Title {
+				return ErrInvalid
+			}
+		}
+		d := p.Derivation
+		if d.UTF8Start != len(string(text[:p.Start])) || d.UTF8End != len(string(text[:p.End])) || d.NormalizedSHA256 != Hash([]byte(string(text))) || d.ModelInputSHA256 != Hash([]byte(d.ModelInput)) || d.ModelTokens > 512 {
+			return ErrInvalid
+		}
+		expected := SegmentID(org, result.ID, *p)
 		if p.ID != expected {
 			return ErrInvalid
 		}
@@ -105,4 +139,8 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, c Candidate) (
 	}
 	h.Segment.Text = excerpt
 	return h, nil
+}
+
+func SegmentID(org, segmentation string, p Segment) string {
+	return StableID("segment", org, segmentation, p.PartKey, strconv.Itoa(p.Derivation.Ordinal), strconv.Itoa(p.Start), strconv.Itoa(p.End), strconv.Itoa(p.Derivation.UTF8Start), strconv.Itoa(p.Derivation.UTF8End), p.Derivation.NormalizedSHA256, Hash([]byte(p.Text)))
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Linux local text slice: host Go processes and isolated real dependencies."""
+from prepare_tokenizer import prepare as prepare_tokenizer
 import argparse, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -41,7 +42,7 @@ class Stack:
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
-        cfg=dict(weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
+        cfg=dict(tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
@@ -49,6 +50,7 @@ class Stack:
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*'])})
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
+        (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps(cfg));worker.chmod(0o600)
     def migrate(self):
         self.config()
@@ -79,6 +81,7 @@ class Stack:
         time.sleep(.15)
     def up(self):
         self.stop_processes()
+        prepare_tokenizer()
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
         self.compose('up','-d','--wait','--wait-timeout','60')
         self.migrate();self.migrate();self.start_processes()
@@ -195,10 +198,10 @@ def main():
                 stack.tests('TestCorpusPersistsAndReplays')
                 req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora",headers={'Authorization':'Bearer '+stack.state['admin']})
                 with urllib.request.urlopen(req,timeout=5) as r:stack.state['scoped_id']=json.load(r)['items'][0]['corpus_id']
-                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestLexical')
+                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestLexical|TestLong')
                 stack.stop_processes()
                 with (stack.directory/'adapters.log').open('w') as log:
-                    run([GO,'test','-count=1','-v','./internal/adapters/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
+                    run([GO,'test','-count=1','-v','./internal/adapters/...','./internal/processing/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
                 stack.start_processes()
                 stack.ingestion_outages()
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])

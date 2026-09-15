@@ -18,7 +18,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
-const InitialCollection = "QuivrTextV1"
+const InitialCollection = "QuivrTextV2"
 
 var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 
@@ -90,7 +90,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	}
 	for _, p := range seg.Segments {
 		id := objectID(org, p.ID)
-		properties := map[string]any{"organization": org, "corpusId": corpusID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": p.Text, "title": ""}
+		properties := map[string]any{"organization": org, "corpusId": corpusID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": p.Text, "title": p.Title}
 		object := map[string]any{"class": g.Collection, "id": id, "properties": properties}
 		var result []struct {
 			Result struct {
