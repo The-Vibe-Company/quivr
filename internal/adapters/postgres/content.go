@@ -51,7 +51,7 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 	}
 	var previous []byte
 	var receiptID string
-	err = tx.QueryRow(ctx, "SELECT id,canonical_request FROM ingestion_receipts WHERE organization=$1 AND request_key=$2", scope.Organization, c.Key).Scan(&receiptID, &previous)
+	err = tx.QueryRow(ctx, "SELECT id,canonical_request FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$2", scope.Organization, c.Key).Scan(&receiptID, &previous)
 	if err == nil {
 		if !bytes.Equal(previous, canonical) {
 			return content.Receipt{}, content.ErrConflict
@@ -127,6 +127,80 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 		return content.Receipt{}, err
 	}
 	return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}}, nil
+}
+
+// Withdraw commits the absorbing fence atomically: an existing or first-seen
+// Record identity is marked withdrawn, its mutation fence advances, a single
+// Tombstone is inserted, the Record event is appended and a resolved
+// withdrawal_applied Receipt is stored. No projection work is dispatched; stale
+// projection objects are hidden by canonical hydration.
+func (s ContentStore) Withdraw(ctx context.Context, scope corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
+	canonical, err := json.Marshal(w)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, scope.Organization); err != nil {
+		return content.Receipt{}, err
+	}
+	var previous []byte
+	var receiptID string
+	err = tx.QueryRow(ctx, "SELECT id,canonical_request FROM ingestion_receipts WHERE organization=$1 AND route_family='withdrawal' AND request_key=$2", scope.Organization, w.Key).Scan(&receiptID, &previous)
+	if err == nil {
+		if !bytes.Equal(previous, canonical) {
+			return content.Receipt{}, content.ErrConflict
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return content.Receipt{}, err
+		}
+		return s.Receipt(ctx, scope.Organization, receiptID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return content.Receipt{}, err
+	}
+	var exists bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$2)", scope.Organization, w.Source.CorpusID).Scan(&exists); err != nil {
+		return content.Receipt{}, err
+	}
+	if !exists {
+		return content.Receipt{}, corpus.ErrNotFound
+	}
+	recordID := content.StableID("record", scope.Organization, w.Source.CorpusID, w.Source.Namespace, w.Source.RecordKey)
+	if _, err = tx.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, w.Source.CorpusID, w.Source.Namespace, w.Source.RecordKey); err != nil {
+		return content.Receipt{}, err
+	}
+	var priorWithdrawn bool
+	if err = tx.QueryRow(ctx, "SELECT withdrawn FROM records WHERE organization=$1 AND id=$2 FOR UPDATE", scope.Organization, recordID).Scan(&priorWithdrawn); err != nil {
+		return content.Receipt{}, err
+	}
+	var order int64
+	if err = tx.QueryRow(ctx, "UPDATE records SET acceptance_order=acceptance_order+1,withdrawn=true WHERE organization=$1 AND id=$2 RETURNING acceptance_order", scope.Organization, recordID).Scan(&order); err != nil {
+		return content.Receipt{}, err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO tombstones(organization,record_id) VALUES($1,$2) ON CONFLICT DO NOTHING", scope.Organization, recordID); err != nil {
+		return content.Receipt{}, err
+	}
+	digest := content.Hash(canonical)
+	receiptID = content.StableID("receipt", scope.Organization, "withdrawal", w.Key)
+	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,route_family,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,state,outcome,processing,error_code) VALUES($1,$2,'withdrawal',$3,$4,$5,$6,$7,$8,$9,$10,'resolved','withdrawal_applied','idle','')`, scope.Organization, receiptID, w.Key, canonical, canonical, w.Source.CorpusID, recordID, order, "withdrawal:"+w.Key, digest)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	// Emit the Record event exactly once per identity, even across repeat
+	// withdrawals with different request keys.
+	if !priorWithdrawn {
+		if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: w.Source.CorpusID, Kind: "record.withdrawn", Resource: "record", ResourceID: recordID, MutationID: content.StableID("withdrawal", recordID)}); err != nil {
+			return content.Receipt{}, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return content.Receipt{}, err
+	}
+	return content.Receipt{ID: receiptID, State: "resolved", Outcome: "withdrawal_applied", RecordID: recordID, Source: w.Source, Processing: content.Processing{State: "idle"}, Diagnostics: []content.Diagnostic{}}, nil
 }
 func notFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {

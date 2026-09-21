@@ -116,6 +116,15 @@ type Command struct {
 	Extensions Extensions     `json:"extensions,omitempty"`
 	Provenance map[string]any `json:"provenance,omitempty"`
 }
+
+// Withdrawal is an absorbing command that fences a Record identity. It shares
+// the Source identity vocabulary with ingestion but uses its own receipt route
+// family and never publishes a Version.
+type Withdrawal struct {
+	Key    string `json:"idempotency_key"`
+	Source Source `json:"source"`
+	Reason string `json:"reason,omitempty"`
+}
 type Processing struct {
 	State string `json:"state"`
 	Phase string `json:"phase,omitempty"`
@@ -205,6 +214,7 @@ type Work struct {
 }
 type Repository interface {
 	Accept(context.Context, corpus.Scope, Command) (Receipt, error)
+	Withdraw(context.Context, corpus.Scope, Withdrawal) (Receipt, error)
 	Receipt(context.Context, string, string) (Receipt, error)
 	Record(context.Context, string, string) (Record, error)
 	Version(context.Context, string, string, string) (StoredVersion, error)
@@ -279,6 +289,28 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 		c.Position = n.String()
 	}
 	result, err := s.Repository.Accept(ctx, scope, c)
+	if !scope.Allows("content:read") {
+		result.RecordID = ""
+		result.VersionID = ""
+		result.Availability = nil
+	}
+	return result, err
+}
+
+// Withdraw durably fences a Record identity. The record may exist already or be
+// fenced before any materialization; a later ordinary ingestion of that identity
+// is a terminal conflict.
+func (s Service) Withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal) (Receipt, error) {
+	if !scope.Allows("content:write") {
+		return Receipt{}, corpus.ErrForbidden
+	}
+	if !scope.Contains(w.Source.CorpusID) {
+		return Receipt{}, corpus.ErrNotFound
+	}
+	if w.Key == "" || w.Source.CorpusID == "" || w.Source.Namespace == "" || w.Source.RecordKey == "" || !ValidText(w.Reason) {
+		return Receipt{}, ErrInvalid
+	}
+	result, err := s.Repository.Withdraw(ctx, scope, w)
 	if !scope.Allows("content:read") {
 		result.RecordID = ""
 		result.VersionID = ""

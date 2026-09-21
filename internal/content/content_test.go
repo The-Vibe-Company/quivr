@@ -17,6 +17,9 @@ func (s *stubRepository) Accept(_ context.Context, _ corpus.Scope, c content.Com
 	s.accepted = c
 	return content.Receipt{ID: "receipt_1", State: "pending"}, nil
 }
+func (*stubRepository) Withdraw(context.Context, corpus.Scope, content.Withdrawal) (content.Receipt, error) {
+	return content.Receipt{ID: "receipt_withdrawal", State: "resolved", Outcome: "withdrawal_applied"}, nil
+}
 func (*stubRepository) Receipt(context.Context, string, string) (content.Receipt, error) {
 	return content.Receipt{}, nil
 }

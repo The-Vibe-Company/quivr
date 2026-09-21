@@ -32,16 +32,17 @@ import (
 )
 
 type API struct {
-	Content      content.Service
-	Retrieval    retrieval.Service
-	Uploads      uploads.Service
-	searchSchema *jsonschema.Schema
-	ingestSchema *jsonschema.Schema
-	uploadSchema *jsonschema.Schema
-	Service      corpus.Service
-	Keys         map[string]corpus.Scope
-	CursorKey    []byte
-	schema       *jsonschema.Schema
+	Content        content.Service
+	Retrieval      retrieval.Service
+	Uploads        uploads.Service
+	searchSchema   *jsonschema.Schema
+	ingestSchema   *jsonschema.Schema
+	uploadSchema   *jsonschema.Schema
+	withdrawSchema *jsonschema.Schema
+	Service        corpus.Service
+	Keys           map[string]corpus.Scope
+	CursorKey      []byte
+	schema         *jsonschema.Schema
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
@@ -69,7 +70,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	withdrawSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/WithdrawalCommand")
+	if err != nil {
+		return nil, err
+	}
+	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	return http.HandlerFunc(a.serve), nil
 }
 func send(w http.ResponseWriter, status int, v any) {

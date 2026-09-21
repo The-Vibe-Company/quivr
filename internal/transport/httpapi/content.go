@@ -60,6 +60,34 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		}
 		return true
 	}
+	if r.Method == "POST" && r.URL.Path == "/v0/records/withdrawals" {
+		if !scope.Allows("content:write") {
+			failure(w, 403, "forbidden")
+			return true
+		}
+		raw, ok := decodeRequest(w, r, a.withdrawSchema)
+		if !ok {
+			return true
+		}
+		b, err := json.Marshal(raw)
+		if err != nil {
+			failure(w, 422, "invalid_schema")
+			return true
+		}
+		var wire transport.WithdrawalCommand
+		if err = json.Unmarshal(b, &wire); err != nil {
+			failure(w, 422, "invalid_schema")
+			return true
+		}
+		receipt, err := a.Content.Withdraw(r.Context(), scope, withdrawalFromTransport(wire))
+		if err != nil {
+			contentError(w, err)
+		} else {
+			w.Header().Set("Location", "/v0/ingestion-receipts/"+receipt.ID)
+			send(w, 202, receiptToTransport(receipt))
+		}
+		return true
+	}
 	if r.Method != "GET" {
 		return false
 	}

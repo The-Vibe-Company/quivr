@@ -113,6 +113,14 @@ func partToTransport(in content.Part) (transport.Part, error) {
 	return out, nil
 }
 
+func withdrawalFromTransport(in transport.WithdrawalCommand) content.Withdrawal {
+	out := content.Withdrawal{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
+	if in.Reason != nil {
+		out.Reason = *in.Reason
+	}
+	return out
+}
+
 func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
 	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
 	switch unionKind(in.Content) {
