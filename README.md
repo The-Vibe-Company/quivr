@@ -44,8 +44,26 @@ passe jamais à un état « failed » pour une panne technique. Sans révision s
 le digest canonique fournit l'identité de Version. Réutiliser une révision avec
 un contenu différent conserve l'historique et signale un conflit. `source_position`
 accepte un entier décimal de 1 à 1000 chiffres ; les zéros initiaux sont normalisés.
-Les commandes sont limitées à 1 MiB. Uploads, Manifests explicites et extensions
+Les commandes sont limitées à 1 MiB. Les Manifests explicites et extensions
 non vides sont refusés jusqu'à leurs tickets dédiés, sans fausse acceptation.
+
+Pour un upload, envoyer `POST /v0/uploads` avec `size_bytes`, `sha256` et
+`media_type` (1 GiB maximum). La réponse 201 fournit `upload_id`, une URL PUT
+présignée, ses en-têtes signés obligatoires et `expires_at` (15 minutes). Le
+client transfère les octets puis appelle `POST /v0/uploads/{upload_id}/confirm`,
+qui vérifie taille et checksum en relisant l'objet et expose un `blob_id` stable
+une fois `verified` (relire via `GET /v0/uploads/{upload_id}` et
+`GET /v0/blobs/{blob_id}`). Un transfert absent, altéré ou hors Organization est
+rejeté (`rejected`, ou 404 pour un autre tenant ; la possession d'un ID n'est pas
+un accès). Soumettre ensuite `POST /v0/records` avec
+`content: {"kind":"blob","blob_id":…,"media_type":"text/plain"}` : le texte
+vérifié suit le même chemin Receipt/Version et conserve ses octets d'origine,
+le Blob source restant tracé dans `provenance.source_blob_ids`. Seuls les médias
+`text/*` sont acceptés dans cette tranche ; les références non vérifiées
+renvoient 422 `unverified_blob`. Les permissions sont `blobs:write` (créer,
+confirmer) et `blobs:read` (lire session et Blob). Les sessions expirées et
+absentes sont lisibles dans leur état terminal ; aucun balayage d'orphelins,
+rétention ou extraction média n'est ajouté ici.
 
 Les Parts texte passent par `quivr.normalized-text.token-windows.v1` avec le
 tokenizer E5 et Hugging Face Tokenizers 0.23.2 épinglés : fenêtres de 384 tokens,

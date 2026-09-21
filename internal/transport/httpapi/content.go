@@ -18,6 +18,8 @@ func contentError(w http.ResponseWriter, err error) {
 		failure(w, 404, "not_found")
 	case errors.Is(err, content.ErrConflict):
 		failure(w, 409, "idempotency_conflict")
+	case errors.Is(err, content.ErrUnverifiedBlob):
+		failure(w, 422, "unverified_blob")
 	case errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported):
 		failure(w, 422, err.Error())
 	default:

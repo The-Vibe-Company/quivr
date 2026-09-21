@@ -1,16 +1,46 @@
 package httpapi
 
 import (
+	"encoding/json"
+
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
-	text, err := in.Content.AsTextContent()
+// contentKind reads the union discriminator without assuming which variant it holds.
+func contentKind(in transport.IngestCommand_Content) string {
+	b, err := json.Marshal(in)
 	if err != nil {
-		return content.Command{}, err
+		return ""
 	}
-	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}, Content: content.Text{Kind: string(text.Kind), Text: text.Text}}
+	var discriminator struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(b, &discriminator) != nil {
+		return ""
+	}
+	return discriminator.Kind
+}
+
+func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
+	kind := contentKind(in.Content)
+	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
+	switch kind {
+	case "text":
+		text, err := in.Content.AsTextContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		c.Content = content.Text{Kind: string(text.Kind), Text: text.Text}
+	case "blob":
+		blob, err := in.Content.AsBlobContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		c.Content = content.Text{Kind: "blob", BlobID: blob.BlobId, MediaType: blob.MediaType}
+	default:
+		return content.Command{}, content.ErrUnsupported
+	}
 	if in.SourceRevision != nil {
 		c.Revision = *in.SourceRevision
 	}

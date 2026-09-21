@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
+	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
 	"net"
@@ -83,7 +84,8 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store}
+	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store}
+	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}
 	windows := processing.TokenWindows{Tokenizer: encoder}
@@ -169,7 +171,7 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, cfg.Keys, []byte(cfg.CursorKey))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}

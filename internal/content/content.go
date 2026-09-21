@@ -8,25 +8,48 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
 var (
-	ErrConflict    = errors.New("idempotency_conflict")
-	ErrUnsupported = errors.New("unsupported_content")
-	ErrInvalid     = errors.New("invalid_input")
+	ErrConflict       = errors.New("idempotency_conflict")
+	ErrUnsupported    = errors.New("unsupported_content")
+	ErrInvalid        = errors.New("invalid_input")
+	ErrUnverifiedBlob = errors.New("unverified_blob")
 )
+
+// maxCanonicalBlobBytes bounds a single canonical object the content service reads.
+const maxCanonicalBlobBytes = 2 << 20
 
 type Source struct {
 	CorpusID  string `json:"corpus_id"`
 	Namespace string `json:"namespace"`
 	RecordKey string `json:"record_key"`
 }
+
+// Text carries either inline text or a verified Blob reference. A Blob reference
+// is resolved to its immutable bytes before acceptance; the stored Command is
+// always inline text so downstream canonical publication is unchanged.
 type Text struct {
-	Kind string `json:"kind"`
-	Text string `json:"text"`
+	Kind      string `json:"kind"`
+	Text      string `json:"text,omitempty"`
+	BlobID    string `json:"blob_id,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+}
+
+// VerifiedBlob is an Organization-scoped verified Blob identity.
+type VerifiedBlob struct {
+	ID        string
+	Blob      Blob
+	MediaType string
+}
+
+// BlobSource resolves a verified Blob reference within an Organization.
+type BlobSource interface {
+	VerifiedBlob(context.Context, string, string) (VerifiedBlob, error)
 }
 type Command struct {
 	Key        string         `json:"idempotency_key"`
@@ -122,6 +145,7 @@ type Service struct {
 	Blobs      Blobs
 	Baseline   BaselineRepository
 	Embeddings EmbeddingRepository
+	BlobSource BlobSource
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
@@ -131,11 +155,26 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 	if !scope.Contains(c.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
-	if c.Content.Kind != "text" || len(c.Extensions) > 0 {
+	if c.Content.Kind != "text" && c.Content.Kind != "blob" {
+		return Receipt{}, ErrUnsupported
+	}
+	if len(c.Extensions) > 0 {
 		return Receipt{}, ErrUnsupported
 	}
 	if ids, ok := c.Provenance["source_blob_ids"].([]any); ok && len(ids) > 0 {
 		return Receipt{}, ErrUnsupported
+	}
+	if c.Content.Kind == "blob" {
+		blobID := c.Content.BlobID
+		verified, err := s.resolveBlob(ctx, scope.Organization, c.Content)
+		if err != nil {
+			return Receipt{}, err
+		}
+		if c.Provenance == nil {
+			c.Provenance = map[string]any{}
+		}
+		c.Provenance["source_blob_ids"] = []any{blobID}
+		c.Content = Text{Kind: "text", Text: string(verified)}
 	}
 	if c.Key == "" || c.Source.CorpusID == "" || c.Source.Namespace == "" || c.Source.RecordKey == "" || c.Content.Text == "" || !utf8.ValidString(c.Content.Text) {
 		return Receipt{}, ErrInvalid
@@ -204,7 +243,37 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	return Version{RecordID: recordID, ID: id, Manifest: manifest, Provenance: stored.Provenance, Availability: stored.Availability, Relations: []any{}, Processing: stored.Processing}, nil
 }
 func ManifestFor(c Command) Manifest {
-	return Manifest{Kind: "manifest", Parts: []Part{{Key: "body", Role: "body", Content: c.Content}}}
+	return Manifest{Kind: "manifest", Parts: []Part{{Key: "body", Role: "body", Content: Text{Kind: "text", Text: c.Content.Text}}}}
+}
+
+// resolveBlob verifies and reads a same-Organization text Blob's immutable bytes.
+func (s Service) resolveBlob(ctx context.Context, org string, ref Text) ([]byte, error) {
+	if s.BlobSource == nil || s.Blobs == nil || ref.BlobID == "" || ref.MediaType == "" {
+		return nil, ErrUnverifiedBlob
+	}
+	if !strings.HasPrefix(strings.ToLower(ref.MediaType), "text/") {
+		return nil, ErrUnverifiedBlob
+	}
+	verified, err := s.BlobSource.VerifiedBlob(ctx, org, ref.BlobID)
+	if err != nil || verified.MediaType != ref.MediaType {
+		return nil, ErrUnverifiedBlob
+	}
+	if verified.Blob.Size < 1 || verified.Blob.Size > maxCanonicalBlobBytes {
+		return nil, ErrUnsupported
+	}
+	data, err := s.Blobs.Read(ctx, verified.Blob)
+	if err != nil {
+		return nil, err
+	}
+	// The referenced object must still be the verified bytes; possession of a
+	// Blob ID never authorizes altered content.
+	if int64(len(data)) != verified.Blob.Size || Hash(data) != verified.Blob.SHA256 {
+		return nil, ErrUnverifiedBlob
+	}
+	if !utf8.Valid(data) {
+		return nil, ErrInvalid
+	}
+	return data, nil
 }
 func Digest(c Command) string {
 	b, _ := json.Marshal(ManifestFor(c))

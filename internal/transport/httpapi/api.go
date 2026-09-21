@@ -25,6 +25,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
@@ -33,15 +34,17 @@ import (
 type API struct {
 	Content      content.Service
 	Retrieval    retrieval.Service
+	Uploads      uploads.Service
 	searchSchema *jsonschema.Schema
 	ingestSchema *jsonschema.Schema
+	uploadSchema *jsonschema.Schema
 	Service      corpus.Service
 	Keys         map[string]corpus.Scope
 	CursorKey    []byte
 	schema       *jsonschema.Schema
 }
 
-func New(store corpus.Store, contents content.Service, search retrieval.Service, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
+func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(contract.OpenAPI, &doc); err != nil {
 		return nil, err
@@ -62,7 +65,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	uploadSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/UploadRequest")
+	if err != nil {
+		return nil, err
+	}
+	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	return http.HandlerFunc(a.serve), nil
 }
 func send(w http.ResponseWriter, status int, v any) {
@@ -102,6 +109,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.contentRoutes(w, r, scope) {
+		return
+	}
+	if a.uploadRoutes(w, r, scope) {
 		return
 	}
 	if r.URL.Path == "/v0/corpora" {

@@ -40,6 +40,10 @@ _Avoid_: Untracked generated file
 Immutable stored bytes whose identity and deduplication scope never cross an organization boundary; one blob may be referenced by multiple parts without sharing their provenance or business context.
 _Avoid_: File when referring to stored content
 
+**Upload Session**:
+A short-lived, organization-scoped grant to transfer exact bytes to storage, carrying the expected size, checksum and media type. It yields a reusable Blob identity only after read-after-write verification; a session or its transfer URL is not itself content or a durable Blob identity.
+_Avoid_: Transfer URL as Blob identity
+
 **Relation**:
 A typed link between records or parts.
 _Avoid_: Dependency, association
