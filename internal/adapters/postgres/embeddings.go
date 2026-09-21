@@ -69,7 +69,7 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 	}
 	var recordID, corpusID string
 	var eligible bool
-	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,v.baseline_ready AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id) FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &eligible)
+	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,`+eligibleVersionSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &eligible)
 	if err != nil {
 		return err
 	}

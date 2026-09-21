@@ -7,8 +7,8 @@ import (
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-// contentKind reads the union discriminator without assuming which variant it holds.
-func contentKind(in transport.IngestCommand_Content) string {
+// unionKind reads a discriminated union's `kind` without assuming its variant.
+func unionKind(in any) string {
 	b, err := json.Marshal(in)
 	if err != nil {
 		return ""
@@ -22,10 +22,100 @@ func contentKind(in transport.IngestCommand_Content) string {
 	return discriminator.Kind
 }
 
+func extensionsFromTransport(in transport.Extensions) content.Extensions {
+	out := make(content.Extensions, len(in))
+	for namespace, extension := range in {
+		out[namespace] = content.Extension{SchemaVersion: extension.SchemaVersion, Data: extension.Data}
+	}
+	return out
+}
+
+// extensionsToTransport preserves the canonical extension shape byte-for-byte
+// through the generated transport representation.
+func extensionsToTransport(in content.Extensions) transport.Extensions {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return transport.Extensions{}
+	}
+	var out transport.Extensions
+	if json.Unmarshal(b, &out) != nil {
+		return transport.Extensions{}
+	}
+	return out
+}
+
+func relationFromTransport(in transport.RelationInput) content.Relation {
+	out := content.Relation{Type: in.Type, Target: content.Source{CorpusID: in.Target.CorpusId, Namespace: in.Target.Namespace, RecordKey: in.Target.RecordKey}}
+	if in.SourceTargetRevision != nil {
+		out.SourceTargetRevision = *in.SourceTargetRevision
+	}
+	return out
+}
+
+func relationToTransport(in content.Relation) transport.RelationInput {
+	out := transport.RelationInput{Type: in.Type, Target: sourceToTransport(in.Target)}
+	if in.SourceTargetRevision != "" {
+		revision := in.SourceTargetRevision
+		out.SourceTargetRevision = &revision
+	}
+	return out
+}
+
+func partFromTransport(in transport.Part) (content.Part, error) {
+	out := content.Part{Key: in.Key, Role: in.Role}
+	if in.ParentKey != nil {
+		out.ParentKey = *in.ParentKey
+	}
+	switch unionKind(in.Content) {
+	case "text":
+		text, err := in.Content.AsTextContent()
+		if err != nil {
+			return out, err
+		}
+		out.Content = content.Text{Kind: "text", Text: text.Text}
+	case "blob":
+		blob, err := in.Content.AsBlobContent()
+		if err != nil {
+			return out, err
+		}
+		out.Content = content.Text{Kind: "blob", BlobID: blob.BlobId, MediaType: blob.MediaType}
+	default:
+		return out, content.ErrUnsupported
+	}
+	if in.Extensions != nil {
+		out.Extensions = extensionsFromTransport(*in.Extensions)
+	}
+	return out, nil
+}
+
+func partToTransport(in content.Part) (transport.Part, error) {
+	out := transport.Part{Key: in.Key, Role: in.Role}
+	if in.ParentKey != "" {
+		parent := in.ParentKey
+		out.ParentKey = &parent
+	}
+	switch in.Content.Kind {
+	case "text":
+		if err := out.Content.FromTextContent(transport.TextContent{Kind: transport.TextContentKind(in.Content.Kind), Text: in.Content.Text}); err != nil {
+			return out, err
+		}
+	case "blob":
+		if err := out.Content.FromBlobContent(transport.BlobContent{Kind: transport.BlobContentKind(in.Content.Kind), BlobId: in.Content.BlobID, MediaType: in.Content.MediaType}); err != nil {
+			return out, err
+		}
+	default:
+		return out, content.ErrInvalid
+	}
+	if len(in.Extensions) > 0 {
+		extensions := extensionsToTransport(in.Extensions)
+		out.Extensions = &extensions
+	}
+	return out, nil
+}
+
 func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
-	kind := contentKind(in.Content)
 	c := content.Command{Key: in.IdempotencyKey, Source: content.Source{CorpusID: in.Source.CorpusId, Namespace: in.Source.Namespace, RecordKey: in.Source.RecordKey}}
-	switch kind {
+	switch unionKind(in.Content) {
 	case "text":
 		text, err := in.Content.AsTextContent()
 		if err != nil {
@@ -38,6 +128,27 @@ func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
 			return content.Command{}, err
 		}
 		c.Content = content.Text{Kind: "blob", BlobID: blob.BlobId, MediaType: blob.MediaType}
+	case "manifest":
+		manifest, err := in.Content.AsManifestContent()
+		if err != nil {
+			return content.Command{}, err
+		}
+		parts := make([]content.Part, 0, len(manifest.Parts))
+		for _, p := range manifest.Parts {
+			part, err := partFromTransport(p)
+			if err != nil {
+				return content.Command{}, err
+			}
+			parts = append(parts, part)
+		}
+		relations := []content.Relation{}
+		if manifest.Relations != nil {
+			for _, r := range *manifest.Relations {
+				relations = append(relations, relationFromTransport(r))
+			}
+		}
+		c.Content = content.Text{Kind: "manifest"}
+		c.Manifest = &content.Manifest{Kind: "manifest", Parts: parts, Relations: relations}
 	default:
 		return content.Command{}, content.ErrUnsupported
 	}
@@ -48,10 +159,7 @@ func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
 		c.Position = *in.SourcePosition
 	}
 	if in.Extensions != nil {
-		c.Extensions = map[string]any{}
-		for k, v := range *in.Extensions {
-			c.Extensions[k] = v
-		}
+		c.Extensions = extensionsFromTransport(*in.Extensions)
 	}
 	if in.Provenance != nil {
 		c.Provenance = map[string]any{}
@@ -112,11 +220,22 @@ func recordToTransport(r content.Record) transport.Record {
 func versionToTransport(v content.Version) (transport.Version, error) {
 	out := transport.Version{RecordId: v.RecordID, VersionId: v.ID, Availability: availabilityToTransport(v.Availability), Processing: processingToTransport(v.Processing), Relations: []transport.ResolvedRelation{}, Manifest: transport.ManifestContent{Kind: transport.ManifestContentKind(v.Manifest.Kind), Parts: []transport.Part{}}}
 	for _, p := range v.Manifest.Parts {
-		part := transport.Part{Key: p.Key, Role: p.Role}
-		if err := part.Content.FromTextContent(transport.TextContent{Kind: transport.TextContentKind(p.Content.Kind), Text: p.Content.Text}); err != nil {
+		part, err := partToTransport(p)
+		if err != nil {
 			return out, err
 		}
 		out.Manifest.Parts = append(out.Manifest.Parts, part)
+	}
+	if len(v.Manifest.Relations) > 0 {
+		relations := make([]transport.RelationInput, 0, len(v.Manifest.Relations))
+		for _, r := range v.Manifest.Relations {
+			relations = append(relations, relationToTransport(r))
+		}
+		out.Manifest.Relations = &relations
+	}
+	if len(v.Extensions) > 0 {
+		extensions := extensionsToTransport(v.Extensions)
+		out.Extensions = &extensions
 	}
 	if len(v.Provenance) > 0 {
 		p := transport.Provenance{}
@@ -129,11 +248,21 @@ func versionToTransport(v content.Version) (transport.Version, error) {
 		if ids, ok := v.Provenance["source_blob_ids"].([]any); ok {
 			values := []string{}
 			for _, id := range ids {
-				values = append(values, id.(string))
+				if value, ok := id.(string); ok {
+					values = append(values, value)
+				}
 			}
 			p.SourceBlobIds = &values
 		}
 		out.Provenance = &p
+	}
+	for _, r := range v.Relations {
+		resolved := transport.ResolvedRelation{SourceReference: relationToTransport(r.Source), Status: transport.ResolvedRelationStatus(r.Status)}
+		if r.Status == "available" {
+			resolved.TargetRecordId = optionalString(r.TargetRecordID)
+			resolved.TargetVersionId = optionalString(r.TargetVersionID)
+		}
+		out.Relations = append(out.Relations, resolved)
 	}
 	return out, nil
 }

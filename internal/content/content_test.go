@@ -3,6 +3,8 @@ package content_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -28,7 +30,7 @@ func (*stubRepository) Work(context.Context, string, string) (content.Work, bool
 	return content.Work{}, false, nil
 }
 func (*stubRepository) Progress(context.Context, string, string, string, string) error { return nil }
-func (*stubRepository) Publish(context.Context, content.Work, content.Blob, content.Blob) error {
+func (*stubRepository) Publish(context.Context, content.Work, content.Publication) error {
 	return nil
 }
 
@@ -108,5 +110,153 @@ func TestInlineTextRejectsUnverifiedBlobReferences(t *testing.T) {
 	command.Provenance = map[string]any{"source_blob_ids": []any{"blob_1"}}
 	if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, content.ErrUnsupported) {
 		t.Fatalf("accepted unverified source_blob_ids: %v", err)
+	}
+}
+
+func manifestCommand() content.Command {
+	return content.Command{
+		Key:     "manifest-1",
+		Source:  content.Source{CorpusID: "corpus", Namespace: "ns", RecordKey: "record"},
+		Content: content.Text{Kind: "manifest"},
+		Manifest: &content.Manifest{Kind: "manifest", Parts: []content.Part{
+			{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: "Titre 🌞"}},
+			{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Corps"}},
+			{Key: "source", Role: "source", Content: content.Text{Kind: "blob", BlobID: "blob_1", MediaType: "application/xml"}},
+		}, Relations: []content.Relation{{Type: "illustrated_by", Target: content.Source{CorpusID: "corpus", Namespace: "ns", RecordKey: "photo"}, SourceTargetRevision: "1"}}},
+		Extensions: content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "Titre", "subjects": []any{map[string]any{"code": "science", "score": 0.75}}}}},
+	}
+}
+
+func manifestService() (*stubRepository, content.Service) {
+	repo := &stubRepository{}
+	return repo, content.Service{Repository: repo, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "application/xml", Blob: content.Blob{SHA256: "blob-checksum"}}}}
+}
+
+func TestManifestAcceptedWithVerifiedBlobPartsAndExtensions(t *testing.T) {
+	repo, service := manifestService()
+	if _, err := service.Accept(context.Background(), scope(), manifestCommand()); err != nil {
+		t.Fatal(err)
+	}
+	if repo.accepted.Manifest == nil || len(repo.accepted.Manifest.Parts) != 3 || len(repo.accepted.Manifest.Relations) != 1 {
+		t.Fatalf("manifest not preserved: %v", repo.accepted.Manifest)
+	}
+	if repo.accepted.Manifest.Parts[2].Content.BlobID != "blob_1" {
+		t.Fatal("verified Blob Part reference lost")
+	}
+	if repo.accepted.Manifest.Parts[2].Content.BlobSHA256 != "blob-checksum" {
+		t.Fatal("verified Blob Part checksum not preserved")
+	}
+	if repo.accepted.Extensions["example.editorial"].SchemaVersion != "1" {
+		t.Fatalf("extension not preserved: %v", repo.accepted.Extensions)
+	}
+}
+
+func TestManifestStructureRejections(t *testing.T) {
+	cases := map[string]func(*content.Command){
+		"duplicate key":     func(c *content.Command) { c.Manifest.Parts[1].Key = "title" },
+		"unknown parent":    func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "missing" },
+		"self parent":       func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "body" },
+		"empty text":        func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "" },
+		"nul text":          func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "bad\x00text" },
+		"empty parts":       func(c *content.Command) { c.Manifest.Parts = nil },
+		"missing relation":  func(c *content.Command) { c.Manifest.Relations[0].Target.RecordKey = "" },
+		"unknown part kind": func(c *content.Command) { c.Manifest.Parts[1].Content.Kind = "manifest" },
+	}
+	for name, mutate := range cases {
+		command := manifestCommand()
+		mutate(&command)
+		_, service := manifestService()
+		if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, content.ErrInvalid) && !errors.Is(err, content.ErrUnsupported) {
+			t.Fatalf("%s: accepted (%v)", name, err)
+		}
+	}
+	// A parent cycle is rejected even when every key exists.
+	cycle := manifestCommand()
+	cycle.Manifest.Parts[1].ParentKey = "source"
+	cycle.Manifest.Parts[2].ParentKey = "body"
+	_, service := manifestService()
+	if _, err := service.Accept(context.Background(), scope(), cycle); !errors.Is(err, content.ErrInvalid) {
+		t.Fatalf("cycle accepted: %v", err)
+	}
+}
+
+func TestManifestRejectsUnverifiedBlobParts(t *testing.T) {
+	cases := map[string]content.Service{
+		"unknown blob":   {Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: content.ErrUnverifiedBlob}},
+		"media mismatch": {Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "image/png"}}},
+		"no source":      {Repository: &stubRepository{}, Blobs: stubBlobs{}},
+	}
+	for name, service := range cases {
+		if _, err := service.Accept(context.Background(), scope(), manifestCommand()); !errors.Is(err, content.ErrUnverifiedBlob) {
+			t.Fatalf("%s: accepted (%v)", name, err)
+		}
+	}
+}
+
+func TestManifestRejectsUnverifiedSourceBlobIDs(t *testing.T) {
+	forged := manifestCommand()
+	forged.Provenance = map[string]any{"source_blob_ids": []any{"blob_missing"}}
+	_, service := manifestService()
+	if _, err := service.Accept(context.Background(), scope(), forged); !errors.Is(err, content.ErrUnverifiedBlob) {
+		t.Fatalf("accepted forged source reference: %v", err)
+	}
+	verified := manifestCommand()
+	verified.Provenance = map[string]any{"source_blob_ids": []any{"blob_1"}}
+	_, service = manifestService()
+	if _, err := service.Accept(context.Background(), scope(), verified); err != nil {
+		t.Fatalf("verified source reference rejected: %v", err)
+	}
+}
+
+func TestManifestStructuralBounds(t *testing.T) {
+	many := manifestCommand()
+	many.Manifest.Parts = []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "x"}}}
+	for i := 0; i < 300; i++ {
+		many.Manifest.Parts = append(many.Manifest.Parts, content.Part{Key: fmt.Sprintf("part-%d", i), Role: "source", Content: content.Text{Kind: "text", Text: "x"}})
+	}
+	_, service := manifestService()
+	if _, err := service.Accept(context.Background(), scope(), many); !errors.Is(err, content.ErrUnsupported) {
+		t.Fatalf("oversized Part count accepted: %v", err)
+	}
+	oversized := manifestCommand()
+	oversized.Manifest.Parts = []content.Part{{Key: strings.Repeat("k", 100000), Role: "body", Content: content.Text{Kind: "text", Text: "x"}}}
+	_, service = manifestService()
+	if _, err := service.Accept(context.Background(), scope(), oversized); !errors.Is(err, content.ErrUnsupported) {
+		t.Fatalf("oversized Part structure accepted: %v", err)
+	}
+}
+
+func TestExtensionSchemaValidation(t *testing.T) {
+	valid := content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "Titre", "subjects": []any{map[string]any{"code": "science", "score": 0.75}}, "flags": map[string]any{"urgent": true}, "extra": nil}}}
+	if err := (content.BuiltinExtensions{}).Validate(context.Background(), valid); err != nil {
+		t.Fatalf("declared schema rejected: %v", err)
+	}
+	invalid := map[string]content.Extensions{
+		"unknown namespace": {"uninstalled": {SchemaVersion: "1", Data: map[string]any{}}},
+		"unknown version":   {"example.editorial": {SchemaVersion: "2", Data: map[string]any{}}},
+		"wrong data type":   {"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}},
+		"bad subject":       {"example.editorial": {SchemaVersion: "1", Data: map[string]any{"subjects": []any{map[string]any{"score": 0.5}}}}},
+	}
+	for name, exts := range invalid {
+		if err := (content.BuiltinExtensions{}).Validate(context.Background(), exts); !errors.Is(err, content.ErrInvalid) && !errors.Is(err, content.ErrUnsupported) {
+			t.Fatalf("%s: accepted (%v)", name, err)
+		}
+	}
+}
+
+func TestOversizedGenericJSONIsBounded(t *testing.T) {
+	large := map[string]any{}
+	for i := 0; i < 4096; i++ {
+		large[content.StableID("k", string(rune('a'+i%26)), string(rune(i)))] = "value"
+	}
+	exts := content.Extensions{"example.editorial": {SchemaVersion: "1", Data: large}}
+	if err := (content.BuiltinExtensions{}).Validate(context.Background(), exts); err != nil {
+		t.Fatalf("schema validation ran before the bound: %v", err)
+	}
+	command := manifestCommand()
+	command.Extensions = exts
+	_, service := manifestService()
+	if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, content.ErrUnsupported) {
+		t.Fatalf("oversized generic JSON accepted: %v", err)
 	}
 }

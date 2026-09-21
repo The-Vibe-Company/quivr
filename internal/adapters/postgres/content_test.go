@@ -14,6 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// publication assembles a canonical single-body publication for adapter fixtures.
+func publication(text, manifest content.Blob) content.Publication {
+	return content.Publication{Normalized: text, Manifest: manifest, Parts: []content.PartBlob{{Key: "body", Role: "body", Blob: text}}}
+}
+
 func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	path := os.Getenv("QUIVR_ADAPTER_CONFIG")
 	if path == "" {
@@ -60,7 +65,7 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	defer pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_part ON version_parts; DROP FUNCTION IF EXISTS fail_fixture_part()")
 	text := content.Blob{Key: "fixture/text", SHA256: "fixture-text", Size: 13}
 	manifest := content.Blob{Key: "fixture/manifest", SHA256: "fixture-manifest", Size: 2}
-	if err = repository.Publish(ctx, work, text, manifest); err == nil {
+	if err = repository.Publish(ctx, work, publication(text, manifest)); err == nil {
 		t.Fatal("publication failure was not injected")
 	}
 	still, err := repository.Receipt(ctx, scope.Organization, receipt.ID)
@@ -81,10 +86,10 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = repository.Publish(ctx, work, text, manifest); err != nil {
+	if err = repository.Publish(ctx, work, publication(text, manifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err = repository.Publish(ctx, work, text, manifest); err != nil {
+	if err = repository.Publish(ctx, work, publication(text, manifest)); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, "SELECT count(*) FROM version_parts WHERE organization=$1", scope.Organization).Scan(&parts); err != nil || parts != 1 {
@@ -176,13 +181,13 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 		t.Fatal("late duplicate moved desired revision backward")
 	}
 	// B finishes first; A's duplicate finishes next. B must still point to A, not to whichever worker won.
-	if err = repository.Publish(ctx, b, text, manifest); err != nil {
+	if err = repository.Publish(ctx, b, publication(text, manifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err = repository.Publish(ctx, duplicateWork, text, manifest); err != nil {
+	if err = repository.Publish(ctx, duplicateWork, publication(text, manifest)); err != nil {
 		t.Fatal(err)
 	}
-	if err = repository.Publish(ctx, a, text, manifest); err != nil {
+	if err = repository.Publish(ctx, a, publication(text, manifest)); err != nil {
 		t.Fatal(err)
 	}
 	var predecessor string

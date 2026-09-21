@@ -56,7 +56,7 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = store.Publish(ctx, work, content.Blob{Key: "fixture/text", SHA256: "guard-text", Size: 15}, content.Blob{Key: "fixture/manifest", SHA256: "guard-manifest", Size: 2}); err != nil {
+	if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/text", SHA256: "guard-text", Size: 15}, content.Blob{Key: "fixture/manifest", SHA256: "guard-manifest", Size: 2})); err != nil {
 		t.Fatal(err)
 	}
 	v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
@@ -149,7 +149,7 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = store.Publish(ctx, qw, content.Blob{Key: "fixture/text", SHA256: "guard-text", Size: 15}, content.Blob{Key: "fixture/manifest", SHA256: "guard-manifest", Size: 2}); err != nil {
+	if err = store.Publish(ctx, qw, publication(content.Blob{Key: "fixture/text", SHA256: "guard-text", Size: 15}, content.Blob{Key: "fixture/manifest", SHA256: "guard-manifest", Size: 2})); err != nil {
 		t.Fatal(err)
 	}
 	_, err = pool.Exec(ctx, `CREATE FUNCTION fail_fixture_quarantine() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.organization='adapter-promotion' AND NEW.event_type='record.quarantined' THEN RAISE EXCEPTION 'synthetic quarantine interruption'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_fixture_quarantine BEFORE INSERT ON change_events FOR EACH ROW EXECUTE FUNCTION fail_fixture_quarantine()`)

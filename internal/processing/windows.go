@@ -64,9 +64,8 @@ type Tokenizer interface {
 }
 type TokenWindows struct{ Tokenizer Tokenizer }
 
-func validText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 func (p TokenWindows) NormalizeQuery(ctx context.Context, q string) (string, error) {
-	if !validText(q) || utf8.RuneCountInString(q) > Parameters.MaxQueryCodepoints {
+	if !content.ValidText(q) || utf8.RuneCountInString(q) > Parameters.MaxQueryCodepoints {
 		return "", content.ErrInvalid
 	}
 	q = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(q, "\r\n", "\n"), "\r", "\n"))
@@ -84,30 +83,44 @@ func (p TokenWindows) NormalizeQuery(ctx context.Context, q string) (string, err
 }
 func (p TokenWindows) Process(ctx context.Context, in Input) (content.Segmentation, error) {
 	out := content.Segmentation{ID: content.StableID("segmentation", in.Organization, in.Version.ID, Recipe), VersionID: in.Version.ID, Recipe: Recipe, Provenance: provenance}
-	inputs := []TokenInput{}
+	// Only explicit title/body text Parts contribute normalized text. Blob Parts
+	// and other roles stay in the immutable Manifest without extraction.
+	type source struct {
+		part  content.Part
+		input TokenInput
+	}
+	sources := []source{}
 	total := 0
-	titleIndex := -1
-	for i, part := range in.Version.Manifest.Parts {
-		if part.Content.Kind != "text" || !validText(part.Content.Text) {
+	titleSlot := -1
+	for _, part := range in.Version.Manifest.Parts {
+		if part.Content.Kind != "text" {
+			continue
+		}
+		if part.Role != "title" && part.Role != "body" {
+			continue
+		}
+		if !content.ValidText(part.Content.Text) {
 			return out, ErrUnsupported
 		}
 		total += len(part.Content.Text)
 		if part.Role == "title" {
-			if titleIndex >= 0 {
+			if titleSlot >= 0 {
 				return out, ErrUnsupported
 			}
-			titleIndex = i
-		} else if part.Role != "body" {
-			return out, ErrUnsupported
+			titleSlot = len(sources)
 		}
 		inputText := part.Content.Text
 		if part.Role == "title" {
 			inputText = strings.TrimSpace(inputText)
 		}
-		inputs = append(inputs, TokenInput{Text: inputText})
+		sources = append(sources, source{part: part, input: TokenInput{Text: inputText}})
 	}
-	if total > Parameters.MaxSourceBytes || len(inputs) == 0 || len(inputs) > Parameters.MaxParts {
+	if total > Parameters.MaxSourceBytes || len(sources) == 0 || len(sources) > Parameters.MaxParts {
 		return out, ErrUnsupported
+	}
+	inputs := make([]TokenInput, len(sources))
+	for i, s := range sources {
+		inputs[i] = s.input
 	}
 	enc, err := p.Tokenizer.Encode(ctx, inputs)
 	if err != nil {
@@ -121,14 +134,14 @@ func (p TokenWindows) Process(ctx context.Context, in Input) (content.Segmentati
 	title, titleUsed, titleKey := "", "", ""
 	titleTokens := 0
 	truncated := false
-	if titleIndex >= 0 {
-		part := in.Version.Manifest.Parts[titleIndex]
+	if titleSlot >= 0 {
+		part := sources[titleSlot].part
 		title, titleKey = part.Content.Text, part.Key
 		titleUsed = strings.TrimSpace(title)
-		titleTokens = enc[titleIndex].Tokens
+		titleTokens = enc[titleSlot].Tokens
 		if titleTokens > Parameters.TitleTokens {
 			cut := Parameters.TitleTokens
-			offsets := enc[titleIndex].Offsets
+			offsets := enc[titleSlot].Offsets
 			for cut > 0 && offsets[cut-1][1] > offsets[cut][0] {
 				cut--
 			}
@@ -140,10 +153,11 @@ func (p TokenWindows) Process(ctx context.Context, in Input) (content.Segmentati
 			truncated = true
 		}
 	}
-	for i, part := range in.Version.Manifest.Parts {
-		if part.Role == "title" {
+	for i, s := range sources {
+		if s.part.Role == "title" {
 			continue
 		}
+		part := s.part
 		runes := []rune(part.Content.Text)
 		tokens := enc[i]
 		spans, err := windows(runes, tokens)

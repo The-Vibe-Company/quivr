@@ -84,7 +84,7 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store}
+	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}
@@ -130,7 +130,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='005_embeddings.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='007_manifests.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}

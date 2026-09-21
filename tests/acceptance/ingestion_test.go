@@ -159,15 +159,9 @@ func TestInlineRejections(t *testing.T) {
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	c := ingestionCorpus(t)
-	for _, kind := range []string{"blob", "manifest"} {
-		cmd := inlineCommand(c, "unsupported-"+kind, "x", "x")
-		if kind == "blob" {
-			cmd["content"] = map[string]any{"kind": "blob", "blob_id": "not-verified", "media_type": "text/plain"}
-		} else {
-			cmd["content"] = map[string]any{"kind": "manifest", "parts": []any{map[string]any{"key": "body", "role": "body", "content": map[string]any{"kind": "text", "text": "x"}}}}
-		}
-		request(t, "POST", "/v0/records", admin, cmd, 422)
-	}
+	unverified := inlineCommand(c, "unsupported-blob", "x", "x")
+	unverified["content"] = map[string]any{"kind": "blob", "blob_id": "not-verified", "media_type": "text/plain"}
+	request(t, "POST", "/v0/records", admin, unverified, 422)
 	cmd := inlineCommand(c, "unknown", "x", "x")
 	cmd["unknown"] = true
 	request(t, "POST", "/v0/records", admin, cmd, 422)

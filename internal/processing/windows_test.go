@@ -165,3 +165,23 @@ func TestOversizedAssembledTitleBatchIsExplicit(t *testing.T) {
 		t.Fatal("deterministic tokenizer limit became a retryable outage", err)
 	}
 }
+
+func TestTokenWindowsSkipPreservedParts(t *testing.T) {
+	p := processor(t)
+	parts := []content.Part{
+		{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Corps du manifeste."}},
+		{Key: "source", Role: "source", Content: content.Text{Kind: "blob", BlobID: "blob_1", MediaType: "application/xml"}},
+		{Key: "caption", Role: "caption", Content: content.Text{Kind: "text", Text: "légende non indexée"}},
+	}
+	r, err := p.Process(context.Background(), processing.Input{Organization: "org-test", Version: content.Version{ID: "version-manifest", Manifest: content.Manifest{Kind: "manifest", Parts: parts}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Segments) != 1 || r.Segments[0].PartKey != "body" || r.Segments[0].Start != 0 || r.Segments[0].End != len([]rune("Corps du manifeste.")) {
+		t.Fatalf("preserved parts contributed segments: %v", r.Segments)
+	}
+	only := []content.Part{{Key: "source", Role: "source", Content: content.Text{Kind: "blob", BlobID: "blob_1", MediaType: "application/xml"}}}
+	if _, err = p.Process(context.Background(), processing.Input{Organization: "org-test", Version: content.Version{ID: "version-blob", Manifest: content.Manifest{Kind: "manifest", Parts: only}}}); !errors.Is(err, processing.ErrUnsupported) {
+		t.Fatal("manifest without retrieval text accepted", err)
+	}
+}

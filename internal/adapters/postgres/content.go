@@ -171,10 +171,13 @@ func (s ContentStore) Record(ctx context.Context, org, id string) (content.Recor
 }
 func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (content.StoredVersion, error) {
 	v := content.StoredVersion{}
-	var provenance []byte
-	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance)
+	var provenance, extensions []byte
+	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance,v.extensions FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance, &extensions)
 	if err == nil {
 		err = json.Unmarshal(provenance, &v.Provenance)
+	}
+	if err == nil {
+		err = json.Unmarshal(extensions, &v.Extensions)
 	}
 	if err == nil {
 		v.Availability, v.Processing, _, err = s.VersionStatus(ctx, org, id)
@@ -196,7 +199,7 @@ func (s ContentStore) Progress(ctx context.Context, org, id, state, code string)
 	_, err := s.Pool.Exec(ctx, "UPDATE ingestion_receipts SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND state='pending'", org, id, state, code)
 	return err
 }
-func (s ContentStore) Publish(ctx context.Context, w content.Work, text, manifest content.Blob) error {
+func (s ContentStore) Publish(ctx context.Context, w content.Work, publication content.Publication) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -235,7 +238,12 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, text, manifes
 		if exists {
 			outcome = "duplicate"
 		} else {
-			for _, b := range []content.Blob{text, manifest} {
+			blobs := make([]content.Blob, 0, len(publication.Parts)+2)
+			blobs = append(blobs, publication.Normalized, publication.Manifest)
+			for _, part := range publication.Parts {
+				blobs = append(blobs, part.Blob)
+			}
+			for _, b := range blobs {
 				_, err = tx.Exec(ctx, "INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", w.Organization, content.StableID("blob", w.Organization, b.SHA256), b.Key, b.SHA256, b.Size)
 				if err != nil {
 					return err
@@ -245,12 +253,22 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, text, manifes
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, text.SHA256), content.StableID("blob", w.Organization, manifest.SHA256), provenance)
+			extensions := w.Command.Extensions
+			if extensions == nil {
+				extensions = content.Extensions{}
+			}
+			extensionsJSON, err := json.Marshal(extensions)
 			if err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, "INSERT INTO version_parts VALUES($1,$2,'body','body',$3)", w.Organization, w.VersionID, content.StableID("blob", w.Organization, text.SHA256)); err != nil {
+			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON)
+			if err != nil {
 				return err
+			}
+			for _, part := range publication.Parts {
+				if _, err = tx.Exec(ctx, "INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", w.Organization, w.VersionID, part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256)); err != nil {
+					return err
+				}
 			}
 			if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID}); err != nil {
 				return err
@@ -266,6 +284,35 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, text, manifes
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// Resolve expands immutable Record-target Relations against canonical
+// currentness, baseline availability and authorization. Missing, unready,
+// withdrawn, quarantined and inaccessible targets all resolve to "unavailable"
+// with no target IDs.
+func (s ContentStore) Resolve(ctx context.Context, scope corpus.Scope, relations []content.Relation) ([]content.ResolvedRelation, error) {
+	if !scope.Allows("content:read") {
+		return nil, corpus.ErrForbidden
+	}
+	resolved := make([]content.ResolvedRelation, len(relations))
+	for i, relation := range relations {
+		resolved[i] = content.ResolvedRelation{Source: relation, Status: "unavailable"}
+		if !scope.Contains(relation.Target.CorpusID) {
+			continue
+		}
+		var recordID, versionID string
+		err := s.Pool.QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		resolved[i].Status = "available"
+		resolved[i].TargetRecordID = recordID
+		resolved[i].TargetVersionID = versionID
+	}
+	return resolved, nil
 }
 
 func (s ContentStore) Claim(ctx context.Context) (content.Dispatch, error) {
