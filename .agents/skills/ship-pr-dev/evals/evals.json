@@ -1,0 +1,70 @@
+{
+  "skill_name": "ship-pr-dev",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ship this branch as a PR against main. It should be clean enough for a human to merge, and do not merge it yourself.",
+      "expected_output": "The skill prepares an ignored ship-pr-dev run directory, collects branch context, creates a tiered agent-budget.json, runs relevant local checks, runs review-code-dev as the single independent gate, fixes confirmed blockers within loop caps, commits with commitzen, pushes normally, creates or updates a PR, waits deterministically until every visible non-skipped PR CI item is green on the latest pushed commit, runs capture-learning-tools report-only, and only then returns the PR URL plus latest commit, verification, CI, review, and artifact summaries."
+    },
+    {
+      "id": 2,
+      "prompt": "Clean this up locally before PR, but don't push yet. I want to know whether it's merge-ready.",
+      "expected_output": "The skill runs local cleanup, verification, and review-code-dev, records artifacts, avoids push/PR creation, and returns a local handoff stating whether the branch is merge-ready and what remains."
+    },
+    {
+      "id": 3,
+      "prompt": "Update the existing PR with the fixes from review feedback and make sure everything is green before handing it back.",
+      "expected_output": "The skill reads the current PR or branch context, applies scoped fixes only, reruns relevant checks, reruns review-code-dev when source changed, pushes normal commits, updates the PR body, waits until every visible non-skipped CI check/check suite on the latest commit is final green, investigates logs for failures, runs the report-only capture-learning-tools pass after green CI, and reports any unresolved human decisions."
+    },
+    {
+      "id": 4,
+      "prompt": "Make a PR for this auth and data export change. Be paranoid about tests and review because it touches permissions.",
+      "expected_output": "The skill selects a deep review-code-dev gate, runs security/data/export-relevant verification, fixes P0/P1/P2 findings, records skipped checks with reasons, and blocks handoff if permission behavior lacks adequate tests or review evidence."
+    },
+    {
+      "id": 5,
+      "prompt": "Create a PR, but there are some unrelated local edits I don't want included.",
+      "expected_output": "The skill identifies unrelated dirty files, stages only intentional files, refuses broad staging, asks or stops if separation is unsafe, and never commits unrelated user work."
+    },
+    {
+      "id": 6,
+      "prompt": "Ship this frontend branch. It changes React pages, Tailwind styles, and form submit behavior, so I want the visual and UX pass to be strict.",
+      "expected_output": "The skill detects a frontend diff and passes frontend/accessibility/responsive/state lenses into one review-code-dev gate instead of running a standalone frontend pass plus another full review. It fixes blockers, reruns affected verification and only the failed lens when appropriate, then waits for latest-SHA CI before calling the PR ready."
+    },
+    {
+      "id": 7,
+      "prompt": "The PR is open but CI is red. Please get it to ready-to-merge without merging.",
+      "expected_output": "The skill finds the PR and latest pushed SHA, reads failing CI logs, identifies the first causal error, fixes within scope, runs corresponding local validation, commits and pushes targeted fixes, loops until every visible non-skipped CI check/check suite is green on the latest SHA or the same check fails after 3 distinct attempts, runs capture-learning-tools after green CI, and never disables checks or bypasses hooks."
+    },
+    {
+      "id": 8,
+      "prompt": "Ship this PR, and before you hand it back only mention process improvements if there is something concrete worth doing next time.",
+      "expected_output": "The skill runs the normal ship loop, waits until every visible non-skipped latest-SHA CI check/check suite is green, then invokes capture-learning-tools in report-only mode with the ship artifacts and writes RUN_DIR/learning-loop.md before handing back. It does not let the learning pass edit files, stage, commit, push, change CI, or reopen the ship loop unless it surfaces a concrete readiness-gate violation with evidence. If the learning pass finds actionable recurring improvements and the PR or local handoff is otherwise good to go, the final response appends 'Good to go. To improve next time, I can:' with up to 3 specific optional follow-ups. If it finds none, the final handoff stays unchanged."
+    },
+    {
+      "id": 9,
+      "prompt": "I am running Ship PR from Codex. Optimize the credits but keep the review serious.",
+      "expected_output": "The coordinator keeps architecture, Git, PR, CI, and final acceptance. Every bounded Codex worker requests gpt-5.6-luna with max effort and fresh self-contained context (fork_turns none when exposed), records requested/effective routing without inventing usage, avoids an automatic external Codex CLI second review, and respects the one-writer plus one-primary plus two/three-focused tier caps."
+    },
+    {
+      "id": 10,
+      "prompt": "Run Ship PR from OpenCode and use subagents where useful, but keep my configured model.",
+      "expected_output": "OpenCode delegations omit model and effort overrides so workers inherit the user's default. The skill still applies the dispatch test, tier caps, single-writer rule, same-worker resume, one review-code-dev gate, and deterministic CI waiting."
+    },
+    {
+      "id": 11,
+      "prompt": "Ship this one-line README typo fix. Don't waste agents on it.",
+      "expected_output": "The skill classifies the change as trivial, keeps implementation inline, launches no implementation worker or specialist board, uses only a quick review when proportionate, records the zero-worker budget and phase timing, targets 10 minutes with a reassessment point around 15 minutes, continues if more work is genuinely required, and preserves normal Git, PR, and latest-SHA CI safety."
+    },
+    {
+      "id": 12,
+      "prompt": "Ship this normal backend fix from Claude Code and optimize credits.",
+      "expected_output": "Bounded Claude workers request claude-sonnet-5 and high effort when the adapter supports it, without passing full conversation history. The standard tier uses at most one writer, one primary reviewer, and two focused reviewers, resumes the same worker for follow-up, and leaves deterministic verification and CI polling to the coordinator."
+    },
+    {
+      "id": 13,
+      "prompt": "Ship this PR that only updates packages under .agents/skills and .claude/skills.",
+      "expected_output": "The context collector marks agent_workflow true but does not infer application backend or security risk from Python scripts or security-named references inside agent packages. Documentation and metadata-only skill updates stay trivial; executable workflow changes are normally standard, so the skill does not launch a deep review solely because agent package paths contain backend or security keywords."
+    }
+  ]
+}

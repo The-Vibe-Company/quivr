@@ -8,5 +8,7 @@
 .pr-lens/
 # Local worktrees and disposable investigation artifacts.
 .scratch/
+# Ship PR and review skill run artifacts.
+plans/
 
 __pycache__/

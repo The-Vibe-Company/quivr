@@ -1,0 +1,29 @@
+{
+  "skill_name": "capture-learning-tools",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We just fixed a website because content frontmatter was missing a newly required field. The agent added the workaround to its own prompt, but I want the project to improve so this does not happen again. Run an engineering learning loop review.",
+      "expected_output": "Explains the issue in plain English, identifies the project gap, recommends a content/schema validator or regression test, proposes a short AGENTS.md rule only as a supporting guardrail, and does not depend on private memory.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "This private repo has a slow e2e suite. CI failed after a PR because nobody ran the quick typecheck locally. What should we automate without creating a big CI bill?",
+      "expected_output": "Differentiates private CI cost from public open-source CI, recommends a local preflight plus fast PR check before full e2e, and explains tradeoffs for a non-technical user.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "The repo has CLAUDE.md but no AGENTS.md. Codex missed the project rules that Claude had. Propose the gold-standard setup for shared instructions.",
+      "expected_output": "Identifies the portability gap, recommends AGENTS.md as shared source of truth plus a CLAUDE.md adapter or symlink, warns against duplicated rules, and provides exact instruction text.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "A reviewer asked twice why we chose this queue architecture. It is not a bug and no test can enforce it. Run the learning loop.",
+      "expected_output": "Avoids forcing a test or CI check, recommends an ADR or decision doc, and explains why documentation is the right prevention layer.",
+      "files": []
+    }
+  ]
+}

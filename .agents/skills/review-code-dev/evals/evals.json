@@ -1,0 +1,105 @@
+{
+  "skill_name": "review-code-dev",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review my uncommitted changes locally. Save the review artifacts and tell me only the actionable issues.",
+      "expected_output": "A read-only review with a prepared non-committable run directory, run-metadata.json, context.json, review.md, review.json, P0-P3 findings, and changed-file coverage."
+    },
+    {
+      "id": 2,
+      "prompt": "Before I open the PR, review this branch against main with special attention to auth and data export regressions. Do not run tests yet.",
+      "expected_output": "A base-branch review that compares against main, checks security-sensitive paths, and reports parseable findings plus coverage."
+    },
+    {
+      "id": 3,
+      "prompt": "Can you review commit HEAD and tell me if anything should block merge?",
+      "expected_output": "A commit-mode review using git show context, with merge-blocking P0/P1 findings first and a JSON issue artifact."
+    },
+    {
+      "id": 4,
+      "prompt": "Run a deep review of this branch against main. The diff touches auth middleware, export jobs, and a shared schema package, so use focused sub-reviewers if the environment supports them, but keep the whole review read-only.",
+      "expected_output": "A deep base-branch review that uses one isolated primary direct pass, launches at most three distinct focused reviewers for unresolved independent questions, records agent-budget.json and subagents.md, vets all candidates, and reports only confirmed P0-P3 findings."
+    },
+    {
+      "id": 5,
+      "prompt": "Review the current changes. Keep this chat clean and use an isolated reviewer if possible; include only the final actionable findings here.",
+      "expected_output": "The main context prepares an ignored plans/review-code-dev run directory, creates context.json and delegation-brief.md, launches a primary-reviewer when a safe adapter exists, avoids passing the full conversation, and reports from review.md/review.json artifacts."
+    },
+    {
+      "id": 6,
+      "prompt": "Run a review, but make sure the temporary review files under plans/review-code-dev cannot accidentally be committed.",
+      "expected_output": "The skill uses prepare_review_run.py before writing artifacts, records run-metadata.json with non_committable true, verifies the Git ignore rule, and stops if plans/review-code-dev is tracked."
+    },
+    {
+      "id": 7,
+      "prompt": "Run a frontend review of this branch. The diff changes React components, Tailwind classes, form state, and responsive layout. Use Impeccable if available, but keep the review read-only.",
+      "expected_output": "A focused frontend review that routes through references/reviewers/frontend.md, uses design-frontend-dev or its smallest read-only references when available, does not run write/live/polish commands, and reports only confirmed P0-P3 UI, accessibility, responsive, state, performance, copy, or visual-system findings."
+    },
+    {
+      "id": 8,
+      "prompt": "Run a deep review with sub-reviewers. If a helper suggests a plausible issue that the lead reviewer cannot verify, do not include it in the final findings.",
+      "expected_output": "A deep review that records helper candidates in candidate-findings.json, classifies unverified or false-positive candidates as rejected/unverified in rejected-findings.md or subagents.md, and keeps review.md limited to lead-verified findings."
+    },
+    {
+      "id": 9,
+      "prompt": "Run a standard review and validate the artifacts. If review.md is not parseable or coverage is incomplete, repair the artifacts once and then stop.",
+      "expected_output": "A bounded review loop with artifact-validation.md, loop-state.json, at most one artifact-only repair pass, parseable review.json when possible, and a clear incomplete status if validation still fails."
+    },
+    {
+      "id": 10,
+      "prompt": "Run a deep review of a large branch with frontend, backend, tests, security, architecture, and performance risks. Respect the helper budget.",
+      "expected_output": "A deep review that builds a finite check queue, runs no more than three focused reviewers total, keeps at most three read-only workers concurrent, records skipped lower-priority checks, and avoids relaunching the whole primary reviewer."
+    },
+    {
+      "id": 11,
+      "prompt": "Review this PR-sized branch. The stated goal is to change export permissions only; tell me if the implementation drifted outside that scope.",
+      "expected_output": "A standard or deep review that performs an intent and scope audit, writes scope-audit.md when scope matters, and promotes scope drift to review.md only if it creates concrete P0-P3 user, system, release, or owner-boundary impact."
+    },
+    {
+      "id": 12,
+      "prompt": "Run a deep review with specialists and make sure duplicate helper findings are merged instead of repeated.",
+      "expected_output": "Focused helpers return structured candidate JSONL; the primary reviewer writes candidate-findings.json with confidence, fingerprint, evidence, status, status_reason, and confirming_sources, then publishes each root cause only once in review.md."
+    },
+    {
+      "id": 13,
+      "prompt": "Run a security-sensitive deep review and include a red-team challenge if the runtime supports it.",
+      "expected_output": "The skill runs at most one independent red-team or adversarial pass after normal review when safe and inside budget, records it in adversarial-review.md or subagents.md, verifies every candidate through the primary reviewer, and keeps unsupported claims out of review.md."
+    },
+    {
+      "id": 14,
+      "prompt": "Review a migration-heavy backend change for deploy safety and API compatibility.",
+      "expected_output": "The skill selects data-migration and api-contract specialist briefs when the diff warrants them, checks rollback/mixed-version/index/backfill and consumer compatibility risks, and returns only evidence-backed P0-P3 findings."
+    },
+    {
+      "id": 15,
+      "prompt": "Run a standard review and reject any helper finding that cannot show the motivating line, failure path, introduced risk, impact, and false-positive check.",
+      "expected_output": "The primary reviewer applies the pre-emit verification gate from review-intelligence.md, records rejected or unverified candidates outside review.md, and leaves the final parseable report limited to verified findings."
+    },
+    {
+      "id": 16,
+      "prompt": "Run this standard review from Codex using the credit-efficient reviewer setup.",
+      "expected_output": "The isolated primary and any focused Codex reviewers request gpt-5.6-luna with max effort and fresh self-contained context, standard stays at two focused reviewers maximum, and agent-budget.json distinguishes requested from effective routing with null usage when unavailable."
+    },
+    {
+      "id": 17,
+      "prompt": "Run this review from Claude Code with the efficient setup.",
+      "expected_output": "The skill requests claude-sonnet-5 for bounded review workers, normally high effort when supported, passes only the work order and paths, and reserves max effort for deep or unresolved P0/P1 validation."
+    },
+    {
+      "id": 18,
+      "prompt": "Review this from OpenCode without changing my model configuration.",
+      "expected_output": "The skill omits model and effort overrides for OpenCode, inherits the default model, and still records adapter, outcome, resume status, and unknown effective usage honestly."
+    },
+    {
+      "id": 19,
+      "prompt": "Quick review this tiny docs-only diff. Avoid unnecessary subagents.",
+      "expected_output": "The skill reviews inline when dispatch overhead exceeds the work, uses zero focused reviewers, reassesses around five minutes without blocking solely on time, records the budget, and preserves read-only coverage and parseable artifacts."
+    },
+    {
+      "id": 20,
+      "prompt": "This small review has already spent twenty minutes retrying agents. Finish efficiently.",
+      "expected_output": "The skill treats twenty minutes as a reassessment point, inspects progress, resumes or narrows the same worker when useful, avoids a wasteful full-review restart, and continues beyond the checkpoint whenever correctness requires it. Time alone never causes partial coverage or a blocker."
+    }
+  ]
+}

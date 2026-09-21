@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Code"
+  short_description: "Run independent local code review"
+  default_prompt: "Review my local code changes, save the review artifacts, and report only actionable issues."

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://thecompanion.sh/schemas/companion-manifest.v2.schema.json",
+  "name": "capture-learning-tools",
+  "version": "0.1.1",
+  "title": "Capture learning",
+  "description": "Turn technical conversations, bugs, CI failures, and repeated agent mistakes into durable project improvements: shared agent instructions, tests, CI, scripts, docs, ADRs, or explicit no-automation decisions.",
+  "notes": "## What it does\n\nEngineering Learning Loop is a portable prevention skill. It reads a conversation or incident, inspects the repository, explains the issue in plain English, and recommends where the learning should live in the project.\n\n## Design principles\n\n- The project is the source of truth.\n- Propose before editing.\n- Prefer tests, scripts, and CI over prose when machine-checkable.\n- Keep shared instructions in one source with host-specific adapters.\n- Account for private CI cost, public open-source CI expectations, and non-technical users.\n\n## Bundled helpers\n\nThe package includes dependency-free Python scripts for inspecting project guidance files, summarizing CI surface, and classifying learnings into likely destinations.",
+  "metadata": {
+    "companionSkillId": "2ef3ebe4-63bb-468a-acc0-a37360a65840",
+    "changelog": [
+      {
+        "version": "0.1.1",
+        "date": "2026-07-03",
+        "changes": [
+          "Publish version 0.1.1."
+        ]
+      },
+      {
+        "version": "0.1.0",
+        "date": "2026-06-29",
+        "changes": [
+          "Initial portable skill package with references, helper scripts, and eval prompts."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {},
+  "commands": [
+    {
+      "name": "Review a technical conversation",
+      "desc": "Extract the durable lesson and recommend project safeguards."
+    },
+    {
+      "name": "Audit project instructions",
+      "desc": "Inspect AGENTS.md, CLAUDE.md, symlinks, imports, and adjacent agent rule files."
+    },
+    {
+      "name": "Recommend CI or testing guardrails",
+      "desc": "Choose budget-aware checks, scripts, tests, or docs based on project risk."
+    },
+    {
+      "name": "Apply approved safeguards",
+      "desc": "Make narrow repository changes after the user approves the recommendation."
+    }
+  ]
+}

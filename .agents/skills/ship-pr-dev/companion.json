@@ -1,0 +1,76 @@
+{
+  "$schema": "https://thecompanion.sh/schemas/companion-manifest.v2.schema.json",
+  "name": "ship-pr-dev",
+  "version": "1.2.2",
+  "title": "Ship PR",
+  "description": "Prepare a branch for a human-mergeable PR with credit-aware host-native workers, one independent review gate, deterministic verification and CI waiting, and no merge action.",
+  "notes": "## What it does\n\nShip PR owns delivery from a local branch to a human-reviewable PR. The coordinator keeps architecture, Git, PR state, and final acceptance while bounded workers handle separable implementation, independent review, difficult CI diagnosis, and the final report-only learning pass.\n\n## Credit routing\n\n- Codex workers request gpt-5.6-luna with max effort and fresh self-contained context.\n- Claude Code workers request claude-sonnet-5, normally at high effort when supported.\n- OpenCode workers inherit the user's default model.\n- Trivial work stays inline; standard/deep work has one writer and bounded read-only reviewer caps.\n- Deterministic checks, Git, PR operations, and CI polling stay in the coordinator.\n\n## Review ownership\n\nreview-code-dev is the only full review gate. Frontend and specialist lenses run inside that review, eliminating the previous Ship PR board plus frontend pass plus final review duplication.\n\n## Readiness\n\nShip PR never merges and never reports success until local evidence is fresh, review blockers are resolved, every visible non-skipped latest-SHA CI item is green, and capture-learning-tools completed report-only.",
+  "metadata": {
+    "companionSkillId": "bccb0c35-71bf-4fe8-ad7c-7a931889fa84",
+    "changelog": [
+      {
+        "version": "1.2.2",
+        "date": "2026-08-20",
+        "changes": [
+          "Ignore Python bytecode caches produced when bundled tests are imported by discovery-based runners."
+        ]
+      },
+      {
+        "version": "1.2.1",
+        "date": "2026-08-20",
+        "changes": [
+          "Distinguish agent workflow packages from application code during impact classification.",
+          "Prevent skill-only Python and security references from escalating small PRs to backend or security review tiers.",
+          "Add regression coverage for skill-only and real application risk paths, without leaving Python cache artifacts."
+        ]
+      },
+      {
+        "version": "1.2.0",
+        "date": "2026-08-20",
+        "changes": [
+          "Route Codex workers to gpt-5.6-luna/max, Claude Code workers to claude-sonnet-5, and leave OpenCode on its default model.",
+          "Add explicit trivial, standard, and deep agent budgets, single-writer ownership, fresh work orders, worker resume, and routing telemetry.",
+          "Remove the duplicate Ship PR review board and standalone frontend mega-pass; review-code-dev now owns one bounded review gate.",
+          "Add 10/25/50-minute local targets, non-blocking reassessment checkpoints, worker progress checks, and separate external-CI timing so small changes cannot silently drift for an hour.",
+          "Preserve the strict latest-SHA all-visible-CI gate and canonical capture-learning-tools handoff."
+        ]
+      },
+      {
+        "version": "1.0.7",
+        "date": "2026-07-03",
+        "changes": [
+          "Last published Companion baseline before the credit-aware redesign."
+        ]
+      },
+      {
+        "version": "1.0.0",
+        "date": "2026-06-26",
+        "changes": [
+          "Initial bounded PR delivery workflow."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {
+    "capture-learning-tools": "2ef3ebe4-63bb-468a-acc0-a37360a65840",
+    "review-code-dev": "b0780a97-6972-4a2b-8e88-f41a528900c7"
+  },
+  "commands": [
+    {
+      "name": "Ship branch as PR",
+      "desc": "Finish scoped work, verify, review, commit, push, create or update the PR, and wait for latest-SHA CI."
+    },
+    {
+      "name": "Prepare local PR handoff",
+      "desc": "Run cleanup, verification, and review but stop before remote mutation."
+    },
+    {
+      "name": "Update existing PR",
+      "desc": "Apply bounded fixes, refresh evidence, push, update the PR, and return CI to green."
+    }
+  ]
+}

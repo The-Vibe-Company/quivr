@@ -1,0 +1,84 @@
+{
+  "$schema": "https://thecompanion.sh/schemas/companion-manifest.v2.schema.json",
+  "name": "review-code-dev",
+  "version": "1.3.2",
+  "title": "Review Code",
+  "description": "Run independent read-only code review with one isolated primary reviewer, credit-aware host-native model routing, bounded specialists, atomic PR-watch state, and parseable P0-P3 artifacts.",
+  "notes": "## What it does\n\nReview Code reviews working-tree, branch, commit, or custom scopes without changing source or Git state. One isolated primary reviewer performs the direct pass and launches only the smallest set of independent specialist checks it cannot answer efficiently itself.\n\n## Credit routing\n\nCodex requests gpt-5.6-luna/max, Claude Code requests claude-sonnet-5, and OpenCode inherits its default. Quick review uses no specialist by default, standard caps specialists at two, and deep caps them at three. Requested/effective routing and unavailable usage are recorded without inventing credit numbers.\n\n## Evidence and safety\n\nEvery file has coverage, focused candidates use JSONL, and the primary verifies failure paths and false-positive checks before publishing P0-P3 findings. Artifacts live under ignored plans/review-code-dev/runs/. The recurring PR-watch ledger preserves the published 1.2.1 behavior with a portable home-directory default.",
+  "metadata": {
+    "companionSkillId": "b0780a97-6972-4a2b-8e88-f41a528900c7",
+    "changelog": [
+      {
+        "version": "1.3.2",
+        "date": "2026-08-20",
+        "changes": [
+          "Ignore Python bytecode caches produced when the PR-watch test is imported by discovery-based runners."
+        ]
+      },
+      {
+        "version": "1.3.1",
+        "date": "2026-08-20",
+        "changes": [
+          "Prevent the bundled PR-watch unit test from leaving Python bytecode caches in reviewed worktrees."
+        ]
+      },
+      {
+        "version": "1.3.0",
+        "date": "2026-08-20",
+        "changes": [
+          "Add Codex Luna/max, Claude Sonnet 5, and OpenCode-default host routing with effective-model telemetry.",
+          "Reduce focused reviewer caps from four/six to two/three and make every specialist consume the same finite budget.",
+          "Require fresh self-contained work orders, same-worker resume, no duplicate angles, and at most three concurrent read-only workers.",
+          "Add 5/20/35-minute non-blocking review checkpoints that surface drift without stopping necessary work.",
+          "Canonicalize package paths and fix the PR-watch default that was hard-coded to another user's home directory."
+        ]
+      },
+      {
+        "version": "1.2.1",
+        "date": "2026-08-05",
+        "changes": [
+          "Add an atomic recurring PR-watch ledger with baseline, claim, release, and reviewed states."
+        ]
+      },
+      {
+        "version": "1.2.0",
+        "date": "2026-06-26",
+        "changes": [
+          "Add evidence-gated specialist review intelligence and expanded reviewer lenses."
+        ]
+      },
+      {
+        "version": "1.0.0",
+        "date": "2026-06-24",
+        "changes": [
+          "Initial isolated read-only review workflow."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {
+    "design-frontend-dev": "02decff6-b4ac-4d06-a494-abeeb08db9f3"
+  },
+  "commands": [
+    {
+      "name": "Review uncommitted changes",
+      "desc": "Collect local context and run an independent read-only review."
+    },
+    {
+      "name": "Review branch against base",
+      "desc": "Review a branch/base diff and report verified P0-P3 findings."
+    },
+    {
+      "name": "Review commit",
+      "desc": "Review one commit or ref with complete changed-file coverage."
+    },
+    {
+      "name": "Run focused review",
+      "desc": "Apply one bounded security, frontend, performance, tests, design, API, migration, or red-team lens."
+    }
+  ]
+}
