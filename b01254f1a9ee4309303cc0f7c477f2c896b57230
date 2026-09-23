@@ -1,0 +1,24 @@
+research/go-core-runtime-deep-dive.md
+  s_0a386fc571f8fe::t_fd33e9756fe197 194,717,728-729,731
+  s_0a386fc571f8fe::t_878969d3918df0 569
+  s_0a386fc571f8fe::t_20fc117305d946 157
+  s_0a386fc571f8fe::t_991ab59ccb49b6 7,20,169,171,196,252,260,305-306,455,489-492,577,661,674,682
+  s_0a386fc571f8fe::t_7c030603c9e719 1-6,8-19,21-156,158-168,170,172,174-183,185-187,191-193,195,197-251,253-259,261-304,307-454,456-488,493-568,570-576,578-660,662-673,675-681,683-716,718-727,730,732-763
+  s_0a386fc571f8fe::t_c91ece90fccdbe 173,184,188-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b01254f1a9ee4309303cc0f7c477f2c896b57230",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

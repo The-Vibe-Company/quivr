@@ -1,0 +1,125 @@
+prototype/runtime-spike/seaweedfs-s3.json
+  s_0a386fc571f8fe::t_9ab94652802e45 1-14
+prototype/runtime-spike/Makefile
+  s_0a386fc571f8fe::t_5a0a9ac76a3d75 21-22
+  s_0a386fc571f8fe::t_9ab94652802e45 1-9,11-20
+  s_0a386fc571f8fe::t_d64ef4a715207f 10
+prototype/runtime-spike/internal/spike/migrations/001_foundation.sql
+  s_0a386fc571f8fe::t_e2b8f0ad92c73a 1-37,39-158
+  s_0a386fc571f8fe::t_998cf1282bfb05 38
+prototype/runtime-spike/evidence/report.md
+  s_0a386fc571f8fe::t_16d0934112e4d7 3-6
+  s_0a386fc571f8fe::t_5d1b69fa1c8540 84,135
+  s_0a386fc571f8fe::t_b1e7c071fcaa7b 1-2,7-83,85-134,136-185
+prototype/runtime-spike/.gitignore
+  s_0a386fc571f8fe::t_e2b8f0ad92c73a 1-2
+prototype/runtime-spike/Dockerfile
+  s_0a386fc571f8fe::t_9ab94652802e45 1,3-17
+  s_0a386fc571f8fe::t_221fe93c06af54 2
+prototype/runtime-spike/.dockerignore
+  s_0a386fc571f8fe::t_f1f9672e55ee7e 1-3
+prototype/runtime-spike/internal/spike/plugin_test.go
+  s_0a386fc571f8fe::t_221fe93c06af54 1-21
+prototype/runtime-spike/contracts/fixtures/normalize-result.json
+  s_0a386fc571f8fe::t_59fb6dac0c5b33 1-8
+prototype/runtime-spike/internal/spike/workflow.go
+  s_0a386fc571f8fe::t_d3ae3840448c4a 61,63-66,76
+  s_0a386fc571f8fe::t_f15e05ea333e56 1-40,42-60,67-75,77-101
+  s_0a386fc571f8fe::t_2597755221a902 41
+  s_0a386fc571f8fe::t_0c82be76b46915 62
+prototype/runtime-spike/internal/spike/core.go
+  s_0a386fc571f8fe::t_418bc7e11dfb0f 37,39-42,68
+  s_0a386fc571f8fe::t_f15e05ea333e56 1-36,38,43-67,69-109
+prototype/runtime-spike/internal/spike/projection.go
+  s_0a386fc571f8fe::t_2597755221a902 17,32,60-61
+  s_0a386fc571f8fe::t_418bc7e11dfb0f 148,154-157
+  s_0a386fc571f8fe::t_d36625bb95c3fc 1-16,18-31,33-59,62-147,149-153,158-218
+prototype/runtime-spike/contracts/fixtures/normalize-request.json
+  s_0a386fc571f8fe::t_59fb6dac0c5b33 1-10
+prototype/runtime-spike/internal/spike/config.go
+  s_0a386fc571f8fe::t_e2b8f0ad92c73a 1-17,27,32-54,63-79
+  s_0a386fc571f8fe::t_2597755221a902 18-26,28-31,55-62
+prototype/runtime-spike/cmd/quivr-spike/main.go
+  s_0a386fc571f8fe::t_f15e05ea333e56 1-46
+prototype/runtime-spike/internal/spike/model.go
+  s_0a386fc571f8fe::t_d3ae3840448c4a 79-82,85-90,92-97
+  s_0a386fc571f8fe::t_e2b8f0ad92c73a 1-20,27-78,83-84,91,98-110,112-116,120,124-197
+  s_0a386fc571f8fe::t_2597755221a902 21-26,111,117-119,121-123
+prototype/runtime-spike/contracts/fixtures/retryable-error.json
+  s_0a386fc571f8fe::t_59fb6dac0c5b33 1-6
+prototype/runtime-spike/contracts/fixtures/terminal-error.json
+  s_0a386fc571f8fe::t_59fb6dac0c5b33 1-6
+prototype/runtime-spike/go.mod
+  s_0a386fc571f8fe::t_7d0a3afb4beea4 74-76,84-86
+  s_0a386fc571f8fe::t_a03befe5d01c95 13
+  s_0a386fc571f8fe::t_894159edfdda22 72
+  s_0a386fc571f8fe::t_9ab94652802e45 1-2,6-7,10-12,14,16,89
+  s_0a386fc571f8fe::t_5a0a9ac76a3d75 3-5
+  s_0a386fc571f8fe::t_2597755221a902 8-9,15,17-71,73,77-83,87-88
+prototype/runtime-spike/README.md
+  s_0a386fc571f8fe::t_9ab94652802e45 1-6,9-45,64-67
+  s_0a386fc571f8fe::t_b1e7c071fcaa7b 7-8,46-63
+prototype/runtime-spike/internal/spike/api.go
+  s_0a386fc571f8fe::t_f15e05ea333e56 1-207
+prototype/runtime-spike/contracts/plugin-error-v1.schema.json
+  s_0a386fc571f8fe::t_59fb6dac0c5b33 1-30
+prototype/runtime-spike/contracts/plugin-normalize-v1.schema.json
+  s_0a386fc571f8fe::t_9ab94652802e45 1-23
+prototype/runtime-spike/contracts/plugin-normalize-result-v1.schema.json
+  s_0a386fc571f8fe::t_9ab94652802e45 1-16
+prototype/runtime-spike/internal/spike/model_test.go
+  s_0a386fc571f8fe::t_1ac2eec2398702 11
+  s_0a386fc571f8fe::t_221fe93c06af54 1-10,12-59
+prototype/runtime-spike/internal/spike/store.go
+  s_0a386fc571f8fe::t_2597755221a902 379-381,383-385
+  s_0a386fc571f8fe::t_7dfb49ceebb059 14,606
+  s_0a386fc571f8fe::t_d3ae3840448c4a 345
+  s_0a386fc571f8fe::t_3055d0670af41c 76-89,103,106-108
+  s_0a386fc571f8fe::t_998cf1282bfb05 1-13,15-75,90-102,104-105,109-344,346-378,382,386-605,607-615
+prototype/runtime-spike/blackbox/runtime_test.go
+  s_0a386fc571f8fe::t_bec3534380e648 159-164
+  s_0a386fc571f8fe::t_cb93962dbe85b2 147-158,165-168,170-177,345-351,353,355-360,460-464,472
+  s_0a386fc571f8fe::t_5992904ea44b48 218-230
+  s_0a386fc571f8fe::t_241ba8870e8833 1-146,178-217,231-288,290-344,352,354,361-459,465-471,473-538
+  s_0a386fc571f8fe::t_3ccf27abab10ab 169
+  s_0a386fc571f8fe::t_1ac2eec2398702 289
+prototype/runtime-spike/internal/spike/blob.go
+  s_0a386fc571f8fe::t_1af22d2a320a8b 7,63-64
+  s_0a386fc571f8fe::t_2597755221a902 73,83
+  s_0a386fc571f8fe::t_d36625bb95c3fc 1-6,8-62,65-72,74-82,84-114
+prototype/runtime-spike/compose.yaml
+  s_0a386fc571f8fe::t_221fe93c06af54 52
+  s_0a386fc571f8fe::t_3763614678fb40 24-30,32-36,39,112,123
+  s_0a386fc571f8fe::t_499f7b2e9b7862 31,40
+  s_0a386fc571f8fe::t_c1334ce768119e 73-74,98-99,117-118
+  s_0a386fc571f8fe::t_9ab94652802e45 1-4,6-20,37-38,41-51,53-72,75-97,100-111,113-116,119-122,124
+  s_0a386fc571f8fe::t_bd110d7ae52991 5
+  s_0a386fc571f8fe::t_2927437e613bea 21-23
+prototype/runtime-spike/internal/spike/plugin.go
+  s_0a386fc571f8fe::t_d36625bb95c3fc 1-76,80-90,96-106,108-124,139-158,160-171,175-183,190,197-213,221-226,233,236-259
+  s_0a386fc571f8fe::t_d3ae3840448c4a 77-79,172-174,184-185,196,227-232,234-235
+  s_0a386fc571f8fe::t_cb93962dbe85b2 94-95,130-131,133-136,159,186-189,191-195,215-219
+  s_0a386fc571f8fe::t_c1334ce768119e 107,125-129,132,137-138,214,220
+  s_0a386fc571f8fe::t_1b0f092ec5f9bd 91-93
+prototype/runtime-spike/internal/spike/worker.go
+  s_0a386fc571f8fe::t_2597755221a902 53
+  s_0a386fc571f8fe::t_f15e05ea333e56 1-52,54-120
+prototype/runtime-spike/go.sum
+  s_0a386fc571f8fe::t_1dfaf8b64b9bca 1-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "4cbaee46b39dda50f855062416b1ea5a5991ff04",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

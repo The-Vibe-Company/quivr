@@ -1,0 +1,59 @@
+research/new-oss-vector-systems.md
+  s_0a386fc571f8fe::t_8ce205a565cfcc 3-4
+  s_0a386fc571f8fe::t_171f5845432056 1-2
+  s_0a386fc571f8fe::t_f3cd2d91844524 5-7
+  s_0a386fc571f8fe::t_1e8ce1c766da18 8-260
+.gitmodules
+  s_0a386fc571f8fe::t_d06fcbe7fc4be8 4-6
+  s_0a386fc571f8fe::t_5d9d26f2cf48b5 1-3
+afp-doc
+  s_0a386fc571f8fe::t_a21d4ab438413f 1
+multimodal-rag
+  s_0a386fc571f8fe::t_058d930878739f 1
+research/deepseek-harness-plugin-architecture.md
+  s_0a386fc571f8fe::t_72eab8bdb2af28 1-236
+research/event-runtime-devx.md
+  s_0a386fc571f8fe::t_6dc17b485ee3eb 1-197
+research/herd-plugin-architecture.md
+  s_0a386fc571f8fe::t_f2ea160960dc2c 1-177
+research/meilisearch-for-quivr.md
+  s_0a386fc571f8fe::t_d1ef473101bda3 1-291
+research/new-durable-runtime-systems.md
+  s_0a386fc571f8fe::t_442e06c3398713 1-272
+research/pi-plugin-architecture.md
+  s_0a386fc571f8fe::t_40e4606f97ab7f 1-235
+research/plugin-isolation-runtime.md
+  s_0a386fc571f8fe::t_16468680c57d1d 1-277
+research/storage-search-stack.md
+  s_0a386fc571f8fe::t_57c029032ed371 1-262
+research/windmill-for-quivr.md
+  s_0a386fc571f8fe::t_3a1d4172ab291f 1-167
+.gitignore
+  s_0a386fc571f8fe::t_7ebc4286dc0726 1-6
+CONTEXT.md
+  s_0a386fc571f8fe::t_258c420a20e19f 1-203
+README.md
+  s_0a386fc571f8fe::t_52f4a8575cf846 1-88
+docs/quivr-v2-architecture-overview.md
+  s_0a386fc571f8fe::t_2dc61a3a735efc 1-301
+docs/quivr-v2-backend-mvp-scope.md
+  s_0a386fc571f8fe::t_2c5fe34dfafbfe 1-672
+research/modern-search-devx.md
+  s_0a386fc571f8fe::t_9c6fb2938079f7 1-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "380417934c84a2a2d9dc9a98483cf321f3a4b445",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

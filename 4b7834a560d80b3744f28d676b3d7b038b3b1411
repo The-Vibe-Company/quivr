@@ -1,0 +1,44 @@
+README.md
+  s_0a386fc571f8fe::t_3541457791491d 80
+CONTEXT.md
+  s_0a386fc571f8fe::t_47774ff416d517 16
+  s_0a386fc571f8fe::t_13abf3431dad29 20,32,64,121-127,132
+  s_0a386fc571f8fe::t_00b7b9d1360205 176,179-181
+  s_0a386fc571f8fe::t_4ec62b0913153d 138
+  s_0a386fc571f8fe::t_b69b979bb9b618 150
+  s_0a386fc571f8fe::t_0ae8add5a2d08f 24,36,134,142,146,164,172
+  s_0a386fc571f8fe::t_04b99e1b8cca7d 86,89-92,94,97-99,106-111,128-131,230
+  s_0a386fc571f8fe::t_26024753034ea1 102
+  s_0a386fc571f8fe::t_a198c45a916f32 12,40,114,117-120
+  s_0a386fc571f8fe::t_e5ca19389f9538 100
+  s_0a386fc571f8fe::t_b46e2cfa778dbf 182
+docs/quivr-v2-architecture-overview.md
+  s_0a386fc571f8fe::t_32ea9015f1a4a1 100-101,115,121-123,126
+  s_0a386fc571f8fe::t_b69b979bb9b618 87,103-104,120
+docs/quivr-v2-canonical-data-model.md
+  s_0a386fc571f8fe::t_bdead905c0090e 106,120-121,160,202
+  s_0a386fc571f8fe::t_da4e5771a31790 169-170,183,236-248,435,437,443-448
+  s_0a386fc571f8fe::t_9f25476dc8dda8 3-6
+  s_0a386fc571f8fe::t_22d67bed5a3786 206
+  s_0a386fc571f8fe::t_eb049e024180e8 457
+  s_0a386fc571f8fe::t_f8529eb141ca72 1-2,7-105,107-119,122-159,161-168,171-182,184-201,203-205,207-235,249-434,436,438-442,449-456,458-512
+docs/quivr-v2-backend-mvp-scope.md
+  s_0a386fc571f8fe::t_b69b979bb9b618 149,174
+  s_0a386fc571f8fe::t_32ea9015f1a4a1 132-133,172,175-177,179,493-497,500
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "4b7834a560d80b3744f28d676b3d7b038b3b1411",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

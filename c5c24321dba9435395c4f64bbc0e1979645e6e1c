@@ -1,0 +1,21 @@
+README.md
+  s_0a386fc571f8fe::t_51625a05478553 7-8
+docs/quivr-v2-architecture-overview.md
+  s_0a386fc571f8fe::t_51625a05478553 9-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c5c24321dba9435395c4f64bbc0e1979645e6e1c",
+  "prompts": {},
+  "sessions": {
+    "s_0a386fc571f8fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0678f-7613-7d52-abd2-edfc97009055",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
