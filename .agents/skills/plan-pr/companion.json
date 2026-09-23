@@ -1,0 +1,56 @@
+{
+  "$schema": "https://skillpack.app/schemas/companion-manifest.v2.schema.json",
+  "name": "plan-pr",
+  "version": "1.1.0",
+  "icon": "layers",
+  "title": "Plan PR",
+  "description": "Prepare a grounded plan from a prompt or ticket, get human approval, implement with fixed design/TDD expertise, then hand off to Ship PR.",
+  "notes": "## Workflow\n\nRead the request, tracker context and repository rules. Produce a concise plan with acceptance evidence and a fixed skill assignment. The same agent implements after approval; ship-pr-dev owns final validation, independent review, PR and CI.\n\n## Setup\n\nOptional shared repository Markdown config records tracker mapping, conventions and application launch/validation instructions. Credentials are referenced, never stored. Linear, GitHub, GitLab and other configured trackers use the same intake contract.\n\n## Dependencies\n\nAll six skills are distributed with the workflow but invoked only when relevant. No runtime skill search or installation. Ship PR plan handoff tested against 1.5.1; design-frontend-dev against 3.1.1.\n\n## Evaluation limits\n\nFixture-based planning comparisons cover seven situations; they do not constitute live Linear, browser or end-to-end PR validation.",
+  "metadata": {
+    "companionSkillId": "d38a38f6-3f19-4547-9db7-0daa729ac51c",
+    "changelog": [
+      {
+        "version": "1.1.0",
+        "date": "2026-09-23",
+        "changes": [
+          "Include Skillpack activation reporting with optional identity, telemetry opt-out, and non-blocking delivery."
+        ]
+      },
+      {
+        "version": "1.0.0",
+        "date": "2026-09-23",
+        "changes": [
+          "Initial prompt/ticket-to-approved-plan workflow with fixed expertise routing.",
+          "Shared portable tracker and validation setup, vertical behavioral TDD and same-agent implementation.",
+          "Explicit source/plan/evidence handoff to Ship PR with adaptive planning depth."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {
+    "better-ui": "282bcb0f-f596-4549-8444-aaa36dc0579a",
+    "design-frontend-dev": "02decff6-b4ac-4d06-a494-abeeb08db9f3",
+    "emil-design-eng": "72009063-04f5-43db-bd45-76e7bb49c8e6",
+    "grilling": "4232efaf-3767-4a3b-85e7-d138981436e0",
+    "ship-pr-dev": "bccb0c35-71bf-4fe8-ad7c-7a931889fa84",
+    "tdd": "cca3457b-8b63-41f9-b02a-b324cc02aecf"
+  },
+  "commands": [
+    {
+      "name": "Plan a change",
+      "desc": "Ground a prompt or ticket in the repository and propose an approval-ready plan."
+    },
+    {
+      "name": "Set up planning conventions",
+      "desc": "Record shared tracker mapping and application validation instructions."
+    },
+    {
+      "name": "Continue an approved plan",
+      "desc": "Preserve approval and completed work, implement remaining slices, then invoke Ship PR."
+    }
+  ]
+}

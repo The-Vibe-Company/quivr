@@ -40,14 +40,15 @@ Stay in the coordinator for one-tool-call edits, deterministic discovery, checks
 ### Primary reviewer
 
 - Read-only and isolated.
-- Owned by `review-code-dev`, including frontend and specialist routing.
-- Verifies specialist candidates before publishing findings.
+- Dispatched by the coordinator using this host matrix and a fresh context; runs `review-code-dev` v2 Alibaba delegation.
+- Performs the review and required focus areas directly, with no nested review agents. Returns the contract in `review-gate.md`; never fixes code.
+- OCR bootstrap and deterministic preview/rule preparation stay with the coordinator. If no isolated adapter exists, report the independent-review blocker rather than silently self-approving.
 
-### Focused reviewer or CI investigator
+### CI investigator
 
 - One independent question and bounded evidence.
 - Read-only, no nested agents.
-- Used only when the coordinator/primary cannot answer efficiently from direct evidence.
+- Used only when the coordinator cannot answer efficiently from direct evidence.
 
 ### Learning worker
 
@@ -58,7 +59,7 @@ Stay in the coordinator for one-tool-call edits, deterministic discovery, checks
 ## Retry And Concurrency
 
 - Resume the same worker for follow-up when supported.
-- After two failed attempts on one root cause, the coordinator takes over or stops.
+- After two failed attempts on one root cause, the coordinator takes over diagnosis under `readiness-gates.md`'s reassessment policy; the count alone does not block delivery.
 - Run at most three read-only workers concurrently.
 - Never run two workers with the same angle.
 - Never use model turns as process or CI pollers; use deterministic wait commands.
@@ -67,9 +68,9 @@ Stay in the coordinator for one-tool-call edits, deterministic discovery, checks
 
 Time limits cover local orchestration and model work, not healthy external CI waiting:
 
-| Tier | Local target | Reassessment checkpoint | Write worker checkpoint | Primary review checkpoint | Focused/CI checkpoint | Learning checkpoint |
+| Tier | Local target | Reassessment checkpoint | Write worker checkpoint | Primary review checkpoint | CI checkpoint | Learning checkpoint |
 | --- | --- | --- | --- | --- | --- | --- |
-| trivial | 10 min | 15 min | none | inline/5 min | none | 3 min |
+| trivial | 10 min | 15 min | none | 5 min | none | 3 min |
 | standard | 25 min | 40 min | 15 min | 12 min | 8 min | 5 min |
 | deep | 50 min | 90 min | 25 min | 20 min | 12 min | 5 min |
 
@@ -94,7 +95,7 @@ Write `phase-timing.json`:
 ## Work Order
 
 ```text
-Role: <write-worker | primary-reviewer | focused-reviewer | ci-investigator | learning-worker>
+Role: <write-worker | primary-reviewer | ci-investigator | learning-worker>
 Objective: <one bounded outcome>
 Repository: <absolute path>
 Inputs: <files/artifacts>
@@ -112,7 +113,7 @@ Write `agent-budget.json` before dispatch and update it after each worker:
 ```json
 {
   "tier": "standard",
-  "limits": {"write_workers": 1, "primary_reviewers": 1, "focused_reviewers": 2, "max_concurrent_read_only": 3},
+  "limits": {"write_workers": 1, "primary_reviewers": 1, "focused_reviewers": 0, "max_concurrent_read_only": 3},
   "workers": [
     {"role": "write-worker", "adapter": "subagent", "requested_model": "gpt-5.6-luna", "requested_effort": "max", "effective_model": null, "effective_effort": null, "resumed": false, "duration_seconds": null, "tokens": null, "outcome": "pending"}
   ]

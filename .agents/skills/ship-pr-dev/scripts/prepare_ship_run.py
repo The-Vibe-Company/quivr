@@ -29,11 +29,16 @@ def slugify(value: str) -> str:
 
 
 def ensure_git_ignore(repo_root: Path) -> None:
-    git_dir = run_git(repo_root, ["rev-parse", "--git-dir"], check=True).stdout.strip()
-    git_path = Path(git_dir)
-    if not git_path.is_absolute():
-        git_path = repo_root / git_path
-    exclude_path = git_path / "info" / "exclude"
+    tracked = run_git(repo_root, ["ls-files", "plans/ship-pr-dev/"], check=True).stdout.strip()
+    if tracked:
+        raise SystemExit("plans/ship-pr-dev/ is tracked by Git; refusing to write artifacts")
+
+    if run_git(repo_root, ["check-ignore", "-q", "plans/ship-pr-dev/"]).returncode == 0:
+        return
+
+    exclude_path = Path(run_git(repo_root, ["rev-parse", "--git-path", "info/exclude"], check=True).stdout.strip())
+    if not exclude_path.is_absolute():
+        exclude_path = repo_root / exclude_path
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
     exclude = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
     ignore_line = "/plans/ship-pr-dev/"
@@ -46,11 +51,6 @@ def ensure_git_ignore(repo_root: Path) -> None:
     check_ignore = run_git(repo_root, ["check-ignore", "-q", "plans/ship-pr-dev/"])
     if check_ignore.returncode != 0:
         raise SystemExit("plans/ship-pr-dev/ is not ignored by Git; refusing to write artifacts")
-
-    tracked = run_git(repo_root, ["ls-files", "plans/ship-pr-dev/"]).stdout.strip()
-    if tracked:
-        raise SystemExit("plans/ship-pr-dev/ is tracked by Git; refusing to write artifacts")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()

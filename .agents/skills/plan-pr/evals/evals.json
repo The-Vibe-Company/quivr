@@ -1,0 +1,109 @@
+{
+  "skill_name": "plan-pr",
+  "evals": [
+    {
+      "id": 1,
+      "name": "small-copy",
+      "prompt": "Prépare un plan très court pour corriger Sauvgarder en Sauvegarder dans src/copy.js. Ne change rien pour le moment.",
+      "expected_output": "A short grounded plan, no unnecessary questions, no synthetic TDD, approval then delivery handoff.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "The proposed change targets src/copy.js and the exact misspelling without unrelated work.",
+        "The plan is at most 300 words and asks no product/setup questions beyond approval.",
+        "No new test suite or forced TDD is proposed for this copy-only change.",
+        "The plan preserves approval before edits and names the downstream delivery owner."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ui-no-runtime",
+      "prompt": "Planifie une amélioration du graphe : je veux mieux repérer les petits nœuds et lire leurs labels. Garde la structure actuelle.",
+      "expected_output": "Read rendering facts, distinguish proposals, select better-ui and behavioral TDD, honor disabled launch, plan visual checks honestly.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "The plan grounds diagnosis in at least two fixture facts: zoom-scaled radius, degree threshold, label size/alpha, separate pointer hit area.",
+        "Proposed sizes/thresholds are labeled proposals rather than visually verified conclusions.",
+        "Launch disabled is honored and no screenshots or running-app verification are fabricated.",
+        "Behavioral tests and rendered readability/interaction checks are distinguished; selected expertise has a phase and assignment."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "linear-conflict",
+      "prompt": "Planifie APP-42 dans Linear. Lis bien les sous-tickets et propose comment le faire.",
+      "expected_output": "Read all scoped provider fixture records; identify parent/child role conflict; ask focused decision, include CSV/error/audit coverage.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "Evidence shows intake of APP-42, APP-10, APP-43, APP-44 and APP-9.",
+        "The admin-only vs all-members conflict is explicit and not silently decided from recency alone.",
+        "A focused role-policy question is present without an unrelated generic questionnaire.",
+        "The approach includes tenant isolation, CSV escaping and the audit requirement with suitable behavioral tests."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "missing-ui-skill",
+      "prompt": "Planifie une nouvelle page de paramètres avec une direction visuelle claire. Pour ce cas le skill design-frontend-dev est indisponible. Aucun serveur ni navigateur. Pas de maquette fournie.",
+      "expected_output": "Disclose missing expertise, no install/search, explicit limited design proposal/preview, do not claim visual validation or block independent planning.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "The missing design skill is disclosed and no marketplace search, installation or invented invocation is claimed.",
+        "A limited design proposal or wireframe is offered for approval without pretending it is a rendered screenshot.",
+        "Missing browser/server does not block all planning or trigger unauthorized setup.",
+        "Assumptions and remaining visual verification are explicit."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "wrong-owner",
+      "prompt": "Le code est déjà prêt. Ouvre la PR et vérifie la CI, pas besoin de refaire un plan.",
+      "expected_output": "Route directly to ship-pr-dev without imposing planning approval; simulated handoff only in eval.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "The response routes to ship-pr-dev without writing a new feature implementation plan.",
+        "It does not require planning approval or setup as a prerequisite for this standalone delivery request.",
+        "It names appropriate verification/review/CI work without claiming those actions have already succeeded."
+      ]
+    },
+    {
+      "id": 6,
+      "name": "approved-resume",
+      "prompt": "Reprends approved-plan.md : je l’ai déjà approuvé. Dis-moi la suite concrète en gardant la contrainte local-only.",
+      "expected_output": "Honor approval and completed work, inspect current state, vertical TDD remaining scope and local-only Ship handoff. No redundant approval.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "The response preserves existing approval and does not ask the same approval again.",
+        "It identifies completed tenant isolation and plans only remaining admin/CSV behavior plus verification.",
+        "Remaining testable behavior uses failing-test then implementation vertical slices.",
+        "The local-only constraint survives the handoff; no push, PR creation or remote CI success is promised."
+      ]
+    },
+    {
+      "id": 7,
+      "name": "setup",
+      "prompt": "Configure ce workflow pour ce dépôt : Linear pour APP-*, ne lance jamais les applications par défaut. Les commandes de test sont déjà dans package.json. Je veux une config partagée.",
+      "expected_output": "Prepare portable shared planning+validation docs preserving preferences with links, no secrets, no marketplace search or task-specific rules.",
+      "files": [
+        "fixtures/project"
+      ],
+      "expectations": [
+        "Shared planning and validation configuration is produced or concretely specified, with Linear APP-* and launch disabled.",
+        "The configuration references existing package scripts instead of inventing service commands.",
+        "Shared configuration contains no credentials, absolute machine paths or unrelated task scenarios.",
+        "The response does not reopen answered tracker/launch preferences or add runtime marketplace discovery."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "skill_name": "impeccable",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review this React dashboard UI for accessibility, responsive behavior, visual hierarchy, and AI-looking patterns. Do not edit code.",
+      "expected_output": "A read-only frontend review with P0-P3 findings, concrete evidence, user impact, and fix direction, without requiring CLI, hooks, live mode, or external services."
+    },
+    {
+      "id": 2,
+      "prompt": "Polish this landing page. It feels generic and too much like an AI-generated SaaS page.",
+      "expected_output": "A production-oriented design pass using brand-register guidance, anti-slop bans, typography/color/layout references, and concrete implementation direction."
+    },
+    {
+      "id": 3,
+      "prompt": "Shape the UX for a new onboarding form before implementation.",
+      "expected_output": "A design brief that asks only necessary clarifying questions, identifies user context, states, edge cases, responsive constraints, and recommended references."
+    }
+  ]
+}

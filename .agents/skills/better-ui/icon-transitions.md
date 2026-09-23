@@ -99,4 +99,3 @@ Use exactly these values for contextual icon animations. Do not deviate:
 - `opacity`: `0` → `1`
 - `filter`: `"blur(4px)"` → `"blur(0px)"`
 - `transition`: `{ type: "spring", duration: 0.3, bounce: 0 }`; **bounce must always be `0`**, never `0.1` or any other value
-

@@ -202,4 +202,3 @@ Motion is a budget, not a garnish. Three rules decide whether an animation belon
   animation: bounceIn 500ms;
 }
 ```
-

@@ -144,4 +144,3 @@ Exits are softer and less attention-grabbing than enters. The user's focus is mo
 - Keep some directional movement to indicate where the element went
 - Exit duration should be shorter than enter duration (150ms vs 300ms)
 - Use a subtle exit when it preserves spatial context. Remove immediately when motion adds no information, the interaction repeats frequently, or reduced motion is requested.
-

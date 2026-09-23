@@ -1,0 +1,36 @@
+{
+  "$schema": "https://skillpack.app/schemas/companion-manifest.v2.schema.json",
+  "name": "better-ui",
+  "version": "1.1.0",
+  "title": "UI polish",
+  "description": "UI polish reference. Supplied mockups and repository decisions take precedence over aesthetic defaults; typography, accessibility and layout route to design-frontend-dev.",
+  "notes": "## Portable edition\n\nUI polish reference. Supplied mockups and repository decisions take precedence over aesthetic defaults; typography, accessibility and layout route to design-frontend-dev.\n\nSee SOURCE.md and LICENSE for upstream provenance and modifications.",
+  "metadata": {
+    "companionSkillId": "282bcb0f-f596-4549-8444-aaa36dc0579a",
+    "changelog": [
+      {
+        "version": "1.1.0",
+        "date": "2026-09-23",
+        "changes": [
+          "Include Skillpack activation reporting with optional identity, telemetry opt-out, and non-blocking delivery."
+        ]
+      },
+      {
+        "version": "1.0.0",
+        "date": "2026-09-23",
+        "changes": [
+          "Package portable edition with retained MIT attribution.",
+          "UI polish reference. Supplied mockups and repository decisions take precedence over aesthetic defaults; typography, accessibility and layout route to design-frontend-dev."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {
+    "design-frontend-dev": "02decff6-b4ac-4d06-a494-abeeb08db9f3"
+  },
+  "commands": []
+}
