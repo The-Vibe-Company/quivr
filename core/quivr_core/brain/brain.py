@@ -145,11 +145,14 @@ class Brain:
         console.print(panel)
 
     @classmethod
-    def load(cls, folder_path: str | Path) -> Self:
+    def load(
+        cls, folder_path: str | Path, allow_dangerous_deserialization: bool = False
+    ) -> Self:
         """
         Load a brain from a folder path.
         Args:
             folder_path (str | Path): The path to the folder containing the brain.
+            allow_dangerous_deserialization (bool): Unpickle the FAISS index of the folder. Only set this for a folder you created yourself.
         Returns:
             Brain: The brain loaded from the folder path.
         Example:
@@ -191,7 +194,7 @@ class Brain:
             vector_db = FAISS.load_local(
                 folder_path=bserialized.vectordb_config.vectordb_folder_path,
                 embeddings=embedder,
-                allow_dangerous_deserialization=True,
+                allow_dangerous_deserialization=allow_dangerous_deserialization,
             )
         else:
             raise ValueError("Unsupported vectordb")

@@ -13,7 +13,7 @@ async def main():
 
         save_path = await brain.save("/home/amine/.local/quivr")
 
-        brain_loaded = Brain.load(save_path)
+        brain_loaded = Brain.load(save_path, allow_dangerous_deserialization=True)
         brain_loaded.print_info()
 
 
