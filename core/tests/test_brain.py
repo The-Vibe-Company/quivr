@@ -4,6 +4,8 @@ from uuid import uuid4
 import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
 from quivr_core.brain import Brain
 from quivr_core.rag.entities.chat import ChatHistory
 from quivr_core.llm import LLMEndpoint
@@ -149,3 +151,31 @@ def test_brain_info_empty(fake_llm: LLMEndpoint, embedder, mem_vector_store):
         },
         "llm_info": asdict(fake_llm.info()),
     }
+
+
+@pytest.mark.asyncio
+async def test_brain_load_faiss_requires_opt_in_deserialization(
+    fake_llm: LLMEndpoint, tmp_path
+):
+    openai_embedder = OpenAIEmbeddings()
+    vector_db = FAISS.from_embeddings(
+        text_embeddings=[("content_1", [0.1] * 1536)],
+        embedding=openai_embedder,
+    )
+    brain = Brain(
+        name="test_brain",
+        id=uuid4(),
+        llm=fake_llm,
+        embedder=openai_embedder,
+        storage=TransparentStorage(),
+        vector_db=vector_db,
+    )
+
+    brain_path = await brain.save(tmp_path)
+
+    with pytest.raises(ValueError):
+        Brain.load(brain_path)
+
+    loaded_brain = Brain.load(brain_path, allow_dangerous_deserialization=True)
+    assert loaded_brain.name == "test_brain"
+    assert isinstance(loaded_brain.vector_db, FAISS)
