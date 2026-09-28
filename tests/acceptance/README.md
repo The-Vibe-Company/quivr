@@ -13,11 +13,12 @@ isolated stack, sets the scoped keys and runs them in the order declared in
   background load, as the connector tests do with `org_c`. Test files run in
   alphabetical order inside one `go test` call, and `TestAuthorization` expects
   exactly one Corpus in `org_a` when it starts.
-- **Wait for enrichment before any search assertion.** Attaching embeddings
-  rewrites the projected object, and the search store briefly hides it from
-  lexical results while it does (THE-690). A Version being searchable is not
-  enough. Wait for `record.enrichment_available` (`awaitEnriched`, `ingestEnriched`),
-  then search.
+- **Wait for enrichment before semantic, hybrid or ranking assertions.** A
+  searchable Version stays in lexical results while its embedding is attached,
+  because the lexical object is never rewritten (THE-690). Its vector only
+  exists once `record.enrichment_available` is emitted, so wait for that event
+  (`awaitEnriched`, `ingestEnriched`) before asserting vector-dependent results.
+  Tests that already wait before lexical assertions may keep doing so.
 - **Poll named public conditions with a deadline** (`awaitReceipt`, `awaitReady`,
   `awaitDelivery`, `awaitOperation`). Never assert server IDs, wall-clock durations
   or private workflow state.

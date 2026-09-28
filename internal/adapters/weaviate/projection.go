@@ -85,10 +85,72 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
-func objectID(org, generation, segment string) string {
-	h := content.Hash([]byte(content.StableID("projection", org, generation, segment)))
+func uuidOf(stable string) string {
+	h := content.Hash([]byte(stable))
 	return h[:8] + "-" + h[8:12] + "-5" + h[13:16] + "-a" + h[17:20] + "-" + h[20:32]
 }
+
+// objectID names the lexical object promotion publishes for a segment.
+func objectID(org, generation, segment string) string {
+	return uuidOf(content.StableID("projection", org, generation, segment))
+}
+
+// enrichedID names the object carrying one embedding payload for a segment. It
+// is scoped like objectID: segments belong to one Version, and neither another
+// generation nor another Version can share the identity.
+func enrichedID(org, generation, segment, payloadSHA string) string {
+	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
+}
+
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", "body", "title"}
+
+type storedObject struct {
+	Properties map[string]any       `json:"properties"`
+	Vectors    map[string][]float32 `json:"vectors"`
+}
+
+// object reads one object by identity; found is false only on a definite 404.
+func (s *Store) object(ctx context.Context, collection, id string) (storedObject, bool, error) {
+	var stored storedObject
+	status, err := s.call(ctx, "GET", "/v1/objects/"+collection+"/"+id+"?include=vector", nil, &stored)
+	if status == http.StatusNotFound {
+		return stored, false, nil
+	}
+	return stored, err == nil, err
+}
+
+func sameProperties(stored, want map[string]any) bool {
+	for key, value := range want {
+		if stored[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+// insert writes one object. A lost response is not an error here: the caller
+// reconciles it by reading the deterministic identity.
+func (s *Store) insert(ctx context.Context, object map[string]any) error {
+	var result []struct {
+		Result struct {
+			Status string `json:"status"`
+			Errors any    `json:"errors"`
+		} `json:"result"`
+	}
+	if _, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": []any{object}}, &result); err != nil {
+		return nil
+	}
+	if len(result) != 1 || result[0].Result.Status != "SUCCESS" || result[0].Result.Errors != nil {
+		return errors.New("projection publication failed")
+	}
+	return nil
+}
+
+// Publish projects each segment's lexical object. The lexical object is the
+// segment's permanent keyword-search anchor: once projected it is never
+// rewritten or deleted. Weaviate re-indexes an updated object under a new
+// document id, and a BM25 query does not read its index atomically, so an
+// update or a delete of the object serving a segment can hide it.
 func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID string, v content.Version, seg content.Segmentation) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
@@ -97,29 +159,22 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": texts[i].Body, "title": texts[i].Title}
-		object := map[string]any{"class": g.Collection, "id": id, "properties": properties}
-		var result []struct {
-			Result struct {
-				Status string `json:"status"`
-				Errors any    `json:"errors"`
-			} `json:"result"`
-		}
-		_, putErr := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": []any{object}}, &result)
-		// A lost response is reconciled by reading the deterministic object identity.
-		var stored struct {
-			Properties map[string]any `json:"properties"`
-		}
-		_, err := s.call(ctx, "GET", "/v1/objects/"+g.Collection+"/"+id, nil, &stored)
+		existing, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
 		}
-		for key, value := range properties {
-			if stored.Properties[key] != value {
-				return errors.New("projection verification mismatch")
-			}
+		if found && sameProperties(existing.Properties, properties) {
+			continue
 		}
-		if putErr == nil && (len(result) != 1 || result[0].Result.Status != "SUCCESS" || result[0].Result.Errors != nil) {
-			return errors.New("projection publication failed")
+		if err = s.insert(ctx, map[string]any{"class": g.Collection, "id": id, "properties": properties}); err != nil {
+			return err
+		}
+		stored, found, err := s.object(ctx, g.Collection, id)
+		if err != nil {
+			return err
+		}
+		if !found || !sameProperties(stored.Properties, properties) {
+			return errors.New("projection verification mismatch")
 		}
 	}
 	return nil
@@ -152,7 +207,7 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 	if q.Mode == "hybrid" {
 		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:0.5,fusionType:relativeScoreFusion,properties:[\"title^2\",\"body\"],targetVectors:[\"semantic_text_v1\"]}", quote(q.Query), vector)
 	}
-	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId}}}", collection, branch, where, 100)
+	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId}}}", collection, branch, where, retrieval.CandidateLimit)
 	var response struct {
 		Data struct {
 			Get map[string][]struct {
@@ -183,6 +238,10 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 	return result, nil
 }
 
+// PublishEmbeddings attaches vectors without updating or deleting the segment's
+// lexical anchor. For each segment it creates an enriched object beside the
+// anchor, verifies it, then removes any other enriched object of the segment.
+// Search sees the anchor throughout; retrieval deduplicates by segment.
 func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid embedding projection")
@@ -196,20 +255,65 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		if err != nil || content.Hash(raw) != e.Payload.SHA256 {
 			return errors.New("embedding payload mismatch")
 		}
-		path := "/v1/objects/" + g.Collection + "/" + objectID(org, g.ID, e.SegmentID)
-		// Merge preserves lexical fields and cannot create a vector-only object.
-		_, _ = s.call(ctx, "PATCH", path, map[string]any{"class": g.Collection, "vectors": map[string]any{"semantic_text_v1": p.Vector}}, nil)
-		var stored struct {
-			Vectors    map[string][]float32 `json:"vectors"`
-			Properties map[string]any       `json:"properties"`
-		}
-		if _, err = s.call(ctx, "GET", path+"?include=vector", nil, &stored); err != nil {
+		id := enrichedID(org, g.ID, e.SegmentID, e.Payload.SHA256)
+		stored, found, err := s.object(ctx, g.Collection, id)
+		if err != nil {
 			return err
 		}
+		if !found {
+			// Never create an enriched object for a segment without its lexical anchor.
+			anchor, projected, err := s.object(ctx, g.Collection, objectID(org, g.ID, e.SegmentID))
+			if err != nil {
+				return err
+			}
+			if !projected {
+				return retrieval.ErrProjectionMissing
+			}
+			lexical := map[string]any{}
+			for _, key := range lexicalProperties {
+				lexical[key] = anchor.Properties[key]
+			}
+			// Create-only: an object already written by a concurrent attachment is
+			// never re-indexed. A rejected or lost create is reconciled by the read below.
+			_, _ = s.call(ctx, "POST", "/v1/objects", map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": map[string]any{"semantic_text_v1": p.Vector}}, nil)
+			if stored, found, err = s.object(ctx, g.Collection, id); err != nil {
+				return err
+			}
+		}
 		recovered, err := content.VectorBytes(stored.Vectors["semantic_text_v1"])
-		if err != nil || content.Hash(recovered) != e.Payload.SHA256 || stored.Properties["segmentId"] != e.SegmentID {
+		if !found || err != nil || content.Hash(recovered) != e.Payload.SHA256 || stored.Properties["segmentId"] != e.SegmentID {
 			return errors.New("embedding projection verification failed")
 		}
+		// Cleanup runs on every attempt, so a retry after an interrupted attachment converges.
+		if err = s.removeStaleEnriched(ctx, g, org, e.SegmentID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeStaleEnriched deletes the segment's other enriched objects in the
+// generation, by filter. The lexical anchor is never deleted, so keyword search
+// keeps the segment visible even while an enriched object is replaced. Segments
+// belong to one Version, so no other Version's objects match.
+func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org, segment, keep string) error {
+	where := map[string]any{"operator": "And", "operands": []any{
+		map[string]any{"path": []string{"organization"}, "operator": "Equal", "valueText": org},
+		map[string]any{"path": []string{"generationId"}, "operator": "Equal", "valueText": g.ID},
+		map[string]any{"path": []string{"segmentId"}, "operator": "Equal", "valueText": segment},
+		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": keep},
+		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": objectID(org, g.ID, segment)},
+	}}
+	var response struct {
+		Results struct {
+			Failed int `json:"failed"`
+		} `json:"results"`
+	}
+	if _, err := s.call(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": g.Collection, "where": where}, "output": "minimal"}, &response); err != nil {
+		return err
+	}
+	if response.Results.Failed > 0 {
+		return errors.New("projection cleanup failed")
 	}
 	return nil
 }

@@ -211,8 +211,8 @@ func TestMonitoringWithdrawalNotices(t *testing.T) {
 	}
 	request(t, "POST", "/v0/subscriptions/"+disabled+"/disable", admin, map[string]any{"idempotency_key": "withdrawal-disable-" + disabled}, 200)
 
-	// Search only after enrichment: attaching an embedding briefly hides an
-	// object from lexical search (THE-690).
+	// Search after enrichment so the Version is observed in its final projected
+	// shape (lexical anchor plus enriched object, THE-690).
 	awaitEnriched(t, admin, s.corpus, s.cursor, s.record)
 	query := map[string]any{"query": "retirée", "corpus_ids": []string{s.corpus}, "mode": "lexical"}
 	if len(request(t, "POST", "/v0/search", admin, query, 200)["items"].([]any)) != 1 {

@@ -11,8 +11,22 @@ import (
 
 const ProfileVersion = "balanced.e5-token-windows.v1"
 
+// MaxLimit is the largest page a search may request.
+const MaxLimit = 50
+
+// CandidateLimit bounds the candidates fetched from the projection per search.
+// An enriched segment has a lexical object and an enriched object, and briefly
+// a second enriched object while its embedding is replaced: never more than
+// three. Three times MaxLimit candidates therefore hold MaxLimit distinct
+// segments when that many match, so deduplication cannot shrink a page.
+const CandidateLimit = 3 * MaxLimit
+
 var ErrUnsupported = errors.New("unsupported_search")
 var ErrUnavailable = errors.New("search_unavailable")
+
+// ErrProjectionMissing reports that a segment has no projected object in the
+// generation, so an embedding cannot be attached to it.
+var ErrProjectionMissing = errors.New("projection missing")
 
 type Request struct {
 	Query         string
@@ -87,7 +101,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if q.Limit == 0 {
 		q.Limit = 10
 	}
-	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Profile != "balanced" || q.Limit < 1 || q.Limit > 50 || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
+	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Profile != "balanced" || q.Limit < 1 || q.Limit > MaxLimit || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
 	seen := map[string]bool{}
@@ -161,7 +175,15 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	return out, nil
 }
 
+// IndexEmbeddings attaches a Version's vectors to its routed generation. A
+// Version that is no longer current and eligible has nothing to serve, so its
+// enrichment ends here instead of retrying against objects a rebuild never
+// projected.
 func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData) error {
+	eligible, err := s.Content.EnrichmentEligible(ctx, org, v.ID)
+	if err != nil || !eligible {
+		return err
+	}
 	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
 	if err != nil {
 		return err
@@ -174,6 +196,12 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 		return ErrUnsupported
 	}
 	if err = s.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
+		if errors.Is(err, ErrProjectionMissing) {
+			// Withdrawn or superseded since the check above: end, else retry.
+			if eligible, recheck := s.Content.EnrichmentEligible(ctx, org, v.ID); recheck == nil && !eligible {
+				return nil
+			}
+		}
 		return err
 	}
 	return s.Content.CommitEnrichment(ctx, org, seg, g, data)

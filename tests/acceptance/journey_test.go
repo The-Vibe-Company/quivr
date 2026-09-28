@@ -25,7 +25,7 @@ import (
 //
 // Each feature keeps its own acceptance tests; this file only composes public
 // behaviour they already prove. Search assertions run only after enrichment
-// committed (THE-690: attaching embeddings can briefly hide a Record from BM25).
+// committed, so vector-dependent results are deterministic.
 
 const (
 	journeyNoMatch = "CALME" // fixture decision marker: no_match; anything else matches

@@ -81,6 +81,30 @@ evaluation schema migrations are separate from rebuilding search projections.
   collection, and each projected object carries its logical generation.
 - Search sends one query covering every requested (Corpus, routed generation)
   pair. Each hit's `projection_generation_id` is its Corpus's routed generation.
+- Each segment's lexical object is its permanent keyword-search anchor. It is
+  never updated or deleted (THE-690). The engine re-indexes an updated object
+  under a new document id, and a BM25 query does not read its index atomically,
+  so updating or deleting the object serving a segment can briefly hide it.
+  - Attaching an embedding creates a separate enriched object (same text, plus
+    the vector) beside the anchor, create-only, and verifies it.
+  - It then deletes the segment's other enriched objects in that generation,
+    by filter.
+  - Every step is idempotent, so a retry converges on the anchor plus one
+    enriched object.
+  - An enriched segment therefore has two objects, and briefly three while its
+    embedding is replaced. Search deduplicates by segment and fetches three
+    times the maximum page size, so a `searchable` Record stays visible and
+    duplicates never shorten a page.
+  - Cost: every enriched segment's text is indexed twice for BM25 (about twice
+    the lexical index). Deduplication keeps one hit per segment, but BM25
+    statistics count both objects, so lexical scores can shift slightly, most
+    in a Corpus that mixes enriched and not-yet-enriched segments.
+  - Superseded and withdrawn Versions keep their objects; hydration hides them.
+    They still use candidate slots, so heavy churn in a Corpus can shorten a page
+    (see `docs/quivr-v2-remaining-limits.md`).
+- Enrichment of a Version that is no longer its Record's current eligible
+  Version (withdrawn, superseded or quarantined) ends without touching the
+  projection.
 - Promotion, enrichment and hydration all check routing. They serialize with
   activation on the Organization journal lock. Work still aimed at a replaced
   generation fails its guard and retries on the new route.

@@ -385,7 +385,7 @@ def verify(stack,steps):
     # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them after
     # order-sensitive acceptance and timed outage scenarios.
     steps.run('short_retention_api',stack.start_short_retention_api)
-    steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration')
+    steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions')
     # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
     steps.run('monitoring',stack.tests,'TestMonitoring')
     steps.run('delivery_worker_restart',delivery_restart,stack)

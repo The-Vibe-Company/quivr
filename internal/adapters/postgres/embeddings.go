@@ -58,6 +58,14 @@ func (s ContentStore) EnrichmentProgress(ctx context.Context, org, id, state, co
 	_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, state, code)
 	return err
 }
+func (s ContentStore) EnrichmentEligible(ctx context.Context, org, id string) (bool, error) {
+	var eligible bool
+	err := s.Pool.QueryRow(ctx, `SELECT coalesce(r.current_version_id=v.id,false) AND `+eligibleVersionSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&eligible)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return eligible, err
+}
 func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {

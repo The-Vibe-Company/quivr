@@ -67,9 +67,8 @@ func awaitRetrievalReady(t *testing.T, receiptID string) map[string]any {
 }
 
 // ingestEnriched ingests one Record and returns its Version once enrichment
-// has committed. Attaching embeddings updates the projected object, and the
-// projection store briefly hides an object from lexical search while it is
-// updated, so routing assertions must not search inside that window.
+// has committed, so assertions see the Version with its vectors and a rebuild
+// reuses them instead of racing the enrichment.
 func ingestEnriched(t *testing.T, corpusID, key, title, text string) string {
 	t.Helper()
 	admin := os.Getenv("QUIVR_TEST_ADMIN")

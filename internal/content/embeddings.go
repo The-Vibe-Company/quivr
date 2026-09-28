@@ -35,6 +35,17 @@ type EmbeddingRepository interface {
 	SaveEmbedding(context.Context, Embedding, VectorSpace) error
 	EnrichmentProgress(context.Context, string, string, string, string) error
 	CommitEnrichment(context.Context, string, Segmentation, Generation, []Embedding) error
+	// EnrichmentEligible reports whether a Version is its Record's current,
+	// eligible Version, the only kind search can serve.
+	EnrichmentEligible(ctx context.Context, org, versionID string) (bool, error)
+}
+
+// EnrichmentEligible reports whether enrichment of a Version can still serve search.
+func (s Service) EnrichmentEligible(ctx context.Context, org, versionID string) (bool, error) {
+	if org == "" || versionID == "" {
+		return false, ErrInvalid
+	}
+	return s.Embeddings.EnrichmentEligible(ctx, org, versionID)
 }
 
 func VectorBytes(vector []float32) ([]byte, error) {

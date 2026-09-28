@@ -14,7 +14,6 @@ stay visible. The Spec 1 obligation map is in
 
 | Limit | Impact | Ticket |
 | --- | --- | --- |
-| Attaching embeddings briefly hides a Record from lexical (BM25) search. Enrichment of a Version that is no longer eligible retries forever | Transient false negatives in lexical search; wasted worker capacity | [THE-690](https://linear.app/thevibecompany/issue/THE-690) |
 | Webhook destinations are not filtered against private or internal addresses | Server-side request forgery from the worker's network | [THE-695](https://linear.app/thevibecompany/issue/THE-695) |
 | No withdrawal notice for a Subscription disabled when the withdrawal is dispatched | A paused consumer keeps an alert for withdrawn content | [THE-696](https://linear.app/thevibecompany/issue/THE-696) |
 | Change events are never physically pruned; expiry is computed from cursor age | Unbounded journal growth | [THE-697](https://linear.app/thevibecompany/issue/THE-697) |
@@ -48,6 +47,18 @@ stay visible. The Spec 1 obligation map is in
 
 **Search and rebuild**
 
+- Each enriched segment is projected twice, as a permanent lexical object and
+  an enriched object, so BM25 postings are duplicated and the lexical index is
+  about twice as large (THE-690). Search deduplicates by segment, but BM25
+  document counts include both objects: an enriched segment's terms count twice,
+  which slightly lowers their IDF against not-yet-enriched segments until
+  enrichment catches up. Revisit for scale in Spec 8.
+- Objects of superseded Versions and withdrawn Records stay in the projection
+  store; hydration hides them. The projection query does not filter them, and
+  each search fetches at most 150 candidates (three per result for a page of
+  50), so a Corpus with heavy correction or withdrawal churn can return a
+  shorter page than exists. Physically purging dead objects is tracked with
+  abandoned generations in [THE-698](https://linear.app/thevibecompany/issue/THE-698).
 - Retrieval measurement ran on one 2-CPU runner with 24 documents.
   Lexical and hybrid ranks vary slightly between runs with identical pins.
 - Mapping values that cannot be projected are skipped silently. Pending
