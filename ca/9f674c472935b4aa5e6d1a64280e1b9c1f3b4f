@@ -1,0 +1,25 @@
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_477ef5f85bee09 60,92-93
+internal/adapters/postgres/migrate_test.go
+  s_ec117ba6cf48fd::t_94bbf752a5d86b 107-108
+scripts/migrations.py
+  s_ec117ba6cf48fd::t_cc1366314b304e 53-56,72-73,78,81-83,160,165-170
+scripts/test_migrations.py
+  s_ec117ba6cf48fd::t_184877f5b4be01 39-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ca9f674c472935b4aa5e6d1a64280e1b9c1f3b4f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
