@@ -57,7 +57,7 @@ from warm startup; this design makes no startup-time or hardware-capacity claim.
 | SeaweedFS S3 profile | Immutable bytes; authenticated bucket access succeeds |
 | Weaviate | Rebuildable search; server is ready and bootstrap can access the selected collection |
 | Local TEI | THE-553 model/tokenizer loaded; bounded inference probe returns the selected vector dimension |
-| `quivr migrate` | One-shot numbered migrations and idempotent storage/projection/bootstrap; successful exit gates first startup |
+| `quivr migrate` | One-shot ordered migrations (legacy `0xx_`, then UTC-stamped) and idempotent storage/projection/bootstrap; successful exit gates first startup |
 | `quivr api` | Same core image as worker/initializer; configured, expected schema available, canonical DB reachable |
 | `quivr worker` | Connected to Temporal and required adapters; processing, indexing, monitoring and delivery loops running |
 | Test webhook receiver | Verification fixture; private control interface ready and capture store initialized |
@@ -89,8 +89,8 @@ Bind the configured webhook destination to the fixture receiver and Organization
 its control interface is reachable only by the test runner.
 
 Migrations may run against the live evaluation stack. Breaking requests/workflows
-and required restarts are accepted and reported. Keep numbered migrations and an
-explicit initializer; do not add expand/contract, drain gates or a compatibility
+and required restarts are accepted and reported. Keep ordered migrations (UTC-stamped
+names; the numbered `0xx_` set is closed) and an explicit initializer; do not add expand/contract, drain gates or a compatibility
 matrix. Verification uses a fresh schema; adapter tests cover migration/bootstrap
 idempotence. Safe production upgrades remain separate work.
 

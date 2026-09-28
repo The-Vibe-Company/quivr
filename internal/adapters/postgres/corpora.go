@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -84,41 +82,4 @@ func (s Store) List(ctx context.Context, scope corpus.Scope, after string, limit
 		result = append(result, c)
 	}
 	return result, rows.Err()
-}
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)"); err != nil {
-		return err
-	}
-	files, err := migrations.Files.ReadDir(".")
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		var applied bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name=$1)", f.Name()).Scan(&applied); err != nil {
-			return err
-		}
-		if applied {
-			continue
-		}
-		sql, err := migrations.Files.ReadFile(f.Name())
-		if err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("migration %s failed: %w", f.Name(), err)
-		}
-		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations VALUES($1)", f.Name()); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
 }

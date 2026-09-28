@@ -15,7 +15,7 @@ Several coding agents may work on Quivr V2 at the same time. **Linear is the fle
 4. **Plan.** Run the `plan-pr` skill for the ticket. Put the complete plan in the Linear comment, starting with `Agent status: awaiting-approval — …` (set Agent phase = `awaiting-approval`), because local plan files under the gitignored `plans/` can disappear with a worktree. Then stop and wait for the coordinator's approval. Do not implement before it arrives.
 5. **Implement.** After approval, set Agent phase = `implementing`, post `Agent status: implementing — …` and build the approved plan test-first. A material change to the approved plan needs a new approval.
 6. **Ship.** Run the `ship-pr-dev` skill: it verifies, reviews, opens the pull request and drives CI to green. Set Agent phase = `shipping`, post `Agent status: shipping — …`, and link the pull request on the ticket. If the pull request ships a user-visible capability, update the README's "What works today" / "What comes next" lists and `docs/api-walkthrough.md` in the same pull request.
-7. **Rebase before hand-back.** Rebase on the latest `origin/main`, resolve conflicts, renumber your migration if its number is taken, and get CI green on the final head.
+7. **Rebase before hand-back.** Rebase on the latest `origin/main`, resolve conflicts, restamp your migration if `make verify` reports it ordered before `main`, and get CI green on the final head.
 8. **Hand back.** Set Agent phase = `ready-to-merge` and post `Agent status: ready-to-merge — PR #<n>, head <sha>, CI green` with the iteration record required by `AGENTS.md`. Leave the ticket In Progress; the coordinator closes it.
 
 If you stop without finishing, remove your Agent phase and Agent runtime labels, move the ticket back to Todo or Backlog, and post `Agent status: released — <reason>` so the ticket is free again.
@@ -51,7 +51,7 @@ Keep exactly one label of each group on your ticket and change the phase label a
 
 ## Collision rules
 
-- **Migrations.** Parallel branches often pick the same next number. Whoever merges first keeps it; everyone else renumbers at rebase and updates the schema-readiness check.
+- **Migrations.** Name new migrations `migrations/<UTC YYYYMMDDTHHMMZ>_<slug>.sql` (`make migration name=<slug>`). Never add a numbered `0xx_` file; that set is closed. Readiness derives from the embedded set, so a migration touches no other file. `make verify` fails if your new migration sorts before the latest migration on `origin/main`; if that happens at your final rebase, rename your file to the current UTC time with the `git mv` command it prints (or `make migration-restamp file=<name>.sql`). Nothing else changes.
 - **Shared files** such as `internal/transport/httpapi/api.go`, `contracts/http/v0/openapi.yaml`, generated transport code and `scripts/local.py`: keep edits small and localized, and regenerate generated code instead of hand-merging it.
 - **Acceptance tests** are order- and load-sensitive. Give new acceptance tests their own Organization or Corpus, and schedule ingestion-heavy tests after the timed scenarios in `scripts/local.py`.
 

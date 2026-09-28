@@ -8,6 +8,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # The migration guard compares against main's tree; a shallow fetch is enough.
+      - run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

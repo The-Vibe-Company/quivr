@@ -157,7 +157,7 @@ listed here, not in "What works today".
 cmd/quivr/          single binary: API, worker, migrations
 internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
 contracts/http/v0/  OpenAPI contract, examples and checks
-migrations/         versioned PostgreSQL migrations
+migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI
 deploy/             Docker Compose and Railway deployment

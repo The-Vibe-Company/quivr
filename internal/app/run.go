@@ -196,14 +196,7 @@ func Run(command string) error {
 	connectorStore := postgres.ConnectorStore{ContentStore: store}
 	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
 	var runtime atomic.Pointer[orchestration.Runtime]
-	schemaReady := func(ctx context.Context) error {
-		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='016_delivery_attempts.sql')").Scan(&exists)
-		if err == nil && !exists {
-			return errors.New("schema migration missing")
-		}
-		return err
-	}
+	schemaReady := func(ctx context.Context) error { return postgres.SchemaReady(ctx, pool) }
 	ready := func(ctx context.Context) error {
 		err := schemaReady(ctx)
 		if err == nil && command == "worker" {
@@ -224,6 +217,7 @@ func Run(command string) error {
 	err = schemaReady(startup)
 	cancel()
 	if err != nil {
+		slog.Error("schema readiness failed", "error", err)
 		return errors.New("database/schema unavailable; run migrate")
 	}
 	// Load the tokenizer before serving so the first search does not pay for it.
