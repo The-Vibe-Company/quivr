@@ -1,0 +1,36 @@
+internal/monitoring/delivery.go
+  s_ec117ba6cf48fd::t_190e544cc6542a 189-196,218-228,232,242,254,256,260,265,267-269
+  s_ec117ba6cf48fd::t_50c18e23d2b596 30-32
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_8fe14610ec48b8 2649,2655
+internal/monitoring/engine_test.go
+  s_ec117ba6cf48fd::t_8fe14610ec48b8 174-183
+internal/monitoring/matches.go
+  s_ec117ba6cf48fd::t_8fe14610ec48b8 120-124
+internal/monitoring/delivery_test.go
+  s_ec117ba6cf48fd::t_7d1d90b3ddffac 213-247
+docs/quivr-v2-monitoring-tracer.md
+  s_ec117ba6cf48fd::t_819d540c97ea16 268-272,281,291-293
+internal/adapters/postgres/delivery.go
+  s_ec117ba6cf48fd::t_4b3ed038660a3c 32,68-76
+internal/adapters/postgres/delivery_test.go
+  s_ec117ba6cf48fd::t_1968cb094411d0 136-144,147,265,267-275
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_8044d739784b9e 137-142,150-151,770,786
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67919c5262eb0b1ca76e6f928ad21f2aad4dae1a",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
