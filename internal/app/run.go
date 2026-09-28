@@ -63,6 +63,9 @@ type Config struct {
 		LoginEndpoint string `json:"login_endpoint"`
 		GraphEndpoint string `json:"graph_endpoint"`
 	} `json:"m365"`
+	// ConnectorRSSAllowPrivateAddresses lets the rss kind reach loopback and
+	// private addresses (local/CI fake feeds only; refused by default).
+	ConnectorRSSAllowPrivateAddresses bool `json:"connector_rss_allow_private_addresses"`
 }
 
 func Run(command string) error {
@@ -93,7 +96,7 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil)}
+	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.RSS{AllowPrivateAddresses: cfg.ConnectorRSSAllowPrivateAddresses}}
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}

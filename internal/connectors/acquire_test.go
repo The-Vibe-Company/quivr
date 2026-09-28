@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,15 +15,17 @@ import (
 type fakeRuns struct {
 	target      Target
 	checkpoints []string
+	items       []bool
 	finished    []*RunError
 }
 
 func (f *fakeRuns) LoadRun(context.Context, string, string) (Target, error) { return f.target, nil }
-func (f *fakeRuns) CommitCheckpoint(_ context.Context, _, _ string, run int64, cp json.RawMessage, _ bool) (bool, error) {
+func (f *fakeRuns) CommitCheckpoint(_ context.Context, _, _ string, run int64, cp json.RawMessage, items bool) (bool, error) {
 	if run != f.target.RunSequence {
 		return false, nil
 	}
 	f.checkpoints = append(f.checkpoints, string(cp))
+	f.items = append(f.items, items)
 	f.target.Checkpoint = cp
 	return true, nil
 }
@@ -36,6 +39,7 @@ type fakeIngest struct {
 	withdrawn []content.Withdrawal
 	fail      error
 	scopes    []corpus.Scope
+	keys      map[string]bool
 }
 
 func (f *fakeIngest) Accept(_ context.Context, s corpus.Scope, c content.Command) (content.Receipt, error) {
@@ -44,7 +48,13 @@ func (f *fakeIngest) Accept(_ context.Context, s corpus.Scope, c content.Command
 	}
 	f.scopes = append(f.scopes, s)
 	f.accepted = append(f.accepted, c)
-	return content.Receipt{ID: "r"}, nil
+	// Like the real store, a replayed idempotency key reserves no new revision.
+	if f.keys == nil {
+		f.keys = map[string]bool{}
+	}
+	fresh := !f.keys[c.Key]
+	f.keys[c.Key] = true
+	return content.Receipt{ID: "r", NewRevision: fresh}, nil
 }
 func (f *fakeIngest) Withdraw(_ context.Context, s corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
 	f.withdrawn = append(f.withdrawn, w)
@@ -174,6 +184,46 @@ func TestARejectedItemIsReportedWithoutStallingTheSource(t *testing.T) {
 		t.Fatalf("an item that can never be accepted must not block the checkpoint: %v", runs.checkpoints)
 	}
 	if f := runs.finished[0]; f == nil || f.Code != "item_rejected" || !f.Completed {
+		t.Fatalf("finish %+v", f)
+	}
+}
+
+func TestOnlyNewVersionsAdvanceLastItem(t *testing.T) {
+	config := `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha v2"}]},{"items":[{"record_key":"b","withdraw":true}]}]}`
+	a, runs, _ := newAcquirer(t, config, "")
+	for i := 0; i < 4; i++ {
+		if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// New item, replayed duplicate, correction, withdrawal (no new Version).
+	if want := []bool{true, false, true, false}; fmt.Sprint(runs.items) != fmt.Sprint(want) {
+		t.Fatalf("last_item_at advanced %v, want %v", runs.items, want)
+	}
+}
+
+type skippingConnector struct{ Fixture }
+
+func (skippingConnector) Kind() string { return "skipping" }
+func (skippingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
+	return Page{}, ErrNotDue
+}
+
+func TestANotDueRunFinishesAsSkippedWithoutPolling(t *testing.T) {
+	a, runs, ingest := newAcquirer(t, `{"script":[]}`, "")
+	registry, err := NewRegistry(skippingConnector{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Registry = registry
+	runs.target.Kind = "skipping"
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(ingest.accepted) != 0 || len(runs.checkpoints) != 0 {
+		t.Fatalf("skipped run acted: %v %v", ingest.accepted, runs.checkpoints)
+	}
+	if f := runs.finished[0]; f == nil || !f.Skipped || f.Code != "" || f.Completed {
 		t.Fatalf("finish %+v", f)
 	}
 }

@@ -158,6 +158,15 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only an acceptance that reserves a revision reports a new Version; a
+	// repeated revision or a replayed key does not.
+	replayed, err := service.Accept(ctx, scope, firstCommand)
+	if err != nil || replayed.ID != firstReceipt.ID {
+		t.Fatal("replay", err)
+	}
+	if !firstReceipt.NewRevision || !secondReceipt.NewRevision || duplicateReceipt.NewRevision || replayed.NewRevision {
+		t.Fatalf("new revision flags %v %v %v %v", firstReceipt.NewRevision, secondReceipt.NewRevision, duplicateReceipt.NewRevision, replayed.NewRevision)
+	}
 	a, _, err := repository.Work(ctx, scope.Organization, firstReceipt.ID)
 	if err != nil {
 		t.Fatal(err)

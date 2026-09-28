@@ -140,7 +140,7 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 	if err = tx.Commit(ctx); err != nil {
 		return content.Receipt{}, err
 	}
-	return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}}, nil
+	return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: reservation.RowsAffected() == 1}, nil
 }
 
 // Withdraw commits the absorbing fence atomically: an existing or first-seen

@@ -153,6 +153,11 @@ type Receipt struct {
 	Processing   Processing    `json:"processing"`
 	Availability *Availability `json:"availability,omitempty"`
 	Diagnostics  []Diagnostic  `json:"diagnostics"`
+	// NewRevision reports, on the call that accepted the command, that it
+	// reserved a revision the Record did not have yet: it will publish a new
+	// Version (unless it conflicts). Replays and repeated revisions report
+	// false. Internal only; not part of the public Receipt shape.
+	NewRevision bool `json:"-"`
 }
 type Record struct {
 	ID               string `json:"record_id"`

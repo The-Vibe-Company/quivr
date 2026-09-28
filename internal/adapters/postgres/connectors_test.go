@@ -141,6 +141,17 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if still, _ := store.ReadConnector(ctx, scope.Organization, created.ID); still.Health.State != connectors.HealthAccessError || still.Health.LastError.Code != "source_unavailable" {
 		t.Fatalf("transient failure cleared the access error: %+v", still.Health)
 	}
+	// A skipped run (source not due) polled nothing: no success, no error, no health change.
+	if err = store.FinishRun(ctx, scope.Organization, created.ID, next[0].Run+1, &connectors.RunError{Skipped: true}); err != nil {
+		t.Fatal(err)
+	}
+	skipped, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped.RunSequence != next[0].Run+2 || skipped.Health.LastSuccessAt != nil || skipped.Health.State != connectors.HealthAccessError || skipped.Health.LastError.Code != "source_unavailable" {
+		t.Fatalf("skipped run changed health: %+v", skipped.Health)
+	}
 	disabled, err := service.Disable(ctx, scope, created.ID)
 	if err != nil || disabled.Enabled || disabled.Health.State != connectors.HealthDisabled {
 		t.Fatalf("disable %v %+v", err, disabled)

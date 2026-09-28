@@ -14,6 +14,7 @@ The design rationale is in [ingestion contracts](../quivr-v2-ingestion-contracts
 
 Delivered kinds:
 
+- [RSS and Atom feeds (`rss`)](rss.md)
 - [Microsoft 365 mailbox (`m365_mail`)](microsoft-365.md)
 
 ## Before you start

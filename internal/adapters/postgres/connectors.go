@@ -362,7 +362,7 @@ func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64
 	// failures only update the last error.
 	success := failure == nil || failure.Completed
 	var code, class any
-	if failure != nil {
+	if failure != nil && !failure.Skipped {
 		code, class = failure.Code, string(failure.Class)
 	}
 	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => interval_seconds),

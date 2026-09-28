@@ -142,6 +142,13 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var rejected string
 	for i := 0; i < pages; i++ {
 		page, err := connector.Fetch(ctx, FetchRequest{Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now()})
+		if errors.Is(err, ErrNotDue) && i == 0 {
+			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
+			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
+		}
+		if errors.Is(err, ErrNotDue) {
+			break
+		}
 		if err != nil {
 			var typed *Error
 			if errors.As(err, &typed) {
@@ -149,10 +156,12 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			}
 			return failure(ClassTransient, "source_unavailable")
 		}
-		accepted := false
+		// Only an item that reserves a new Version counts as source activity;
+		// a replayed Receipt (re-fetched unchanged item) does not.
+		fresh := false
 		for _, item := range page.Items {
-			var size int64
-			if size, err = a.submit(ctx, scope, target.Instance, item); err != nil {
+			size, created, err := a.submit(ctx, scope, target.Instance, item)
+			if err != nil {
 				var typed *Error
 				switch {
 				case errors.As(err, &typed):
@@ -173,9 +182,9 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 				continue
 			}
 			stored += size
-			accepted = true
+			fresh = fresh || created
 		}
-		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, page.Checkpoint, accepted)
+		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, page.Checkpoint, fresh)
 		if err != nil {
 			return err
 		}
@@ -201,9 +210,10 @@ var (
 	errSourceRead = errors.New("source read failed")
 )
 
-// submit sends one item through the ingestion command path and returns the
-// attachment bytes it stored.
-func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance, item Item) (int64, error) {
+// submit sends one item through the ingestion command path. It returns the
+// attachment bytes it stored and whether the item reserved a new Record
+// Version (replays and withdrawals do not).
+func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance, item Item) (int64, bool, error) {
 	source := content.Source{CorpusID: inst.CorpusID, Namespace: inst.Namespace, RecordKey: item.RecordKey}
 	revision := item.Revision
 	if revision == "" {
@@ -222,7 +232,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 	}
 	if item.Withdraw {
 		_, err := a.Ingest.Withdraw(ctx, scope, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
-		return 0, err
+		return 0, false, err
 	}
 	key := KeyPrefix + content.StableID("item", inst.ID, item.RecordKey, revision)
 	manifest := item.Manifest
@@ -233,14 +243,14 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 		if a.Receipts != nil {
 			known, err := a.Receipts.HasReceipt(ctx, scope.Organization, key)
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 			if known {
-				return 0, errSkipped
+				return 0, false, errSkipped
 			}
 		}
 		if a.Blobs == nil {
-			return 0, content.ErrUnsupported
+			return 0, false, content.ErrUnsupported
 		}
 		m := content.Manifest{Kind: "manifest"}
 		if manifest != nil {
@@ -254,7 +264,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 				continue
 			}
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 			stored += size
 			m.Parts = append(m.Parts, content.Part{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, Content: content.Text{Kind: "blob", BlobID: id, MediaType: at.MediaType}, Extensions: at.Extensions})
@@ -265,8 +275,8 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 	if c.Manifest != nil {
 		c.Content = content.Text{Kind: "manifest"}
 	}
-	_, err := a.Ingest.Accept(ctx, scope, c)
-	return stored, err
+	receipt, err := a.Ingest.Accept(ctx, scope, c)
+	return stored, err == nil && receipt.NewRevision, err
 }
 
 // errTooLarge marks an attachment whose bytes exceed MaxAttachmentBytes.

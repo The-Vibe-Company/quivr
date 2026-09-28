@@ -1895,8 +1895,9 @@ components:
       - m365_mail
       - x_list
       description: Built-in connector kind. fixture is a deterministic test connector available only when
-        the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they
-        are delivered.
+        the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional
+        honor_ttl; optional credential username+password or token). Other kinds are refused with 422
+        unsupported_connector_kind until they are delivered.
     CredentialDeposit:
       type: object
       additionalProperties: false

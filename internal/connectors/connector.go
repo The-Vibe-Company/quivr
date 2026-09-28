@@ -38,6 +38,11 @@ type Error struct {
 
 func (e *Error) Error() string { return string(e.Class) + ": " + e.Code }
 
+// ErrNotDue is returned by Fetch when the source asked not to be polled yet
+// (for example an RSS ttl). The run finishes as skipped: no poll happened, so
+// neither last_success_at nor last_error changes.
+var ErrNotDue = errors.New("not_due")
+
 // AccessError, TransientError and SourceError build typed failures.
 func AccessError(code string) error    { return &Error{Class: ClassAccess, Code: code} }
 func TransientError(code string) error { return &Error{Class: ClassTransient, Code: code} }

@@ -654,7 +654,7 @@ type Connector struct {
 		SilentAfterSeconds       int `json:"silent_after_seconds"`
 	} `json:"health_policy"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 	Kind     ConnectorKind `json:"kind"`
 	Schedule struct {
 		IntervalSeconds int `json:"interval_seconds"`
@@ -671,7 +671,7 @@ type ConnectorCreate struct {
 	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
 	IdempotencyKey string                 `json:"idempotency_key"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 	Kind            ConnectorKind      `json:"kind"`
 	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
 	SourceNamespace string             `json:"source_namespace"`
@@ -704,7 +704,7 @@ type ConnectorHealthPolicy struct {
 	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
 }
 
-// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 type ConnectorKind string
 
 // ConnectorPage defines model for ConnectorPage.

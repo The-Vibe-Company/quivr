@@ -26,6 +26,9 @@ type RunError struct {
 	// but had to report a problem (e.g. a rejected item): it still counts as
 	// a successful poll.
 	Completed bool
+	// Skipped marks a run that did not poll the source (ErrNotDue): it only
+	// schedules the next run, recording neither a success nor an error.
+	Skipped bool
 }
 
 // HealthInput is everything Connector Health depends on.
