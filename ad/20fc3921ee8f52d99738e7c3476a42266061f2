@@ -1,0 +1,90 @@
+internal/adapters/s3/uploads_test.go
+  s_ec117ba6cf48fd::t_5fc1949729863b 103-104
+  s_ec117ba6cf48fd::t_cf245ef91df75f 84-102,105-106
+internal/adapters/postgres/connectors_test.go
+  s_ec117ba6cf48fd::t_61cc97fe12d80e 16,175-203
+  s_ec117ba6cf48fd::t_cbced6a629c366 15,204-241
+internal/app/run.go
+  s_ec117ba6cf48fd::t_374b7c559c1b05 15,60-65,96,144,193
+internal/adapters/postgres/content.go
+  s_ec117ba6cf48fd::t_61cc97fe12d80e 226-233
+  s_ec117ba6cf48fd::t_b7ebf67a36d12c 225
+go.mod
+  s_ec117ba6cf48fd::t_be92e6911317bc 14
+internal/adapters/s3/uploads.go
+  s_ec117ba6cf48fd::t_cf245ef91df75f 5,64-66,70,76-92
+  s_ec117ba6cf48fd::t_2c30f122985058 93-95
+scripts/fake_graph.py
+  s_ec117ba6cf48fd::t_7aebe2570e7489 30-31,96-97,100-101,164-170,172-173,213
+  s_ec117ba6cf48fd::t_41e3ef00622ddd 1-13,15-24,27-29,32-34,36-95,98-99,102-134,136-144,146-163,171,174-212,214-237,241-258
+  s_ec117ba6cf48fd::t_be32870b0e5c3c 25-26,135,145,238-240
+  s_ec117ba6cf48fd::t_ac0055cfebd4f2 14,35
+internal/connectors/m365mail/graph.go
+  s_ec117ba6cf48fd::t_03be438783529e 1-144
+internal/connectors/m365mail/fakegraph_test.go
+  s_ec117ba6cf48fd::t_bdd6234862e7c6 1-3,5-57,59-225
+  s_ec117ba6cf48fd::t_4d198b1cab6ebd 4,58
+internal/connectors/m365mail/mapping.go
+  s_ec117ba6cf48fd::t_b7ebf67a36d12c 95-97
+  s_ec117ba6cf48fd::t_21a48398760725 1-6,8-94,98-229,231-287
+  s_ec117ba6cf48fd::t_be92e6911317bc 7,230
+scripts/local.py
+  s_ec117ba6cf48fd::t_681b69793d66ff 28,50-52,56,92-95,97,274-275
+  s_ec117ba6cf48fd::t_309340dbf1625c 141
+internal/connectors/acquire.go
+  s_ec117ba6cf48fd::t_d92af88e2fbaf2 7,30-49,82-88,136-140,153-155,157-162,174,185,196-205,209-213,215-219,224,226-259,264-281
+internal/connectors/connector.go
+  s_ec117ba6cf48fd::t_ccae4026650909 13,59-75,108-113
+internal/content/extensions.go
+  s_ec117ba6cf48fd::t_9a51df261e9992 24-63
+tests/acceptance/connectors_m365_test.go
+  s_ec117ba6cf48fd::t_a0bf2d2858e6eb 1-302
+scripts/m365_restart.py
+  s_ec117ba6cf48fd::t_031c9b9d824161 48
+  s_ec117ba6cf48fd::t_8d8f076522b074 1-47,49-96
+internal/uploads/uploads.go
+  s_ec117ba6cf48fd::t_b7ebf67a36d12c 100-101
+  s_ec117ba6cf48fd::t_12feca7ed68642 6-7,9-11,88-93,98-99,222-265
+docs/connectors/microsoft-365.md
+  s_ec117ba6cf48fd::t_661ddebad0e9c5 1-215
+internal/connectors/m365mail/auth.go
+  s_ec117ba6cf48fd::t_57c58e92d497c3 1-190
+docs/connectors/README.md
+  s_ec117ba6cf48fd::t_b11898fd80540c 10-14
+internal/orchestration/temporal/connectors.go
+  s_ec117ba6cf48fd::t_374b7c559c1b05 56
+  s_ec117ba6cf48fd::t_1ab1f5bb8c6f7e 31-33,57-59,66-79
+internal/uploads/deposit_test.go
+  s_ec117ba6cf48fd::t_663d21024805aa 1-11,13-35,37-121
+  s_ec117ba6cf48fd::t_e707eec4ccacc0 12,36
+internal/connectors/attachments_test.go
+  s_ec117ba6cf48fd::t_b7ebf67a36d12c 55-57
+  s_ec117ba6cf48fd::t_db7c0d6a1e60ef 1-54,58-189
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_5562c80b0743f4 388-394,411-412
+internal/connectors/m365mail/connector.go
+  s_ec117ba6cf48fd::t_4b013f9824b55e 1-171,175-227
+  s_ec117ba6cf48fd::t_be92e6911317bc 172-174
+internal/connectors/m365mail/m365mail_test.go
+  s_ec117ba6cf48fd::t_01e36c8a36c787 78,82
+  s_ec117ba6cf48fd::t_f961148ef77122 1-21,23-77,79-81,83-345,369-370
+  s_ec117ba6cf48fd::t_9a51df261e9992 22,346-368
+internal/connectors/service.go
+  s_ec117ba6cf48fd::t_8f480b8503fba9 141-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad20fc3921ee8f52d99738e7c3476a42266061f2",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
