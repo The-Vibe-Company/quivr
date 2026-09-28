@@ -74,23 +74,30 @@ func (s *Store) Verify(ctx context.Context, objectKey string, size int64, sha256
 }
 
 // PutStream writes server-collected bytes under a content-addressed key. The
-// declared checksum is enforced by storage; an existing object with the same
-// key already holds the same bytes, so a precondition failure is not an error
-// (the caller verifies afterwards).
+// declared checksum is enforced by storage and the caller verifies the stored
+// bytes afterwards. A present object of the expected length is not rewritten.
+// Storage may refuse the conditional write before reading the body and close
+// the connection, and a stored write can lose its response, so any failed
+// write is resolved by observing the object rather than by its error shape.
 func (s *Store) PutStream(ctx context.Context, objectKey string, body io.ReadSeeker, size int64, sha256hex, mediaType string) error {
 	checksum, err := hex.DecodeString(sha256hex)
 	if err != nil || len(checksum) != 32 || size < 1 || size > uploads.MaxUploadBytes || mediaType == "" {
 		return errors.New("invalid deposit expectation")
 	}
-	_, err = s.client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey), Body: body, ContentLength: aws.Int64(size), ContentType: aws.String(mediaType), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*")})
-	var status interface{ HTTPStatusCode() int }
-	if err != nil && errors.As(err, &status) && status.HTTPStatusCode() == 412 {
+	if s.holds(ctx, objectKey, size) {
 		return nil
 	}
-	if err != nil {
+	_, err = s.client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey), Body: body, ContentLength: aws.Int64(size), ContentType: aws.String(mediaType), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*")})
+	if err != nil && !s.holds(ctx, objectKey, size) {
 		return errors.New("deposit storage unavailable")
 	}
 	return nil
+}
+
+// holds reports whether an object of the expected length is stored at the key.
+func (s *Store) holds(ctx context.Context, objectKey string, size int64) bool {
+	head, err := s.client.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey)})
+	return err == nil && head.ContentLength != nil && *head.ContentLength == size
 }
 
 // ReadRange reads an inclusive byte range of a stored object.

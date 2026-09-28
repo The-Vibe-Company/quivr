@@ -66,6 +66,20 @@ func awaitRetrievalReady(t *testing.T, receiptID string) map[string]any {
 	}
 }
 
+// ingestEnriched ingests one Record and returns its Version once enrichment
+// has committed. Attaching embeddings updates the projected object, and the
+// projection store briefly hides an object from lexical search while it is
+// updated, so routing assertions must not search inside that window.
+func ingestEnriched(t *testing.T, corpusID, key, title, text string) string {
+	t.Helper()
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	start := request(t, "GET", changesPath(corpusID, "", 0), admin, nil, 200)["next_cursor"].(string)
+	accepted := request(t, "POST", "/v0/records", admin, inlineCommand(corpusID, key, title, text), 202)
+	ready := awaitRetrievalReady(t, accepted["receipt_id"].(string))
+	awaitEnriched(t, admin, corpusID, start, ready["record_id"].(string))
+	return ready["version_id"].(string)
+}
+
 func awaitOperation(t *testing.T, location string) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
@@ -104,8 +118,7 @@ func TestRebuildActivatesScopedGenerationAndReplays(t *testing.T) {
 	b := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Rebuild B", "idempotency_key": "rebuild-b-" + run}, 201)["corpus_id"].(string)
 	versions := map[string]string{}
 	for corpusID, text := range map[string]string{a: "Lanterne rouge du port", b: "Lanterne verte du quai"} {
-		accepted := request(t, "POST", "/v0/records", admin, inlineCommand(corpusID, "rebuild-"+corpusID, "lanterne", text), 202)
-		versions[corpusID] = awaitRetrievalReady(t, accepted["receipt_id"].(string))["version_id"].(string)
+		versions[corpusID] = ingestEnriched(t, corpusID, "rebuild-"+corpusID, "lanterne", text)
 	}
 	before := generationsByVersion(t, []string{a, b}, "lanterne")
 	if len(before) != 2 {
@@ -186,8 +199,7 @@ func TestRebuildCancelAndRerunTerminalOperation(t *testing.T) {
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	run := fmt.Sprint(time.Now().UnixNano())
 	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Operation control", "idempotency_key": "operation-control-" + run}, 201)["corpus_id"].(string)
-	accepted := request(t, "POST", "/v0/records", admin, inlineCommand(c, "control-"+run, "balise", "Balise cardinale du chenal"), 202)
-	version := awaitRetrievalReady(t, accepted["receipt_id"].(string))["version_id"].(string)
+	version := ingestEnriched(t, c, "control-"+run, "balise", "Balise cardinale du chenal")
 	cursor := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
 
 	source, location := postRebuild(t, admin, c, "control-1", 202)

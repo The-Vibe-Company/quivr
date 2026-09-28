@@ -7,9 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -102,5 +108,94 @@ func TestStreamedDepositIsStoredOnceAndVerified(t *testing.T) {
 	}
 	if err := blobs.Verify(ctx, objectKey, int64(len(data)), hex.EncodeToString(make([]byte, 32))); !errors.Is(err, uploads.ErrVerificationMismatch) {
 		t.Fatal("streamed verification did not detect a digest mismatch")
+	}
+}
+
+// Storage may refuse a conditional PUT before reading the body and close the
+// connection, so the client sees a reset instead of 412; a stored PUT can also
+// lose its response. The proxy injects both as TCP resets in front of real
+// storage. A deposit resolves them by observing the object, never by trusting
+// an ambiguous transport outcome, and a present object of the wrong length is
+// not accepted.
+func TestStreamedDepositResolvesAmbiguousStorageOutcomes(t *testing.T) {
+	cfg := transferConfig(t)
+	target, err := url.Parse(cfg.Endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var puts atomic.Int64
+	var loseNext, refuseAll atomic.Bool
+	errReset := errors.New("synthetic connection reset")
+	reset := func(w http.ResponseWriter) {
+		conn, _, hijackErr := w.(http.Hijacker).Hijack()
+		if hijackErr != nil {
+			panic(hijackErr)
+		}
+		_ = conn.(*net.TCPConn).SetLinger(0) // Close with RST, as the storage peer does.
+		_ = conn.Close()
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ModifyResponse = func(r *http.Response) error {
+		if r.Request.Method == http.MethodPut && (r.StatusCode == http.StatusPreconditionFailed || loseNext.CompareAndSwap(true, false)) {
+			r.Body.Close()
+			return errReset
+		}
+		return nil
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) { reset(w) }
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			puts.Add(1)
+			if refuseAll.Load() {
+				reset(w)
+				return
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	cfg.Endpoint = server.URL
+	blobs := store.New(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	data := bytes.Repeat([]byte("pièce jointe ambiguë "), 200_000)
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	objectKey := fmt.Sprintf("adapter-transfers/ambiguous-%d-%s", time.Now().UnixNano(), digest)
+
+	// A stored PUT whose response is lost is proven by the stored object.
+	loseNext.Store(true)
+	if err = blobs.PutStream(ctx, objectKey, bytes.NewReader(data), int64(len(data)), digest, "application/pdf"); err != nil {
+		t.Fatalf("lost acknowledgement of a stored deposit: %v", err)
+	}
+	if loseNext.Load() {
+		t.Fatal("failure injection never followed a stored PUT")
+	}
+	if err = blobs.Verify(ctx, objectKey, int64(len(data)), digest); err != nil {
+		t.Fatalf("deposited bytes did not verify: %v", err)
+	}
+	// A repeated deposit of present bytes converges without resending them.
+	sent := puts.Load()
+	if err = blobs.PutStream(ctx, objectKey, bytes.NewReader(data), int64(len(data)), digest, "application/pdf"); err != nil {
+		t.Fatalf("repeated deposit: %v", err)
+	}
+	if puts.Load() != sent {
+		t.Fatalf("repeated deposit resent the body (%d PUTs)", puts.Load()-sent)
+	}
+	// A present object of another length is not mistaken for this deposit:
+	// the conditional PUT is refused (reset) and the deposit fails.
+	shorter := data[:len(data)-1]
+	shortSum := sha256.Sum256(shorter)
+	if err = blobs.PutStream(ctx, objectKey, bytes.NewReader(shorter), int64(len(shorter)), hex.EncodeToString(shortSum[:]), "application/pdf"); err == nil {
+		t.Fatal("a present object of another length was accepted")
+	}
+	// A deposit that storage never receives stays an error.
+	refuseAll.Store(true)
+	absentKey := objectKey + "-absent"
+	if err = blobs.PutStream(ctx, absentKey, bytes.NewReader(data), int64(len(data)), digest, "application/pdf"); err == nil {
+		t.Fatal("a deposit that never reached storage was accepted")
+	}
+	if err = blobs.Verify(ctx, absentKey, int64(len(data)), digest); err == nil {
+		t.Fatal("refused deposit is present")
 	}
 }
