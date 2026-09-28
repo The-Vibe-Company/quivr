@@ -1,0 +1,63 @@
+internal/adapters/postgres/delivery.go
+  s_ec117ba6cf48fd::t_c3c0cab74935bc 1-202
+internal/monitoring/delivery.go
+  s_ec117ba6cf48fd::t_a98567cf33e9e1 1-263
+docs/quivr-v2-monitoring-tracer.md
+  s_ec117ba6cf48fd::t_e46b915b811103 254-297,390-406
+  s_ec117ba6cf48fd::t_8ab6aaf759a124 249-250
+  s_ec117ba6cf48fd::t_a38ad80beddac2 407
+internal/monitoring/matches.go
+  s_ec117ba6cf48fd::t_0e807326be6d0e 65-69,78-79,122-128
+  s_ec117ba6cf48fd::t_855191d22bfaec 129
+internal/transport/httpapi/matches_test.go
+  s_ec117ba6cf48fd::t_61fb2b0597c7c7 7,54-111,118-119
+  s_ec117ba6cf48fd::t_3e22649dd117eb 41-46,112-117
+tests/acceptance/delivery_test.go
+  s_ec117ba6cf48fd::t_75f3213878daec 1-20,23-321,352-353
+  s_ec117ba6cf48fd::t_1ccce5c6f0e951 21-22,322-351
+contracts/http/v0/embed.go
+  s_ec117ba6cf48fd::t_ab9dc0f9c598cc 9-13
+internal/transport/httpapi/matches.go
+  s_ec117ba6cf48fd::t_f127feaf6a6d76 56,70-72,103-104,189-191,194-294
+internal/monitoring/delivery_test.go
+  s_ec117ba6cf48fd::t_c8ac1cb5bcbbbb 1-212
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_e46b915b811103 133-138
+internal/monitoring/webhook_test.go
+  s_ec117ba6cf48fd::t_ab9dc0f9c598cc 1-44
+internal/app/run.go
+  s_ec117ba6cf48fd::t_7f6c98d80a1ca3 82-83,239-252
+  s_ec117ba6cf48fd::t_6b4022b37efb4c 164
+internal/monitoring/engine_test.go
+  s_ec117ba6cf48fd::t_61fb2b0597c7c7 158-161,177-182,195-196
+  s_ec117ba6cf48fd::t_d4b3b7a8cd63bf 197
+internal/monitoring/webhook.go
+  s_ec117ba6cf48fd::t_94fe8411b8c525 1-38
+internal/adapters/postgres/delivery_test.go
+  s_ec117ba6cf48fd::t_6ea04fc71848b9 7-9,42,231-253
+  s_ec117ba6cf48fd::t_2b9955053612bd 1-6,10-41,43-230,254-277
+internal/adapters/postgres/evaluation.go
+  s_ec117ba6cf48fd::t_b64d6bacf9813b 336-337,339-341,346-347,355-356
+scripts/local.py
+  s_ec117ba6cf48fd::t_542aa8056214bc 12-14,31,63-65,134
+tests/acceptance/matches_test.go
+  s_ec117ba6cf48fd::t_16dc242ec68d12 217-219,230,271
+migrations/014_delivery_attempts.sql
+  s_ec117ba6cf48fd::t_6b4022b37efb4c 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74a0355f63e40ee376a2406d1332712739cc4729",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
