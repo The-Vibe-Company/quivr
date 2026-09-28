@@ -39,6 +39,7 @@ tests/acceptance/matches_test.go
   s_ec117ba6cf48fd::t_687bfd1e703477 1-3,5-41,43-174,177-186,188-212
 internal/app/run.go
   s_ec117ba6cf48fd::t_87ee6b1b3d3c98 216-229
+  s_ec117ba6cf48fd::t_110ab597430c07 161,202
 docs/quivr-v2-monitoring-tracer.md
   s_ec117ba6cf48fd::t_72132d0ba29a3e 193-253
 internal/monitoring/monitoring.go
