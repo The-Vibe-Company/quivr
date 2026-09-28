@@ -1,0 +1,23 @@
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_8867afa4449477 130,132-133
+internal/normalization/normalization_test.go
+  s_54b80c92daa9cb::t_4d32a985fb65fb 347-386
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_8867afa4449477 147-148,152-154,160-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ae8beddcc633424330a26ff861393aba697a45e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
