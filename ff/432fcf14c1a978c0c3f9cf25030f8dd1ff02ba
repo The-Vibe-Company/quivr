@@ -1,0 +1,84 @@
+scripts/fake_x.py
+  s_ec117ba6cf48fd::t_8cff8d9805dd48 1-143
+internal/connectors/acquire_test.go
+  s_ec117ba6cf48fd::t_8fe14610ec48b8 19,24,28,30-31,192,233-304
+internal/adapters/postgres/connectors.go
+  s_ec117ba6cf48fd::t_9c6a69cc39cac2 25,29-32,44-46,48-49,66-71,338-340,354-367,372-373,394,396,398,402
+  s_ec117ba6cf48fd::t_3380cbe98adca7 26-28
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_cf245ef91df75f 688-697,727-734
+  s_ec117ba6cf48fd::t_c6d154e2b417ee 735-736
+contracts/http/v0/examples.json
+  s_ec117ba6cf48fd::t_fd1f2ae35b6205 815-838,841-864
+  s_ec117ba6cf48fd::t_d001131b49261f 839-840
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_0aab3abc5cc2f8 1900,2016-2021,2024-2036,2060-2066
+  s_ec117ba6cf48fd::t_fd1f2ae35b6205 2022-2023
+docs/connectors/README.md
+  s_ec117ba6cf48fd::t_4ab91ba0bdb099 11-15,95-100
+docs/connectors/x.md
+  s_ec117ba6cf48fd::t_ca93da81b180aa 1-152,154-158,160-178
+  s_ec117ba6cf48fd::t_ff52d1cfcad7db 153,159
+internal/connectors/service.go
+  s_ec117ba6cf48fd::t_9c6a69cc39cac2 65-75
+  s_ec117ba6cf48fd::t_914cffe8940852 152-154
+internal/adapters/postgres/connectors_test.go
+  s_ec117ba6cf48fd::t_6b313b9851b9de 104,107-113,116-133,162,165-169
+internal/connectors/xlist_test.go
+  s_ec117ba6cf48fd::t_3bcfb5a659c44a 1-209,211-272,274-399,401-491
+  s_ec117ba6cf48fd::t_895231f730773a 273,400
+  s_ec117ba6cf48fd::t_cd8378f9aa267b 210
+CONTEXT.md
+  s_ec117ba6cf48fd::t_ec63fc28b34b12 209-212
+internal/transport/httpapi/connectors.go
+  s_ec117ba6cf48fd::t_29fabfd8ef1d6a 69-77
+  s_ec117ba6cf48fd::t_65825673d2ccb7 10
+internal/connectors/xlist.go
+  s_ec117ba6cf48fd::t_895231f730773a 219,273,329,354,387,424
+  s_ec117ba6cf48fd::t_b4841be530cf89 1-218,220-272,274-328,330-353,355-386,388-423,425-583
+scripts/connector_x_restart.py
+  s_ec117ba6cf48fd::t_64affcf6057d34 35
+  s_ec117ba6cf48fd::t_22280c203687d0 1-34,36-92
+internal/connectors/acquire.go
+  s_ec117ba6cf48fd::t_3f39602e4e372d 57-67,75-77,128-131,160,162,173,213-216,221-223,271
+  s_ec117ba6cf48fd::t_45b00fd17f0e2a 224,263-270,272-273
+internal/connectors/health.go
+  s_ec117ba6cf48fd::t_3f39602e4e372d 32-33
+internal/app/run.go
+  s_ec117ba6cf48fd::t_c76720650ca907 69-76,107-111
+  s_ec117ba6cf48fd::t_ec38ab80001ed7 214
+tests/acceptance/connectors_x_test.go
+  s_ec117ba6cf48fd::t_64affcf6057d34 43-44
+  s_ec117ba6cf48fd::t_b049677bf98a03 1-42,45-154,166-212
+  s_ec117ba6cf48fd::t_99cb09bb643864 155-165
+migrations/017_connector_usage.sql
+  s_ec117ba6cf48fd::t_35d911359f6652 1-8
+internal/connectors/connector.go
+  s_ec117ba6cf48fd::t_3f39602e4e372d 32-34,96-100,109-117,133-136
+  s_ec117ba6cf48fd::t_434e2bf398efe3 137-138
+internal/transport/httpapi/connectors_test.go
+  s_ec117ba6cf48fd::t_69a53fcbec3c27 93-98,108,178-219
+  s_ec117ba6cf48fd::t_069eb17b540fc9 6
+scripts/local.py
+  s_ec117ba6cf48fd::t_6913f8c7765f72 276-278,284-285
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_4ab91ba0bdb099 408-417
+internal/content/extensions.go
+  s_ec117ba6cf48fd::t_4670191e3515f3 68-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff432fcf14c1a978c0c3f9cf25030f8dd1ff02ba",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
