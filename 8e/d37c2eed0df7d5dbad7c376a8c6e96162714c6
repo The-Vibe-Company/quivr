@@ -1,0 +1,20 @@
+internal/adapters/postgres/monitoring_test.go
+  s_ec117ba6cf48fd::t_71700a7faeb74f 192-194,197-239,248-250,254,257
+  s_ec117ba6cf48fd::t_1e101b42c021fb 182-191,195-196,240-247,251-253,255-256,258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ed37c2eed0df7d5dbad7c376a8c6e96162714c6",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
