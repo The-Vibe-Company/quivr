@@ -45,6 +45,8 @@ internal/corpus/retrieval_test.go
   s_ec117ba6cf48fd::t_88ab9ef2f81751 1-93
 internal/adapters/postgres/rebuild.go
   s_ec117ba6cf48fd::t_6b63d43982e65c 55-59,194-208,248,251-256,259
+internal/app/run.go
+  s_ec117ba6cf48fd::t_371ea135148559 163
 ---
 {
   "schema_version": "authorship/3.0.0",
