@@ -1028,7 +1028,10 @@ paths:
         a different request under the same key is 409 idempotency_conflict. Another enabled instance on the
         same Corpus and Source Namespace is 409 source_namespace_in_use. The interval defaults per kind and
         is refused below the deployment floor (30 s by default) with 422 invalid_interval. Deposited
-        credentials are write-only and never returned. Commits connector.created in the change feed.
+        credentials are write-only and never returned. A deployment without a credential key refuses any
+        request carrying a credential with 503 credentials_unavailable (retryable false) before storing or
+        digesting it; instances without a credential are unaffected. Commits connector.created in the change
+        feed.
       x-required-permissions:
       - connectors:write
       responses:
@@ -1158,7 +1161,9 @@ paths:
       description: Deposit a new credential version to rotate the current one. The secret is encrypted at
         rest and never returned. Replaying the same key and request is idempotent; a different request under
         the same key is 409 idempotency_conflict. A disabled instance is 409 connector_disabled. Commits
-        connector.credential_replaced, and connector.health_changed when the evaluated health changes.
+        connector.credential_replaced, and connector.health_changed when the evaluated health changes. A
+        deployment without a credential key refuses every rotation with 503 credentials_unavailable
+        (retryable false) before storing or digesting it.
       x-required-permissions:
       - connectors:write
       responses:
@@ -1775,7 +1780,8 @@ components:
           type: object
           writeOnly: true
           description: Kind-specific secret, validated by the kind's credential JSON Schema, encrypted at
-            rest with the deployment credential key and never returned or logged.
+            rest with the deployment credential key and never returned or logged. Without a configured
+            credential key the request is refused with 503 credentials_unavailable.
         expires_at:
           type: string
           format: date-time

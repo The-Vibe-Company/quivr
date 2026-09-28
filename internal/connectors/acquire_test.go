@@ -249,6 +249,26 @@ func (s *stubConnector) Fetch(_ context.Context, r FetchRequest) (Page, error) {
 	return s.pages[len(s.requests)-1], nil
 }
 
+func TestASealedCredentialThatCannotBeOpenedIsAnAccessErrorNotACrash(t *testing.T) {
+	keyless, _ := NewKeylessSealer(testCursorKey)
+	rotated, _ := NewSealer("another-test-credential-key-0123456789abcdef")
+	for name, sealer := range map[string]Sealer{"key absent": keyless, "key changed": rotated} {
+		t.Run(name, func(t *testing.T) {
+			a, runs, ingest := newAcquirer(t, `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]}]}`, `{"token":"fixture-test-secret-acquire"}`)
+			a.Sealer = sealer
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.finished) != 1 || runs.finished[0] == nil || runs.finished[0].Class != ClassAccess || runs.finished[0].Code != "credential_unreadable" {
+				t.Fatalf("finished %+v", runs.finished)
+			}
+			if len(ingest.accepted) != 0 || len(runs.checkpoints) != 0 {
+				t.Fatal("acquired without an openable credential")
+			}
+		})
+	}
+}
+
 func stubAcquirer(t *testing.T, stub *stubConnector, readsToday int64) (Acquirer, *fakeRuns) {
 	t.Helper()
 	registry, err := NewRegistry(stub)

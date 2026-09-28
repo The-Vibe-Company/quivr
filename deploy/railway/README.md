@@ -28,6 +28,22 @@ This is a single-node evaluation deployment, with the accepted Temporal dev serv
 and no high availability. Redeploying a volume-backed service can interrupt requests.
 No Railway TCP proxies or public dependency domains are needed.
 
+## Credential key (optional)
+
+The demo runs without `QUIVR_CREDENTIAL_KEY`. Ingestion, search and connectors that
+need no credential, such as public RSS feeds, work normally. api and worker each log
+`credential deposits disabled` once at startup. Credentialed connectors (Microsoft 365
+mail, X lists, authenticated RSS) are then refused: creating one with a `credential`,
+or rotating a credential, returns `503 credentials_unavailable`.
+
+To enable them later, set `QUIVR_CREDENTIAL_KEY` (32+ random bytes) to the SAME value
+on both api and worker, then restart api and worker. No migration is needed. The one
+side effect is that adding, changing or removing the key changes how connector
+requests are fingerprinted for idempotency. A connector create sent before the change
+and retried after it returns `409 idempotency_conflict` instead of replaying. Keep the
+value stable afterwards: changing or removing it also makes stored credentials
+unreadable (`access_error` / `credential_unreadable`) until they are deposited again. `provision.py` generates this value by default.
+
 ## Provision and deploy
 
 Authenticate `railway login`, then create/link a dedicated project in the intended

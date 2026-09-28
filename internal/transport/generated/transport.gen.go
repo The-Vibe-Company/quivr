@@ -762,7 +762,7 @@ type CorpusRequest struct {
 type CredentialDeposit struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
-	// Secret Kind-specific secret, validated by the kind's credential JSON Schema, encrypted at rest with the deployment credential key and never returned or logged.
+	// Secret Kind-specific secret, validated by the kind's credential JSON Schema, encrypted at rest with the deployment credential key and never returned or logged. Without a configured credential key the request is refused with 503 credentials_unavailable.
 	Secret *map[string]interface{} `json:"secret,omitempty"`
 }
 

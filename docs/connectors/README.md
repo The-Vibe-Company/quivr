@@ -22,10 +22,20 @@ Delivered kinds:
 
 ## Before you start
 
-- **Deployment secret.** Every `api` and `worker` process needs `credential_key`
-  (32+ random bytes) in its `QUIVR_CONFIG` file. On Railway it comes from
-  `QUIVR_CREDENTIAL_KEY`, which `deploy/railway/provision.py` generates. Keep it
-  stable: stored credentials cannot be decrypted without it.
+- **Deployment secret (optional).** `credential_key` (32+ random bytes) in the
+  `QUIVR_CONFIG` file of every `api` and `worker` process enables Deposited
+  Credentials. On Railway it comes from `QUIVR_CREDENTIAL_KEY`, which
+  `deploy/railway/provision.py` generates. Keep it stable and identical on api
+  and worker: stored credentials cannot be decrypted without it. Without it the
+  core starts and logs `credential deposits disabled`. Instances without a
+  credential, such as public RSS, work normally. Any create carrying a
+  `credential`, and every rotation, is refused with `503 credentials_unavailable`
+  (not retryable) before anything is stored. Instances holding a credential
+  sealed under an absent or different key fail runs with `access_error`
+  (`credential_unreadable`) until the key is restored or the credential is
+  redeposited. Adding, changing or removing the key changes how connector
+  requests are fingerprinted for idempotency. A create sent before the change
+  and retried after it returns `409 idempotency_conflict` instead of replaying.
 - **API key.** Use a key with `connectors:write` (and `connectors:read`) whose
   Corpus scope includes the target Corpus. Add `changes:read` to follow events.
 - **Minimum interval.** `connector_min_interval` (default `30s`) is the shortest

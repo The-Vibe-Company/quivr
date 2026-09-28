@@ -53,7 +53,8 @@ type Config struct {
 	Destinations map[string]monitoring.Destination `json:"destinations"`
 	// Delivery overrides the webhook retry policy (worker only).
 	Delivery DeliveryConfig `json:"delivery"`
-	// CredentialKey encrypts Deposited Credentials at rest (32+ bytes).
+	// CredentialKey encrypts Deposited Credentials at rest (32+ bytes). It is
+	// optional: without it credential deposits and rotations are refused.
 	CredentialKey string `json:"credential_key"`
 	// ConnectorFixtures enables the deterministic fixture connector kind (local/CI only).
 	ConnectorFixtures bool `json:"connector_fixtures"`
@@ -78,6 +79,16 @@ type XConfig struct {
 	APIEndpoint string `json:"api_endpoint"`
 }
 
+// connectorSealer builds the Deposited Credential sealer. credential_key is
+// optional; a configured key shorter than 32 bytes is a startup error.
+func (cfg Config) connectorSealer(logger *slog.Logger) (connectors.Sealer, error) {
+	if cfg.CredentialKey == "" {
+		logger.Info("credential deposits disabled", "reason", "credential_key not configured")
+		return connectors.NewKeylessSealer(cfg.CursorKey)
+	}
+	return connectors.NewSealer(cfg.CredentialKey)
+}
+
 func Run(command string) error {
 	if command != "api" && command != "worker" && command != "migrate" {
 		return errors.New("usage: quivr api|worker|migrate")
@@ -93,10 +104,15 @@ func Run(command string) error {
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
 	}
-	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.CredentialKey) < 32 || len(cfg.Keys) == 0 {
-		return errors.New("database_url, cursor_key (32+ bytes), credential_key (32+ bytes) and keys required")
+	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
+		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
 	}
-	sealer, err := connectors.NewSealer(cfg.CredentialKey)
+	logger := slog.Default()
+	if command == "migrate" {
+		// Only api and worker handle credentials; migrate stays silent about them.
+		logger = slog.New(slog.DiscardHandler)
+	}
+	sealer, err := cfg.connectorSealer(logger)
 	if err != nil {
 		return err
 	}

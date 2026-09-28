@@ -22,6 +22,9 @@ var (
 	ErrInvalidInterval   = publicerr.New("invalid_interval")
 	ErrInvalid           = publicerr.New("invalid_input")
 	ErrDisabled          = publicerr.New("connector_disabled")
+	// ErrCredentialsUnavailable refuses a credential deposit or rotation on a
+	// deployment without credential_key, before the secret is digested or stored.
+	ErrCredentialsUnavailable = publicerr.New("credentials_unavailable")
 )
 
 // DefaultMinInterval is the product floor for polling intervals.
@@ -142,6 +145,9 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if !validText(in.Key) || !validText(in.Namespace) || !validText(in.CorpusID) {
 		return Instance{}, ErrInvalid
 	}
+	if in.Secret != nil && !s.Sealer.CanSeal() {
+		return Instance{}, ErrCredentialsUnavailable
+	}
 	connector, ok := s.Registry.Lookup(in.Kind)
 	if !ok {
 		return Instance{}, ErrUnsupportedKind
@@ -173,11 +179,15 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if err != nil {
 		return Instance{}, ErrInvalid
 	}
+	digest, err := s.Sealer.Digest("create", canonical)
+	if err != nil {
+		return Instance{}, err
+	}
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {
 		return Instance{}, err
 	}
-	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: s.Sealer.Digest("create", canonical)}
+	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: digest}
 	if in.Secret != nil {
 		sealed, err := s.Sealer.Seal(scope.Organization, n.ID, in.Secret)
 		if err != nil {
@@ -244,6 +254,9 @@ func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id s
 	if in.Secret == nil {
 		return Instance{}, ErrInvalidCredential
 	}
+	if !s.Sealer.CanSeal() {
+		return Instance{}, ErrCredentialsUnavailable
+	}
 	if err = s.Registry.validate(inst.Kind, inst.Config, in.Secret); err != nil {
 		return Instance{}, err
 	}
@@ -251,12 +264,16 @@ func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id s
 	if err != nil {
 		return Instance{}, ErrInvalid
 	}
+	digest, err := s.Sealer.Digest("credential", canonical)
+	if err != nil {
+		return Instance{}, err
+	}
 	sealed, err := s.Sealer.Seal(scope.Organization, id, in.Secret)
 	if err != nil {
 		return Instance{}, err
 	}
 	sealed.ExpiresAt = in.ExpiresAt
-	return s.Store.ReplaceCredential(ctx, scope.Organization, id, CredentialDeposit{RequestKey: in.Key, RequestDigest: s.Sealer.Digest("credential", canonical), Sealed: sealed})
+	return s.Store.ReplaceCredential(ctx, scope.Organization, id, CredentialDeposit{RequestKey: in.Key, RequestDigest: digest, Sealed: sealed})
 }
 
 func (s Service) minInterval() time.Duration {

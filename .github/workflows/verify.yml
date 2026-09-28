@@ -38,6 +38,8 @@ jobs:
             .scratch/quivr-verify-*/weaviate.log
             .scratch/quivr-verify-*/adapters.log
             .scratch/quivr-verify-*/outages.json
+            .scratch/quivr-verify-*/keyless-report.json
+            .scratch/quivr-verify-*/keyless/*.log*
             .scratch/quivr-verify-*/tokenizer-provenance.json
             .scratch/quivr-verify-*/embedding-provenance.json
             .scratch/quivr-verify-*/embedding-outage.json

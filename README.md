@@ -130,6 +130,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
   and `x_list`, which polls an X list: edits become corrections, deleted or protected
   posts are withdrawn, and health shows daily reads ([guide](docs/connectors/x.md)).
+  The deployment `credential_key` is optional. Without it, credential deposits are
+  refused with `503 credentials_unavailable`, and everything else works.
 - **Retrieval measurement** with a frozen workload (`make measure`).
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,

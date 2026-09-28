@@ -43,8 +43,8 @@ def main():
     secretfile = directory / 'secrets.json'
     if secretfile.exists():
         values = json.loads(secretfile.read_text())
-        # credential_key became required with Connector Instances (THE-668); add it once
-        # to existing deployments without rotating any other secret.
+        # credential_key is optional (THE-691) but enables Deposited Credentials; add it
+        # once to existing deployments without rotating any other secret.
         if 'credential_key' not in values:
             values['credential_key'] = secrets.token_hex(32)
             secretfile.write_text(json.dumps(values))

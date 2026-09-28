@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,11 +96,16 @@ func connectorAPI(t *testing.T) http.Handler {
 
 func connectorAPIWith(t *testing.T, store *memoryConnectors) http.Handler {
 	t.Helper()
+	sealer, _ := connectors.NewSealer("handler-test-credential-key-0123456789")
+	return connectorAPISealed(t, store, sealer)
+}
+
+func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors.Sealer) http.Handler {
+	t.Helper()
 	registry, err := connectors.NewRegistry(connectors.Fixture{}, connectors.XList{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealer, _ := connectors.NewSealer("handler-test-credential-key-0123456789")
 	keys := map[string]corpus.Scope{
 		connectorKey: {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
 		readerKey:    {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
@@ -215,5 +221,36 @@ func TestXListInstancesValidateTheirWindowAndExposeUsageAndDiagnostics(t *testin
 	}
 	if d := h["diagnostics"].(map[string]any); d["recheck_window_seconds"].(float64) != 86400 {
 		t.Fatalf("diagnostics %v", h)
+	}
+}
+
+func TestKeylessDeploymentRefusesCredentialDepositsWith503(t *testing.T) {
+	sealer, err := connectors.NewKeylessSealer("cursor-key-0123456789abcdef0123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := connectorAPISealed(t, &memoryConnectors{items: map[string]connectors.Instance{}}, sealer)
+	withSecret := map[string]any{"idempotency_key": "k1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}},
+		"credential": map[string]any{"secret": map[string]any{"token": "fixture-test-secret-keyless"}}}
+	status, body := postJSON(t, handler, "/v0/connectors", connectorKey, withSecret)
+	if status != 503 || body["code"] != "credentials_unavailable" || body["retryable"] != false {
+		t.Fatalf("create with secret: %d %v", status, body)
+	}
+	conforms(t, "Error", body)
+	free := map[string]any{"idempotency_key": "k2", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}}
+	status, created := postJSON(t, handler, "/v0/connectors", connectorKey, free)
+	if status != 201 || created["credential"] != nil {
+		t.Fatalf("secret-free create: %d %v", status, created)
+	}
+	payload, _ := json.Marshal(map[string]any{"idempotency_key": "r1", "secret": map[string]any{"token": "fixture-test-secret-keyless"}})
+	req := httptest.NewRequest("PUT", "/v0/connectors/"+created["connector_id"].(string)+"/credential", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+connectorKey)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	var rotated map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &rotated)
+	if rec.Code != 503 || rotated["code"] != "credentials_unavailable" {
+		t.Fatalf("rotation: %d %s", rec.Code, rec.Body.String())
 	}
 }

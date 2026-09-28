@@ -191,7 +191,9 @@ Operations are supported.
 source into one Corpus and Source Namespace on a schedule. Collected items go through
 the same ingestion path as `POST /v0/records`. Credentials are write-only and never
 returned. Kinds that have not shipped yet are refused with
-`422 unsupported_connector_kind`. See the [operator guide](connectors/README.md).
+`422 unsupported_connector_kind`. A deployment without `credential_key` refuses
+credential deposits and rotations with `503 credentials_unavailable`; instances without
+a credential, such as public RSS feeds, work normally. See the [operator guide](connectors/README.md).
 
 The `x_list` kind polls one X list with a deposited bearer token:
 

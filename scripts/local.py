@@ -33,7 +33,7 @@ class Stack:
             self.save()
         for key,value in [('short_api_port',port()),('short_probe_port',port()),('receiver_port',port()),('graph_port',port()),('fake_x_port',port())]:
             self.state.setdefault(key,value)
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -79,6 +79,13 @@ class Stack:
         # A second API over the same database with a short change retention proves public cursor expiry.
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
         worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps(cfg));worker.chmod(0o600)
+        # Keyless variant (THE-691): same stack without credential_key, its own Organization
+        # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
+        keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
+        keyless={k:v for k,v in cfg.items() if k!='credential_key'}
+        keyless.update(log_directory=str(keyless_logs),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write'],['*'])})
+        for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
+            f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
     def migrate(self):
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
@@ -102,9 +109,9 @@ class Stack:
         if getattr(self,'fake_graph',None) is None:
             from fake_graph import FakeGraph
             self.fake_graph=FakeGraph(self.state['graph_port'])
-    def start_processes(self):
+    def start_processes(self,keyless=False):
         self.start_fake_graph()
-        for command,config in [('api','config.json'),('worker','worker.json')]:self.spawn(command,config)
+        for command,config in [('api','keyless.json' if keyless else 'config.json'),('worker','keyless-worker.json' if keyless else 'worker.json')]:self.spawn(command,config)
         for key in ['probe_port','worker_probe_port']:self.await_ready(key)
     def signal_owned(self,pid,sig):
         try:
@@ -145,9 +152,9 @@ class Stack:
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
         self.compose('up','-d','--wait','--wait-timeout','180')
         self.migrate();self.migrate();self.start_processes()
-    def tests(self,pattern):
+    def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -230,6 +237,22 @@ class Stack:
         query['query']='comète'
         assert call('POST','/v0/search',query)['items']==[] # Old projection remains, canonical hydration suppresses it.
         (self.directory/'outages.json').write_text(json.dumps({'temporal':'passed','seaweed':'passed','weaviate':'passed','worker_kill_and_replay':'passed','delayed_promotion_and_stale_candidate':'passed'}))
+    def verify_keyless(self):
+        """Restart api and worker without credential_key, prove the keyless core, then restore keyed mode."""
+        start=time.monotonic();status='failed'
+        self.stop_processes()
+        try:
+            self.start_processes(keyless=True)
+            for command in ['api','worker']:
+                lines=(self.directory/'keyless'/(command+'.log')).read_text().count('credential deposits disabled')
+                assert lines==1,f'{command} logged credential deposits disabled {lines} times'
+            self.tests('TestKeyless',{'QUIVR_TEST_KEYLESS_MODE':'1'})
+            status='passed'
+        finally:
+            (self.directory/'keyless-report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3)}))
+            # Never leave the harness keyless for a later step, even when the scenario fails. Like the
+            # other restart scenarios this restores api and worker only, not the short-retention API.
+            self.stop_processes();self.start_processes()
     def capture(self):
         for service in ['postgres','temporal','seaweed','weaviate','tei']:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
@@ -289,6 +312,8 @@ def main():
                 verify_m365_restart(stack)
                 from connector_x_restart import verify as verify_connector_x_restart
                 verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
+                # Last scenario: the keyless worker would fail credentialed instances of earlier scenarios.
+                stack.verify_keyless()
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()

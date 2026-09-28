@@ -6,29 +6,37 @@ import subprocess
 import sys
 
 
-def main():
-    mode = os.environ.get('QUIVR_ROLE', 'api')
-    if mode not in ('api', 'worker', 'migrate'):
-        raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
-    key = os.environ['QUIVR_API_KEY']
+def build_config(env):
+    """Build the core configuration from Railway runtime variables."""
+    key = env['QUIVR_API_KEY']
     config = {
-        'database_url': os.environ['DATABASE_URL'],
-        'cursor_key': os.environ['QUIVR_CURSOR_KEY'],
-        'credential_key': os.environ['QUIVR_CREDENTIAL_KEY'],
+        'database_url': env['DATABASE_URL'],
+        'cursor_key': env['QUIVR_CURSOR_KEY'],
         'listen': '0.0.0.0:8080',
-        'probe_listen': '0.0.0.0:' + os.environ.get('PORT', '8081'),
-        'temporal_address': os.environ['TEMPORAL_ADDRESS'],
-        'weaviate_url': os.environ['WEAVIATE_URL'],
-        'tei_url': os.environ['TEI_URL'],
+        'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
+        'temporal_address': env['TEMPORAL_ADDRESS'],
+        'weaviate_url': env['WEAVIATE_URL'],
+        'tei_url': env['TEI_URL'],
         'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
                       'script': '/app/scripts/token_offsets.py',
                       'model': '/app/.scratch/tokenizer/tokenizer.json'},
-        's3': {'endpoint': os.environ['S3_ENDPOINT'], 'access_key': os.environ['S3_ACCESS_KEY'],
-               'secret_key': os.environ['S3_SECRET_KEY'], 'bucket': 'quivr-content'},
+        's3': {'endpoint': env['S3_ENDPOINT'], 'access_key': env['S3_ACCESS_KEY'],
+               'secret_key': env['S3_SECRET_KEY'], 'bucket': 'quivr-content'},
         'keys': {key: {'organization': 'quivr-demo',
                        'actions': ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query'],
                        'corpora': ['*']}},
     }
+    # Optional: without it the core starts and refuses only credential deposits.
+    if env.get('QUIVR_CREDENTIAL_KEY'):
+        config['credential_key'] = env['QUIVR_CREDENTIAL_KEY']
+    return config
+
+
+def main():
+    mode = os.environ.get('QUIVR_ROLE', 'api')
+    if mode not in ('api', 'worker', 'migrate'):
+        raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
+    config = build_config(os.environ)
     os.umask(0o077)
     path = pathlib.Path('/tmp/quivr-runtime.json')
     path.write_text(json.dumps(config))
