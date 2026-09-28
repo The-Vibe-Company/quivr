@@ -1,0 +1,33 @@
+scripts/local.py
+  s_ec117ba6cf48fd::t_52a7753936c774 15-16
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_5383d4980523b2 143-146
+migrations/017_delivery_retries.sql
+  s_ec117ba6cf48fd::t_85039397ba3428 10-18
+internal/monitoring/metrics.go
+  s_ec117ba6cf48fd::t_8acd310a84b6a3 20-23,25-26,28,31
+  s_ec117ba6cf48fd::t_b1f2f72d98c312 48
+internal/monitoring/metrics_test.go
+  s_ec117ba6cf48fd::t_480afc21fb34dc 17
+  s_ec117ba6cf48fd::t_b15dba17bb1f20 42
+docs/quivr-v2-monitoring-tracer.md
+  s_ec117ba6cf48fd::t_3e7e352b5b380e 313-315
+  s_ec117ba6cf48fd::t_f2e808e2e7aead 341-343
+  s_ec117ba6cf48fd::t_0e8963324666af 344-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f04bd49ff2f7e8ce56068a18af7c88c4deb0a5af",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
