@@ -1,0 +1,114 @@
+package monitoring
+
+import (
+	"context"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+)
+
+// Match is an immutable positive historical determination. It is unique per
+// Subscription Version and Record Version and does not assert that the
+// Record is still current or searchable.
+type Match struct {
+	ID                    string
+	SubscriptionID        string
+	SubscriptionVersionID string
+	SavedQueryID          string
+	SavedQueryVersionID   string
+	RecordID              string
+	RecordVersionID       string
+	PreviousMatchID       string
+	Evidence              MatchEvidence
+	// Position is the journal position of the Match commit, used for stable paging.
+	Position int64
+}
+
+// NoticeReferences are the reference-only identifiers of a monitoring notice.
+type NoticeReferences struct {
+	MatchID               string `json:"match_id"`
+	RecordID              string `json:"record_id"`
+	RecordVersionID       string `json:"record_version_id"`
+	SubscriptionID        string `json:"subscription_id"`
+	SubscriptionVersionID string `json:"subscription_version_id"`
+	DeliveryID            string `json:"delivery_id"`
+	PreviousMatchID       string `json:"previous_match_id,omitempty"`
+}
+
+// Notice is the immutable reference-only notification body. Its stored bytes
+// are what every delivery attempt sends; the feed event shares its ID.
+type Notice struct {
+	EventID       string           `json:"event_id"`
+	Type          string           `json:"type"`
+	SchemaVersion string           `json:"schema_version"`
+	OccurredAt    time.Time        `json:"occurred_at"`
+	References    NoticeReferences `json:"references"`
+}
+
+// Admission is the current derived admission view of a Delivery.
+type Admission struct {
+	Allowed bool
+	Reason  string
+}
+
+// Delivery is the logical notification of one notice to one destination.
+type Delivery struct {
+	ID             string
+	MatchID        string
+	SubscriptionID string
+	DestinationID  string
+	State          string
+	AttemptCount   int
+	// Event holds the exact immutable notice bytes.
+	Event     []byte
+	Admission Admission
+}
+
+// MatchStore reads Match history and Deliveries.
+type MatchStore interface {
+	Match(ctx context.Context, org, id string) (Match, error)
+	// Matches returns up to limit Matches of a Subscription committed after position.
+	Matches(ctx context.Context, org, subscriptionID string, after int64, limit int) ([]Match, error)
+	Delivery(ctx context.Context, org, id string) (Delivery, error)
+}
+
+// Matches lists a visible Subscription's Match history in commit order.
+func (s Service) Matches(ctx context.Context, scope corpus.Scope, subscriptionID string, after int64, limit int) ([]Match, error) {
+	if !scope.Allows("monitoring:read") {
+		return nil, ErrForbidden
+	}
+	if _, err := s.visible(ctx, scope, subscriptionID); err != nil {
+		return nil, err
+	}
+	return s.MatchStore.Matches(ctx, scope.Organization, subscriptionID, after, limit)
+}
+
+// Match reads one Match when its Subscription and content scope are visible.
+func (s Service) Match(ctx context.Context, scope corpus.Scope, id string) (Match, error) {
+	if !scope.Allows("monitoring:read") {
+		return Match{}, ErrForbidden
+	}
+	m, err := s.MatchStore.Match(ctx, scope.Organization, id)
+	if err != nil {
+		return Match{}, err
+	}
+	if _, err = s.visible(ctx, scope, m.SubscriptionID); err != nil {
+		return Match{}, err
+	}
+	return m, nil
+}
+
+// Delivery reads a logical Delivery under the same visibility rule as its Match.
+func (s Service) Delivery(ctx context.Context, scope corpus.Scope, id string) (Delivery, error) {
+	if !scope.Allows("monitoring:read") {
+		return Delivery{}, ErrForbidden
+	}
+	d, err := s.MatchStore.Delivery(ctx, scope.Organization, id)
+	if err != nil {
+		return Delivery{}, err
+	}
+	if _, err = s.visible(ctx, scope, d.SubscriptionID); err != nil {
+		return Delivery{}, err
+	}
+	return d, nil
+}

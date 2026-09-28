@@ -110,7 +110,7 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 		return err
 	}
 	if !emitted {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation}); err != nil {
+		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID}); err != nil {
 			return err
 		}
 	}

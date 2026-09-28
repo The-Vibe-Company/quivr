@@ -44,6 +44,15 @@ type Event struct {
 	ResourceKind string
 	ResourceID   string
 	OccurredAt   time.Time
+	// Monitoring carries the references of a monitoring notice event; it is
+	// nil for every other event.
+	Monitoring *References
+}
+
+// References are the reference-only identifiers a monitoring notice shares
+// with its webhook body. They confer no access by themselves.
+type References struct {
+	MatchID, RecordID, RecordVersionID, SubscriptionID, SubscriptionVersionID, DeliveryID, PreviousMatchID string
 }
 
 // Window is one consistent scan of the journal.

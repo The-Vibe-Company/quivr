@@ -167,6 +167,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	if a.operationRoutes(w, r, scope) {
 		return
 	}
+	if a.matchRoutes(w, r, scope) {
+		return
+	}
 	if r.URL.Path == "/v0/corpora" {
 		switch r.Method {
 		case "POST":

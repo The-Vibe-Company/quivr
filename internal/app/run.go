@@ -160,7 +160,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='012_operation_control.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='013_evaluation.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
@@ -207,7 +207,7 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations}), httpapi.WithOperations(operations.Service{Store: store}))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
@@ -220,6 +220,20 @@ func Run(command string) error {
 			case <-workerDone:
 			case <-time.After(5 * time.Second):
 			}
+		}()
+		evaluationDone := make(chan struct{})
+		defer func() {
+			stop()
+			select {
+			case <-evaluationDone:
+			case <-time.After(5 * time.Second):
+			}
+		}()
+		// Monitoring evaluation keeps its durable state in PostgreSQL and runs
+		// independently of Temporal availability.
+		go func() {
+			defer close(evaluationDone)
+			monitoring.Engine{Store: postgres.EvaluationStore{ContentStore: store}, Versions: versionParts{contents}, Evaluators: map[string]monitoring.EvaluationPort{monitoring.EvaluatorKey(monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion}): monitoring.Fixture{}}, Workers: 4, Lease: time.Minute}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)

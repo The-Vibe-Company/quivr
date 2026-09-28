@@ -190,6 +190,67 @@ Current authorization is checked again before exposing explanations or content.
   Corpus. These events share the resource kind and ID and have distinct stable
   per-Corpus event IDs; consumers deduplicate by resource, not event ID.
 
+### Implemented evaluation (THE-654)
+
+- **Triggers:** the committed `record.retrieval_ready` (a Version's lexical
+  baseline became searchable) and `record.enrichment_available` events. Each
+  carries an internal, never-exposed Record Version reference, so evaluation
+  always targets the exact Version the event concerns and never "the Record's
+  current Version at dispatch time", which could reach a Version made
+  searchable before activation. Trigger events committed before this schema
+  change have no Version reference and are skipped: in an existing evaluation
+  database, such events are never evaluated (no backfill).
+- **Dispatch:** a per-Organization checkpoint, starting at the first activation
+  boundary, advances through committed positions. For each trigger it records
+  one durable evaluation intent per enabled Subscription on the event's Corpus
+  whose activation position precedes the event, in pages of 100 Subscriptions
+  resumed from the checkpoint. Checkpoint and intents commit together, so a
+  restart neither loses nor duplicates work. A later enrichment trigger is new
+  work for the same Version.
+- **Runtime:** evaluation runs in the `worker` process as a PostgreSQL claim
+  loop with four concurrent evaluators, separate from future webhook
+  delivery. This deliberately departs from "Temporal executes durable work":
+  the durable state (checkpoints and intents) lives in PostgreSQL, one-minute
+  leases recover work from crashed claims, the commit is idempotent on the
+  unique Match identity, and a short in-process evaluator call needs no
+  Temporal history. Monitoring therefore keeps evaluating during a Temporal
+  outage. The evaluator sits behind `monitoring.EvaluationPort`; a later remote
+  evaluator can run as a Temporal activity behind that port without changing
+  the commit path.
+- **Decisions:** `no_match` and `not_ready` complete the intent without a Match;
+  a `not_ready` Version is evaluated again by its next trigger. An evaluator
+  error keeps the intent pending with a bounded error code and jittered
+  exponential backoff from one second to five minutes; it never becomes a
+  negative decision. The worker logs `pending_intents` and `erroring_intents`
+  every 30 seconds.
+- **Fixture semantics:** the pinned `configuration` is
+  `{"decisions": {"<marker>": "<decision>", …, "default": "<decision>"}}`.
+  Markers are literal substrings of the Version's text Parts, checked in sorted
+  order; the first present marker decides, otherwise `default` (absent:
+  `no_match`). Decisions are `match`, `no_match` and `not_ready`, plus two
+  fixture-only, test-oriented values: `error` makes the evaluation fail, and
+  `match_after_enrichment` is `not_ready` until the Version has embedding
+  coverage. Evidence names the marker and the Parts containing it.
+- **Atomic commit:** under the Organization journal lock, which disable and
+  withdrawal also take, Monitoring rechecks that the Subscription is enabled on
+  the pinned Version, that the Record Version is current and eligible (baseline
+  ready, not quarantined, no withdrawal or Tombstone) and that its Corpus is in
+  the Subscription's scope. It then commits the Match
+  (`match_id` derived from Subscription Version + Record Version), its pending
+  Delivery, the immutable `match.created` notice bytes, the public event with
+  the same `event_id` and `occurred_at`, and the delivery outbox work. An
+  existing Match commits nothing.
+- **Corrections:** a matching correction Version gets its own plain
+  `match.created` Match for now; `previous_match_id`, `match.corrected`,
+  `match.no_longer_matches` and withdrawal notices belong to THE-657.
+- **Reads:** `GET /v0/matches?subscription_id=` pages by commit order with a
+  signed cursor bound to the Subscription and key scope; `GET /v0/matches/{id}`
+  and `GET /v0/deliveries/{id}` require `monitoring:read` and a key that
+  covers every pinned Corpus, otherwise 404. A Delivery stays `pending` with no
+  attempts until the delivery slice; its admission view reports
+  `subscription_disabled` or `record_withdrawn`. Change events for notices
+  carry `monitoring` references in both polling and SSE.
+
 ## Evaluation and transactions
 
 The initial adapter consumes pinned query/subscription/evaluator configuration,

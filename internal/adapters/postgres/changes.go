@@ -24,7 +24,8 @@ WITH head AS (
     COALESCE((SELECT occurred_at < now() - make_interval(secs => $6::double precision) FROM change_events WHERE organization=$1 AND sequence=$3::bigint + 1), false) AS expired
   FROM head
 )
-SELECT b.h, b.upper, b.expired, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at
+SELECT b.h, b.upper, b.expired, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
+  n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, n.delivery_id, coalesce(n.previous_match_id,'')
 FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at
@@ -32,7 +33,9 @@ LEFT JOIN LATERAL (
   WHERE organization=$1 AND corpus_id=$2 AND sequence > $3 AND sequence <= b.upper
   ORDER BY sequence
   LIMIT $4
-) e ON true`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, retention.Seconds())
+) e ON true
+LEFT JOIN monitoring_notices n ON n.organization=$1 AND n.event_id=e.event_id
+ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, retention.Seconds())
 	if err != nil {
 		return changes.Window{}, err
 	}
@@ -44,11 +47,16 @@ LEFT JOIN LATERAL (
 		var sequence *int64
 		var id, kind, resource, resourceID *string
 		var occurred *time.Time
-		if err = rows.Scan(&w.Head, &upper, &w.Expired, &sequence, &id, &kind, &resource, &resourceID, &occurred); err != nil {
+		var match, record, version, subscription, subscriptionVersion, delivery, previous *string
+		if err = rows.Scan(&w.Head, &upper, &w.Expired, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous); err != nil {
 			return changes.Window{}, err
 		}
 		if sequence != nil {
-			visible = append(visible, changes.Event{Position: *sequence, ID: *id, Type: *kind, CorpusID: corpusID, ResourceKind: *resource, ResourceID: *resourceID, OccurredAt: *occurred})
+			e := changes.Event{Position: *sequence, ID: *id, Type: *kind, CorpusID: corpusID, ResourceKind: *resource, ResourceID: *resourceID, OccurredAt: *occurred}
+			if match != nil {
+				e.Monitoring = &changes.References{MatchID: *match, RecordID: *record, RecordVersionID: *version, SubscriptionID: *subscription, SubscriptionVersionID: *subscriptionVersion, DeliveryID: *delivery, PreviousMatchID: *previous}
+			}
+			visible = append(visible, e)
 		}
 	}
 	if err = rows.Err(); err != nil {

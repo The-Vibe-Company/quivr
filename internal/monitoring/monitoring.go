@@ -1,6 +1,7 @@
 // Package monitoring owns immutable Saved Query and Subscription Versions,
 // Subscription activation from a committed journal boundary, and disabling.
-// Evaluation, Matches and Deliveries are later slices built on these facts.
+// Evaluation turns later eligible Versions into unique Matches with their
+// pending logical Deliveries; network delivery is a later slice.
 package monitoring
 
 import (
@@ -130,6 +131,8 @@ type Service struct {
 	Store        Store
 	Corpora      CorpusAuthorizer
 	Destinations map[string]Destination
+	// MatchStore reads Match history and Deliveries.
+	MatchStore MatchStore
 }
 
 func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in SavedQueryInput) (SavedQuery, error) {

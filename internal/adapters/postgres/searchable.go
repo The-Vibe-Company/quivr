@@ -146,7 +146,7 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 		}
 	}
 	if !ready {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID)}); err != nil {
+		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID}); err != nil {
 			return err
 		}
 	}

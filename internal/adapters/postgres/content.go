@@ -22,7 +22,18 @@ func lockJournal(ctx context.Context, tx pgx.Tx, org string) error {
 	return tx.QueryRow(ctx, "SELECT last_sequence FROM organization_journals WHERE organization=$1 FOR UPDATE", org).Scan(&seq)
 }
 
-type eventInput struct{ Organization, CorpusID, Kind, Resource, ResourceID, MutationID string }
+// eventInput is one public journal fact. VersionID is internal: it names the
+// Record Version a monitoring trigger event concerns and is never exposed.
+type eventInput struct{ Organization, CorpusID, Kind, Resource, ResourceID, MutationID, VersionID string }
+
+// eventID is the stable public identity of an event.
+func eventID(event eventInput) string {
+	identity := event.MutationID
+	if identity == "" {
+		identity = event.ResourceID
+	}
+	return content.StableID("event", event.Organization, event.Kind, event.Resource, identity)
+}
 
 func appendEvent(ctx context.Context, tx pgx.Tx, event eventInput) error {
 	_, err := appendEventAt(ctx, tx, event)
@@ -36,11 +47,7 @@ func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, err
 	if err := tx.QueryRow(ctx, "UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence", event.Organization).Scan(&sequence); err != nil {
 		return 0, err
 	}
-	identity := event.MutationID
-	if identity == "" {
-		identity = event.ResourceID
-	}
-	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, event.Organization, sequence, content.StableID("event", event.Organization, event.Kind, event.Resource, identity), event.CorpusID, event.Kind, event.Resource, event.ResourceID)
+	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''))`, event.Organization, sequence, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID)
 	return sequence, err
 }
 func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
@@ -250,6 +257,7 @@ func (s ContentStore) Record(ctx context.Context, org, id string) (content.Recor
 	err := s.Pool.QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND id=$2", org, id).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID)
 	return r, notFound(err)
 }
+
 // Records reads one keyset page of a Corpus catalog in a single statement.
 func (s ContentStore) Records(ctx context.Context, org, corpusID, after string, limit int) ([]content.Record, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND corpus_id=$2 AND id > $3 COLLATE "C" ORDER BY id COLLATE "C" LIMIT $4`, org, corpusID, after, limit)

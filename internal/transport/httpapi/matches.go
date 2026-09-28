@@ -1,0 +1,185 @@
+package httpapi
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+)
+
+// matchPage is the signed payload of a Match history page cursor. It binds
+// the Subscription filter and authorization scope in its own signature domain.
+type matchPage struct {
+	Version      int    `json:"v"`
+	Subscription string `json:"sub"`
+	Scope        string `json:"s"`
+	After        int64  `json:"a"`
+}
+
+func (a *API) signMatchPage(b []byte) []byte {
+	h := hmac.New(sha256.New, a.CursorKey)
+	h.Write([]byte("match-page\x00"))
+	h.Write(b)
+	return h.Sum(nil)
+}
+
+func (a *API) encodeMatchPage(p matchPage) string {
+	b, _ := json.Marshal(p)
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signMatchPage(b))
+}
+
+func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int64, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return 0, errors.New("invalid_cursor")
+	}
+	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+	var p matchPage
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signMatchPage(b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
+		return 0, errors.New("invalid_cursor")
+	}
+	if p.Subscription != subscriptionID || p.Scope != scopeDigest(s) {
+		return 0, errPageScope
+	}
+	return p.After, nil
+}
+
+// matchRoutes serves /v0/matches and /v0/deliveries/{id}.
+func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+	path := r.URL.Path
+	if path != "/v0/matches" && !strings.HasPrefix(path, "/v0/matches/") && !strings.HasPrefix(path, "/v0/deliveries/") {
+		return false
+	}
+	var resource, id string
+	switch {
+	case path == "/v0/matches":
+		resource = "matches"
+	case strings.HasPrefix(path, "/v0/matches/"):
+		resource, id = "match", strings.TrimPrefix(path, "/v0/matches/")
+	default:
+		resource, id = "delivery", strings.TrimPrefix(path, "/v0/deliveries/")
+	}
+	if a.Monitoring.MatchStore == nil || (resource != "matches" && (id == "" || strings.Contains(id, "/"))) {
+		failure(w, 404, "not_found")
+		return true
+	}
+	if r.Method != "GET" {
+		failure(w, 405, "method_not_allowed")
+		return true
+	}
+	if !scope.Allows("monitoring:read") {
+		failure(w, 403, "forbidden")
+		return true
+	}
+	ctx := r.Context()
+	switch resource {
+	case "match":
+		m, err := a.Monitoring.Match(ctx, scope, id)
+		respondMonitoring(w, 200, matchToTransport(m), err)
+	case "delivery":
+		d, err := a.Monitoring.Delivery(ctx, scope, id)
+		if err != nil {
+			monitoringFailure(w, err)
+			return true
+		}
+		out, err := deliveryToTransport(d)
+		if err != nil {
+			failure(w, 503, "storage_unavailable")
+			return true
+		}
+		send(w, 200, out)
+	default:
+		a.listMatches(w, r, scope)
+	}
+	return true
+}
+
+func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	q := r.URL.Query()
+	for k, v := range q {
+		if (k != "subscription_id" && k != "page_cursor" && k != "limit") || len(v) != 1 {
+			failure(w, 422, "invalid_query")
+			return
+		}
+	}
+	subscriptionID := q.Get("subscription_id")
+	if subscriptionID == "" {
+		failure(w, 422, "invalid_query")
+		return
+	}
+	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
+		failure(w, 422, "invalid_cursor")
+		return
+	}
+	limit := 100
+	if q.Has("limit") {
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 100 {
+			failure(w, 422, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	var after int64
+	if q.Has("page_cursor") {
+		var err error
+		if after, err = a.decodeMatchPage(q.Get("page_cursor"), subscriptionID, scope); errors.Is(err, errPageScope) {
+			failure(w, 409, "cursor_scope_changed")
+			return
+		} else if err != nil {
+			failure(w, 422, "invalid_cursor")
+			return
+		}
+	}
+	matches, err := a.Monitoring.Matches(r.Context(), scope, subscriptionID, after, limit+1)
+	if err != nil {
+		monitoringFailure(w, err)
+		return
+	}
+	page := transport.MatchPage{Items: make([]transport.Match, 0, min(len(matches), limit))}
+	for i, m := range matches {
+		if i == limit {
+			next := a.encodeMatchPage(matchPage{Version: 1, Subscription: subscriptionID, Scope: scopeDigest(scope), After: matches[limit-1].Position})
+			page.NextPageCursor = &next
+			break
+		}
+		page.Items = append(page.Items, matchToTransport(m))
+	}
+	send(w, 200, page)
+}
+
+func matchToTransport(m monitoring.Match) transport.Match {
+	out := transport.Match{MatchId: m.ID, SubscriptionId: m.SubscriptionID, SubscriptionVersionId: m.SubscriptionVersionID, SavedQueryId: m.SavedQueryID, SavedQueryVersionId: m.SavedQueryVersionID,
+		RecordId: m.RecordID, RecordVersionId: m.RecordVersionID,
+		Evidence: transport.MatchEvidence{Evaluator: transport.EvaluatorConfig{PluginId: m.Evidence.Evaluator.PluginID, Version: m.Evidence.Evaluator.Version, Configuration: m.Evidence.Evaluator.Configuration}, Explanation: m.Evidence.Explanation}}
+	if m.PreviousMatchID != "" {
+		out.PreviousMatchId = &m.PreviousMatchID
+	}
+	if len(m.Evidence.PartKeys) > 0 {
+		keys := m.Evidence.PartKeys
+		out.Evidence.PartKeys = &keys
+	}
+	if m.Evidence.Details != nil {
+		details := m.Evidence.Details
+		out.Evidence.Details = &details
+	}
+	return out
+}
+
+func deliveryToTransport(d monitoring.Delivery) (transport.Delivery, error) {
+	out := transport.Delivery{DeliveryId: d.ID, MatchId: d.MatchID, DestinationId: d.DestinationID, State: transport.DeliveryState(d.State), AttemptCount: d.AttemptCount, Admission: transport.DeliveryAdmission{Allowed: d.Admission.Allowed}}
+	if d.Admission.Reason != "" {
+		reason := transport.DeliveryAdmissionReason(d.Admission.Reason)
+		out.Admission.Reason = &reason
+	}
+	return out, json.Unmarshal(d.Event, &out.Event)
+}
