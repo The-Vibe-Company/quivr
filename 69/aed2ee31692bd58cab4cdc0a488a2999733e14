@@ -1,0 +1,42 @@
+internal/connectors/rss.go
+  s_ec117ba6cf48fd::t_e2a899cafe2d0c 1-514,519-562
+  s_ec117ba6cf48fd::t_1e8f1aee36262e 515-518
+internal/connectors/testdata/rss/atom.xml
+  s_ec117ba6cf48fd::t_036550145bb2d9 1-18
+scripts/local.py
+  s_ec117ba6cf48fd::t_1ee64a88f404e7 50
+go.mod
+  s_ec117ba6cf48fd::t_190e544cc6542a 39,44-45,47-49
+  s_ec117ba6cf48fd::t_bbdb3f59d3ba7c 10,15,46
+internal/connectors/rss_test.go
+  s_ec117ba6cf48fd::t_98ce928646c6f6 228,234,240,246,428
+  s_ec117ba6cf48fd::t_eac561605ca66a 1-227,229-233,235-239,241-245,247-427,429-467
+internal/connectors/rss_html.go
+  s_ec117ba6cf48fd::t_16f33df2c67445 1-60
+internal/connectors/testdata/rss/rss1.rdf
+  s_ec117ba6cf48fd::t_998a6880cea6a5 1-21
+internal/app/run.go
+  s_ec117ba6cf48fd::t_1ee64a88f404e7 59-61,92
+internal/connectors/testdata/rss/rss2.xml
+  s_ec117ba6cf48fd::t_89598a62062b07 1-28
+go.sum
+  s_ec117ba6cf48fd::t_96858270662d67 69-72,90-91,94-95,115-116,128-129,134-135,142-143,147-148
+internal/content/extensions.go
+  s_ec117ba6cf48fd::t_f6f57896c22c4b 24-25,119-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "69aed2ee31692bd58cab4cdc0a488a2999733e14",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

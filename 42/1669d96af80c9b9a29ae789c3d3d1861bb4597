@@ -1,0 +1,26 @@
+internal/content/extensions.go
+  s_ec117ba6cf48fd::t_9b8ac389aa7e02 137-138,150
+internal/connectors/rss.go
+  s_ec117ba6cf48fd::t_9b8ac389aa7e02 44-50,64-65,250-256,339,342-346,350-363,416-417,444,514-533,543,549,573-580,592-619
+  s_ec117ba6cf48fd::t_26bfb927f702a6 620
+docs/connectors/rss.md
+  s_ec117ba6cf48fd::t_902cc397858783 5,48-51,72-74,101-104,106-114,129-131
+internal/connectors/rss_test.go
+  s_ec117ba6cf48fd::t_00f6445d52c57e 468-530
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "421669d96af80c9b9a29ae789c3d3d1861bb4597",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

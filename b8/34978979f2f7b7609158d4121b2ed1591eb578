@@ -1,0 +1,21 @@
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_de42bc2f2a1b6a 654,671,704
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_a5268611c67a16 1898
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b834978979f2f7b7609158d4121b2ed1591eb578",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
