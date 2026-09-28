@@ -1,0 +1,32 @@
+tests/acceptance/delivery_test.go
+  s_ec117ba6cf48fd::t_2b17f023fc8f9c 74-76,92-97,106,113-118,120
+tests/acceptance/corrections_test.go
+  s_ec117ba6cf48fd::t_eca65f13ca22ee 1-294
+README.md
+  s_ec117ba6cf48fd::t_97b57d11fd7ebc 119-122,150
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_577a97c90e8081 785,804
+docs/quivr-v2-monitoring-tracer.md
+  s_ec117ba6cf48fd::t_24b0d691fff46f 243-245,333-335,349-411
+  s_ec117ba6cf48fd::t_2bb8a20c2a4e74 412
+docs/api-walkthrough.md
+  s_ec117ba6cf48fd::t_97b57d11fd7ebc 187-202
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_577a97c90e8081 2572-2575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b7673c8dc423d17a23809ce79c76d28724fe762",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
