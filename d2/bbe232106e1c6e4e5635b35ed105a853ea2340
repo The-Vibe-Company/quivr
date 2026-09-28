@@ -1,0 +1,23 @@
+scripts/operation_control.py
+  s_ec117ba6cf48fd::t_c63886a9e41add 1-60
+scripts/local.py
+  s_ec117ba6cf48fd::t_c63886a9e41add 51-52,54,250-251
+tests/acceptance/rebuild_test.go
+  s_ec117ba6cf48fd::t_fb0caf3cb4d6c4 15-20,23,39,74,176-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2bbe232106e1c6e4e5635b35ed105a853ea2340",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
