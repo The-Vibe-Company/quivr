@@ -1,0 +1,50 @@
+internal/content/content.go
+  s_ec117ba6cf48fd::t_182429e5fb2366 225,515
+  s_ec117ba6cf48fd::t_5eafdc9ff2f89a 226-231,238,516-525
+internal/adapters/postgres/catalog_test.go
+  s_ec117ba6cf48fd::t_c67438398c8fcf 1-101
+migrations/009_record_catalog.sql
+  s_ec117ba6cf48fd::t_4608b11dd7461f 1-2
+internal/changes/changes.go
+  s_ec117ba6cf48fd::t_4a7ce2cd64722f 12,32-36
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_673e4b3db4072a 43-49,512-513
+internal/transport/httpapi/catalog_test.go
+  s_ec117ba6cf48fd::t_d79ea5ff5da953 1-7,9-77,79-161
+  s_ec117ba6cf48fd::t_1dc1aa5d996b99 8,78
+internal/adapters/postgres/content.go
+  s_ec117ba6cf48fd::t_4608b11dd7461f 246-262
+internal/transport/httpapi/content.go
+  s_ec117ba6cf48fd::t_00d4727581c3c3 177-180
+tests/acceptance/catalog_test.go
+  s_ec117ba6cf48fd::t_80fcb88d5d2302 1-57,61-121,123-198,200-203,206-217,219-260,265-267,270,276-279,284-292,294-299,303,306-307,313,316-325,330-369,375,390-391
+  s_ec117ba6cf48fd::t_5947750c065671 58-60,122,199,204-205,218,261-264,268-269,271-275,280-283,293,300-302,304-305,308-312,314-315,326-329,370-374,376-389
+internal/transport/httpapi/changes_test.go
+  s_ec117ba6cf48fd::t_1dc1aa5d996b99 227,233,298
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_c55bea0a8ad638 285,288-292,301-304,306-307,320-335
+internal/transport/httpapi/changes.go
+  s_ec117ba6cf48fd::t_4a7ce2cd64722f 34,37,39,47-54,56,123,147,185
+internal/transport/httpapi/catalog.go
+  s_ec117ba6cf48fd::t_3b25394b3b61ca 1-128
+scripts/local.py
+  s_ec117ba6cf48fd::t_d18515ab510ba8 229,231
+internal/app/run.go
+  s_ec117ba6cf48fd::t_b659f89d2e5c14 95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55f0317b437a52fd5974cacc5087aa5f996f9066",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
