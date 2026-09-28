@@ -1,0 +1,60 @@
+contracts/http/v0/checks/validate.py
+  s_ec117ba6cf48fd::t_ce7de723da0bfe 18-33,94-95
+README.md
+  s_ec117ba6cf48fd::t_5c398063c0c33a 70-75
+  s_ec117ba6cf48fd::t_3624ca9932f09b 195-196
+tests/acceptance/journey_test.go
+  s_ec117ba6cf48fd::t_69ade36147e44a 37-41
+  s_ec117ba6cf48fd::t_006ae50e6155e9 1-36,42-394
+scripts/inventory.py
+  s_ec117ba6cf48fd::t_c401587a132104 1-116
+contracts/http/v0/README.md
+  s_ec117ba6cf48fd::t_e93462381ae222 25-31
+tests/acceptance/README.md
+  s_ec117ba6cf48fd::t_0254f1b55628f9 1-44
+docs/evidence/the-662-spec1-closure.md
+  s_ec117ba6cf48fd::t_912c348f46033d 1-109
+docs/quivr-v2-remaining-limits.md
+  s_ec117ba6cf48fd::t_9f37c4b056ce90 1-79
+.github/workflows/verify.yml
+  s_ec117ba6cf48fd::t_3840d868b0362c 7,9-10
+  s_ec117ba6cf48fd::t_383dccaa36c918 77-78
+  s_ec117ba6cf48fd::t_6f3c7bf05350c7 41-50
+scripts/lifecycle.py
+  s_ec117ba6cf48fd::t_e2d5187c5b0148 1-58
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_576f099b500d1f 236-326
+  s_ec117ba6cf48fd::t_f7b634f355cd82 5-10
+  s_ec117ba6cf48fd::t_159b9fd09809ab 34-39
+scripts/verify_report.py
+  s_ec117ba6cf48fd::t_d0db797d292169 1-110
+third_party/README.md
+  s_ec117ba6cf48fd::t_5b0bc56d28c036 1-30
+scripts/local.py
+  s_ec117ba6cf48fd::t_7999381b4e1e67 108-111,114,116-122,124-127
+  s_ec117ba6cf48fd::t_4a14119480c4c0 274-276,278-280
+  s_ec117ba6cf48fd::t_6e1868a0062c27 31
+  s_ec117ba6cf48fd::t_d7aa4890c8d2b3 93-95,97-98
+  s_ec117ba6cf48fd::t_5c0c98e1c47e5b 270
+  s_ec117ba6cf48fd::t_e10ee3ca862502 156
+  s_ec117ba6cf48fd::t_19224a37b5b0ef 5,282-385,390-393,395,398-399,401,404-405,407
+  s_ec117ba6cf48fd::t_445ca862fd1dd8 281
+scripts/test_local.py
+  s_ec117ba6cf48fd::t_be1e9477341d6e 1-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "42cd69f4a4af75e880f00b4c40696fcc068f47fb",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
