@@ -1,0 +1,36 @@
+internal/connectors/connector.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 40-44
+internal/connectors/acquire_test.go
+  s_ec117ba6cf48fd::t_399f1eeffeadda 7,18,23,28,42,51-57,190-226,228-229
+  s_ec117ba6cf48fd::t_5eff982ef1dd69 227
+internal/content/content.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 156-160
+internal/adapters/postgres/content_test.go
+  s_ec117ba6cf48fd::t_f6cf86262e8a16 161-169
+internal/connectors/health.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 29-31
+internal/adapters/postgres/connectors.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 365
+internal/adapters/postgres/content.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 143
+internal/connectors/acquire.go
+  s_ec117ba6cf48fd::t_28e9689c8fdcc9 113-119,127-129,131-132,145,147,166-168,181,187-188
+internal/adapters/postgres/connectors_test.go
+  s_ec117ba6cf48fd::t_8c7c8f569760f7 142-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f879ec374a208472fdc93ef2099321606b83c3b0",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
