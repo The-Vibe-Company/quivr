@@ -4,8 +4,10 @@ permissions:
   contents: read
 jobs:
   verify:
+    # The one declared supported platform (linux/amd64); see scripts/inventory.py.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The assembled journey and lifecycle proofs (THE-662) add about five minutes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # The migration guard compares against main's tree; a shallow fetch is enough.
@@ -36,6 +38,18 @@ jobs:
           include-hidden-files: true
           path: |
             .scratch/quivr-verify-*/report.json
+            .scratch/quivr-verify-*/report.md
+            .scratch/quivr-verify-*/readiness.json
+            .scratch/quivr-verify-*/services.json
+            .scratch/quivr-verify-*/dependency-inventory.json
+            .scratch/quivr-verify-*/journey-*.json
+            .scratch/quivr-verify-*/lifecycle.json
+            .scratch/quivr-verify-*/delivery-metrics.txt
+            .scratch/quivr-verify-*/metrics-*.txt
+            .scratch/quivr-verify-*/failure-drill.json
+            .scratch/quivr-verify-*/connector-*.json
+            .scratch/quivr-verify-*/m365-restart.json
+            .scratch/quivr-verify-*/*-before-lifecycle.log
             .scratch/quivr-verify-*/acceptance.log
             .scratch/quivr-verify-*/api*.log*
             .scratch/quivr-verify-*/worker*.log*
@@ -62,3 +76,5 @@ jobs:
             contracts/http/v0/openapi.yaml
             contracts/shared/v0/manifest.schema.json
           if-no-files-found: warn
+      - if: always()
+        run: cat .scratch/quivr-verify-*/report.md >> "$GITHUB_STEP_SUMMARY" || true

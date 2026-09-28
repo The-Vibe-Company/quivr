@@ -22,10 +22,13 @@ compiles both files together through the `contracts` package.
 
 | Target | Pinned tool | Verified |
 | --- | --- | --- |
-| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and 24 JSON round trips |
-| Python client | OpenAPI Generator v7.25.0, `python` | Import and 24 JSON round trips |
-| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and 24 JSON round trips |
-| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, 24 examples, 31 boundary checks |
+| Go types and net/http strict server bindings | oapi-codegen v2.8.0, runtime v1.7.0 | Compilation and a JSON round trip of every example |
+| Python client | OpenAPI Generator v7.25.0, `python` | Import and a JSON round trip of every example |
+| TypeScript client | OpenAPI Generator v7.25.0, `typescript-fetch`, TypeScript 5.9.3 | CommonJS/ESM compilation and a JSON round trip of every example |
+| Schema | openapi-spec-validator 0.9.0, jsonschema 4.26.0 | Full document, every example (27 today), at least 31 boundary checks |
+
+`checks/validate.py` fails if one of the original 24 examples is removed or the boundary
+checks drop below the original 31 (THE-662); later slices only add to either set.
 
 The generator image used was
 `openapitools/openapi-generator-cli:v7.25.0@sha256:2ab0a9680222de65dc9d3baf861aa02b99e1b80c211d8221ebf3ae8f8a102524`.

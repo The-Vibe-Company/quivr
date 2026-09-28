@@ -2,6 +2,7 @@
 """Linux local text slice: host Go processes and isolated real dependencies."""
 from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
+import verify_report
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -27,6 +28,7 @@ class Stack:
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.directory.chmod(0o700)
         self.statefile=self.directory/'state.json'
+        self.readiness={}
         if self.statefile.exists(): self.state=json.loads(self.statefile.read_text())
         else:
             self.state={'password':secrets.token_hex(24),'cursor_key':secrets.token_hex(32), 'admin':secrets.token_hex(32),'other':secrets.token_hex(32),'reader':secrets.token_hex(32),'scoped':secrets.token_hex(32),'denied':secrets.token_hex(32),'pids':[], 'api_port':port(),'probe_port':port(),'worker_probe_port':port()}
@@ -88,7 +90,12 @@ class Stack:
         keyless.update(log_directory=str(keyless_logs),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write'],['*'])})
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
+    def running(self):
+        """Whether this project's PostgreSQL container is up; make migrate needs a started project."""
+        return bool(self.compose('ps','-q','--status','running','postgres',capture_output=True,text=True).stdout.strip())
     def migrate(self):
+        if not self.running():
+            raise RuntimeError(f'project {self.name} is not running; start it with `make dev` before `make migrate`')
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
             run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
@@ -98,15 +105,39 @@ class Stack:
         self.state['pids'].append(p.pid)
         if command=='worker':self.state['worker_pid']=p.pid
         self.save()
-    def await_ready(self,key):
-        deadline=time.monotonic()+20
+    def await_ready(self,key,timeout=20):
+        """Bounded readiness wait; a timeout names the probe, its last answer and the logs to read."""
+        probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api'}.get(key,key)
+        url=f"http://127.0.0.1:{self.state[key]}/readyz";start=time.monotonic();last='no answer'
         while True:
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/readyz",timeout=1) as r:
+                with urllib.request.urlopen(url,timeout=1) as r:
                     if r.status==204:break
-            except OSError:pass
-            if time.monotonic()>deadline:raise RuntimeError('readiness timeout; inspect scoped logs')
+                    last=f'HTTP {r.status}'
+            except urllib.error.HTTPError as error:last=f'HTTP {error.code}: {error.read(200).decode(errors="replace").strip()}'
+            except OSError as error:last=type(error).__name__
+            if time.monotonic()-start>timeout:
+                self.readiness[probe]={'ready':False,'last':last,'waited_seconds':round(time.monotonic()-start,3)}
+                self.save_readiness()
+                raise RuntimeError(f'{probe} readiness timed out after {timeout}s at {url} (last: {last}); inspect {self.directory}/{probe}-startup.log')
             time.sleep(.1)
+        self.readiness[probe]={'ready':True,'waited_seconds':round(time.monotonic()-start,3)}
+        self.save_readiness()
+    def probe(self,key):
+        """Status of one /readyz probe, or None when nothing answers."""
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/readyz",timeout=3) as r:return r.status
+        except urllib.error.HTTPError as error:return error.code
+        except OSError:return None
+    def readiness_split(self):
+        """During a search outage: API ready (204), worker live but not ready (503)."""
+        deadline=time.monotonic()+15
+        while (observed:={'api':self.probe('probe_port'),'worker':self.probe('worker_probe_port')})!={'api':204,'worker':503}:
+            assert time.monotonic()<deadline,f'readiness must separate acceptance from the outage: {observed}'
+            time.sleep(.2)
+        self.readiness['during_search_outage']=observed;self.save_readiness()
+    def save_readiness(self):
+        (self.directory/'readiness.json').write_text(json.dumps(self.readiness,indent=2))
     def start_fake_graph(self):
         if getattr(self,'fake_graph',None) is None:
             from fake_graph import FakeGraph
@@ -135,14 +166,7 @@ class Stack:
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.save()
-        deadline=time.monotonic()+20
-        while True:
-            try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{self.state['short_probe_port']}/readyz",timeout=1) as r:
-                    if r.status==204:break
-            except OSError:pass
-            if time.monotonic()>deadline:raise RuntimeError('short-retention API readiness timeout')
-            time.sleep(.1)
+        self.await_ready('short_probe_port')
     def stop_processes(self):
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
         self.state['pids']=[];self.state.pop('worker_pid',None);self.save()
@@ -152,8 +176,21 @@ class Stack:
         prepare_tokenizer()
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
-        self.compose('up','-d','--wait','--wait-timeout','180')
+        self.start_dependencies()
         self.migrate();self.migrate();self.start_processes()
+    def start_dependencies(self,attempts=2):
+        """Start the pinned dependencies with bounded readiness. A dependency that crashes while
+        starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
+        more bounded attempt; every retry is recorded in readiness.json, never hidden."""
+        for attempt in range(1,attempts+1):
+            try:
+                self.compose('up','-d','--wait','--wait-timeout','180');return
+            except subprocess.CalledProcessError as error:
+                crashed=self.compose('ps','--all','--status','exited','--format','{{.Service}}',capture_output=True,text=True).stdout.split()
+                self.readiness.setdefault('dependency_start_retries',[]).append({'attempt':attempt,'exited':crashed})
+                self.save_readiness()
+                # Only a crashed dependency is retried; a healthcheck timeout fails at once.
+                if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
         env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
@@ -221,6 +258,9 @@ class Stack:
             time.sleep(.2)
         assert receipt['outcome']=='created' and receipt['diagnostics'],receipt
         assert not receipt['availability']['is_current'] and not receipt['availability']['searchable'],receipt
+        # Readiness separates durable acceptance from a downstream outage (THE-662): the API
+        # stays ready while the worker reports the lost search dependency, without a restart.
+        self.readiness_split()
         record=call('GET','/v0/records/'+receipt['record_id'])
         assert record['current_version_id']==first['version_id'],record
         version=call('GET','/v0/records/'+receipt['record_id']+'/versions/'+receipt['version_id'])
@@ -256,75 +296,154 @@ class Stack:
             # other restart scenarios this restores api and worker only, not the short-retention API.
             self.stop_processes();self.start_processes()
     def capture(self):
+        with (self.directory/'services.json').open('w') as out:self.compose('ps','--all','--format','json',stdout=out)
         for service in ['postgres','temporal','seaweed','weaviate','tei']:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
     def down(self,reset=False):
+        """Stop this project's processes and containers. reset also deletes its volumes and the
+        state bound to that data; generated credentials and ports are kept and nothing is
+        started again (make dev initializes a fresh schema)."""
         self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        if reset:
+            for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
+            self.save()
+
+
+def api_call(stack,path,expected=200):
+    """One authenticated public read, asserting its status; returns the JSON body."""
+    req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}{path}",headers={'Authorization':'Bearer '+stack.state['admin']})
+    try:response=urllib.request.urlopen(req,timeout=5)
+    except urllib.error.HTTPError as error:response=error
+    with response:
+        body=json.load(response)
+        assert response.status==expected,(path,response.status,body)
+        return body
+
+def persistence(stack):
+    stack.tests('TestCorpusPersistsAndReplays')
+    original_id=api_call(stack,'/v0/corpora')['items'][0]['corpus_id']
+    (stack.directory/'original-corpus-id.txt').write_text(original_id)
+    # Restart all application processes and PostgreSQL; assert via HTTP again.
+    stack.stop_processes();stack.compose('restart','postgres');stack.compose('up','-d','--wait','--wait-timeout','180');stack.migrate();stack.start_processes()
+    assert api_call(stack,'/v0/corpora/'+original_id)['corpus_id']==original_id
+    stack.tests('TestCorpusPersistsAndReplays')
+    stack.state['scoped_id']=api_call(stack,'/v0/corpora')['items'][0]['corpus_id']
+    stack.save();stack.stop_processes();stack.config();stack.start_processes()
+
+def adapters(stack):
+    stack.stop_processes()
+    with (stack.directory/'adapters.log').open('w') as log:
+        run([GO,'test','-count=1','-v','./internal/adapters/...','./internal/processing/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
+    stack.start_processes()
+
+def delivery_restart(stack):
+    # A Delivery with one failed attempt converges after the worker is killed and restarted.
+    stack.tests('TestDeliveryRestartBefore');stack.stop_worker();stack.start_worker();stack.tests('TestDeliveryRestartAfter')
+
+def journey(stack,steps):
+    """The assembled public journey (THE-662) around a real worker outage."""
+    steps.run('journey_before_restart',stack.tests,'^TestJourneyBeforeRestart$')
+    steps.run('stop_worker',stack.stop_worker)
+    try:steps.run('journey_worker_stopped',stack.tests,'^TestJourneyWorkerStopped$')
+    finally:steps.run('start_worker',stack.start_worker)
+    steps.run('journey_after_restart',stack.tests,'^TestJourneyAfterRestart$')
+
+def connectors(stack):
+    # Connector acquisition keeps polling on its schedule; run it after every
+    # timed scenario, in its own Organization, then prove restart resumption.
+    # The x_list kind polls a local fake X API served from this process.
+    import fake_x
+    fake_x.start(stack.state['fake_x_port'])
+    stack.tests('TestConnector')
+
+def verify(stack,steps):
+    """Every verification step in order; each feature keeps its own tests."""
+    from embedding_outage import verify as verify_embedding_outage
+    from rebuild_recovery import verify as verify_rebuild_recovery
+    from operation_control import verify as verify_operation_control
+    from connector_restart import verify as verify_connector_restart
+    from m365_restart import verify as verify_m365_restart
+    from connector_x_restart import verify as verify_connector_x_restart
+    from lifecycle import verify as verify_lifecycle
+    steps.run('persistence_across_restart',persistence,stack)
+    steps.run('core_acceptance',stack.tests,'TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch')
+    steps.run('adapter_integration',adapters,stack)
+    steps.run('ingestion_outages',stack.ingestion_outages)
+    steps.run('embedding_outage',verify_embedding_outage,stack)
+    steps.run('rebuild_recovery',verify_rebuild_recovery,stack)
+    steps.run('operation_control',verify_operation_control,stack)
+    # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them after
+    # order-sensitive acceptance and timed outage scenarios.
+    steps.run('short_retention_api',stack.start_short_retention_api)
+    steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration')
+    # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
+    steps.run('monitoring',stack.tests,'TestMonitoring')
+    steps.run('delivery_worker_restart',delivery_restart,stack)
+    journey(stack,steps)
+    steps.run('connectors',connectors,stack)
+    steps.run('connector_restart',verify_connector_restart,stack)
+    steps.run('m365_restart',verify_m365_restart,stack)
+    steps.run('x_restart',verify_connector_x_restart,stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
+    # The keyless worker would fail credentialed instances of earlier scenarios.
+    steps.run('keyless_core',stack.verify_keyless)
+    steps.run('validate_captures',run,[os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
+    # Last: stop/migrate/reset semantics on this isolated project.
+    steps.run('lifecycle',verify_lifecycle,stack)
+
+def preparation(stack,steps):
+    """Cold preparation (model/tokenizer download) is reported apart from the warm stack start."""
+    try:embedding=json.loads((stack.directory/'embedding-provenance.json').read_text())
+    except (OSError,ValueError):embedding={}
+    start=next((s.get('seconds') for s in steps.items if s['step']=='start_stack'),None)
+    return {'model_prepare_seconds':embedding.get('prepare_seconds'),'model_downloaded_bytes':embedding.get('downloaded_bytes'),'start_stack_seconds':start,
+            'note':'start_stack includes preparation, image pulls on a cold cache, build, Compose readiness and migrations; no startup-time claim'}
+
+def finish(stack,steps,status,start):
+    """Capture, inventory and report before cleaning up only this run; redact what leaves it."""
+    from inventory import inventory, pins
+    kept=status!='passed' and os.environ.get('QUIVR_KEEP_ON_FAILURE')=='1'
+    # A second Ctrl+C or a CI cancellation must not abort capture, cleanup or the report.
+    previous={sig:signal.signal(sig,signal.SIG_IGN) for sig in (signal.SIGINT,signal.SIGTERM)}
+    try:
+        try:steps.run('capture_diagnostics',stack.capture)
+        except Exception:pass
+        try:(stack.directory/'dependency-inventory.json').write_text(json.dumps(inventory(stack.directory/'quivr'),indent=2))
+        except Exception as error:(stack.directory/'dependency-inventory.json').write_text(json.dumps({'status':'not inventoried','error':verify_report.bounded(error)}))
+    finally:
+        if not kept:
+            try:steps.run('scoped_cleanup',stack.down,True)
+            except Exception:pass
+        source=run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip()
+        dirty=bool(run(['git','status','--porcelain','--untracked-files=no'],capture_output=True,text=True).stdout.strip())
+        verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
+            'scope':'Every feature acceptance suite, adapter integration, outage/restart scenarios and the assembled public journey (THE-662) over real PostgreSQL, Temporal, S3, Weaviate and TEI',
+            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s'},'pins':pins(),
+            'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
+            'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
+        verify_report.redact_tree(stack.directory,verify_report.secrets_of(stack.state)+[CAPTURE_SECRET])
+        print('Verification report:',stack.directory/'report.md')
+        if kept:print(f'Kept for inspection (QUIVR_KEEP_ON_FAILURE=1). Remove it with: QUIVR_PROJECT={stack.name} make reset')
+        for sig,handler in previous.items():signal.signal(sig,handler)
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('command',choices=['dev','verify','down','reset','migrate']);args=parser.parse_args()
     verification=args.command=='verify'
-    stack=Stack('quivr-verify-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10])
-    def interrupted(*_):raise KeyboardInterrupt()
+    # QUIVR_PROJECT selects an existing project for down/reset/migrate, e.g. a kept verification run.
+    name=os.environ.get('QUIVR_PROJECT') if args.command in ['down','reset','migrate'] else None
+    stack=Stack(name or ('quivr-verify-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]))
+    def interrupted(*_):raise verify_report.Interrupted()
     signal.signal(signal.SIGTERM,interrupted)
-    start=time.monotonic();status='failed'
+    steps=verify_report.Steps();start=time.monotonic();status='failed'
     try:
         if args.command in ['dev','verify']:
-            stack.up()
-            if verification:
-                stack.tests('TestCorpusPersistsAndReplays')
-                req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora",headers={'Authorization':'Bearer '+stack.state['admin']})
-                with urllib.request.urlopen(req,timeout=5) as r: original_id=json.load(r)['items'][0]['corpus_id']
-                (stack.directory/'original-corpus-id.txt').write_text(original_id)
-                # Restart all application processes and PostgreSQL; assert via HTTP again.
-                stack.stop_processes();stack.compose('restart','postgres');stack.compose('up','-d','--wait','--wait-timeout','180');stack.migrate();stack.start_processes()
-                req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora/{original_id}",headers={'Authorization':'Bearer '+stack.state['admin']})
-                with urllib.request.urlopen(req,timeout=5) as r: assert json.load(r)['corpus_id']==original_id
-                stack.tests('TestCorpusPersistsAndReplays')
-                req=urllib.request.Request(f"http://127.0.0.1:{stack.state['api_port']}/v0/corpora",headers={'Authorization':'Bearer '+stack.state['admin']})
-                with urllib.request.urlopen(req,timeout=5) as r:stack.state['scoped_id']=json.load(r)['items'][0]['corpus_id']
-                stack.save();stack.stop_processes();stack.config();stack.start_processes();stack.tests('TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch')
-                stack.stop_processes()
-                with (stack.directory/'adapters.log').open('w') as log:
-                    run([GO,'test','-count=1','-v','./internal/adapters/...','./internal/processing/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
-                stack.start_processes()
-                stack.ingestion_outages()
-                from embedding_outage import verify as verify_embedding_outage
-                verify_embedding_outage(stack)
-                from rebuild_recovery import verify as verify_rebuild_recovery
-                verify_rebuild_recovery(stack)
-                from operation_control import verify as verify_operation_control
-                verify_operation_control(stack)
-                # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them last so they cannot skew
-                # order-sensitive acceptance or timed outage scenarios.
-                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration')
-                # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
-                stack.tests('TestMonitoring')
-                # A Delivery with one failed attempt converges after the worker is killed and restarted.
-                stack.tests('TestDeliveryRestartBefore');stack.stop_worker();stack.start_worker();stack.tests('TestDeliveryRestartAfter')
-                # Connector acquisition keeps polling on its schedule; run it after every
-                # timed scenario, in its own Organization, then prove restart resumption.
-                # The x_list kind polls a local fake X API served from this process.
-                import fake_x
-                fake_x.start(stack.state['fake_x_port'])
-                stack.tests('TestConnector')
-                from connector_restart import verify as verify_connector_restart
-                verify_connector_restart(stack)
-                from m365_restart import verify as verify_m365_restart
-                verify_m365_restart(stack)
-                from connector_x_restart import verify as verify_connector_x_restart
-                verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
-                # Last scenario: the keyless worker would fail credentialed instances of earlier scenarios.
-                stack.verify_keyless()
-                run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
+            steps.run('start_stack',stack.up)
+            if verification:verify(stack,steps)
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
-        elif args.command=='migrate':stack.migrate()
+        elif args.command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(args.command=='reset')
         status='passed'
+    except (KeyboardInterrupt,verify_report.Interrupted):
+        status='interrupted';raise
     finally:
-        if verification:
-            try:stack.capture()
-            finally:stack.down(True)
-            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion, lexical/semantic/hybrid HTTP acceptance, E5 enrichment/outage and FR/EN relevance; real PostgreSQL, Temporal, S3, Weaviate and TEI','timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s'},'artifacts':str(stack.directory)},indent=2))
-            print('Verification artifacts:',stack.directory)
+        if verification:finish(stack,steps,status,start)
 if __name__=='__main__':main()

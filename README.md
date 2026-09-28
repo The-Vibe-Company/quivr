@@ -67,6 +67,12 @@ make verify   # contracts, unit tests and end-to-end journeys on an isolated sta
 make down     # stop everything, keep data (make reset also deletes volumes)
 ```
 
+`make verify` runs every feature's acceptance suite and one assembled monitoring
+journey on an isolated stack. It removes only its own project, even after a
+failure or Ctrl+C. It then prints the path of a `report.md` that names any failed
+step, the pinned versions and the dependency inventory. Linux x86_64 is the only
+supported platform; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
+
 `make dev` prints the API address and the path of a generated `config.json` holding
 throwaway local keys. Export both, then create a Corpus, ingest a text and search it:
 
@@ -186,6 +192,8 @@ listed here, not in "What works today".
 | [Ingestion](docs/quivr-v2-ingestion-contracts.md) · [Search](docs/quivr-v2-search-contracts.md) · [Monitoring](docs/quivr-v2-monitoring-tracer.md) | Contract rationale |
 | [Connectors](docs/connectors/README.md) | Operating scheduled Connector Instances |
 | [Local harness](docs/quivr-v2-local-harness.md) | How `make dev` and `make verify` work |
+| [Remaining limits](docs/quivr-v2-remaining-limits.md) | Known limits and their tickets; what is not claimed |
+| [Third-party notices](third_party/README.md) | Dependency notices and inventory |
 | [Railway deployment](deploy/railway/README.md) | Hosted single-node evaluation demo |
 | [Research](research/) | Technology comparisons behind the stack |
 

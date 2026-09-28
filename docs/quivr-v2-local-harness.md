@@ -2,10 +2,12 @@
 
 Decision ticket: [THE-548](https://linear.app/thevibecompany/issue/THE-548).
 
-Status: proposed handoff for THE-550. Stan accepted correlated logs, a few
-metrics and an error report as the initial diagnostics; distributed tracing and
-dashboards are deferred. This document specifies the harness, not an implemented
-stack or a completed end-to-end proof. Commands below are implementation targets.
+Status: implemented. [THE-662](https://linear.app/thevibecompany/issue/THE-662)
+assembled the end-to-end journey and hardened the harness; see "Implemented
+verification (THE-662)" below. Stan accepted correlated logs, a few metrics and
+an error report as the initial diagnostics; distributed tracing and dashboards
+are deferred. The rest of this document is the original design (THE-548); where
+it says "must", the implemented section records what was built.
 
 ## Scope and inherited decisions
 
@@ -29,9 +31,12 @@ matching belongs to a future plugin.
 | --- | --- |
 | `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed |
 | `make verify` | Run static/contract checks and tests in an isolated Compose project; collect a report and return nonzero on failure |
-| `make down` | Stop the development project and preserve its data volumes |
-| `make reset` | Explicitly remove only this project's local data and initialize again |
-| `make migrate` | Run the versioned initializer against the selected project; report failures and required restarts |
+| `make down` | Stop the development project's processes and containers and preserve its data volumes |
+| `make reset` | Stop the project and delete only its volumes and the state bound to that data. Generated credentials and ports are kept, and nothing is restarted: the next `make dev` initializes a fresh schema |
+| `make migrate` | Run the versioned initializer against the running project; report failures and required restarts. On a stopped project it fails and points to `make dev` |
+
+`QUIVR_PROJECT=<name>` selects another project for `down`, `reset` and `migrate`,
+for example a verification run kept with `QUIVR_KEEP_ON_FAILURE=1`.
 
 `verify` uses its own project name, volumes, network, fixture identities and
 temporary credentials. It must not reuse or reset the developer's stack. Publish
@@ -227,6 +232,110 @@ start recorded separately from warm start and model readiness, resource peaks an
 exact pins. Harness or dependency errors fail it; a missed p95 target or relevance
 deficit is a reported finding. It stays outside `verify` and runs in CI through
 the non-required `Retrieval baseline` workflow, on manual dispatch only.
+
+## Implemented verification (THE-662)
+
+`make verify` runs on linux/amd64 only (ubuntu-24.04 in CI); no other platform is
+claimed. It runs the same commands locally and in CI, in this order:
+1. `denylist`, `migrations` and `contracts`, which regenerates the transport and
+   compares it with the committed code. It also validates the full OpenAPI
+   document, every example (the original 24 are a guarded floor) and at least
+   31 boundary checks.
+2. `test`.
+3. `scripts/local.py verify`.
+4. The demo UI check.
+
+**Isolation.** Each run gets:
+- a unique Compose project `quivr-verify-<run id>`, with its own network and volumes;
+- ports on 127.0.0.1 only;
+- a private directory under `.scratch/` (mode 0700);
+- freshly generated keys, database password, S3 and cursor secrets (state file mode 0600).
+
+The harness reads no personal credential from the environment. The only variables
+it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE`;
+`scripts/test_local.py` enforces this.
+
+**Steps and report.**
+- Every scenario is a named step:
+  - persistence, core acceptance, adapters and outages;
+  - changes/catalog/rebuild, monitoring and delivery restart;
+  - the three journey phases, connectors, keyless, capture validation and lifecycle.
+- On success, failure or interrupt (SIGINT or SIGTERM), the run captures service
+  logs and `services.json`, writes `dependency-inventory.json`, then removes only
+  its own project.
+- Before the report is written, every generated secret is replaced by `[REDACTED]`
+  in exportable artifacts. Private configuration files are never uploaded.
+- `report.json` and `report.md` record:
+  - status, the failed or interrupted step and its bounded error;
+  - source revision and dirty flag, per-step durations;
+  - `timing_overrides`;
+  - pins: image digests, model revision, tokenizer, toolchain;
+  - the unsupported platforms;
+  - a link to [the remaining-limit report](quivr-v2-remaining-limits.md).
+- CI uploads the artifacts and appends `report.md` to the job summary.
+- With `QUIVR_KEEP_ON_FAILURE=1`, a failed run keeps its project for inspection.
+  Remove it with `QUIVR_PROJECT=<name> make reset`.
+
+**Readiness.** Every wait is bounded:
+- Compose `--wait` up to 180 s, with one more bounded attempt when a dependency
+  crashes while starting (recorded as `dependency_start_retries`);
+- each process `/readyz` up to 20 s.
+
+A timeout names the probe (`api`, `worker`, `short-api`), its last answer and
+the startup log to read, and records them in `readiness.json`.
+
+Readiness separates durable acceptance from downstream outages. During the
+Weaviate outage scenario the harness asserts that:
+- the API `/readyz` stays 204, so commands are still accepted durably;
+- the worker `/readyz` turns 503, but the worker is live and is not restarted.
+
+It records both under `during_search_outage`. The report records cold model
+preparation apart from the whole stack start (`preparation`); it makes no
+startup-time claim.
+
+The lifecycle step recreates containers. Before it runs, the service logs of
+the whole run are kept as `<service>-before-lifecycle.log`.
+
+**Assembled journey.** `tests/acceptance/journey_test.go` composes the feature
+journeys in its own Corpus, over HTTP, SSE and raw signed webhook bytes. The
+harness stops the worker between the first and second phases and restarts it
+before the third:
+
+1. **Before restart.**
+   - Inline ingestion and replay.
+   - Lexical search, then vector search: `record.retrieval_ready` precedes
+     `record.enrichment_available`.
+   - A Match whose signed webhook fails once and is then delivered with
+     identical bytes.
+   - A batch with a verified upload and a structured Manifest.
+   - A correction that no longer matches, and a withdrawal notice.
+2. **Worker stopped.** New work is accepted and stays pending; reads and search
+   keep working.
+3. **After restart.**
+   - The pending work converges, with exactly one Match and its Delivery.
+   - SSE replay and `Last-Event-ID` resume agree with polling.
+   - The saved cursor expires with 410 on the short-retention API, and catalog
+     resync converges.
+   - A rebuild activates a new generation without changing results or
+     resurrecting the withdrawn Record.
+
+Each phase writes `journey-<phase>.json` with per-step timings. Each feature keeps
+its own detailed tests. See [tests/acceptance/README.md](../tests/acceptance/README.md)
+for ordering rules, including waiting for enrichment before any search assertion.
+
+**Lifecycle.** The last step, `scripts/lifecycle.py`, proves on the verification
+project that:
+- `migrate` is idempotent while the project runs, and refused with guidance once
+  it is stopped;
+- `down` then `dev` keeps a Corpus;
+- `reset` then `dev` starts with no Corpora.
+
+It writes `lifecycle.json`.
+
+**Dependencies.** [third_party/README.md](../third_party/README.md) indexes the
+notices. `scripts/inventory.py` lists the Go modules linked into the built
+binary, the pinned images, the model and tokenizer, and the demo UI's npm
+packages. A licence it cannot identify is written as `unclassified`.
 
 ## Plugin substitution and handoff
 

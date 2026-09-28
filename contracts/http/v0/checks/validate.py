@@ -15,6 +15,22 @@ validate(spec)
 cases = json.loads((root / "examples.json").read_text())
 examples = {case["name"]: case["value"] for case in cases}
 
+# The original contract fixture set (THE-543/THE-547/THE-640). Later slices may
+# add examples, never drop one of these: THE-662 keeps them as a floor.
+ORIGINAL_EXAMPLES = [
+    "structured_inline", "structured_manifest", "blob_input", "pending_receipt",
+    "resolved_receipt", "mixed_batch_input", "mixed_batch_result", "verified_upload",
+    "version_relations", "administrative_operation", "saved_query_create", "saved_query",
+    "subscription_create", "subscription", "positive_match", "reference_webhook",
+    "delivery", "attempt_page", "monitoring_change", "text_search",
+    "canonical_search_results", "lexical_search_without_embedding", "rebuild_queued",
+    "rebuild_succeeded",
+]
+ORIGINAL_BOUNDARIES = 31
+missing = [name for name in ORIGINAL_EXAMPLES if name not in examples]
+assert not missing, f"original contract examples removed: {missing}"
+assert len(examples) == len(cases), "duplicate example names"
+
 
 def check(schema, value, valid=True):
     validator = Draft202012Validator({
@@ -75,4 +91,6 @@ for schema, value in invalid:
 # A malformed command is permitted through the envelope, then rejected per entry.
 check("BatchRequest", {"items": [examples["structured_inline"], 42]})
 check("IngestCommand", 42, False)
+boundaries = len(invalid) + 2
+assert boundaries >= ORIGINAL_BOUNDARIES, f"{boundaries} boundary checks, fewer than the original {ORIGINAL_BOUNDARIES}"
 print(f"OpenAPI valid; {len(cases)} examples and {len(invalid) + 2} boundary checks passed")
