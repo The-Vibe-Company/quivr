@@ -1,0 +1,94 @@
+internal/transport/httpapi/operations_test.go
+  s_ec117ba6cf48fd::t_bfa9b09b78cfe9 21
+  s_ec117ba6cf48fd::t_bb0c12be467e4b 22-24,92,94-95
+internal/adapters/postgres/corpora.go
+  s_ec117ba6cf48fd::t_6b63d43982e65c 42-55,59,69
+  s_ec117ba6cf48fd::t_3850dec70bd4f1 41
+  s_ec117ba6cf48fd::t_89ef9b60c77ca1 24
+internal/adapters/weaviate/projection.go
+  s_ec117ba6cf48fd::t_dbcb0dc5cfbfac 96-97,99
+internal/adapters/postgres/retrieval_config_test.go
+  s_ec117ba6cf48fd::t_bfa28c9725e145 1-213
+internal/operations/operations.go
+  s_ec117ba6cf48fd::t_b715e0fa750149 151-152
+  s_ec117ba6cf48fd::t_b2f9fb769320a2 18-22,53-55,61,100-104,126-150
+internal/adapters/weaviate/mapping_test.go
+  s_ec117ba6cf48fd::t_ed6b31a036639a 1-87
+internal/adapters/postgres/rebuild.go
+  s_ec117ba6cf48fd::t_6b63d43982e65c 55-59,194-208,248,251-256,259
+internal/transport/httpapi/retrieval_config_test.go
+  s_ec117ba6cf48fd::t_bb0c12be467e4b 1-80
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_f3f9acbab82bfa 45,91-94,101
+scripts/local.py
+  s_ec117ba6cf48fd::t_2187255c14f18d 30,56-58,131,256
+internal/corpus/retrieval.go
+  s_ec117ba6cf48fd::t_2afb1751c206c1 1-132
+tests/acceptance/corpora_test.go
+  s_ec117ba6cf48fd::t_78fe7106261a1c 118-120,122
+internal/corpus/corpus.go
+  s_ec117ba6cf48fd::t_678e66ce7cd0b8 57-59,66-76,85-87,89
+internal/content/searchable.go
+  s_ec117ba6cf48fd::t_3850dec70bd4f1 42
+  s_ec117ba6cf48fd::t_dbcb0dc5cfbfac 43-48
+tests/acceptance/retrieval_config_test.go
+  s_ec117ba6cf48fd::t_87edc647ea7ced 1-48,50-62,64-92,99-151
+  s_ec117ba6cf48fd::t_3bc98eb95e7ada 49,63
+  s_ec117ba6cf48fd::t_59d9cd695185e6 93-98
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_c1b8c437a333df 255-257
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_59d9cd695185e6 475-476,1719-1720
+  s_ec117ba6cf48fd::t_df08e93f7ce064 473-474,477-479,1645-1647,1651-1653,1699-1705,1721
+internal/corpus/retrieval_test.go
+  s_ec117ba6cf48fd::t_88ab9ef2f81751 1-93
+internal/adapters/postgres/searchable.go
+  s_ec117ba6cf48fd::t_6b63d43982e65c 22-27
+internal/transport/httpapi/operations.go
+  s_ec117ba6cf48fd::t_f3f9acbab82bfa 64-67,151-192,194
+  s_ec117ba6cf48fd::t_8624757b946905 193,195
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_e8ed4d26d5a41b 676,761
+  s_ec117ba6cf48fd::t_59d9cd695185e6 580,588,604,883
+README.md
+  s_ec117ba6cf48fd::t_c1b8c437a333df 32-39
+scripts/operation_control.py
+  s_ec117ba6cf48fd::t_4d80f004d43c6d 6-7,61-82
+internal/app/run.go
+  s_ec117ba6cf48fd::t_dfa5e39550a7f6 163
+docs/quivr-v2-search-contracts.md
+  s_ec117ba6cf48fd::t_0e7bfaf341fe69 227
+  s_ec117ba6cf48fd::t_59d9cd695185e6 68-69,194-197
+  s_ec117ba6cf48fd::t_a4bc79ae8fb060 228-233
+  s_ec117ba6cf48fd::t_c9d6fc7e18cdb2 114-117,149-150,164-193,198-226
+internal/content/extensions.go
+  s_ec117ba6cf48fd::t_dbcb0dc5cfbfac 83-89
+internal/content/mapping_test.go
+  s_ec117ba6cf48fd::t_386c82f85d6866 1-81
+internal/content/mapping.go
+  s_ec117ba6cf48fd::t_29a2947cb1d7af 1-121
+internal/operations/operations_test.go
+  s_ec117ba6cf48fd::t_eb86a821aedfe0 131
+  s_ec117ba6cf48fd::t_658f140ada9e54 16-21,87-130
+internal/adapters/postgres/operations.go
+  s_ec117ba6cf48fd::t_03e00f2f91044e 43-55,73,87-98,105-142,144-147,151-156,159-162,169,276-285
+migrations/015_retrieval_configs.sql
+  s_ec117ba6cf48fd::t_59d9cd695185e6 6,11-15
+  s_ec117ba6cf48fd::t_dfa5e39550a7f6 1-5,7-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "074792e8bb0ed8ed4dbaed8908e4efd6e2a2cae1",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
