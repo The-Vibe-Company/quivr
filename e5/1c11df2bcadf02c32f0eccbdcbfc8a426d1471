@@ -1,0 +1,25 @@
+internal/adapters/s3/uploads.go
+  s_ec117ba6cf48fd::t_15d3819724aa8b 77-81,87,90-91,97-100
+  s_ec117ba6cf48fd::t_913a90c33d7e00 101-102
+tests/acceptance/rebuild_test.go
+  s_ec117ba6cf48fd::t_0f18d89df6ca32 69-82,121,202
+internal/adapters/s3/uploads_test.go
+  s_ec117ba6cf48fd::t_a967d0f52e5a90 10,12,14-16,18
+  s_ec117ba6cf48fd::t_8157bbb332ef6d 113-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e51c11df2bcadf02c32f0eccbdcbfc8a426d1471",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
