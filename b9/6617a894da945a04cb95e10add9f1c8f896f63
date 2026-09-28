@@ -1,0 +1,24 @@
+internal/transport/httpapi/changes.go
+  s_ec117ba6cf48fd::t_fde52f261e8c1e 73-76
+internal/changes/changes.go
+  s_ec117ba6cf48fd::t_fde52f261e8c1e 133-136,139-141
+  s_ec117ba6cf48fd::t_de2f06b1729f3f 142
+internal/transport/httpapi/changes_test.go
+  s_ec117ba6cf48fd::t_fde52f261e8c1e 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b96617a894da945a04cb95e10add9f1c8f896f63",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
