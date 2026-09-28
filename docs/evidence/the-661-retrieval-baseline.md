@@ -73,6 +73,27 @@ The runner cache was empty, so "prepare" is a cold preparation. The warm start i
 | weaviate | 3.5 | 105 |
 | quivr-worker / quivr-api | lifetime-average CPU (from `ps`) | 131 / 41 RSS |
 
+## Confirming run
+
+A second run completed after the rebase: [run 36410913683](https://github.com/The-Vibe-Company/quivr-v2/actions/runs/36410913683). It measured merge ref `79211204` of head `87f6e4a`, with a clean tree, on an EPYC 7763 runner with 2 CPUs. Its artifact holds the report; it is not committed here.
+
+| Mode | MRR@10 | Recall@3 | sequential p95 | concurrent-4 p95 | ingesting p95 |
+| --- | --- | --- | --- | --- | --- |
+| lexical | 0.6993 | 0.8333 | 871 | 2947 | 4061 |
+| semantic | 0.9583 | 1.0000 | 895 | 2965 | 4117 |
+| hybrid | 0.7969 | 0.9583 | 903 | 3013 | 4227 |
+
+Same conclusions as the first run:
+- Semantic is identical to the first run.
+- The hybrid deficit reproduces. This run's hybrid score equals the prototype's 0.7969 exactly.
+- Simple search meets the target, and the concurrent and ingesting conditions miss it. There were no failures.
+
+Lexical and hybrid ranks vary between the two runs on the same fixture and pins:
+- Hybrid `fr-train` ranked 2 in the first run and 1 in the second.
+- Several lexical ranks moved; for example, `en-election` and `en-wind` dropped out of the top 10.
+
+So one run does not fix lexical and hybrid scores to the fourth decimal. The variance is recorded for THE-641; its cause was not investigated here.
+
 ## Attempts and limits
 
 - **Attempt 1** ([run 36400294008](https://github.com/The-Vibe-Company/quivr-v2/actions/runs/36400294008)) hit the 30-minute job timeout during the ingesting condition, so it wrote no report. The frozen protocol needs about 37 minutes at the observed latency. The job timeout was raised to 90 minutes and the protocol was left unchanged.
