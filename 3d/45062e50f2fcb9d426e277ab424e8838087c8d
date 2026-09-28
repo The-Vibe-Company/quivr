@@ -1,0 +1,102 @@
+contracts/plugins/v0/fixtures/responses/duplicate-part-keys.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-67
+contracts/plugins/v0/fixtures/manifests/invalid/bad-range.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-9
+contracts/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_6c603381daea46 1-145
+contracts/plugins/v0/fixtures/responses/cyclic-parents.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-68
+contracts/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_6c603381daea46 1-50
+contracts/plugins/v0/fixtures/requests/inline-content.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-44
+contracts/plugins/v0/fixtures/manifests/invalid/duplicate-secret.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-13
+contracts/plugins/v0/fixtures/requests/missing-record-version.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-42
+contracts/plugins/v0/fixtures/manifests/invalid/invalid-config-schema.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-12
+contracts/plugins/v0/fixtures/ranges.json
+  s_54b80c92daa9cb::t_612e13cef77b22 1-85
+contracts/plugins/v0/fixtures/manifests/invalid/unknown-field.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-10
+contracts/plugins/v0/fixtures/protocol/error-retryable.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-5
+contracts/plugins/v0/fixtures/manifests/invalid/incompatible-engine.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-9
+contracts/plugins/v0/fixtures/responses/no-parts.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-6
+contracts/plugins/v0/checks/validate.py
+  s_54b80c92daa9cb::t_abc62c75813c30 1-36
+contracts/plugins/v0/fixtures/manifests/invalid/incompatible-plugin-api.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-9
+contracts/plugins/v0/fixtures/protocol/discovery.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-11
+contracts/plugins/v0/fixtures/responses/minimal.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-15
+contracts/plugins/v0/fixtures/responses/unknown-field.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-68
+contracts/plugins/v0/fixtures/requests/file-reference.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-27
+contracts/plugins/v0/fixtures/manifests/valid/full.yaml
+  s_54b80c92daa9cb::t_612e13cef77b22 44-50
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-43,51-52
+contracts/plugins/v0/fixtures/responses/missing-role.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-66
+contracts/plugins/v0/fixtures/requests/missing-sha256.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-42
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_612e13cef77b22 1-294
+contracts/plugins/v0/fixtures/manifests/invalid/reserved-contribution.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-11
+scripts/contracts.sh
+  s_54b80c92daa9cb::t_f4bd53d1164239 17
+contracts/plugins/v0/fixtures/requests/signed-url.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-43
+contracts/plugins/v0/fixtures/protocol/error-missing-retryable.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-4
+contracts/plugins/v0/fixtures/responses/wrong-manifest-kind.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-67
+contracts/plugins/v0/fixtures/responses/too-many-warnings.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-195
+contracts/plugins/v0/fixtures/manifests/invalid/unsatisfiable-range.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-9
+contracts/plugins/v0/fixtures/manifests/valid/minimal.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-9
+contracts/plugins/v0/fixtures/protocol/health-ok.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-3
+contracts/plugins/v0/fixtures/manifests/invalid/invalid-extension-schema.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-13
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_6c603381daea46 1-223
+contracts/plugins/v0/fixtures/protocol/discovery-reserved.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-12
+contracts/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_6c603381daea46 1-48
+contracts/plugins/v0/fixtures/manifests/invalid/foreign-namespace.yaml
+  s_54b80c92daa9cb::t_c42bbea4ca7dd7 1-12
+contracts/plugins/v0/fixtures/responses/unknown-parent.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-67
+contracts/plugins/v0/fixtures/protocol/error-terminal.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-5
+contracts/plugins/v0/fixtures/responses/pages.json
+  s_54b80c92daa9cb::t_bbd136d5809d63 1-67
+contracts/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_6c603381daea46 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3d45062e50f2fcb9d426e277ab424e8838087c8d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
