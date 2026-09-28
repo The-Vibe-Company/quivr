@@ -1,0 +1,35 @@
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_eaf255386c1b94 1882-1883
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_6a95c8f7155494 1182
+internal/transport/httpapi/connectors_test.go
+  s_ec117ba6cf48fd::t_7b7aac1e40c767 341-343
+quivr-search/src/components/connectors/ConnectorDetail.tsx
+  s_ec117ba6cf48fd::t_03adceac0c2087 4,302-308
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_ec117ba6cf48fd::t_d0249b81319187 120-143
+quivr-search/src/components/connectors/SchemaForm.tsx
+  s_ec117ba6cf48fd::t_187d09ed0dc598 239-241
+quivr-search/src/lib/connectors.ts
+  s_ec117ba6cf48fd::t_37d9f3b090896b 138
+quivr-search/tests/access.spec.ts
+  s_ec117ba6cf48fd::t_56994cc5347d33 19-20,25,33
+quivr-search/tests/connectors.spec.ts
+  s_ec117ba6cf48fd::t_4fbe23343d2d1b 260,265-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0dacabb084d91a9268225a31c5b42c74dec86dc1",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
