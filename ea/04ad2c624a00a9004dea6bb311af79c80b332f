@@ -1,0 +1,35 @@
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_90a9677666b65d 286-297
+.github/workflows/verify.yml
+  s_ec117ba6cf48fd::t_0a498d15bb25c9 43-44
+scripts/local.py
+  s_ec117ba6cf48fd::t_512efba0e746b0 391,411
+  s_ec117ba6cf48fd::t_35df7c8971749a 124-136
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 378-385,390,406-408
+  s_ec117ba6cf48fd::t_02700c783f0cdd 331,333
+  s_ec117ba6cf48fd::t_bda81d069d1e9b 246-248
+scripts/inventory.py
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 70
+scripts/lifecycle.py
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 27-32
+scripts/verify_report.py
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 7,14-15,45,47,72
+scripts/test_local.py
+  s_ec117ba6cf48fd::t_512efba0e746b0 91-98,116,118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea04ad2c624a00a9004dea6bb311af79c80b332f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
