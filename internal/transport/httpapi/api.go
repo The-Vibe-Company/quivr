@@ -278,11 +278,25 @@ func scopeDigest(s corpus.Scope) string {
 	h := sha256.Sum256(b)
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
-func (a *API) sign(b []byte) []byte {
+
+// Page cursor signing domains. Every token signed with CursorKey names its
+// domain so one kind is never accepted in place of another; the Change Cursor
+// uses its own "change-cursor" domain in internal/changes.
+const (
+	corpusPageDomain    = "corpus-page"
+	recordPageDomain    = "record-page"
+	connectorPageDomain = "connector-page"
+	matchPageDomain     = "match-page"
+)
+
+// signCursor is the only signer for CursorKey tokens; the domain is required.
+func (a *API) signCursor(domain string, b []byte) []byte {
 	h := hmac.New(sha256.New, a.CursorKey)
+	h.Write([]byte(domain + "\x00"))
 	h.Write(b)
 	return h.Sum(nil)
 }
+
 func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	q := r.URL.Query()
 	for k, v := range q {
@@ -311,7 +325,7 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 		var c cursor
-		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.sign(b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
+		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(corpusPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
 			failure(w, 422, "invalid_cursor")
 			return
 		}
@@ -326,7 +340,7 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	if len(items) > limit {
 		page["items"] = items[:limit]
 		b, _ := json.Marshal(cursor{items[limit-1].ID, scope})
-		page["next_page_cursor"] = base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.sign(b))
+		page["next_page_cursor"] = base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(corpusPageDomain, b))
 	}
 	send(w, 200, page)
 }

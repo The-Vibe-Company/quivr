@@ -2,15 +2,20 @@ package httpapi_test
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -52,14 +57,14 @@ const (
 func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, string) {
 	t.Helper()
 	keys := map[string]corpus.Scope{
-		catalogReader: {Organization: "org_a", Actions: []string{"content:read", "changes:read", "corpora:read"}, Corpora: []string{"*"}},
+		catalogReader: {Organization: "org_a", Actions: []string{"content:read", "changes:read", "corpora:read", "connectors:read"}, Corpora: []string{"*"}},
 		catalogScoped: {Organization: "org_a", Actions: []string{"content:read", "changes:read"}, Corpora: []string{"corpus_a"}},
 		catalogDenied: {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}},
 	}
-	key := []byte("cursor-key-0123456789abcdef0123456789")
+	key := catalogCursorKey
 	journal := &memoryJournal{}
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed))
+	handler, err := httpapi.New(knownCorpora{}, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed), httpapi.WithConnectors(catalogConnectors(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +73,23 @@ func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, stri
 	changeCursor := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", catalogReader, 200)["next_cursor"].(string)
 	return server, changeCursor
 }
+
+// catalogConnectors holds two Connector instances so /v0/connectors issues a page cursor.
+func catalogConnectors(t *testing.T) connectors.Service {
+	t.Helper()
+	registry, err := connectors.NewRegistry(connectors.Fixture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryConnectors{items: map[string]connectors.Instance{}}
+	at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	for _, id := range []string{"connector_a", "connector_b"} {
+		store.items[id] = connectors.Instance{Organization: "org_a", ID: id, CorpusID: "corpus_a", Namespace: id, Kind: "fixture", Config: []byte(`{}`), Enabled: true, CreatedAt: at, Health: connectors.Health{State: connectors.HealthActive, EvaluatedAt: at}}
+	}
+	return connectors.Service{Store: store, Registry: registry}
+}
+
+var catalogCursorKey = []byte("cursor-key-0123456789abcdef0123456789")
 
 func recordsPath(corpusID, pageCursor string, limit int) string {
 	q := url.Values{"corpus_id": {corpusID}}
@@ -140,9 +162,30 @@ func TestCatalogPageCursorsAreDistinctAndBound(t *testing.T) {
 	if e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor="+url.QueryEscape(page), catalogReader, 422); e["code"] != "invalid_cursor" {
 		t.Fatal(e)
 	}
-	if c, ok := corporaPage["next_page_cursor"].(string); ok {
-		if e := getJSON(t, server, recordsPath("corpus_a", c, 0), catalogReader, 422); e["code"] != "invalid_cursor" {
-			t.Fatal(e)
+	corpusCursor, ok := corporaPage["next_page_cursor"].(string)
+	if !ok {
+		t.Fatal("corpora page issued no cursor", corporaPage)
+	}
+	connectorPage := getJSON(t, server, "/v0/connectors?limit=1", catalogReader, 200)
+	connectorCursor, ok := connectorPage["next_page_cursor"].(string)
+	if !ok {
+		t.Fatal("connectors page issued no cursor", connectorPage)
+	}
+	// Each cursor kind is signed in its own domain: none is accepted in place of another.
+	for name, path := range map[string]string{
+		"corpus cursor as record page cursor":    recordsPath("corpus_a", corpusCursor, 0),
+		"corpus cursor as change cursor":         "/v0/changes?corpus_id=corpus_a&cursor=" + url.QueryEscape(corpusCursor),
+		"corpus cursor as connector cursor":      "/v0/connectors?page_cursor=" + url.QueryEscape(corpusCursor),
+		"change cursor as corpus cursor":         "/v0/corpora?page_cursor=" + url.QueryEscape(changeCursor),
+		"change cursor as connector cursor":      "/v0/connectors?page_cursor=" + url.QueryEscape(changeCursor),
+		"record page cursor as corpus cursor":    "/v0/corpora?page_cursor=" + url.QueryEscape(page),
+		"record page cursor as connector cursor": "/v0/connectors?page_cursor=" + url.QueryEscape(page),
+		"connector cursor as corpus cursor":      "/v0/corpora?page_cursor=" + url.QueryEscape(connectorCursor),
+		"connector cursor as record page cursor": recordsPath("corpus_a", connectorCursor, 0),
+		"connector cursor as change cursor":      "/v0/changes?corpus_id=corpus_a&cursor=" + url.QueryEscape(connectorCursor),
+	} {
+		if e := getJSON(t, server, path, catalogReader, 422); e["code"] != "invalid_cursor" {
+			t.Fatal(name, e)
 		}
 	}
 	if e := getJSON(t, server, recordsPath("corpus_a", "x"+page, 0), catalogReader, 422); e["code"] != "invalid_cursor" {
@@ -157,5 +200,35 @@ func TestCatalogPageCursorsAreDistinctAndBound(t *testing.T) {
 	}
 	if e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor="+url.QueryEscape(changeCursor), catalogScoped, 409); e["resync_url"] != "/v0/records?corpus_id=corpus_a" {
 		t.Fatal("change feed scope error lacks resync reference", e)
+	}
+}
+
+func TestListPageCursorsPaginateAndRejectUndomainedSignatures(t *testing.T) {
+	server, _ := catalogServer(t, &memoryCatalog{})
+	for _, c := range []struct{ path, idField, lastID string }{
+		{"/v0/corpora", "corpus_id", "corpus_b"},
+		{"/v0/connectors", "connector_id", "connector_b"},
+	} {
+		first := getJSON(t, server, c.path+"?limit=1", catalogReader, 200)
+		next, ok := first["next_page_cursor"].(string)
+		if !ok {
+			t.Fatal(c.path, "issued no cursor", first)
+		}
+		second := getJSON(t, server, c.path+"?limit=1&page_cursor="+url.QueryEscape(next), catalogReader, 200)
+		if items := second["items"].([]any); len(items) != 1 || items[0].(map[string]any)[c.idField] != c.lastID || second["next_page_cursor"] != nil {
+			t.Fatal(c.path, "second page", second)
+		}
+		// Cursors issued before signing domains were an HMAC of the bare payload.
+		payload := strings.SplitN(next, ".", 2)[0]
+		raw, err := base64.RawURLEncoding.DecodeString(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := hmac.New(sha256.New, catalogCursorKey)
+		h.Write(raw)
+		legacy := payload + "." + base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+		if e := getJSON(t, server, c.path+"?page_cursor="+url.QueryEscape(legacy), catalogReader, 422); e["code"] != "invalid_cursor" {
+			t.Fatal(c.path, "legacy cursor", e)
+		}
 	}
 }

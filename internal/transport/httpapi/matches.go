@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,16 +23,9 @@ type matchPage struct {
 	After        int64  `json:"a"`
 }
 
-func (a *API) signMatchPage(b []byte) []byte {
-	h := hmac.New(sha256.New, a.CursorKey)
-	h.Write([]byte("match-page\x00"))
-	h.Write(b)
-	return h.Sum(nil)
-}
-
 func (a *API) encodeMatchPage(p matchPage) string {
 	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signMatchPage(b))
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(matchPageDomain, b))
 }
 
 func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int64, error) {
@@ -44,7 +36,7 @@ func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int
 	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p matchPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signMatchPage(b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(matchPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
 		return 0, errors.New("invalid_cursor")
 	}
 	if p.Subscription != subscriptionID || p.Scope != scopeDigest(s) {

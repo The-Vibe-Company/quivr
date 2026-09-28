@@ -66,8 +66,14 @@ func (knownCorpora) Read(_ context.Context, org, id string) (corpus.Corpus, erro
 	}
 	return corpus.Corpus{}, corpus.ErrNotFound
 }
-func (knownCorpora) List(context.Context, corpus.Scope, string, int) ([]corpus.Corpus, error) {
-	return nil, nil
+func (knownCorpora) List(_ context.Context, _ corpus.Scope, after string, limit int) ([]corpus.Corpus, error) {
+	out := []corpus.Corpus{}
+	for _, id := range []string{"corpus_a", "corpus_b"} {
+		if id > after && len(out) < limit {
+			out = append(out, corpus.Corpus{ID: id})
+		}
+	}
+	return out, nil
 }
 
 const (

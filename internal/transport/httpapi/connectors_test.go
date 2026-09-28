@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -60,8 +61,18 @@ func (m *memoryConnectors) ReadConnector(_ context.Context, org, id string) (con
 	}
 	return in, nil
 }
-func (m *memoryConnectors) ListConnectors(context.Context, corpus.Scope, string, string, int) ([]connectors.Instance, error) {
-	return nil, nil
+func (m *memoryConnectors) ListConnectors(_ context.Context, s corpus.Scope, corpusID, after string, limit int) ([]connectors.Instance, error) {
+	out := []connectors.Instance{}
+	for _, in := range m.items {
+		if in.Organization == s.Organization && (corpusID == "" || in.CorpusID == corpusID) && in.ID > after {
+			out = append(out, in)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 func (m *memoryConnectors) DisableConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
 	in, err := m.ReadConnector(ctx, org, id)

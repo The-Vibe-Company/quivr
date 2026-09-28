@@ -410,7 +410,7 @@ paths:
     get:
       operationId: listCorpora
       description: Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a Change
-        Cursor.
+        Cursor or a Record page cursor (either is 422 invalid_cursor).
       responses:
         '200':
           description: Successful response
@@ -1053,7 +1053,8 @@ paths:
     get:
       operationId: listConnectors
       description: Connector Instances of authorized Corpora, optionally filtered to one Corpus, in stable
-        identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor.
+        identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor or another
+        list page cursor (422 invalid_cursor).
       x-required-permissions:
       - connectors:read
       responses:

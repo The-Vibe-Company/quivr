@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -26,16 +25,9 @@ type recordPage struct {
 
 var errPageScope = errors.New("cursor_scope_changed")
 
-func (a *API) signRecordPage(b []byte) []byte {
-	h := hmac.New(sha256.New, a.CursorKey)
-	h.Write([]byte("record-page\x00"))
-	h.Write(b)
-	return h.Sum(nil)
-}
-
 func (a *API) encodeRecordPage(p recordPage) string {
 	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signRecordPage(b))
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(recordPageDomain, b))
 }
 
 func (a *API) decodeRecordPage(token, corpusID string, s corpus.Scope) (string, error) {
@@ -46,7 +38,7 @@ func (a *API) decodeRecordPage(token, corpusID string, s corpus.Scope) (string, 
 	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p recordPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signRecordPage(b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 {
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(recordPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 {
 		return "", errors.New("invalid_cursor")
 	}
 	if p.Corpus != corpusID || p.Scope != scopeDigest(s) {

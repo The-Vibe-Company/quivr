@@ -206,7 +206,7 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 		var c cursor
-		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.sign(b)) || json.Unmarshal(b, &c) != nil || c.Scope != binding {
+		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(connectorPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != binding {
 			failure(w, 422, "invalid_cursor")
 			return
 		}
@@ -221,7 +221,7 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 	for i, in := range items {
 		if i == limit {
 			b, _ := json.Marshal(cursor{items[limit-1].ID, binding})
-			next := base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.sign(b))
+			next := base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(connectorPageDomain, b))
 			page.NextPageCursor = &next
 			break
 		}
