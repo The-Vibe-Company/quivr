@@ -1,0 +1,33 @@
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_1182894b238d13 258,274
+  s_ec117ba6cf48fd::t_068933c51a24ef 259-268,270,303,318
+internal/transport/httpapi/catalog_test.go
+  s_ec117ba6cf48fd::t_52a65db54baa2b 178-199
+  s_ec117ba6cf48fd::t_9444d835e137b0 149-161
+  s_ec117ba6cf48fd::t_467b4a920af7ee 5-7,12,63,76-77
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_2f460720f4b108 321-323,325
+  s_ec117ba6cf48fd::t_1d7aa0a06d8002 324
+internal/transport/httpapi/changes_test.go
+  s_ec117ba6cf48fd::t_5b4d6f07eb8a7e 69-76
+internal/transport/httpapi/catalog.go
+  s_ec117ba6cf48fd::t_068933c51a24ef 30,41
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_2f460720f4b108 413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf8dfe5d77585d609026916e3d5676136f87157a",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
