@@ -60,6 +60,10 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &DeliveryAttemptPage{}
 			case "ChangeEvent":
 				target = &ChangeEvent{}
+			case "ConnectorCreate":
+				target = &ConnectorCreate{}
+			case "Connector":
+				target = &Connector{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

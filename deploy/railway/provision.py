@@ -43,13 +43,19 @@ def main():
     secretfile = directory / 'secrets.json'
     if secretfile.exists():
         values = json.loads(secretfile.read_text())
+        # credential_key became required with Connector Instances (THE-668); add it once
+        # to existing deployments without rotating any other secret.
+        if 'credential_key' not in values:
+            values['credential_key'] = secrets.token_hex(32)
+            secretfile.write_text(json.dumps(values))
     else:
         if any(s.get('source') for s in existing.values()):
             raise SystemExit('Existing deployment without local secrets: restore credentials instead of rotating them.')
-        values = {k: secrets.token_hex(32) for k in ['database_password', 'api_key', 'cursor_key', 's3_access', 's3_secret', 'demo_password']}
+        values = {k: secrets.token_hex(32) for k in ['database_password', 'api_key', 'cursor_key', 'credential_key', 's3_access', 's3_secret', 'demo_password']}
         secretfile.write_text(json.dumps(values))
     common = {
         'QUIVR_API_KEY': values['api_key'], 'QUIVR_CURSOR_KEY': values['cursor_key'],
+        'QUIVR_CREDENTIAL_KEY': values['credential_key'],
         'DATABASE_URL': f"postgres://quivr:{values['database_password']}@postgres.railway.internal:5432/quivr?sslmode=disable",
         'S3_ACCESS_KEY': values['s3_access'], 'S3_SECRET_KEY': values['s3_secret'],
         'S3_ENDPOINT': 'http://seaweed.railway.internal:8333',

@@ -1,0 +1,178 @@
+// Package connectors owns Connector Instances: pull acquisition endpoints bound
+// to one Corpus and one Source Namespace, their Deposited Credentials, their
+// Acquisition Checkpoints and their Connector Health. Built-in connectors fetch
+// from a source; every item enters the engine through the same ingestion
+// command path as the public API.
+package connectors
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+// ErrorClass separates a source refusing access from a transient outage and
+// from a source returning unusable data.
+type ErrorClass string
+
+const (
+	ClassAccess    ErrorClass = "access"
+	ClassTransient ErrorClass = "transient"
+	ClassSource    ErrorClass = "source"
+)
+
+// Error is a typed acquisition failure. Code is a stable public diagnostic
+// (never a message containing source data or secrets).
+type Error struct {
+	Class      ErrorClass
+	Code       string
+	RetryAfter time.Duration
+}
+
+func (e *Error) Error() string { return string(e.Class) + ": " + e.Code }
+
+// AccessError, TransientError and SourceError build typed failures.
+func AccessError(code string) error    { return &Error{Class: ClassAccess, Code: code} }
+func TransientError(code string) error { return &Error{Class: ClassTransient, Code: code} }
+func SourceError(code string) error    { return &Error{Class: ClassSource, Code: code} }
+
+// Item is one source item that is new or changed since the checkpoint.
+type Item struct {
+	// RecordKey is the source-provided stable identity within the Source Namespace.
+	RecordKey string
+	// Revision identifies the item content; empty derives it from the content.
+	Revision string
+	// Position is an optional monotonic Source Position.
+	Position   string
+	Content    content.Text
+	Manifest   *content.Manifest
+	Extensions content.Extensions
+	// Withdraw asks for a Tombstone instead of a new version (source terms, e.g. deleted posts).
+	Withdraw bool
+}
+
+// FetchRequest is one page request. Credential is the decrypted secret JSON,
+// held only in memory for the duration of the fetch.
+type FetchRequest struct {
+	Config     json.RawMessage
+	Credential json.RawMessage
+	Checkpoint json.RawMessage
+	Now        time.Time
+}
+
+// Page is a fetched page and the checkpoint that resumes after it. More asks
+// for another page in the same run.
+type Page struct {
+	Items      []Item
+	Checkpoint json.RawMessage
+	More       bool
+}
+
+// Connector is the internal contract of one connector kind. It is shaped so a
+// future connector Plugin Contribution can implement it remotely: pure
+// config/credential/checkpoint in, items/checkpoint/typed errors out.
+type Connector interface {
+	Kind() string
+	// ConfigSchema and CredentialSchema are JSON Schemas; a nil
+	// CredentialSchema means the kind takes no credential.
+	ConfigSchema() []byte
+	CredentialSchema() []byte
+	DefaultInterval() time.Duration
+	Fetch(context.Context, FetchRequest) (Page, error)
+}
+
+// Kinds known to the public contract, delivered or not.
+var Kinds = []string{"fixture", "rss", "m365_mail", "x_list"}
+
+type registered struct {
+	connector  Connector
+	config     *jsonschema.Schema
+	credential *jsonschema.Schema
+}
+
+// Registry resolves the connector kinds enabled in this deployment.
+type Registry struct{ kinds map[string]registered }
+
+// NewRegistry compiles each connector's schemas.
+func NewRegistry(list ...Connector) (*Registry, error) {
+	r := &Registry{kinds: map[string]registered{}}
+	for _, c := range list {
+		entry := registered{connector: c}
+		var err error
+		if entry.config, err = compile(c.Kind()+"/config", c.ConfigSchema()); err != nil {
+			return nil, err
+		}
+		if c.CredentialSchema() != nil {
+			if entry.credential, err = compile(c.Kind()+"/credential", c.CredentialSchema()); err != nil {
+				return nil, err
+			}
+		}
+		r.kinds[c.Kind()] = entry
+	}
+	return r, nil
+}
+
+func compile(name string, schema []byte) (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytesReader(schema))
+	if err != nil {
+		return nil, fmt.Errorf("%s schema: %w", name, err)
+	}
+	compiler := jsonschema.NewCompiler()
+	url := "https://quivr.invalid/connectors/" + name
+	if err = compiler.AddResource(url, doc); err != nil {
+		return nil, err
+	}
+	return compiler.Compile(url)
+}
+
+// Enabled lists enabled kinds.
+func (r *Registry) Enabled() []string {
+	kinds := make([]string, 0, len(r.kinds))
+	for k := range r.kinds {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+// Lookup returns the connector of an enabled kind.
+func (r *Registry) Lookup(kind string) (Connector, bool) {
+	if r == nil {
+		return nil, false
+	}
+	e, ok := r.kinds[kind]
+	return e.connector, ok
+}
+
+func (r *Registry) validate(kind string, config, secret json.RawMessage) error {
+	e, ok := r.kinds[kind]
+	if !ok {
+		return ErrUnsupportedKind
+	}
+	if err := validateJSON(e.config, config); err != nil {
+		return ErrInvalidConfig
+	}
+	if secret != nil {
+		if e.credential == nil || validateJSON(e.credential, secret) != nil {
+			return ErrInvalidCredential
+		}
+	}
+	return nil
+}
+
+func validateJSON(schema *jsonschema.Schema, raw json.RawMessage) error {
+	if raw == nil {
+		return errors.New("missing document")
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytesReader(raw))
+	if err != nil {
+		return err
+	}
+	return schema.Validate(doc)
+}

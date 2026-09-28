@@ -1015,6 +1015,173 @@ paths:
           minimum: 1
           maximum: 100
           default: 100
+  /v0/connectors:
+    post:
+      operationId: createConnector
+      description: Create a Connector Instance bound to exactly one authorized Corpus and one Source Namespace.
+        Kind-specific config and credential secret are validated against the kind's JSON Schema. Replaying
+        the same idempotency key and request returns the same instance (without re-enabling a disabled one);
+        a different request under the same key is 409 idempotency_conflict. Another enabled instance on the
+        same Corpus and Source Namespace is 409 source_namespace_in_use. The interval defaults per kind and
+        is refused below the deployment floor (30 s by default) with 422 invalid_interval. Deposited
+        credentials are write-only and never returned. Commits connector.created in the change feed.
+      x-required-permissions:
+      - connectors:write
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorCreate'
+    get:
+      operationId: listConnectors
+      description: Connector Instances of authorized Corpora, optionally filtered to one Corpus, in stable
+        identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor.
+      x-required-permissions:
+      - connectors:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorPage'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: corpus_id
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+  /v0/connectors/{connector_id}:
+    get:
+      operationId: getConnector
+      description: Read configuration, credential metadata (never the secret) and the last evaluated Connector
+        Health. Instances of other Organizations or unauthorized Corpora are 404.
+      x-required-permissions:
+      - connectors:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+  /v0/connectors/{connector_id}/disable:
+    post:
+      operationId: disableConnector
+      description: Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance
+        the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable).
+        Commits connector.disabled and connector.health_changed.
+      x-required-permissions:
+      - connectors:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+  /v0/connectors/{connector_id}/credential:
+    put:
+      operationId: replaceConnectorCredential
+      description: Deposit a new credential version to rotate the current one. The secret is encrypted at
+        rest and never returned. Replaying the same key and request is idempotent; a different request under
+        the same key is 409 idempotency_conflict. A disabled instance is 409 connector_disabled. Commits
+        connector.credential_replaced, and connector.health_changed when the evaluated health changes.
+      x-required-permissions:
+      - connectors:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialReplace'
   /v0/search:
     post:
       operationId: searchRecords
@@ -1708,6 +1875,236 @@ components:
       description: Pin a plugin-provided profile when resolving config. Explicit fields override default
         fields by logical name; unmapped source data remains preserved. Effective resolved fields are
         returned.
+    ConnectorKind:
+      type: string
+      enum:
+      - fixture
+      - rss
+      - m365_mail
+      - x_list
+      description: Built-in connector kind. fixture is a deterministic test connector available only when
+        the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they
+        are delivered.
+    CredentialDeposit:
+      type: object
+      additionalProperties: false
+      properties:
+        secret:
+          type: object
+          writeOnly: true
+          description: Kind-specific secret, validated by the kind's credential JSON Schema, encrypted at
+            rest with the deployment credential key and never returned or logged.
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - secret
+    CredentialReplace:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        secret:
+          type: object
+          writeOnly: true
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - idempotency_key
+      - secret
+    ConnectorSchedule:
+      type: object
+      additionalProperties: false
+      properties:
+        interval_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120);
+            values below the deployment floor (30 s by default) are 422 invalid_interval.
+    ConnectorHealthPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        silent_after_seconds:
+          type: integer
+          minimum: 1
+          maximum: 2592000
+          description: No new item for this long makes the source silent. Default 86400.
+        credential_warning_seconds:
+          type: integer
+          minimum: 0
+          maximum: 31536000
+          description: A credential expiring within this window is credential_expiring. Default 1209600.
+    ConnectorCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        corpus_id:
+          type: string
+          minLength: 1
+        source_namespace:
+          type: string
+          minLength: 1
+          maxLength: 200
+        kind:
+          $ref: '#/components/schemas/ConnectorKind'
+        config:
+          type: object
+          description: Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
+        schedule:
+          $ref: '#/components/schemas/ConnectorSchedule'
+        health_policy:
+          $ref: '#/components/schemas/ConnectorHealthPolicy'
+        credential:
+          $ref: '#/components/schemas/CredentialDeposit'
+      required:
+      - idempotency_key
+      - corpus_id
+      - source_namespace
+      - kind
+      - config
+    CredentialMetadata:
+      type: object
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        deposited_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - version
+      - deposited_at
+      description: Metadata of the current Deposited Credential; the secret itself is never returned.
+    ConnectorError:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+        at:
+          type: string
+          format: date-time
+      required:
+      - code
+      - at
+    ConnectorHealth:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+          - active
+          - silent
+          - access_error
+          - credential_expiring
+          - disabled
+        evaluated_at:
+          type: string
+          format: date-time
+        last_success_at:
+          type: string
+          format: date-time
+        last_item_at:
+          type: string
+          format: date-time
+        last_error:
+          $ref: '#/components/schemas/ConnectorError'
+      required:
+      - state
+      - evaluated_at
+      description: Last committed Connector Health, evaluated at each acquisition run, credential replacement
+        and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring,
+        silent, active. access_error means the source refused access (distinct from silent, which means
+        no new item within the threshold). Other failures appear only as last_error.
+    Connector:
+      type: object
+      additionalProperties: false
+      properties:
+        connector_id:
+          type: string
+          minLength: 1
+        corpus_id:
+          type: string
+          minLength: 1
+        source_namespace:
+          type: string
+          minLength: 1
+        kind:
+          $ref: '#/components/schemas/ConnectorKind'
+        config:
+          type: object
+        schedule:
+          type: object
+          additionalProperties: false
+          properties:
+            interval_seconds:
+              type: integer
+              minimum: 1
+          required:
+          - interval_seconds
+        health_policy:
+          type: object
+          additionalProperties: false
+          properties:
+            silent_after_seconds:
+              type: integer
+              minimum: 1
+            credential_warning_seconds:
+              type: integer
+              minimum: 0
+          required:
+          - silent_after_seconds
+          - credential_warning_seconds
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        disabled_at:
+          type: string
+          format: date-time
+        credential:
+          $ref: '#/components/schemas/CredentialMetadata'
+        health:
+          $ref: '#/components/schemas/ConnectorHealth'
+      required:
+      - connector_id
+      - corpus_id
+      - source_namespace
+      - kind
+      - config
+      - schedule
+      - health_policy
+      - enabled
+      - created_at
+      - health
+    ConnectorPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Connector'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
     CorpusRequest:
       type: object
       additionalProperties: false

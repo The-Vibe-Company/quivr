@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
@@ -53,6 +54,9 @@ func (a *API) ingestCommand(ctx context.Context, scope corpus.Scope, raw any) (c
 	c, err := commandFromTransport(wire)
 	if err != nil {
 		return content.Receipt{}, 422, "invalid_schema"
+	}
+	if connectors.IsConnectorKey(c.Key) {
+		return content.Receipt{}, 422, "reserved_idempotency_key"
 	}
 	receipt, err := a.Content.Accept(ctx, scope, c)
 	if err != nil {
@@ -160,6 +164,10 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		var wire transport.WithdrawalCommand
 		if err = json.Unmarshal(b, &wire); err != nil {
 			failure(w, 422, "invalid_schema")
+			return true
+		}
+		if connectors.IsConnectorKey(wire.IdempotencyKey) {
+			failure(w, 422, "reserved_idempotency_key")
 			return true
 		}
 		receipt, err := a.Content.Withdraw(r.Context(), scope, withdrawalFromTransport(wire))

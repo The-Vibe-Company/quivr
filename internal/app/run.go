@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -49,6 +50,12 @@ type Config struct {
 	// Destinations are deployment-configured webhook receivers. Real
 	// deployments reference their signing secret through secret_env.
 	Destinations map[string]monitoring.Destination `json:"destinations"`
+	// CredentialKey encrypts Deposited Credentials at rest (32+ bytes).
+	CredentialKey string `json:"credential_key"`
+	// ConnectorFixtures enables the deterministic fixture connector kind (local/CI only).
+	ConnectorFixtures bool `json:"connector_fixtures"`
+	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
+	ConnectorMinInterval string `json:"connector_min_interval"`
 }
 
 func Run(command string) error {
@@ -66,8 +73,26 @@ func Run(command string) error {
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
 	}
-	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
-		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
+	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.CredentialKey) < 32 || len(cfg.Keys) == 0 {
+		return errors.New("database_url, cursor_key (32+ bytes), credential_key (32+ bytes) and keys required")
+	}
+	sealer, err := connectors.NewSealer(cfg.CredentialKey)
+	if err != nil {
+		return err
+	}
+	minInterval := connectors.DefaultMinInterval
+	if cfg.ConnectorMinInterval != "" {
+		if minInterval, err = time.ParseDuration(cfg.ConnectorMinInterval); err != nil || minInterval <= 0 {
+			return errors.New("connector_min_interval must be a positive duration")
+		}
+	}
+	var kinds []connectors.Connector
+	if cfg.ConnectorFixtures {
+		kinds = append(kinds, connectors.Fixture{})
+	}
+	registry, err := connectors.NewRegistry(kinds...)
+	if err != nil {
+		return err
 	}
 	for token, s := range cfg.Keys {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
@@ -157,10 +182,12 @@ func Run(command string) error {
 		slog.Info("migrations complete")
 		return nil
 	}
+	connectorStore := postgres.ConnectorStore{ContentStore: store}
+	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='013_evaluation.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='014_connectors.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
@@ -207,7 +234,8 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
@@ -238,7 +266,7 @@ func Run(command string) error {
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store)
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

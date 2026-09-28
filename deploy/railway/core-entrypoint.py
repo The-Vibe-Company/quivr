@@ -14,6 +14,7 @@ def main():
     config = {
         'database_url': os.environ['DATABASE_URL'],
         'cursor_key': os.environ['QUIVR_CURSOR_KEY'],
+        'credential_key': os.environ['QUIVR_CREDENTIAL_KEY'],
         'listen': '0.0.0.0:8080',
         'probe_listen': '0.0.0.0:' + os.environ.get('PORT', '8081'),
         'temporal_address': os.environ['TEMPORAL_ADDRESS'],

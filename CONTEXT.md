@@ -191,8 +191,20 @@ _Avoid_: Real-time ingestion, replay when referring only to transport redelivery
 ## Extensibility
 
 **Connector Instance**:
-A configured acquisition endpoint that introduces external content into a corpus.
+A configured acquisition endpoint bound to exactly one corpus and one source namespace that introduces external content into that corpus through the same ingestion commands as any client.
 _Avoid_: Source when referring to collection mechanics
+
+**Acquisition Checkpoint**:
+The durable, connector-defined position from which a connector instance resumes acquisition, advanced only after the items fetched before it were durably accepted; re-fetching after a crash converges on the same receipts.
+_Avoid_: Source position, change cursor
+
+**Deposited Credential**:
+A write-only secret supplied for a connector instance, encrypted at rest, versioned by replacement and optionally carrying an expiry; it is never returned or logged.
+_Avoid_: API key, stored password
+
+**Connector Health**:
+The committed, evaluated condition of a connector instance's collection (active, silent, access error, credential expiring or disabled) that distinguishes a source refusing access from a source that simply published nothing new.
+_Avoid_: Uptime, workflow status
 
 **Plugin**:
 A versioned installation unit that contributes one or more extensions to the engine through public contracts.

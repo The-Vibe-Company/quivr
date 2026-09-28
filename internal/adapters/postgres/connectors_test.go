@@ -1,0 +1,172 @@
+package postgres_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+)
+
+// TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime drives
+// the real store: idempotent create, namespace ownership, sealed credentials,
+// leased claims, stale-run fencing and transactional health events.
+func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-connectors-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Connectors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
+	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
+	one := 1
+	input := connectors.CreateInput{Key: "k1", CorpusID: c.ID, Namespace: "wire", Kind: "fixture", Config: json.RawMessage(`{"script":[]}`), IntervalSeconds: &one, Secret: json.RawMessage(`{"token":"fixture-test-secret-adapter"}`)}
+	created, err := service.Create(ctx, scope, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Credential == nil || created.Credential.Version != 1 || created.Health.State != connectors.HealthActive {
+		t.Fatalf("created %+v", created)
+	}
+	replay, err := service.Create(ctx, scope, input)
+	if err != nil || replay.ID != created.ID {
+		t.Fatalf("replay %v %+v", err, replay)
+	}
+	changed := input
+	changed.Namespace = "other"
+	if _, err = service.Create(ctx, scope, changed); !errors.Is(err, connectors.ErrConflict) {
+		t.Fatalf("conflict: %v", err)
+	}
+	second := input
+	second.Key = "k2"
+	if _, err = service.Create(ctx, scope, second); !errors.Is(err, connectors.ErrNamespaceInUse) {
+		t.Fatalf("namespace: %v", err)
+	}
+	var ciphertext []byte
+	if err = pool.QueryRow(ctx, "SELECT ciphertext FROM connector_credentials WHERE organization=$1 AND connector_id=$2", scope.Organization, created.ID).Scan(&ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(ciphertext, []byte("fixture-test-secret")) {
+		t.Fatal("secret stored in plaintext")
+	}
+
+	// Exactly one claimant owns a due run; a released lease can be claimed again.
+	claim := func() []postgres.ConnectorRun {
+		runs, err := store.ClaimConnectorRuns(ctx, time.Minute, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mine []postgres.ConnectorRun
+		for _, r := range runs {
+			if r.Organization == scope.Organization {
+				mine = append(mine, r)
+			} else if err := store.ReleaseConnectorRun(ctx, r); err != nil {
+				t.Fatal(err) // never hold another Organization's run
+			}
+		}
+		return mine
+	}
+	first := claim()
+	if len(first) != 1 || first[0].ConnectorID != created.ID {
+		t.Fatalf("claim %+v", first)
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("leased run claimed twice: %+v", again)
+	}
+	if err = store.ReleaseConnectorRun(ctx, first[0]); err != nil {
+		t.Fatal(err)
+	}
+	run := claim()
+	if len(run) != 1 || run[0].Run != first[0].Run {
+		t.Fatalf("re-dispatch must target the same run: %+v", run)
+	}
+	target, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil || target.Sealed == nil {
+		t.Fatalf("load %v %+v", err, target)
+	}
+	if plain, err := sealer.Open(scope.Organization, created.ID, *target.Sealed); err != nil || string(plain) != `{"token":"fixture-test-secret-adapter"}` {
+		t.Fatalf("open %v %s", err, plain)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run+1, json.RawMessage(`{"step":9}`), true); ok || err != nil {
+		t.Fatalf("stale checkpoint committed: %v %v", ok, err)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, json.RawMessage(`{"step":1}`), true); !ok || err != nil {
+		t.Fatalf("checkpoint: %v %v", ok, err)
+	}
+	feed := changes.Service{Journal: store.ContentStore, Key: []byte("adapter-cursor-key-0123456789abcdef")}
+	start, err := feed.Start(ctx, scope, c.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.FinishRun(ctx, scope.Organization, created.ID, run[0].Run, &connectors.RunError{Class: connectors.ClassAccess, Code: "unauthorized"}); err != nil {
+		t.Fatal(err)
+	}
+	// A duplicate finish of the same run is fenced.
+	if err = store.FinishRun(ctx, scope.Organization, created.ID, run[0].Run, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.RunSequence != run[0].Run+1 || string(after.Checkpoint) != `{"step": 1}` || after.Health.State != connectors.HealthAccessError || after.Health.LastError == nil || after.Health.LastError.Code != "unauthorized" {
+		t.Fatalf("after finish %+v %s", after.Health, after.Checkpoint)
+	}
+	if len(claim()) != 0 {
+		t.Fatal("next run must wait for its interval")
+	}
+	// A later transient failure keeps the unresolved access error.
+	time.Sleep(1100 * time.Millisecond)
+	next := claim()
+	if len(next) != 1 || next[0].Run != run[0].Run+1 {
+		t.Fatalf("next run %+v", next)
+	}
+	if err = store.FinishRun(ctx, scope.Organization, created.ID, next[0].Run, &connectors.RunError{Class: connectors.ClassTransient, Code: "source_unavailable"}); err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := store.ReadConnector(ctx, scope.Organization, created.ID); still.Health.State != connectors.HealthAccessError || still.Health.LastError.Code != "source_unavailable" {
+		t.Fatalf("transient failure cleared the access error: %+v", still.Health)
+	}
+	disabled, err := service.Disable(ctx, scope, created.ID)
+	if err != nil || disabled.Enabled || disabled.Health.State != connectors.HealthDisabled {
+		t.Fatalf("disable %v %+v", err, disabled)
+	}
+	page, err := feed.Read(ctx, scope, c.ID, start, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range page.Items {
+		kinds = append(kinds, e.Type)
+	}
+	want := []string{"connector.health_changed", "connector.disabled", "connector.health_changed"}
+	if fmt.Sprint(kinds) != fmt.Sprint(want) {
+		t.Fatalf("events %v want %v", kinds, want)
+	}
+	// Disabling released the Source Namespace for a replacement instance.
+	replacement, err := service.Create(ctx, scope, second)
+	if err != nil {
+		t.Fatalf("replacement: %v", err)
+	}
+	// Leave nothing scheduled behind for the rest of the verification run.
+	defer func() {
+		if _, err := service.Disable(context.Background(), scope, replacement.ID); err != nil {
+			t.Error(err)
+		}
+	}()
+	if _, err = service.ReplaceCredential(ctx, scope, created.ID, connectors.CredentialInput{Key: "r1", Secret: json.RawMessage(`{"token":"fixture-test-token"}`)}); !errors.Is(err, connectors.ErrDisabled) {
+		t.Fatalf("replace on disabled: %v", err)
+	}
+}

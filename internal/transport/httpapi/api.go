@@ -22,6 +22,7 @@ import (
 
 	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -52,6 +53,9 @@ type API struct {
 	CursorKey      []byte
 	schema         *jsonschema.Schema
 	monitoringSchemas
+	Connectors       connectors.Service
+	connectorSchema  *jsonschema.Schema
+	credentialSchema *jsonschema.Schema
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -93,7 +97,15 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 			return nil, err
 		}
 	}
-	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	connectorSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/ConnectorCreate")
+	if err != nil {
+		return nil, err
+	}
+	credentialSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/CredentialReplace")
+	if err != nil {
+		return nil, err
+	}
+	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}
@@ -168,6 +180,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.matchRoutes(w, r, scope) {
+		return
+	}
+	if a.connectorRoutes(w, r, scope) {
 		return
 	}
 	if r.URL.Path == "/v0/corpora" {

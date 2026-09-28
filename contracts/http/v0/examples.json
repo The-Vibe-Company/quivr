@@ -749,5 +749,68 @@
         "projection_generation_id": "generation_2"
       }
     }
+  },
+  {
+    "name": "connector_create",
+    "schema": "ConnectorCreate",
+    "value": {
+      "idempotency_key": "newsroom-wire-feed",
+      "corpus_id": "corpus_news",
+      "source_namespace": "newsroom-wire",
+      "kind": "fixture",
+      "config": {
+        "script": []
+      },
+      "schedule": {
+        "interval_seconds": 300
+      },
+      "health_policy": {
+        "silent_after_seconds": 86400,
+        "credential_warning_seconds": 1209600
+      },
+      "credential": {
+        "secret": {
+          "token": "fixture-test-token"
+        },
+        "expires_at": "2027-01-01T00:00:00Z"
+      }
+    }
+  },
+  {
+    "name": "connector",
+    "schema": "Connector",
+    "value": {
+      "connector_id": "connector_1",
+      "corpus_id": "corpus_news",
+      "source_namespace": "newsroom-wire",
+      "kind": "fixture",
+      "config": {
+        "script": []
+      },
+      "schedule": {
+        "interval_seconds": 300
+      },
+      "health_policy": {
+        "silent_after_seconds": 86400,
+        "credential_warning_seconds": 1209600
+      },
+      "enabled": true,
+      "created_at": "2026-09-28T10:00:00Z",
+      "credential": {
+        "version": 1,
+        "deposited_at": "2026-09-28T10:00:00Z",
+        "expires_at": "2027-01-01T00:00:00Z"
+      },
+      "health": {
+        "state": "access_error",
+        "evaluated_at": "2026-09-28T10:05:00Z",
+        "last_success_at": "2026-09-28T10:01:00Z",
+        "last_item_at": "2026-09-28T10:01:00Z",
+        "last_error": {
+          "code": "unauthorized",
+          "at": "2026-09-28T10:05:00Z"
+        }
+      }
+    }
   }
 ]

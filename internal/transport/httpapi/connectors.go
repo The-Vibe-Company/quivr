@@ -1,0 +1,231 @@
+package httpapi
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+
+	"crypto/hmac"
+)
+
+// WithConnectors enables the Connector Instance routes.
+func WithConnectors(service connectors.Service) Option {
+	return func(a *API) { a.Connectors = service }
+}
+
+func connectorFailure(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, corpus.ErrForbidden):
+		failure(w, 403, "forbidden")
+	case errors.Is(err, corpus.ErrNotFound):
+		failure(w, 404, "not_found")
+	case errors.Is(err, connectors.ErrConflict), errors.Is(err, connectors.ErrNamespaceInUse), errors.Is(err, connectors.ErrDisabled):
+		failure(w, 409, err.Error())
+	case errors.Is(err, connectors.ErrUnsupportedKind), errors.Is(err, connectors.ErrInvalidConfig), errors.Is(err, connectors.ErrInvalidCredential), errors.Is(err, connectors.ErrInvalidInterval), errors.Is(err, connectors.ErrInvalid):
+		failure(w, 422, err.Error())
+	default:
+		failure(w, 503, "connectors_unavailable")
+	}
+}
+
+func connectorToTransport(in connectors.Instance) transport.Connector {
+	out := transport.Connector{ConnectorId: in.ID, CorpusId: in.CorpusID, SourceNamespace: in.Namespace, Kind: transport.ConnectorKind(in.Kind), Enabled: in.Enabled, CreatedAt: in.CreatedAt.UTC(), Config: map[string]any{}}
+	_ = json.Unmarshal(in.Config, &out.Config)
+	out.Schedule.IntervalSeconds = int(in.Interval.Seconds())
+	out.HealthPolicy.SilentAfterSeconds = int(in.SilentAfter.Seconds())
+	out.HealthPolicy.CredentialWarningSeconds = int(in.CredentialWarning.Seconds())
+	if in.DisabledAt != nil {
+		v := in.DisabledAt.UTC()
+		out.DisabledAt = &v
+	}
+	if c := in.Credential; c != nil {
+		out.Credential = &transport.CredentialMetadata{Version: c.Version, DepositedAt: c.DepositedAt.UTC()}
+		if c.ExpiresAt != nil {
+			v := c.ExpiresAt.UTC()
+			out.Credential.ExpiresAt = &v
+		}
+	}
+	h := in.Health
+	out.Health = transport.ConnectorHealth{State: transport.ConnectorHealthState(h.State), EvaluatedAt: h.EvaluatedAt.UTC()}
+	if h.LastSuccessAt != nil {
+		v := h.LastSuccessAt.UTC()
+		out.Health.LastSuccessAt = &v
+	}
+	if h.LastItemAt != nil {
+		v := h.LastItemAt.UTC()
+		out.Health.LastItemAt = &v
+	}
+	if h.LastError != nil {
+		out.Health.LastError = &transport.ConnectorError{Code: h.LastError.Code, At: h.LastError.At.UTC()}
+	}
+	return out
+}
+
+// decodeInto validates raw JSON against a contract schema and decodes it.
+func decodeInto(w http.ResponseWriter, r *http.Request, schema interface{ Validate(any) error }, v any) bool {
+	raw, payload, ok := readJSON(w, r, maxRequestBytes)
+	if !ok {
+		return false
+	}
+	if schema.Validate(raw) != nil || json.Unmarshal(payload, v) != nil {
+		failure(w, 422, "invalid_schema")
+		return false
+	}
+	return true
+}
+
+func rawJSON(v *map[string]any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	b, _ := json.Marshal(*v)
+	return b
+}
+
+func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+	if r.URL.Path != "/v0/connectors" && !strings.HasPrefix(r.URL.Path, "/v0/connectors/") {
+		return false
+	}
+	if a.Connectors.Store == nil {
+		failure(w, 404, "not_found")
+		return true
+	}
+	path := strings.Split(strings.TrimPrefix(r.URL.Path, "/v0/connectors"), "/")
+	write := r.Method != "GET"
+	action := "connectors:read"
+	if write {
+		action = "connectors:write"
+	}
+	switch {
+	case len(path) == 1 && r.Method == "POST", len(path) == 1 && r.Method == "GET":
+	case len(path) == 2 && path[1] != "" && r.Method == "GET":
+	case len(path) == 3 && path[1] != "" && path[2] == "disable" && r.Method == "POST":
+	case len(path) == 3 && path[1] != "" && path[2] == "credential" && r.Method == "PUT":
+	case len(path) <= 3:
+		failure(w, 405, "method_not_allowed")
+		return true
+	default:
+		failure(w, 404, "not_found")
+		return true
+	}
+	if !scope.Allows(action) {
+		failure(w, 403, "forbidden")
+		return true
+	}
+	ctx := r.Context()
+	switch {
+	case len(path) == 1 && r.Method == "POST":
+		var body transport.ConnectorCreate
+		if !decodeInto(w, r, a.connectorSchema, &body) {
+			return true
+		}
+		in := connectors.CreateInput{Key: body.IdempotencyKey, CorpusID: body.CorpusId, Namespace: body.SourceNamespace, Kind: string(body.Kind), Config: rawJSON(&body.Config)}
+		if body.Schedule != nil {
+			in.IntervalSeconds = body.Schedule.IntervalSeconds
+		}
+		if body.HealthPolicy != nil {
+			in.SilentAfterSeconds, in.CredentialWarningSeconds = body.HealthPolicy.SilentAfterSeconds, body.HealthPolicy.CredentialWarningSeconds
+		}
+		if body.Credential != nil {
+			in.Secret, in.ExpiresAt = rawJSON(body.Credential.Secret), body.Credential.ExpiresAt
+		}
+		inst, err := a.Connectors.Create(ctx, scope, in)
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 201, connectorToTransport(inst))
+	case len(path) == 1:
+		a.listConnectors(w, r, scope)
+	case len(path) == 2:
+		inst, err := a.Connectors.Read(ctx, scope, path[1])
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 200, connectorToTransport(inst))
+	case path[2] == "disable":
+		var body transport.ActionRequest
+		if !decodeInto(w, r, a.actionSchema, &body) {
+			return true
+		}
+		inst, err := a.Connectors.Disable(ctx, scope, path[1])
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 200, connectorToTransport(inst))
+	default:
+		var body transport.CredentialReplace
+		if !decodeInto(w, r, a.credentialSchema, &body) {
+			return true
+		}
+		inst, err := a.Connectors.ReplaceCredential(ctx, scope, path[1], connectors.CredentialInput{Key: body.IdempotencyKey, Secret: rawJSON(body.Secret), ExpiresAt: body.ExpiresAt})
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 200, connectorToTransport(inst))
+	}
+	return true
+}
+
+func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
+	q := r.URL.Query()
+	for k, v := range q {
+		if (k != "limit" && k != "page_cursor" && k != "corpus_id") || len(v) != 1 || v[0] == "" {
+			failure(w, 422, "invalid_query")
+			return
+		}
+	}
+	limit := 100
+	if q.Has("limit") {
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 100 {
+			failure(w, 422, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	corpusID := q.Get("corpus_id")
+	binding := "connectors|" + scopeDigest(s) + "|" + corpusID
+	after := ""
+	if q.Has("page_cursor") {
+		parts := strings.Split(q.Get("page_cursor"), ".")
+		if len(parts) != 2 {
+			failure(w, 422, "invalid_cursor")
+			return
+		}
+		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+		var c cursor
+		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.sign(b)) || json.Unmarshal(b, &c) != nil || c.Scope != binding {
+			failure(w, 422, "invalid_cursor")
+			return
+		}
+		after = c.After
+	}
+	items, err := a.Connectors.List(r.Context(), s, corpusID, after, limit+1)
+	if err != nil {
+		connectorFailure(w, err)
+		return
+	}
+	page := transport.ConnectorPage{Items: []transport.Connector{}}
+	for i, in := range items {
+		if i == limit {
+			b, _ := json.Marshal(cursor{items[limit-1].ID, binding})
+			next := base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.sign(b))
+			page.NextPageCursor = &next
+			break
+		}
+		page.Items = append(page.Items, connectorToTransport(in))
+	}
+	send(w, 200, page)
+}

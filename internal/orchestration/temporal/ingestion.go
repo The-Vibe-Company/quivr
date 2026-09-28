@@ -39,10 +39,16 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 type Runtime struct {
 	Client client.Client
 	Worker worker.Worker
-	Store  DispatchStore
+	// ConnectorWorker serves acquisition on its own task queue so scheduled
+	// polling is never starved by content processing, and the reverse.
+	ConnectorWorker worker.Worker
+	Store           DispatchStore
+	Connectors      *Connectors
 }
 
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore) (*Runtime, error) {
+// Start runs the worker. A non-nil conns also schedules Connector Instance
+// acquisition runs on their own task queue.
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors) (*Runtime, error) {
 	// The application retries startup after transient connection failures.
 	connect, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -57,16 +63,37 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}, activity.RegisterOptions{Name: "process-token-windows"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
 	registerRebuild(w, rebuilder)
+	var cw worker.Worker
+	if conns != nil {
+		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
+		registerConnectors(cw, conns)
+		if err = cw.Start(); err != nil {
+			c.Close()
+			return nil, err
+		}
+	}
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
+		if cw != nil {
+			cw.Stop()
+		}
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{Client: c, Worker: w, Store: store}
+	runtime := &Runtime{Client: c, Worker: w, ConnectorWorker: cw, Store: store, Connectors: conns}
 	go runtime.dispatch(ctx)
+	if conns != nil {
+		go runtime.scheduleConnectors(ctx)
+	}
 	return runtime, nil
 }
-func (r *Runtime) Close() { r.Worker.Stop(); r.Client.Close() }
+func (r *Runtime) Close() {
+	r.Worker.Stop()
+	if r.ConnectorWorker != nil {
+		r.ConnectorWorker.Stop()
+	}
+	r.Client.Close()
+}
 func (r *Runtime) dispatch(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()

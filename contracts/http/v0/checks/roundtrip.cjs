@@ -13,6 +13,9 @@ for (const c of cases) {
     WebhookEvent: [['occurred_at']],
     ChangeEvent: [['occurred_at']],
     Delivery: [['event', 'occurred_at']],
+    ConnectorCreate: [['credential', 'expires_at']],
+    Connector: [['created_at'], ['credential', 'deposited_at'], ['credential', 'expires_at'], ['health', 'evaluated_at'],
+      ['health', 'last_success_at'], ['health', 'last_item_at'], ['health', 'last_error', 'at']],
   };
   for (const parts of timestampPaths[c.schema] || []) {
     const parents = parts.slice(0, -1);

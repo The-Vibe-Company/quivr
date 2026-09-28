@@ -57,6 +57,57 @@ func (e BlobContentKind) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorHealthState.
+const (
+	AccessError        ConnectorHealthState = "access_error"
+	Active             ConnectorHealthState = "active"
+	CredentialExpiring ConnectorHealthState = "credential_expiring"
+	Disabled           ConnectorHealthState = "disabled"
+	Silent             ConnectorHealthState = "silent"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorHealthState enum.
+func (e ConnectorHealthState) Valid() bool {
+	switch e {
+	case AccessError:
+		return true
+	case Active:
+		return true
+	case CredentialExpiring:
+		return true
+	case Disabled:
+		return true
+	case Silent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorKind.
+const (
+	Fixture  ConnectorKind = "fixture"
+	M365Mail ConnectorKind = "m365_mail"
+	Rss      ConnectorKind = "rss"
+	XList    ConnectorKind = "x_list"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorKind enum.
+func (e ConnectorKind) Valid() bool {
+	switch e {
+	case Fixture:
+		return true
+	case M365Mail:
+		return true
+	case Rss:
+		return true
+	case XList:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -581,6 +632,90 @@ type ConfigUpdate struct {
 	Retrieval RetrievalConfig `json:"retrieval"`
 }
 
+// Connector defines model for Connector.
+type Connector struct {
+	Config      map[string]interface{} `json:"config"`
+	ConnectorId string                 `json:"connector_id"`
+	CorpusId    string                 `json:"corpus_id"`
+	CreatedAt   time.Time              `json:"created_at"`
+
+	// Credential Metadata of the current Deposited Credential; the secret itself is never returned.
+	Credential *CredentialMetadata `json:"credential,omitempty"`
+	DisabledAt *time.Time          `json:"disabled_at,omitempty"`
+	Enabled    bool                `json:"enabled"`
+
+	// Health Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+	Health       ConnectorHealth `json:"health"`
+	HealthPolicy struct {
+		CredentialWarningSeconds int `json:"credential_warning_seconds"`
+		SilentAfterSeconds       int `json:"silent_after_seconds"`
+	} `json:"health_policy"`
+
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	Kind     ConnectorKind `json:"kind"`
+	Schedule struct {
+		IntervalSeconds int `json:"interval_seconds"`
+	} `json:"schedule"`
+	SourceNamespace string `json:"source_namespace"`
+}
+
+// ConnectorCreate defines model for ConnectorCreate.
+type ConnectorCreate struct {
+	// Config Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
+	Config         map[string]interface{} `json:"config"`
+	CorpusId       string                 `json:"corpus_id"`
+	Credential     *CredentialDeposit     `json:"credential,omitempty"`
+	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
+	IdempotencyKey string                 `json:"idempotency_key"`
+
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	Kind            ConnectorKind      `json:"kind"`
+	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
+	SourceNamespace string             `json:"source_namespace"`
+}
+
+// ConnectorError defines model for ConnectorError.
+type ConnectorError struct {
+	At   time.Time `json:"at"`
+	Code string    `json:"code"`
+}
+
+// ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+type ConnectorHealth struct {
+	EvaluatedAt   time.Time            `json:"evaluated_at"`
+	LastError     *ConnectorError      `json:"last_error,omitempty"`
+	LastItemAt    *time.Time           `json:"last_item_at,omitempty"`
+	LastSuccessAt *time.Time           `json:"last_success_at,omitempty"`
+	State         ConnectorHealthState `json:"state"`
+}
+
+// ConnectorHealthState defines model for ConnectorHealth.State.
+type ConnectorHealthState string
+
+// ConnectorHealthPolicy defines model for ConnectorHealthPolicy.
+type ConnectorHealthPolicy struct {
+	// CredentialWarningSeconds A credential expiring within this window is credential_expiring. Default 1209600.
+	CredentialWarningSeconds *int `json:"credential_warning_seconds,omitempty"`
+
+	// SilentAfterSeconds No new item for this long makes the source silent. Default 86400.
+	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
+}
+
+// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it; other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+type ConnectorKind string
+
+// ConnectorPage defines model for ConnectorPage.
+type ConnectorPage struct {
+	Items          []Connector `json:"items"`
+	NextPageCursor *string     `json:"next_page_cursor,omitempty"`
+}
+
+// ConnectorSchedule defines model for ConnectorSchedule.
+type ConnectorSchedule struct {
+	// IntervalSeconds Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
+	IntervalSeconds *int `json:"interval_seconds,omitempty"`
+}
+
 // Corpus defines model for Corpus.
 type Corpus struct {
 	CorpusId string `json:"corpus_id"`
@@ -603,6 +738,28 @@ type CorpusRequest struct {
 
 	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. Effective resolved fields are returned.
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
+}
+
+// CredentialDeposit defines model for CredentialDeposit.
+type CredentialDeposit struct {
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Secret Kind-specific secret, validated by the kind's credential JSON Schema, encrypted at rest with the deployment credential key and never returned or logged.
+	Secret *map[string]interface{} `json:"secret,omitempty"`
+}
+
+// CredentialMetadata Metadata of the current Deposited Credential; the secret itself is never returned.
+type CredentialMetadata struct {
+	DepositedAt time.Time  `json:"deposited_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Version     int        `json:"version"`
+}
+
+// CredentialReplace defines model for CredentialReplace.
+type CredentialReplace struct {
+	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
+	IdempotencyKey string                  `json:"idempotency_key"`
+	Secret         *map[string]interface{} `json:"secret,omitempty"`
 }
 
 // Delivery defines model for Delivery.
@@ -1106,6 +1263,13 @@ type StreamChangesParams struct {
 	LastEventID *string `json:"Last-Event-ID,omitempty"`
 }
 
+// ListConnectorsParams defines parameters for ListConnectors.
+type ListConnectorsParams struct {
+	CorpusId   *string `form:"corpus_id,omitempty" json:"corpus_id,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -1131,6 +1295,15 @@ type ListRecordsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
+type CreateConnectorJSONRequestBody = ConnectorCreate
+
+// ReplaceConnectorCredentialJSONRequestBody defines body for ReplaceConnectorCredential for application/json ContentType.
+type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
+
+// DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
+type DisableConnectorJSONRequestBody = ActionRequest
 
 // CreateCorpusJSONRequestBody defines body for CreateCorpus for application/json ContentType.
 type CreateCorpusJSONRequestBody = CorpusRequest
@@ -1382,6 +1555,21 @@ type ServerInterface interface {
 	// (GET /v0/changes/stream)
 	StreamChanges(w http.ResponseWriter, r *http.Request, params StreamChangesParams)
 
+	// (GET /v0/connectors)
+	ListConnectors(w http.ResponseWriter, r *http.Request, params ListConnectorsParams)
+
+	// (POST /v0/connectors)
+	CreateConnector(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/connectors/{connector_id})
+	GetConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (PUT /v0/connectors/{connector_id}/credential)
+	ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (POST /v0/connectors/{connector_id}/disable)
+	DisableConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
 	// (GET /v0/corpora)
 	ListCorpora(w http.ResponseWriter, r *http.Request, params ListCorporaParams)
 
@@ -1625,6 +1813,157 @@ func (siw *ServerInterfaceWrapper) StreamChanges(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StreamChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConnectors operation middleware
+func (siw *ServerInterfaceWrapper) ListConnectors(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConnectorsParams
+
+	// ------------- Optional query parameter "corpus_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnectors(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateConnector operation middleware
+func (siw *ServerInterfaceWrapper) CreateConnector(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateConnector(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetConnector operation middleware
+func (siw *ServerInterfaceWrapper) GetConnector(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConnector(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplaceConnectorCredential operation middleware
+func (siw *ServerInterfaceWrapper) ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplaceConnectorCredential(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisableConnector operation middleware
+func (siw *ServerInterfaceWrapper) DisableConnector(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisableConnector(w, r, connectorId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2611,6 +2950,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches/{match_id}", wrapper.GetMatch)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}", wrapper.GetDelivery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}/attempts", wrapper.ListDeliveryAttempts)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors", wrapper.ListConnectors)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors", wrapper.CreateConnector)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}", wrapper.GetConnector)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/disable", wrapper.DisableConnector)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/credential", wrapper.ReplaceConnectorCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
@@ -2752,6 +3096,203 @@ type StreamChangesdefaultJSONResponse struct {
 }
 
 func (response StreamChangesdefaultJSONResponse) VisitStreamChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorsRequestObject struct {
+	Params ListConnectorsParams
+}
+
+type ListConnectorsResponseObject interface {
+	VisitListConnectorsResponse(w http.ResponseWriter) error
+}
+
+type ListConnectors200JSONResponse ConnectorPage
+
+func (response ListConnectors200JSONResponse) VisitListConnectorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConnectorsdefaultJSONResponse) VisitListConnectorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConnectorRequestObject struct {
+	Body *CreateConnectorJSONRequestBody
+}
+
+type CreateConnectorResponseObject interface {
+	VisitCreateConnectorResponse(w http.ResponseWriter) error
+}
+
+type CreateConnector201JSONResponse Connector
+
+func (response CreateConnector201JSONResponse) VisitCreateConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConnectordefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateConnectordefaultJSONResponse) VisitCreateConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnectorRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+}
+
+type GetConnectorResponseObject interface {
+	VisitGetConnectorResponse(w http.ResponseWriter) error
+}
+
+type GetConnector200JSONResponse Connector
+
+func (response GetConnector200JSONResponse) VisitGetConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnectordefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetConnectordefaultJSONResponse) VisitGetConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplaceConnectorCredentialRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Body        *ReplaceConnectorCredentialJSONRequestBody
+}
+
+type ReplaceConnectorCredentialResponseObject interface {
+	VisitReplaceConnectorCredentialResponse(w http.ResponseWriter) error
+}
+
+type ReplaceConnectorCredential200JSONResponse Connector
+
+func (response ReplaceConnectorCredential200JSONResponse) VisitReplaceConnectorCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReplaceConnectorCredentialdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ReplaceConnectorCredentialdefaultJSONResponse) VisitReplaceConnectorCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableConnectorRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Body        *DisableConnectorJSONRequestBody
+}
+
+type DisableConnectorResponseObject interface {
+	VisitDisableConnectorResponse(w http.ResponseWriter) error
+}
+
+type DisableConnector200JSONResponse Connector
+
+func (response DisableConnector200JSONResponse) VisitDisableConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableConnectordefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DisableConnectordefaultJSONResponse) VisitDisableConnectorResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -3964,6 +4505,21 @@ type StrictServerInterface interface {
 	// (GET /v0/changes/stream)
 	StreamChanges(ctx context.Context, request StreamChangesRequestObject) (StreamChangesResponseObject, error)
 
+	// (GET /v0/connectors)
+	ListConnectors(ctx context.Context, request ListConnectorsRequestObject) (ListConnectorsResponseObject, error)
+
+	// (POST /v0/connectors)
+	CreateConnector(ctx context.Context, request CreateConnectorRequestObject) (CreateConnectorResponseObject, error)
+
+	// (GET /v0/connectors/{connector_id})
+	GetConnector(ctx context.Context, request GetConnectorRequestObject) (GetConnectorResponseObject, error)
+
+	// (PUT /v0/connectors/{connector_id}/credential)
+	ReplaceConnectorCredential(ctx context.Context, request ReplaceConnectorCredentialRequestObject) (ReplaceConnectorCredentialResponseObject, error)
+
+	// (POST /v0/connectors/{connector_id}/disable)
+	DisableConnector(ctx context.Context, request DisableConnectorRequestObject) (DisableConnectorResponseObject, error)
+
 	// (GET /v0/corpora)
 	ListCorpora(ctx context.Context, request ListCorporaRequestObject) (ListCorporaResponseObject, error)
 
@@ -4165,6 +4721,155 @@ func (sh *strictHandler) StreamChanges(w http.ResponseWriter, r *http.Request, p
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StreamChangesResponseObject); ok {
 		if err := validResponse.VisitStreamChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConnectors operation middleware
+func (sh *strictHandler) ListConnectors(w http.ResponseWriter, r *http.Request, params ListConnectorsParams) {
+	var request ListConnectorsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnectors(ctx, request.(ListConnectorsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnectors")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectorsResponseObject); ok {
+		if err := validResponse.VisitListConnectorsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateConnector operation middleware
+func (sh *strictHandler) CreateConnector(w http.ResponseWriter, r *http.Request) {
+	var request CreateConnectorRequestObject
+
+	var body CreateConnectorJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateConnector(ctx, request.(CreateConnectorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateConnector")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateConnectorResponseObject); ok {
+		if err := validResponse.VisitCreateConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConnector operation middleware
+func (sh *strictHandler) GetConnector(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request GetConnectorRequestObject
+
+	request.ConnectorId = connectorId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConnector(ctx, request.(GetConnectorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConnector")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConnectorResponseObject); ok {
+		if err := validResponse.VisitGetConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReplaceConnectorCredential operation middleware
+func (sh *strictHandler) ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request ReplaceConnectorCredentialRequestObject
+
+	request.ConnectorId = connectorId
+
+	var body ReplaceConnectorCredentialJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReplaceConnectorCredential(ctx, request.(ReplaceConnectorCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReplaceConnectorCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReplaceConnectorCredentialResponseObject); ok {
+		if err := validResponse.VisitReplaceConnectorCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisableConnector operation middleware
+func (sh *strictHandler) DisableConnector(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request DisableConnectorRequestObject
+
+	request.ConnectorId = connectorId
+
+	var body DisableConnectorJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisableConnector(ctx, request.(DisableConnectorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisableConnector")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisableConnectorResponseObject); ok {
+		if err := validResponse.VisitDisableConnectorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
