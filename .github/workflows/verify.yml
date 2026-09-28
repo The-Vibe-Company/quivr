@@ -50,4 +50,5 @@ jobs:
             .scratch/quivr-demo-verify-*/browser.log
             .scratch/quivr-demo-verify-*/browser/**/*.png
             contracts/http/v0/openapi.yaml
+            contracts/shared/v0/manifest.schema.json
           if-no-files-found: warn

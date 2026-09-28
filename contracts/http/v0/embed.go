@@ -2,10 +2,8 @@ package contract
 
 import _ "embed"
 
-// OpenAPI is the authoritative public contract embedded in the binary.
-//
-//go:embed openapi.yaml
-var OpenAPI []byte
+// The OpenAPI document references the shared Manifest schema; load it through
+// the contracts package, which compiles every contract resource together.
 
 // WebhookVector is the public Standard Webhooks interoperability vector.
 //

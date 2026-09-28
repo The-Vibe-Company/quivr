@@ -1,0 +1,294 @@
+{
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests) or the engine Manifest validation (responses) reports.",
+  "cases": [
+    {
+      "file": "manifests/valid/full.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Every Plugin API 0.1 manifest field."
+    },
+    {
+      "file": "manifests/valid/minimal.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Required fields only; defaults apply."
+    },
+    {
+      "file": "manifests/invalid/bad-range.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Caret shorthand is outside the range grammar."
+    },
+    {
+      "file": "manifests/invalid/unsatisfiable-range.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Well-formed but unsatisfiable range."
+    },
+    {
+      "file": "manifests/invalid/incompatible-plugin-api.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Plugin API 0.1.0 is outside the declared range."
+    },
+    {
+      "file": "manifests/invalid/incompatible-engine.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_engine"
+      ],
+      "description": "Engine 0.1.0 is outside the declared range."
+    },
+    {
+      "file": "manifests/invalid/reserved-contribution.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "reserved_contribution"
+      ],
+      "description": "enricher is reserved in Plugin API 0.1."
+    },
+    {
+      "file": "manifests/invalid/foreign-namespace.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "foreign_namespace"
+      ],
+      "description": "Namespace not prefixed by the plugin id followed by a dot."
+    },
+    {
+      "file": "manifests/invalid/invalid-config-schema.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema"
+      ],
+      "description": "Configuration schema is not valid JSON Schema."
+    },
+    {
+      "file": "manifests/invalid/invalid-extension-schema.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_extension_schema"
+      ],
+      "description": "Extension schema is not valid JSON Schema."
+    },
+    {
+      "file": "manifests/invalid/unknown-field.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Unknown field in the normalizer Contribution."
+    },
+    {
+      "file": "manifests/invalid/duplicate-secret.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_secret"
+      ],
+      "description": "Secret declared twice."
+    },
+    {
+      "file": "requests/signed-url.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Signed GET URL reference with submitted extensions and provenance."
+    },
+    {
+      "file": "requests/file-reference.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Local-development file reference."
+    },
+    {
+      "file": "requests/inline-content.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Bodies are never inline."
+    },
+    {
+      "file": "requests/missing-sha256.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Input checksum is required."
+    },
+    {
+      "file": "requests/missing-record-version.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Record Version identity is required."
+    },
+    {
+      "file": "responses/pages.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Blob Part plus page Parts, Relation, extensions, language, warning."
+    },
+    {
+      "file": "responses/minimal.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "One text Part."
+    },
+    {
+      "file": "responses/duplicate-part-keys.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "Part keys must be unique; schema cannot express it."
+    },
+    {
+      "file": "responses/cyclic-parents.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "Parent references must be acyclic."
+    },
+    {
+      "file": "responses/unknown-parent.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "parent_key must name a Part of the same Manifest."
+    },
+    {
+      "file": "responses/missing-role.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Every Part has a role."
+    },
+    {
+      "file": "responses/wrong-manifest-kind.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The Manifest kind is manifest."
+    },
+    {
+      "file": "responses/unknown-field.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Unknown response fields are rejected."
+    },
+    {
+      "file": "responses/too-many-warnings.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At most 32 warnings."
+    },
+    {
+      "file": "responses/no-parts.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At least one Part."
+    },
+    {
+      "file": "protocol/discovery.json",
+      "schema": "discovery.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Discovery document."
+    },
+    {
+      "file": "protocol/discovery-reserved.json",
+      "schema": "discovery.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Discovery may only list normalizer in v0."
+    },
+    {
+      "file": "protocol/health-ok.json",
+      "schema": "health.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Healthy plugin."
+    },
+    {
+      "file": "protocol/error-retryable.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Retryable error."
+    },
+    {
+      "file": "protocol/error-terminal.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Terminal error."
+    },
+    {
+      "file": "protocol/error-missing-retryable.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "retryable is mandatory."
+    }
+  ]
+}

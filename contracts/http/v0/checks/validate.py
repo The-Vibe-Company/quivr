@@ -1,13 +1,16 @@
 """Validate the authoritative schema, examples, and important invalid states."""
 import json
+import sys
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from openapi_spec_validator import validate
-import yaml
 
 root = Path(__file__).resolve().parents[1]
-spec = yaml.safe_load((root / "openapi.yaml").read_text())
+sys.path.insert(0, str(root))
+from bundle import load  # noqa: E402  shared Manifest components inlined
+
+spec = load()
 validate(spec)
 cases = json.loads((root / "examples.json").read_text())
 examples = {case["name"]: case["value"] for case in cases}

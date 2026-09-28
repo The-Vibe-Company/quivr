@@ -1,0 +1,12 @@
+{
+  "plugin_api": "0.1.0",
+  "plugin": {
+    "id": "example-pdf",
+    "version": "1.0.0"
+  },
+  "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+  "contributions": [
+    "normalizer",
+    "enricher"
+  ]
+}

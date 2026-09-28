@@ -1273,22 +1273,7 @@ components:
         Corpus scope; every resource access is authorized.
   schemas:
     SourceIdentity:
-      type: object
-      additionalProperties: false
-      properties:
-        corpus_id:
-          type: string
-          minLength: 1
-        namespace:
-          type: string
-          minLength: 1
-        record_key:
-          type: string
-          minLength: 1
-      required:
-      - corpus_id
-      - namespace
-      - record_key
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/SourceIdentity
     Error:
       type: object
       additionalProperties: false
@@ -1312,135 +1297,19 @@ components:
       - message
       - retryable
     Extensions:
-      type: object
-      additionalProperties:
-        type: object
-        additionalProperties: false
-        properties:
-          schema_version:
-            type: string
-            minLength: 1
-          data:
-            type: object
-            additionalProperties: true
-        required:
-        - schema_version
-        - data
-      description: Keys are plugin namespaces. Data is validated against the installed schema version;
-        source data is not a computed Annotation.
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/Extensions
     TextContent:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          enum:
-          - text
-        text:
-          type: string
-          minLength: 1
-      required:
-      - kind
-      - text
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/TextContent
     BlobContent:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          enum:
-          - blob
-        blob_id:
-          type: string
-          minLength: 1
-        media_type:
-          type: string
-          minLength: 1
-      required:
-      - kind
-      - blob_id
-      - media_type
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/BlobContent
     Part:
-      type: object
-      additionalProperties: false
-      properties:
-        key:
-          type: string
-          minLength: 1
-        parent_key:
-          type: string
-          minLength: 1
-        role:
-          type: string
-          minLength: 1
-        content:
-          oneOf:
-          - $ref: '#/components/schemas/TextContent'
-          - $ref: '#/components/schemas/BlobContent'
-        extensions:
-          $ref: '#/components/schemas/Extensions'
-      required:
-      - key
-      - role
-      - content
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/Part
     RelationInput:
-      type: object
-      additionalProperties: false
-      properties:
-        type:
-          type: string
-          minLength: 1
-        target:
-          $ref: '#/components/schemas/SourceIdentity'
-        source_target_revision:
-          type: string
-          minLength: 1
-      required:
-      - type
-      - target
-      description: Source-provided link to an independently identified Record in the same Organization.
-        Optional source revision preserves provenance; ordinary expansion resolves the current eligible
-        target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise
-        Part-target syntax remains outside this initial draft.
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/RelationInput
     ManifestContent:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          enum:
-          - manifest
-        parts:
-          type: array
-          items:
-            $ref: '#/components/schemas/Part'
-          minItems: 1
-        relations:
-          type: array
-          items:
-            $ref: '#/components/schemas/RelationInput'
-      required:
-      - kind
-      - parts
-      description: Unique Part keys, acyclic parent references within this Manifest, and verified same-Organization
-        Blobs are checked before atomic publication. These semantic constraints need server validation
-        in addition to JSON Schema.
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/ManifestContent
     Provenance:
-      type: object
-      additionalProperties: false
-      properties:
-        source_blob_ids:
-          type: array
-          items:
-            type: string
-            minLength: 1
-        producer:
-          type: string
-          minLength: 1
-        producer_version:
-          type: string
-          minLength: 1
-      required: []
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/Provenance
     IngestCommand:
       type: object
       additionalProperties: false

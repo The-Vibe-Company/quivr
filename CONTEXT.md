@@ -253,3 +253,31 @@ _Avoid_: Retry queue, deletion
 **Plugin Worker**:
 An independently operated process that executes remote contributions through public engine contracts.
 _Avoid_: In-process plugin, engine instance
+
+**Plugin Manifest**:
+The declaration a plugin ships to describe itself: its identity and version, compatibility ranges, contributions, configuration schema, required secrets, owned extension namespaces and limits.
+_Avoid_: Record Version Manifest, package metadata
+
+**Plugin Protocol**:
+The versioned, language-neutral contract through which the engine discovers, checks and invokes a plugin's contributions.
+_Avoid_: SDK API, internal plugin interface
+
+**Plugin API Version**:
+The semantic version of the plugin protocol, versioned independently of the engine; a plugin declares the range it supports and the engine refuses one outside it.
+_Avoid_: Engine version, plugin version
+
+**Normalizer**:
+A contribution that turns one accepted blob of a routed media type into the parts, relations and extensions of that record version's manifest, without changing the record version's identity.
+_Avoid_: Parser, converter, enricher
+
+**Normalizer Route**:
+The installation's mapping from an accepted blob media type to the normalizer that handles it, marked required or optional.
+_Avoid_: Plugin registration, media type support
+
+**Plugin Invocation**:
+One uniquely identified call of a contribution for a specific input; retries of the same logical call share an idempotency key and must converge on the same output.
+_Avoid_: Plugin request, job
+
+**Plugin Contract Runner**:
+The tool that checks a plugin against the plugin protocol and normative fixtures using the engine's own validation, so passing it means the engine accepts the plugin.
+_Avoid_: SDK test suite, integration test

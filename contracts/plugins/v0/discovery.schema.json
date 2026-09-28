@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plugin Protocol discovery document, v0",
+  "description": "GET /v0/discovery. manifest_digest is sha256 over the exact bytes of the quivr-plugin.yaml the plugin was built from; the engine compares it with the pinned manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plugin_api",
+    "plugin",
+    "manifest_digest",
+    "contributions"
+  ],
+  "properties": {
+    "plugin_api": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+      "description": "Plugin API version the plugin implements."
+    },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "plugin-manifest.schema.json#/$defs/PluginId"
+        },
+        "version": {
+          "$ref": "plugin-manifest.schema.json#/$defs/Version"
+        }
+      }
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "contributions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "normalizer"
+        ]
+      }
+    }
+  }
+}

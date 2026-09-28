@@ -7,6 +7,17 @@ Design and scope are recorded in [ingestion](../../../docs/quivr-v2-ingestion-co
 Generated code belongs in transport/SDK packages when implementation starts;
 it is deliberately not checked into this design change.
 
+## Shared Manifest schema
+
+The `SourceIdentity`, `Extensions`, `TextContent`, `BlobContent`, `Part`,
+`RelationInput`, `ManifestContent` and `Provenance` components are one-line
+aliases to [`contracts/shared/v0/manifest.schema.json`](../../shared/v0/manifest.schema.json),
+the single source shared with the [Plugin Protocol](../../plugins/v0/README.md).
+Edit those shapes there. `bundle.py` inlines them under the same component names
+for generators and validators that cannot follow cross-file references; the
+generated transport is byte-identical to an inline definition. The Go server
+compiles both files together through the `contracts` package.
+
 ## Selected tools and verification
 
 | Target | Pinned tool | Verified |

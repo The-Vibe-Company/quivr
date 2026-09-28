@@ -1,0 +1,43 @@
+{
+  "invocation_id": "inv-0001",
+  "idempotency_key": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
+  "contribution": "normalizer",
+  "organization_id": "org-example",
+  "corpus_id": "corpus-example",
+  "record_id": "rec-0001",
+  "record_version_id": "ver-0001",
+  "source": {
+    "corpus_id": "corpus-example",
+    "namespace": "example-files",
+    "record_key": "reports/2026/annual.pdf"
+  },
+  "input": {
+    "blob_id": "blob-0001",
+    "media_type": "application/pdf",
+    "size_bytes": 48213,
+    "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "reference": {
+      "kind": "signed_url",
+      "url": "https://storage.example.invalid/blobs/blob-0001?signature=abc",
+      "expires_at": "2026-09-28T15:10:00Z"
+    }
+  },
+  "extensions": {
+    "example.editorial": {
+      "schema_version": "1",
+      "data": {
+        "headline": "Annual report"
+      }
+    }
+  },
+  "provenance": {
+    "source_blob_ids": [
+      "blob-0001"
+    ],
+    "producer": "example-client",
+    "producer_version": "2.1.0"
+  },
+  "configuration": {
+    "max_pages": 500
+  }
+}

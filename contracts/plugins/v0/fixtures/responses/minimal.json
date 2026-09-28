@@ -1,0 +1,15 @@
+{
+  "manifest": {
+    "kind": "manifest",
+    "parts": [
+      {
+        "key": "body",
+        "role": "body",
+        "content": {
+          "kind": "text",
+          "text": "Hello."
+        }
+      }
+    ]
+  }
+}

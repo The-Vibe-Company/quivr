@@ -14,6 +14,7 @@ if [ "${1:-check}" = generate ]; then
 fi
 cmp "$work/transport.gen.go" internal/transport/generated/transport.gen.go
 "$work/venv/bin/python" contracts/http/v0/checks/validate.py
+"$work/venv/bin/python" contracts/plugins/v0/checks/validate.py
 node contracts/http/v0/checks/webhook.cjs
 for generator in python typescript-fetch; do
   docker run --rm --network none --user "$(id -u):$(id -g)" -v "$work:/out" \

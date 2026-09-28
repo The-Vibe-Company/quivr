@@ -223,6 +223,7 @@ internal/adapters/s3/
 internal/adapters/weaviate/
 internal/adapters/pluginhttp/     introduced when the external-plugin slice needs it
 contracts/http/v0/openapi.yaml    authoritative HTTP contract
+contracts/shared/                shared JSON Schemas (Manifest) used by HTTP and plugin contracts
 contracts/plugins/               authoritative plugin JSON Schemas, added as needed
 contracts/internal/              durable workflow/event payload schemas as needed
 migrations/                      ordered PostgreSQL migrations: legacy 0xx_, then <UTC YYYYMMDDTHHMMZ>_<slug>.sql

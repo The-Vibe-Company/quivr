@@ -284,3 +284,46 @@ func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckManifestIsTheEngineStructuralRule proves the exported check applies
+// the same structural rules as acceptance, with actionable messages, and runs
+// the per-Part hook in Part order before later structural failures.
+func TestCheckManifestIsTheEngineStructuralRule(t *testing.T) {
+	base := func() *content.Manifest {
+		return &content.Manifest{Kind: "manifest", Parts: []content.Part{
+			{Key: "doc", Role: "document", Content: content.Text{Kind: "text", Text: "a"}},
+			{Key: "page", ParentKey: "doc", Role: "page", Content: content.Text{Kind: "text", Text: "b"}},
+		}}
+	}
+	if err := content.CheckManifest(base(), nil); err != nil {
+		t.Fatalf("valid Manifest rejected: %v", err)
+	}
+	dup := base()
+	dup.Parts[1].Key = "doc"
+	dup.Parts[1].ParentKey = ""
+	detail := func(err error) string {
+		var v *content.ManifestViolation
+		if !errors.As(err, &v) {
+			t.Fatalf("not a ManifestViolation: %v", err)
+		}
+		return v.Detail
+	}
+	err := content.CheckManifest(dup, nil)
+	if !errors.Is(err, content.ErrInvalid) || err.Error() != "invalid_input" || !strings.Contains(detail(err), `"doc"`) {
+		t.Fatalf("duplicate key: %v", err)
+	}
+	cycle := base()
+	cycle.Parts[0].ParentKey = "page"
+	if err := content.CheckManifest(cycle, nil); !errors.Is(err, content.ErrInvalid) || !strings.Contains(detail(err), "cycle") {
+		t.Fatalf("cycle: %v", err)
+	}
+	hookErr := errors.New("hook")
+	var seen []int
+	err = content.CheckManifest(dup, func(i int) error {
+		seen = append(seen, i)
+		return hookErr
+	})
+	if !errors.Is(err, hookErr) || len(seen) != 1 || seen[0] != 0 {
+		t.Fatalf("hook precedence changed: err=%v seen=%v", err, seen)
+	}
+}

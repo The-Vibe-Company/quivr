@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"unicode/utf8"
@@ -337,44 +338,79 @@ func (s Service) Withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal)
 }
 
 // validateManifest enforces the semantic Manifest constraints the JSON Schema
-// cannot express: unique Part keys, an acyclic same-Manifest parent hierarchy,
-// valid text content, verified same-Organization Blob Parts and schema-validated
-// Part extensions. Role semantics beyond preservation belong to the processing
-// profile, which blocks rather than rejects an unsupported combination.
+// cannot express: the structural rules of CheckManifest, plus verified
+// same-Organization Blob Parts and schema-validated Part extensions. Role
+// semantics beyond preservation belong to the processing profile, which blocks
+// rather than rejects an unsupported combination.
 func (s Service) validateManifest(ctx context.Context, org string, m *Manifest) error {
-	if len(m.Parts) == 0 {
-		return ErrInvalid
-	}
-	if len(m.Parts) > maxManifestParts {
-		return ErrUnsupported
-	}
-	byKey := make(map[string]Part, len(m.Parts))
-	for i := range m.Parts {
+	return CheckManifest(m, func(i int) error {
 		p := m.Parts[i]
-		if p.Key == "" || p.Role == "" {
-			return ErrInvalid
-		}
-		if _, exists := byKey[p.Key]; exists {
-			return ErrInvalid
-		}
-		byKey[p.Key] = p
-		switch p.Content.Kind {
-		case "text":
-			if p.Content.Text == "" || !ValidText(p.Content.Text) {
-				return ErrInvalid
-			}
-		case "blob":
+		if p.Content.Kind == "blob" {
 			checksum, err := s.verifyPartBlob(ctx, org, p.Content)
 			if err != nil {
 				return err
 			}
 			// Preserve the verified checksum in the immutable canonical Manifest.
 			m.Parts[i].Content.BlobSHA256 = checksum
-		default:
-			return ErrUnsupported
 		}
-		if err := s.validateExtensions(ctx, p.Extensions); err != nil {
-			return err
+		return s.validateExtensions(ctx, p.Extensions)
+	})
+}
+
+// ManifestViolation is a structural Manifest rejection. Error reports only the
+// stable public code (ErrInvalid or ErrUnsupported) so API responses never echo
+// submitted keys; Detail carries the actionable explanation for tooling such as
+// the Plugin Contract Runner.
+type ManifestViolation struct {
+	Kind   error
+	Detail string
+}
+
+func (v *ManifestViolation) Error() string { return v.Kind.Error() }
+func (v *ManifestViolation) Unwrap() error { return v.Kind }
+
+func violation(kind error, format string, args ...any) error {
+	return &ManifestViolation{Kind: kind, Detail: fmt.Sprintf(format, args...)}
+}
+
+// CheckManifest applies the engine's structural Manifest rules that JSON Schema
+// cannot express: a bounded non-empty Part list, unique Part keys, valid text,
+// known content kinds, an acyclic same-Manifest parent hierarchy, complete
+// Relation targets and a bounded non-text structure. part, when non-nil, runs
+// once per Part in order, after that Part's own structural checks; acceptance
+// uses it for Blob verification and extension validation. Errors are
+// *ManifestViolation wrapping ErrInvalid or ErrUnsupported (or part's error). The Plugin Contract Runner
+// reuses this function so "passes the runner" means "the engine accepts it".
+func CheckManifest(m *Manifest, part func(i int) error) error {
+	if len(m.Parts) == 0 {
+		return violation(ErrInvalid, "a Manifest needs at least one Part")
+	}
+	if len(m.Parts) > maxManifestParts {
+		return violation(ErrUnsupported, "%d Parts exceed the limit of %d", len(m.Parts), maxManifestParts)
+	}
+	byKey := make(map[string]Part, len(m.Parts))
+	for i := range m.Parts {
+		p := m.Parts[i]
+		if p.Key == "" || p.Role == "" {
+			return violation(ErrInvalid, "Part %d needs a key and a role", i)
+		}
+		if _, exists := byKey[p.Key]; exists {
+			return violation(ErrInvalid, "duplicate Part key %q", p.Key)
+		}
+		byKey[p.Key] = p
+		switch p.Content.Kind {
+		case "text":
+			if p.Content.Text == "" || !ValidText(p.Content.Text) {
+				return violation(ErrInvalid, "Part %q text must be non-empty valid UTF-8 without NUL", p.Key)
+			}
+		case "blob":
+		default:
+			return violation(ErrUnsupported, "Part %q has unsupported content kind %q", p.Key, p.Content.Kind)
+		}
+		if part != nil {
+			if err := part(i); err != nil {
+				return err
+			}
 		}
 	}
 	for _, p := range m.Parts {
@@ -382,16 +418,16 @@ func (s Service) validateManifest(ctx context.Context, org string, m *Manifest) 
 			continue
 		}
 		if p.ParentKey == p.Key {
-			return ErrInvalid
+			return violation(ErrInvalid, "Part %q is its own parent", p.Key)
 		}
 		parent, ok := byKey[p.ParentKey]
 		if !ok {
-			return ErrInvalid
+			return violation(ErrInvalid, "Part %q names unknown parent %q", p.Key, p.ParentKey)
 		}
 		seen := map[string]bool{}
 		for {
 			if seen[parent.Key] {
-				return ErrInvalid
+				return violation(ErrInvalid, "parent cycle through Part %q", parent.Key)
 			}
 			seen[parent.Key] = true
 			if parent.ParentKey == "" {
@@ -399,17 +435,17 @@ func (s Service) validateManifest(ctx context.Context, org string, m *Manifest) 
 			}
 			parent, ok = byKey[parent.ParentKey]
 			if !ok {
-				return ErrInvalid
+				return violation(ErrInvalid, "Part %q names unknown parent %q", p.Key, p.ParentKey)
 			}
 		}
 	}
-	for _, r := range m.Relations {
+	for i, r := range m.Relations {
 		if r.Type == "" || r.Target.CorpusID == "" || r.Target.Namespace == "" || r.Target.RecordKey == "" {
-			return ErrInvalid
+			return violation(ErrInvalid, "Relation %d needs a type and a complete target", i)
 		}
 	}
 	if !boundedManifestStructure(m) {
-		return ErrUnsupported
+		return violation(ErrUnsupported, "Manifest structure exceeds %d bytes", maxGenericJSONBytes)
 	}
 	return nil
 }

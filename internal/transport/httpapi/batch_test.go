@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
+	"github.com/The-Vibe-Company/quivr-v2/contracts"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -19,7 +19,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -133,15 +132,11 @@ func postRaw(t *testing.T, handler http.Handler, path, key string, payload []byt
 // conforms validates an actual response body against the authoritative contract.
 func conforms(t *testing.T, schema string, body any) {
 	t.Helper()
-	var doc map[string]any
-	if err := yaml.Unmarshal(contract.OpenAPI, &doc); err != nil {
+	compiler, err := contracts.NewCompiler()
+	if err != nil {
 		t.Fatal(err)
 	}
-	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("https://quivr.invalid/openapi", doc); err != nil {
-		t.Fatal(err)
-	}
-	compiled, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/" + schema)
+	compiled, err := compiler.Compile(contracts.HTTPSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +395,13 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 			e["content"] = map[string]any{"kind": "blob", "blob_id": "blob_unknown", "media_type": "text/plain"}
 		}), status: 422, code: "unverified_blob"},
 		{name: "NUL in text", key: adminKey, entry: inline("nul", "nul", "a\x00b"), status: 422, code: "invalid_input"},
+		// Structural Manifest rejections keep the bare public code; details stay internal.
+		{name: "duplicate Part key", key: adminKey, entry: with("duplicate", func(e map[string]any) {
+			e["content"] = map[string]any{"kind": "manifest", "parts": []any{
+				map[string]any{"key": "a", "role": "body", "content": map[string]any{"kind": "text", "text": "x"}},
+				map[string]any{"key": "a", "role": "body", "content": map[string]any{"kind": "text", "text": "y"}},
+			}}
+		}), status: 422, code: "invalid_input"},
 		{name: "missing content", key: adminKey, entry: with("missing", func(e map[string]any) { delete(e, "content") }), status: 422, code: "invalid_schema"},
 		{name: "unknown core field", key: adminKey, entry: with("unknown", func(e map[string]any) { e["atomic"] = true }), status: 422, code: "invalid_schema"},
 		{name: "storage outage", key: adminKey, entry: inline("outage", "outage", "Texte"), failure: errors.New("connection refused"), status: 503, code: "content_unavailable"},

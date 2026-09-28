@@ -1,0 +1,52 @@
+# A complete normalizer plugin manifest exercising every Plugin API 0.1 field.
+id: example-pdf
+version: 1.2.0-rc.1+build.7
+description: Turns PDF Blobs into one text Part per page.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types:
+      - application/pdf
+    timeout_ms: 60000
+    retry:
+      max_attempts: 4
+    limits:
+      max_response_bytes: 8388608
+      max_parts: 200
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      max_pages:
+        type: integer
+        minimum: 1
+      keep_blob_part:
+        type: boolean
+    required: [max_pages]
+secrets:
+  - name: EXAMPLE_PDF_LICENSE_KEY
+    description: Optional license key for a commercial extraction backend.
+    required: false
+extensions:
+  example-pdf.document:
+    "1":
+      type: object
+      additionalProperties: false
+      properties:
+        page_count:
+          type: integer
+          minimum: 0
+        producer_tool:
+          type: string
+  example-pdf.page:
+    "1":
+      type: object
+      properties:
+        number:
+          type: integer
+          minimum: 1
+run:
+  command: [python, -m, example_pdf]

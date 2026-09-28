@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
+	"github.com/The-Vibe-Company/quivr-v2/contracts"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -32,7 +32,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
 )
 
 type API struct {
@@ -60,53 +59,51 @@ type API struct {
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
-	var doc map[string]any
-	if err := yaml.Unmarshal(contract.OpenAPI, &doc); err != nil {
-		return nil, err
-	}
-	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("https://quivr.invalid/openapi", doc); err != nil {
-		return nil, err
-	}
-	schema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/CorpusRequest")
+	// The OpenAPI document references the shared Manifest schema, so compile
+	// every contract resource together.
+	compiler, err := contracts.NewCompiler()
 	if err != nil {
 		return nil, err
 	}
-	ingestSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/IngestCommand")
+	schema, err := compiler.Compile(contracts.HTTPSchema("CorpusRequest"))
 	if err != nil {
 		return nil, err
 	}
-	searchSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/SearchRequest")
+	ingestSchema, err := compiler.Compile(contracts.HTTPSchema("IngestCommand"))
 	if err != nil {
 		return nil, err
 	}
-	uploadSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/UploadRequest")
+	searchSchema, err := compiler.Compile(contracts.HTTPSchema("SearchRequest"))
 	if err != nil {
 		return nil, err
 	}
-	withdrawSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/WithdrawalCommand")
+	uploadSchema, err := compiler.Compile(contracts.HTTPSchema("UploadRequest"))
 	if err != nil {
 		return nil, err
 	}
-	batchSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/BatchRequest")
+	withdrawSchema, err := compiler.Compile(contracts.HTTPSchema("WithdrawalCommand"))
 	if err != nil {
 		return nil, err
 	}
-	configSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/ConfigUpdate")
+	batchSchema, err := compiler.Compile(contracts.HTTPSchema("BatchRequest"))
+	if err != nil {
+		return nil, err
+	}
+	configSchema, err := compiler.Compile(contracts.HTTPSchema("ConfigUpdate"))
 	if err != nil {
 		return nil, err
 	}
 	var monitored monitoringSchemas
 	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SubscriptionCreate": &monitored.subscription, "ActionRequest": &monitored.action} {
-		if *target, err = compiler.Compile("https://quivr.invalid/openapi#/components/schemas/" + name); err != nil {
+		if *target, err = compiler.Compile(contracts.HTTPSchema(name)); err != nil {
 			return nil, err
 		}
 	}
-	connectorSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/ConnectorCreate")
+	connectorSchema, err := compiler.Compile(contracts.HTTPSchema("ConnectorCreate"))
 	if err != nil {
 		return nil, err
 	}
-	credentialSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/CredentialReplace")
+	credentialSchema, err := compiler.Compile(contracts.HTTPSchema("CredentialReplace"))
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,5 @@
+{
+  "code": "backend_busy",
+  "message": "Extraction backend is saturated; retry later.",
+  "retryable": true
+}

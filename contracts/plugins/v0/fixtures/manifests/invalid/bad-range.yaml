@@ -1,0 +1,9 @@
+# plugin_api uses a caret shorthand, which the v0 range grammar does not define.
+id: example-pdf
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: "^0.1.0"
+contributions:
+  normalizer:
+    media_types: [application/pdf]

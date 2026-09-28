@@ -1,0 +1,13 @@
+# An owned extension schema is not a valid JSON Schema.
+id: example-pdf
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [application/pdf]
+extensions:
+  example-pdf.document:
+    "1":
+      minimum: not-a-number

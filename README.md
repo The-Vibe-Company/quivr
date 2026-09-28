@@ -127,13 +127,17 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   and `x_list`, which polls an X list: edits become corrections, deleted or protected
   posts are withdrawn, and health shows daily reads ([guide](docs/connectors/x.md)).
 - **Retrieval measurement** with a frozen workload (`make measure`).
+- **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
+  which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
+  schemas, secrets and limits. The engine does not invoke plugins yet.
 
 ## What comes next
 
 - Signed webhook delivery with retried attempts, and plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The plugin platform: out-of-process plugin workers, packaging and SDKs.
+- The plugin platform: a Python SDK, the Contract Runner, and out-of-process
+  normalizers invoked by the engine (starting with PDF to text).
 
 The contract already describes some of these routes; the ones not implemented yet are
 listed here, not in "What works today".
@@ -144,6 +148,8 @@ listed here, not in "What works today".
 | --- | --- |
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
+| [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
+| [Architecture decisions](docs/adr/) | Hard-to-reverse decisions and why |
 | [Domain language](CONTEXT.md) | Corpus, Record, Version, Manifest, Receipt… |
 | [Architecture overview](docs/quivr-v2-architecture-overview.md) | Target architecture and plugin model |
 | [Module boundaries](docs/quivr-v2-module-boundaries.md) | Who owns what in the Go core |

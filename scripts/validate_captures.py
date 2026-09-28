@@ -1,8 +1,9 @@
 import json, pathlib, sys
-import yaml
 from jsonschema import Draft202012Validator, RefResolver
 root=pathlib.Path(__file__).resolve().parents[1]
-doc=yaml.safe_load((root/'contracts/http/v0/openapi.yaml').read_text())
+sys.path.insert(0,str(root/'contracts/http/v0'))
+from bundle import load
+doc=load()  # openapi.yaml with the shared Manifest schema inlined
 count=0
 for p in pathlib.Path(sys.argv[1]).glob('response-*.json'):
     c=json.loads(p.read_text());path=c['path']
