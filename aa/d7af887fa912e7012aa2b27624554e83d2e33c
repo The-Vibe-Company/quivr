@@ -15,6 +15,7 @@ internal/adapters/postgres/searchable.go
   s_ec117ba6cf48fd::t_91e87b253c2ef1 19-20,22,37-40,124,128,159,172
 internal/transport/httpapi/operations_test.go
   s_ec117ba6cf48fd::t_06275deac13fe1 1-71,73-94,96-111,113-115,117-123,125-142,144-148,150-152,154-156
+  s_ec117ba6cf48fd::t_44216ed47f808c 72,95,112,116,124,143,149,153
 docs/quivr-v2-search-contracts.md
   s_ec117ba6cf48fd::t_5d8d86eefb37c8 76-105
 internal/adapters/weaviate/generation_test.go
@@ -45,6 +46,7 @@ internal/adapters/postgres/embeddings.go
   s_ec117ba6cf48fd::t_91e87b253c2ef1 80,84
 internal/adapters/postgres/operations_test.go
   s_ec117ba6cf48fd::t_8dfdcd77eebc2e 1-17,19-47,49-125
+  s_ec117ba6cf48fd::t_44216ed47f808c 18,48
 internal/operations/operations.go
   s_ec117ba6cf48fd::t_ff4adb8d70e5b1 31-33
   s_ec117ba6cf48fd::t_0d66bea02f2b68 1-30,34-100
@@ -55,6 +57,7 @@ internal/retrieval/rebuild.go
 internal/adapters/postgres/rebuild_test.go
   s_ec117ba6cf48fd::t_0986419217ad98 1-23,25-53,55-216
   s_ec117ba6cf48fd::t_0ded90516034f0 54
+  s_ec117ba6cf48fd::t_44216ed47f808c 24
 internal/adapters/postgres/rebuild.go
   s_ec117ba6cf48fd::t_0d7e63b6d9a0e3 1-17,19-239
   s_ec117ba6cf48fd::t_f01647cddb1ab2 18
