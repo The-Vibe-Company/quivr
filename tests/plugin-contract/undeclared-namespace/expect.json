@@ -1,0 +1,6 @@
+{
+  "description": "Output extensions in a namespace the manifest does not declare.",
+  "certified": false,
+  "check": "invoke",
+  "code": "undeclared_namespace"
+}

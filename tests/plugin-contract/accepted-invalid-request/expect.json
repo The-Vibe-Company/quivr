@@ -1,0 +1,6 @@
+{
+  "description": "Invalid requests answered 202 with an error envelope instead of a non-2xx refusal.",
+  "certified": false,
+  "check": "invalid_request",
+  "code": "accepted_invalid_request"
+}

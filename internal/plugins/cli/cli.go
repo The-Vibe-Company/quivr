@@ -29,8 +29,7 @@ type command struct {
 	run   func(ctx context.Context, args []string, stdout, stderr io.Writer) int
 }
 
-// commands is the `quivr plugin` subcommand table; the Contract Runner adds
-// test here.
+// commands is the `quivr plugin` subcommand table.
 var commands map[string]command
 
 const inspectUsage = "quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yaml>"
@@ -40,6 +39,7 @@ func init() {
 		"inspect": {usage: inspectUsage, run: inspect},
 		"init":    {usage: initUsage, run: initCommand},
 		"dev":     {usage: devUsage, run: dev},
+		"test":    {usage: testUsage, run: test},
 	}
 }
 

@@ -247,7 +247,10 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 	n := m.Contributions.Normalizer
 	invokeCtx, cancel := context.WithTimeout(ctx, time.Duration(n.TimeoutMS)*time.Millisecond)
 	defer cancel()
-	result, err := devhost.InvokeNormalizer(invokeCtx, proc.BaseURL, request, n.Limits.MaxResponseBytes)
+	input, _ := plugins.InputFromRequest(request)
+	result, err := devhost.InvokeNormalizerWith(invokeCtx, proc.BaseURL, request, plugins.MaxResponseBytes(m), func(body []byte) []plugins.Issue {
+		return plugins.CheckNormalizerOutput(invokeCtx, body, plugins.OutputContext{Manifest: m, Input: input})
+	})
 	if err != nil {
 		s.status("%v", err)
 		return proc, false

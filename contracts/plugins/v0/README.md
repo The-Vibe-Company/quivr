@@ -16,6 +16,7 @@ and the glossary in [CONTEXT.md](../../../CONTEXT.md).
 | `normalizer-response.schema.json` | `POST /v0/contributions/normalizer` 200 response |
 | `error.schema.json` | Body of every non-2xx response |
 | `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
+| `reports/contract-report.schema.json` | JSON report of `quivr plugin test --report` (tooling, not protocol) |
 
 The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
 are **not** defined here. They come from
@@ -124,19 +125,34 @@ the engine's structural Manifest rules: unique Part keys, known and acyclic
 parents, valid text, complete Relation targets, and the Part count and
 structure bounds.
 
-**Protocol rules that are documented but not enforced yet.** These rules are
-part of the v0 contract, but no code checks them yet. Nothing in this
-repository enforces them before the slices below land.
+**Protocol rules checked at certification time.** These rules are part of the
+v0 contract. `quivr plugin test` (the Contract Runner, below) checks them on
+every normalizer response, with the validation in `internal/plugins`
+(`CheckNormalizerOutput`) that the engine is meant to reuse. The engine does
+not invoke plugins yet, so it does not enforce them at ingestion until the
+slices named below land.
 
 1. **Blob Parts may reference only the input Blob.** A normalizer response
-   must not introduce other Blobs. *Enforced from THE-682 (Contract Runner) and
-   THE-683 (engine invocation).*
+   must not introduce other Blobs. A Blob Part must name the input Blob id
+   with its media type (`foreign_blob`, `unverified_blob`). The public Blob
+   Part carries no checksum. The reference is resolved to the verified input
+   Blob, and its SHA-256 must equal the request's `input.sha256`. The runner
+   re-hashes the file it served. *Checked by the Contract Runner; enforced by
+   the engine from THE-683.*
 2. **Response size cap.** A response larger than the declared
-   `max_response_bytes`, itself bounded by the engine, is invalid output.
-   *Enforced from THE-682 (Contract Runner) and THE-683 (engine invocation).*
-3. **Namespace ownership.** Response extensions may use only namespaces the
-   plugin declares, and clients may not write plugin-owned namespaces.
-   *Enforced from THE-684.*
+   `max_response_bytes` (default 4 MiB) is invalid output
+   (`response_too_large`). The engine caps the declared value at 16 MiB.
+   *Checked by the Contract Runner; enforced by the engine from THE-683.*
+3. **Namespace ownership.** Response extensions, top-level and on Parts, may
+   use only namespaces and schema versions the plugin declares, with data
+   valid against the declared schema (`undeclared_namespace`,
+   `undeclared_schema_version`, `invalid_extension`). Clients may not write
+   plugin-owned namespaces. *The output side is checked by the Contract
+   Runner. Engine enforcement, including rejection of client writes, arrives
+   with THE-684.*
+
+A response with more Parts than the declared `max_parts` is also invalid
+(`too_many_parts`).
 
 ## Normative fixtures
 
@@ -210,10 +226,38 @@ runs these steps:
    `GET /v0/discovery` matches the manifest: digest, id, version, Plugin API
    range and Contributions;
 3. with `--fixture`, sends the fixture's request, validates the answer with the
-   engine's Manifest rules and the declared `max_response_bytes`, and prints
-   the response on stdout.
+   same output checks as the Contract Runner (engine Manifest rules, response
+   size, Blob Parts, declared namespaces), and prints the response on stdout.
 
 It exits `0` when every check passes and `1` otherwise. Without `--fixture`,
 or with `--watch`, it keeps running and restarts the plugin when a file in the
 plugin directory changes; hidden directories, `__pycache__`, virtual
 environments and build outputs are ignored.
+
+## Contract Runner
+
+`quivr plugin test [--endpoint <url>] [--report <file>] [--fixture <file>]... [--startup-timeout <duration>] [<plugin-dir>]`
+certifies that the engine can safely invoke a plugin's normalizer. It talks
+only the public protocol, so it applies to a plugin in any language, and it
+judges answers with the engine's own validation, never a copy. It starts
+`run.command` like `dev`. With `--endpoint`, it targets a running plugin
+instead and still reads `quivr-plugin.yaml` from `<plugin-dir>`, because
+discovery carries only the manifest digest.
+
+| Check | Passes when |
+| --- | --- |
+| `manifest`, `compatibility` | `quivr plugin inspect` accepts the manifest, and this engine and Plugin API version satisfy its ranges. Otherwise the plugin is not started. |
+| `health`, `discovery` | `GET /v0/health` answers 200, and discovery matches the manifest (digest, id, version, Plugin API, Contributions). |
+| `fixtures` | At least one invocation fixture applies. The runner uses the normative `fixtures/invocations/*.json` whose media type the plugin declares and whose configuration it accepts, plus the plugin's `fixtures/*.json` (or `--fixture`). |
+| `invoke` (per fixture) | The answer is a 200 within the declared `timeout_ms` (`deadline_exceeded` otherwise) that passes the output checks above: response schema (unknown fields rejected), engine Manifest rules, `max_parts`, response size, input-Blob-only Blob Parts and declared namespaces. |
+| `replay` (per fixture) | The same `idempotency_key` with a new `invocation_id` yields the same Manifest, extensions and language (`nondeterministic_output` names the first difference). |
+| `invalid_request` | A non-JSON body, an unknown request field and the normative invalid requests in `fixtures/requests/` are refused with a non-2xx error envelope and `retryable: false`. A request the schema rejects can never succeed, so `retryable: true` is `wrong_error_class`. |
+
+The human report goes to stdout; the plugin's own output goes to stderr.
+`--report <file>` writes the JSON report described by
+`reports/contract-report.schema.json`. Exit codes: `0` certified, `1` not
+certified, `2` usage error.
+
+The deliberately broken plugins in `tests/plugin-contract/` show one failure
+per rule. CI certifies the `quivr plugin init` template and publishes its
+report as the `plugin-contract-report` workflow artifact.

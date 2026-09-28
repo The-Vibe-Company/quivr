@@ -144,14 +144,21 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
   discovery digest and replays a fixture through the engine's Manifest validation,
   without a Quivr stack ([SDK guide](sdks/python/README.md)).
+- **Plugin Contract Runner** (`quivr plugin test`), which certifies a normalizer over
+  the public protocol, launched from its manifest or at `--endpoint <url>`. It runs
+  health, discovery, normative and plugin fixtures, deterministic replay, the declared
+  deadline, terminal errors for invalid requests, and compatibility ranges. It judges
+  output with the engine's own validation: Manifest rules, response size, input-Blob-only
+  Blob Parts and declared namespaces. It writes a JSON report with `--report`, and CI
+  publishes one for the `quivr plugin init` template.
 
 ## What comes next
 
 - Plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The rest of the plugin platform: the Contract Runner (`quivr plugin test`) and
-  out-of-process normalizers invoked by the engine (starting with PDF to text).
+- The rest of the plugin platform: out-of-process normalizers invoked by the engine
+  (starting with PDF to text).
 
 The contract already describes some of these routes; the ones not implemented yet are
 listed here, not in "What works today".

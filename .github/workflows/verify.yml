@@ -21,6 +21,14 @@ jobs:
           node-version: '22'
       - run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
       - run: make verify
+      # Contract Runner report for the `quivr plugin init` template (scripts/plugin_sdk.sh).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-contract-report
+          include-hidden-files: true
+          path: .scratch/plugin-sdk/contract-report.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:

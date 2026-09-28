@@ -1,0 +1,170 @@
+// Package plugincontract runs the Plugin Contract Runner (`quivr plugin test`)
+// against the test plugins in this directory. Each subdirectory holds a
+// quivr-plugin.yaml whose run.command starts the Go fake plugin in one mode
+// (so no Python is needed) and an expect.json: either certified, or the check
+// id and issue code the runner must report. Every JSON report is validated
+// against contracts/plugins/v0/reports/contract-report.schema.json.
+package plugincontract_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/cli"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+func TestMain(m *testing.M) {
+	fakeplugin.MaybeRun()
+	os.Exit(m.Run())
+}
+
+type expectation struct {
+	Certified bool   `json:"certified"`
+	Check     string `json:"check"`
+	Code      string `json:"code"`
+}
+
+type report struct {
+	Certified bool                  `json:"certified"`
+	Target    struct{ Mode string } `json:"target"`
+	Checks    []struct {
+		ID     string          `json:"id"`
+		Status string          `json:"status"`
+		Issues []plugins.Issue `json:"issues"`
+	} `json:"checks"`
+}
+
+// fakeOnPath exposes this test binary as quivr-fake-plugin, the command the
+// test manifests declare.
+func fakeOnPath(t *testing.T) {
+	t.Helper()
+	self, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(self, filepath.Join(bin, "quivr-fake-plugin")); err != nil {
+		t.Skipf("symbolic links unavailable: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(fakeplugin.EnvEnable, "1")
+}
+
+func reportSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/plugins/v0/reports/contract-report.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+func runTest(t *testing.T, args ...string) (int, string, report) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.json")
+	var out, errOut bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	code := cli.RunContext(ctx, append([]string{"test", "--report", path}, args...), &out, &errOut)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no report (exit %d): %v\n%s%s", code, err, out.String(), errOut.String())
+	}
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reportSchema(t).Validate(instance); err != nil {
+		t.Fatalf("report violates contract-report.schema.json: %v\n%s", err, raw)
+	}
+	var r report
+	if err := json.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	return code, out.String(), r
+}
+
+func TestContractRunnerCertifiesOnlyWellBehavedPlugins(t *testing.T) {
+	fakeOnPath(t)
+	manifests, err := filepath.Glob(filepath.Join("*", plugins.ManifestFile))
+	if err != nil || len(manifests) < 9 {
+		t.Fatalf("test plugins: %v %v", manifests, err)
+	}
+	for _, manifest := range manifests {
+		dir := filepath.Dir(manifest)
+		t.Run(dir, func(t *testing.T) {
+			var want expectation
+			raw, err := os.ReadFile(filepath.Join(dir, "expect.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &want); err != nil {
+				t.Fatal(err)
+			}
+			code, out, r := runTest(t, dir)
+			if want.Certified {
+				if code != cli.ExitOK || !r.Certified || !strings.Contains(out, "CERTIFIED") {
+					t.Fatalf("want certified, exit %d:\n%s", code, out)
+				}
+				return
+			}
+			if code != cli.ExitInvalid || r.Certified || !strings.Contains(out, "NOT CERTIFIED") {
+				t.Fatalf("want not certified with exit 1, got exit %d:\n%s", code, out)
+			}
+			for _, c := range r.Checks {
+				if c.ID != want.Check || c.Status != "fail" {
+					continue
+				}
+				for _, issue := range c.Issues {
+					if issue.Code == want.Code && issue.Message != "" && strings.Contains(out, want.Code) {
+						return
+					}
+				}
+			}
+			t.Fatalf("no failed %s check with issue %s:\n%s", want.Check, want.Code, out)
+		})
+	}
+}
+
+func TestContractRunnerTargetsARunningEndpoint(t *testing.T) {
+	fakeOnPath(t)
+	dir := "valid"
+	proc, err := devhost.Start(devhost.Options{Dir: dir, Command: []string{"quivr-fake-plugin", "ok"}, Manifest: filepath.Join(dir, plugins.ManifestFile)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proc.Stop(5 * time.Second)
+	code, out, r := runTest(t, "--endpoint", proc.BaseURL+"/", dir)
+	if code != cli.ExitOK || !r.Certified || r.Target.Mode != "endpoint" {
+		t.Fatalf("exit %d mode %q:\n%s", code, r.Target.Mode, out)
+	}
+	// A dead endpoint is reported, not certified.
+	port, err := devhost.FreePort("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = runTest(t, "--startup-timeout", "300ms", "--endpoint", "http://127.0.0.1:"+strconv.Itoa(port), dir)
+	if code != cli.ExitInvalid || !strings.Contains(out, "unhealthy") {
+		t.Fatalf("dead endpoint: exit %d:\n%s", code, out)
+	}
+}
+
+func TestContractRunnerUsage(t *testing.T) {
+	for _, args := range [][]string{{"test", "--endpoint"}, {"test", "--endpoint", "ftp://x"}, {"test", "--bogus"}, {"test", "a", "b"}, {"test", "--startup-timeout", "soon"}} {
+		var out, errOut bytes.Buffer
+		if code := cli.RunContext(context.Background(), args, &out, &errOut); code != cli.ExitUsage || !strings.Contains(errOut.String(), "usage: quivr plugin test") {
+			t.Errorf("%v: exit %d %s", args, code, errOut.String())
+		}
+	}
+}

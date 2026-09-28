@@ -19,6 +19,19 @@ import (
 //go:embed http/v0/openapi.yaml shared/v0/manifest.schema.json plugins/v0/*.schema.json
 var files embed.FS
 
+//go:embed plugins/v0/fixtures/invocations plugins/v0/fixtures/requests
+var pluginFixtures embed.FS
+
+// PluginFixtures returns the normative Plugin Protocol v0 invocation fixtures
+// and request fixtures, rooted at plugins/v0/fixtures, for the Contract Runner.
+func PluginFixtures() fs.FS {
+	sub, err := fs.Sub(pluginFixtures, "plugins/v0/fixtures")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+
 const (
 	// BaseURL mirrors the repository layout so relative $refs between contract
 	// files resolve exactly as they do on disk.

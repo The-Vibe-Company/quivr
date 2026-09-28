@@ -22,7 +22,12 @@ quivr plugin inspect .                              # validate quivr-plugin.yaml
 python3 -m unittest discover -s tests               # unit tests
 quivr plugin dev --fixture fixtures/sample.json     # run the plugin and replay the fixture once
 quivr plugin dev --fixture fixtures/sample.json --watch   # replay after every source change
+quivr plugin test --report contract-report.json     # certify the plugin with the Contract Runner
 ```
+
+`quivr plugin test` runs every fixture in `fixtures/`, replays each
+idempotency key, enforces `timeout_ms`, sends invalid requests, and exits
+`0` only when the engine can safely invoke the plugin.
 
 `quivr plugin dev` starts `run.command` from `quivr-plugin.yaml` with
 `QUIVR_PLUGIN_HOST` and `QUIVR_PLUGIN_PORT` set, waits for `GET /v0/health`,

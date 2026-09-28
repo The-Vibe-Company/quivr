@@ -515,17 +515,7 @@ func (s Service) verifyPartBlob(ctx context.Context, org string, ref Text) (stri
 }
 
 func (s Service) validateExtensions(ctx context.Context, exts Extensions) error {
-	if len(exts) == 0 {
-		return nil
-	}
-	if !boundedJSON(exts) {
-		return ErrUnsupported
-	}
-	validator := s.Extensions
-	if validator == nil {
-		validator = BuiltinExtensions{}
-	}
-	return validator.Validate(ctx, exts)
+	return CheckExtensions(ctx, s.Extensions, exts)
 }
 
 // boundedJSON keeps source-declared generic JSON within an explicit budget.

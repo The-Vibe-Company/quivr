@@ -1,0 +1,6 @@
+{
+  "description": "A normalizer that answers after its declared timeout_ms.",
+  "certified": false,
+  "check": "invoke",
+  "code": "deadline_exceeded"
+}

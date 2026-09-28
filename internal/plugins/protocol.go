@@ -150,7 +150,7 @@ func ValidateDocument(file string, raw []byte) []Issue {
 // response schema, then the engine's own structural Manifest rules
 // (content.CheckManifest), exactly as for a kind "manifest" submission.
 // Blob verification, response size, the input-Blob-only rule and namespace
-// ownership need invocation context and are not checked here.
+// ownership need invocation context: CheckNormalizerOutput adds them.
 func ValidateNormalizerResponse(raw []byte) []Issue {
 	if issues := ValidateDocument("normalizer-response.schema.json", raw); len(issues) > 0 {
 		return issues

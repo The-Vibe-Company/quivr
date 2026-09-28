@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
@@ -23,7 +25,12 @@ import (
 const (
 	EnvEnable = "QUIVR_FAKE_PLUGIN"        // "1" serves instead of testing
 	EnvDigest = "QUIVR_FAKE_PLUGIN_DIGEST" // overrides the served manifest digest
-	EnvMode   = "QUIVR_FAKE_PLUGIN_MODE"   // ok (default), retry, terminal, invalid, large, garbage, exit, unhealthy
+	// EnvMode selects the behaviour, unless the first argument does: ok
+	// (default), retry, terminal, invalid, large, garbage, exit, unhealthy, and
+	// the broken plugins of tests/plugin-contract: malformed-part, bad-checksum,
+	// undeclared-namespace, nondeterministic, slow, wrong-error-class,
+	// accept-invalid.
+	EnvMode   = "QUIVR_FAKE_PLUGIN_MODE"
 	EnvMarker = "QUIVR_FAKE_PLUGIN_MARKER" // file appended with "start\n" on every start
 )
 
@@ -52,6 +59,11 @@ func serve() error {
 		_ = f.Close()
 	}
 	mode := os.Getenv(EnvMode)
+	// A committed manifest selects the mode as the first argument, such as
+	// run.command [quivr-fake-plugin, nondeterministic].
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		mode = os.Args[1]
+	}
 	if mode == "exit" {
 		return fmt.Errorf("exiting on purpose")
 	}
@@ -93,17 +105,77 @@ func serve() error {
 		var request struct {
 			InvocationID string `json:"invocation_id"`
 			Input        struct {
+				BlobID    string `json:"blob_id"`
+				MediaType string `json:"media_type"`
+				SHA256    string `json:"sha256"`
 				Reference struct {
 					URL string `json:"url"`
 				} `json:"reference"`
 			} `json:"input"`
 		}
 		body, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(body, &request); err != nil {
-			write(w, 400, map[string]any{"code": "invalid_request", "message": err.Error(), "retryable": false})
+		invalid := json.Unmarshal(body, &request)
+		if invalid == nil {
+			if issues := plugins.ValidateDocument("normalizer-request.schema.json", body); len(issues) > 0 {
+				invalid = fmt.Errorf("%s %s", issues[0].Path, issues[0].Message)
+			}
+		}
+		if invalid != nil {
+			if mode == "wrong-error-class" {
+				write(w, 503, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": true})
+				return
+			}
+			if mode == "accept-invalid" {
+				write(w, 202, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": false})
+				return
+			}
+			write(w, 400, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": false})
 			return
 		}
+		text := "echo " + request.Input.Reference.URL
+		ok := map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
+			map[string]any{"key": "body", "role": "section", "content": map[string]any{"kind": "text", "text": text}},
+		}}}
+		stats := report.Manifest.ID + ".stats"
+		if _, declared := report.Manifest.Extensions[stats]; declared {
+			// A richer valid answer: the input Blob as a Part and a declared extension.
+			ok = map[string]any{
+				"manifest": map[string]any{"kind": "manifest", "parts": []any{
+					map[string]any{"key": "original", "role": "original", "content": map[string]any{"kind": "blob", "blob_id": request.Input.BlobID, "media_type": request.Input.MediaType}},
+					map[string]any{"key": "body", "parent_key": "original", "role": "section", "content": map[string]any{"kind": "text", "text": text}},
+				}},
+				"extensions": map[string]any{stats: map[string]any{"schema_version": "1", "data": map[string]any{"characters": len(text)}}},
+				"language":   "en",
+			}
+		}
 		switch mode {
+		case "malformed-part":
+			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
+				map[string]any{"key": "body", "role": "section", "content": map[string]any{"kind": "text", "text": "broken\x00text"}},
+			}}})
+		case "bad-checksum":
+			// Names a Blob by the checksum of other bytes, not the input Blob.
+			other := sha256.Sum256([]byte("not the input"))
+			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
+				map[string]any{"key": "original", "role": "original", "content": map[string]any{"kind": "blob", "blob_id": "dev-blob-" + hex.EncodeToString(other[:])[:16], "media_type": request.Input.MediaType}},
+				map[string]any{"key": "body", "role": "section", "content": map[string]any{"kind": "text", "text": text}},
+			}}})
+		case "undeclared-namespace":
+			write(w, 200, map[string]any{"manifest": ok["manifest"],
+				"extensions": map[string]any{"another-plugin.stats": map[string]any{"schema_version": "1", "data": map[string]any{}}}})
+		case "nondeterministic":
+			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
+				map[string]any{"key": "body", "role": "section", "content": map[string]any{"kind": "text", "text": text + " at invocation " + request.InvocationID}},
+			}}})
+		case "slow":
+			select {
+			case <-time.After(time.Duration(report.Manifest.Contributions.Normalizer.TimeoutMS)*time.Millisecond + 2*time.Second):
+			case <-r.Context().Done():
+				return
+			}
+			write(w, 200, ok)
+		case "wrong-error-class":
+			write(w, 200, ok)
 		case "retry":
 			write(w, 503, map[string]any{"code": "backend_busy", "message": "busy", "retryable": true})
 		case "terminal":
@@ -125,9 +197,7 @@ func serve() error {
 				map[string]any{"key": "a", "role": "section", "content": map[string]any{"kind": "text", "text": string(text)}},
 			}}})
 		default:
-			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
-				map[string]any{"key": "body", "role": "section", "content": map[string]any{"kind": "text", "text": "echo " + request.Input.Reference.URL}},
-			}}})
+			write(w, 200, ok)
 		}
 	})
 	listener, err := net.Listen("tcp", net.JoinHostPort(os.Getenv("QUIVR_PLUGIN_HOST"), os.Getenv("QUIVR_PLUGIN_PORT")))

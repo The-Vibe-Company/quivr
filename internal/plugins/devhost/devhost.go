@@ -32,7 +32,7 @@ import (
 // Issue codes added by the local host, beside the codes of package plugins.
 const (
 	CodeDiscoveryMismatch    = "discovery_mismatch"
-	CodeResponseTooLarge     = "response_too_large"
+	CodeResponseTooLarge     = plugins.CodeResponseTooLarge
 	CodeInvalidErrorEnvelope = "invalid_error_envelope"
 )
 
@@ -174,11 +174,21 @@ func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, e
 // WaitHealthy polls GET /v0/health until it returns 200, the process exits or
 // ctx ends.
 func (p *Process) WaitHealthy(ctx context.Context) error {
+	return waitHealthy(ctx, p.BaseURL, p.done, p.ExitError)
+}
+
+// WaitHealthyAt polls GET /v0/health on an already running plugin until it
+// returns 200 or ctx ends.
+func WaitHealthyAt(ctx context.Context, baseURL string) error {
+	return waitHealthy(ctx, baseURL, nil, nil)
+}
+
+func waitHealthy(ctx context.Context, baseURL string, done <-chan struct{}, exitErr func() error) error {
 	last := "no answer yet"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, body, err := get(ctx, p.BaseURL+"/v0/health", 2*time.Second)
+		status, body, err := get(ctx, baseURL+"/v0/health", 2*time.Second)
 		switch {
 		case err != nil && ctx.Err() != nil:
 			// keep the last meaningful answer
@@ -193,10 +203,10 @@ func (p *Process) WaitHealthy(ctx context.Context) error {
 			last = fmt.Sprintf("GET /v0/health returned %d %s", status, describeEnvelope(body))
 		}
 		select {
-		case <-p.done:
-			return fmt.Errorf("plugin exited (%v) before becoming healthy", p.ExitError())
+		case <-done:
+			return fmt.Errorf("plugin exited (%v) before becoming healthy", exitErr())
 		case <-ctx.Done():
-			return fmt.Errorf("plugin not healthy at %s: %s", p.BaseURL, last)
+			return fmt.Errorf("plugin not healthy at %s: %s", baseURL, last)
 		case <-ticker.C:
 		}
 	}
@@ -432,6 +442,13 @@ type Result struct {
 // through plugins.ValidateNormalizerResponse, and other statuses must carry
 // the error envelope. ctx bounds the invocation (use the manifest timeout).
 func InvokeNormalizer(ctx context.Context, baseURL string, request []byte, maxResponseBytes int) (*Result, error) {
+	return InvokeNormalizerWith(ctx, baseURL, request, maxResponseBytes, plugins.ValidateNormalizerResponse)
+}
+
+// InvokeNormalizerWith is InvokeNormalizer with the check applied to a 200
+// body, such as a closure over plugins.CheckNormalizerOutput with the
+// invocation context.
+func InvokeNormalizerWith(ctx context.Context, baseURL string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v0/contributions/normalizer", bytes.NewReader(request))
 	if err != nil {
 		return nil, err
@@ -454,7 +471,7 @@ func InvokeNormalizer(ctx context.Context, baseURL string, request []byte, maxRe
 		return result, nil
 	}
 	if resp.StatusCode == http.StatusOK {
-		result.Issues = plugins.ValidateNormalizerResponse(body)
+		result.Issues = check(body)
 		return result, nil
 	}
 	if issues := plugins.ValidateDocument("error.schema.json", body); len(issues) > 0 {

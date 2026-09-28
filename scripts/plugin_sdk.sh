@@ -3,8 +3,10 @@
 #  1. the generated models and schema copies match the contracts;
 #  2. the SDK unit tests pass;
 #  3. a plugin scaffolded by `quivr plugin init` passes inspect and its own tests,
-#     `quivr plugin dev --fixture` prints a response the engine accepts, and a
-#     discovery digest mismatch is reported.
+#     `quivr plugin dev --fixture` prints a response the engine accepts,
+#     `quivr plugin test` certifies it (JSON report in
+#     .scratch/plugin-sdk/contract-report.json), and a discovery digest
+#     mismatch is reported.
 # Needs Python 3.12+ and network access for pip (like `make contracts`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -44,6 +46,11 @@ assert "discovery matches quivr-plugin.yaml" in log, log
 assert "response valid" in log, log
 print("plugin dev replayed the scaffolded fixture:", roles)
 EOF
+
+# Certify the template with the Contract Runner; CI uploads the JSON report.
+"$quivr" plugin test --report "$work/contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
+grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
+echo "quivr plugin test certified the scaffolded template: $work/contract-report.json"
 
 # Serve a stale copy of the manifest: discovery must no longer match.
 cp quivr-plugin.yaml stale.yaml

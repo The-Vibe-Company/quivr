@@ -1,0 +1,6 @@
+{
+  "description": "A Part whose text contains NUL, which content.CheckManifest rejects.",
+  "certified": false,
+  "check": "invoke",
+  "code": "invalid_manifest"
+}

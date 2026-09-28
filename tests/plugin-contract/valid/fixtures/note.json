@@ -1,0 +1,7 @@
+{
+  "description": "A plain-text note: the plugin's own fixture, beside the normative Markdown fixture.",
+  "input": {
+    "path": "note.txt",
+    "media_type": "text/plain"
+  }
+}

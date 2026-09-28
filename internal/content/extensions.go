@@ -14,6 +14,23 @@ type ExtensionValidator interface {
 	Validate(context.Context, Extensions) error
 }
 
+// CheckExtensions applies the engine's extension rules: a bounded JSON size,
+// then validator (BuiltinExtensions when nil). Acceptance uses it for submitted
+// and Part extensions, and the Plugin Contract Runner for normalizer output. An
+// oversized set is a *ManifestViolation wrapping ErrUnsupported.
+func CheckExtensions(ctx context.Context, validator ExtensionValidator, exts Extensions) error {
+	if len(exts) == 0 {
+		return nil
+	}
+	if !boundedJSON(exts) {
+		return violation(ErrUnsupported, "extensions exceed %d bytes of JSON", maxGenericJSONBytes)
+	}
+	if validator == nil {
+		validator = BuiltinExtensions{}
+	}
+	return validator.Validate(ctx, exts)
+}
+
 // BuiltinExtensions is the foundation's declared schema registry. It ships one
 // generic example namespace so structured source data can be exercised without a
 // plugin platform; installations install real plugin schemas later. It
