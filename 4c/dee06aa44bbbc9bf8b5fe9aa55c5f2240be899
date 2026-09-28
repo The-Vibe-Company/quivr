@@ -1,0 +1,22 @@
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_3024cd6928031c 1293,1295
+  s_ec117ba6cf48fd::t_1b256d66fe23a3 1294
+tests/acceptance/rebuild_test.go
+  s_ec117ba6cf48fd::t_1fab5d503b9fd2 272-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4cdee06aa44bbbc9bf8b5fe9aa55c5f2240be899",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
