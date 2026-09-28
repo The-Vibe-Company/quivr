@@ -2,7 +2,7 @@
 """Linux local text slice: host Go processes and isolated real dependencies."""
 from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
-import argparse, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
+import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
 
@@ -48,12 +48,16 @@ class Stack:
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],[s.get('scoped_id','corpus_not_granted')]),
+            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
-            s['denied']:scope('org_a',['content:read'],['*'])})
+            s['denied']:scope('org_a',['content:read'],['*'])},
+            # One deployment-configured webhook destination per Organization. These are obvious
+            # local test values; real deployments reference the signing secret through secret_env.
+            destinations={'local-receiver-org-a':dict(organization='org_a',url='http://127.0.0.1:9/local-receiver-org-a',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-a!').decode()),
+                          'local-receiver-org-b':dict(organization='org_b',url='http://127.0.0.1:9/local-receiver-org-b',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-b!').decode())})
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -229,6 +233,8 @@ def main():
                 # Change-feed and catalog resync tests add Corpora and ingestion load; run them last so they cannot skew
                 # order-sensitive acceptance or timed outage scenarios.
                 stack.start_short_retention_api();stack.tests('TestChange|TestCatalog')
+                # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
+                stack.tests('TestMonitoring')
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()

@@ -25,16 +25,23 @@ func lockJournal(ctx context.Context, tx pgx.Tx, org string) error {
 type eventInput struct{ Organization, CorpusID, Kind, Resource, ResourceID, MutationID string }
 
 func appendEvent(ctx context.Context, tx pgx.Tx, event eventInput) error {
+	_, err := appendEventAt(ctx, tx, event)
+	return err
+}
+
+// appendEventAt appends one event and returns its journal position. Callers
+// hold the Organization journal lock, so positions commit in order.
+func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
 	if err := tx.QueryRow(ctx, "UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence", event.Organization).Scan(&sequence); err != nil {
-		return err
+		return 0, err
 	}
 	identity := event.MutationID
 	if identity == "" {
 		identity = event.ResourceID
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, event.Organization, sequence, content.StableID("event", event.Organization, event.Kind, event.Resource, identity), event.CorpusID, event.Kind, event.Resource, event.ResourceID)
-	return err
+	return sequence, err
 }
 func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
 	canonical, err := json.Marshal(c)

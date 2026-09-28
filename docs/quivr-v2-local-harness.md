@@ -128,6 +128,12 @@ starts a second API over the same database with `change_retention: 2s` so
 pre-stream cursor expiry (HTTP 410) is proven publicly; in-stream `stream_error`
 is covered by transport tests.
 
+The harness configuration provisions one webhook destination per test
+Organization (`local-receiver-org-a`, `local-receiver-org-b`) with obvious
+local test signing secrets. No receiver listens on those URLs until delivery
+lands; monitoring acceptance (`TestMonitoring*`) runs after the timed change-feed
+and outage scenarios on its own Corpora.
+
 ## Webhook fixture and bounded recovery scenarios
 
 The receiver stores raw body bytes, headers, arrival time and response outcome,

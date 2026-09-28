@@ -24,6 +24,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
@@ -37,6 +38,7 @@ type API struct {
 	Retrieval      retrieval.Service
 	Uploads        uploads.Service
 	Changes        changes.Service
+	Monitoring     monitoring.Service
 	searchSchema   *jsonschema.Schema
 	ingestSchema   *jsonschema.Schema
 	uploadSchema   *jsonschema.Schema
@@ -46,6 +48,7 @@ type API struct {
 	Keys           map[string]corpus.Scope
 	CursorKey      []byte
 	schema         *jsonschema.Schema
+	monitoringSchemas
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -81,7 +84,13 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	var monitored monitoringSchemas
+	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SubscriptionCreate": &monitored.subscription, "ActionRequest": &monitored.action} {
+		if *target, err = compiler.Compile("https://quivr.invalid/openapi#/components/schemas/" + name); err != nil {
+			return nil, err
+		}
+	}
+	a := &API{monitoringSchemas: monitored, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}
@@ -147,6 +156,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.uploadRoutes(w, r, scope) {
+		return
+	}
+	if a.monitoringRoutes(w, r, scope) {
 		return
 	}
 	if r.URL.Path == "/v0/corpora" {

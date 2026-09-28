@@ -150,6 +150,46 @@ may name `previous_match_id`. These are historical positive facts; Match reads
 do not assert that the Record still corresponds or is currently searchable.
 Current authorization is checked again before exposing explanations or content.
 
+### Implemented definitions (THE-653)
+
+- **Evaluator:** the only installed evaluator is the deterministic fixture,
+  `plugin_id: "quivr.fixture"`, `version: "1"`. Any other identity is rejected
+  with 422 `unsupported_evaluator`. Its `configuration` is pinned verbatim
+  (at most 16 KiB, like the Saved Query `expression`) and echoed on every
+  Subscription and Subscription Version read; its semantics belong to the
+  evaluation slice.
+- **Destinations:** the deployment configuration's `destinations` map binds each
+  `destination_id` to one Organization, URL and signing secret. Real deployments
+  set `secret_env` to the name of an environment variable holding the secret;
+  `secret` is accepted for local test values only. Secrets are never stored in
+  PostgreSQL, logged, accepted or returned. An unknown or other-Organization
+  destination is 422 `unknown_destination`.
+- **Scope:** writes need `monitoring:write`, reads `monitoring:read`. Creating a
+  Saved Query or Subscription over any Corpus the key does not grant, or that is
+  not in its Organization, is 403 `forbidden`, as for search. Reads and disable
+  of definitions whose pinned Corpora are not all granted, or from another
+  Organization, are 404. Only `balanced` is accepted as `retrieval_profile`
+  (422 `unsupported_profile`); an unknown Saved Query Version is 422
+  `unknown_saved_query`.
+- **Idempotency:** route families are Saved Query creation, Subscription
+  creation and disable. The same key and canonical request return the same
+  resource in its current state; changed input is 409 `idempotency_conflict`.
+  Names are immutable. Replaying Subscription creation after disable returns
+  `enabled: false`. Disabling an already disabled Subscription succeeds without
+  another event.
+- **Activation boundary:** Subscription creation takes the Organization journal
+  lock and commits the Subscription, its Version and `subscription.created` in
+  one transaction. The Version records the journal position of that commit;
+  every earlier change has a lower position and every later change a higher
+  one, so evaluation considers only positions after it and never scans history.
+  Disable updates the Subscription row under the same lock, so later Match and
+  Delivery admission can serialize with it.
+- **Per-Corpus events:** the change feed is read per Corpus. One logical
+  monitoring fact (`saved_query.created`, `subscription.created`,
+  `subscription.disabled`) is therefore committed as one event for each pinned
+  Corpus. These events share the resource kind and ID and have distinct stable
+  per-Corpus event IDs; consumers deduplicate by resource, not event ID.
+
 ## Evaluation and transactions
 
 The initial adapter consumes pinned query/subscription/evaluator configuration,

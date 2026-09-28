@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -22,6 +23,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -43,6 +45,9 @@ type Config struct {
 	CursorKey       string                  `json:"cursor_key"`
 	ChangeRetention string                  `json:"change_retention"`
 	Keys            map[string]corpus.Scope `json:"keys"`
+	// Destinations are deployment-configured webhook receivers. Real
+	// deployments reference their signing secret through secret_env.
+	Destinations map[string]monitoring.Destination `json:"destinations"`
 }
 
 func Run(command string) error {
@@ -67,6 +72,16 @@ func Run(command string) error {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return errors.New("invalid scoped credential configuration")
 		}
+	}
+	for id, d := range cfg.Destinations {
+		if d.SecretEnv != "" {
+			d.Secret = os.Getenv(d.SecretEnv)
+		}
+		target, err := url.Parse(d.URL)
+		if id == "" || d.Organization == "" || d.Secret == "" || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+			return errors.New("invalid webhook destination configuration")
+		}
+		cfg.Destinations[id] = d
 	}
 	retention := changes.DefaultRetention
 	if cfg.ChangeRetention != "" {
@@ -138,7 +153,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='008_withdrawal_receipts.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='010_monitoring.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
@@ -179,7 +194,7 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
