@@ -18,6 +18,7 @@ internal/app/run.go
   s_ec117ba6cf48fd::t_5746b09203e864 13,44,71-76,182
 scripts/local.py
   s_ec117ba6cf48fd::t_591aab2f65e10b 28-29,51-52,54,59-60,80-91,110
+  s_ec117ba6cf48fd::t_79fa8135754996 221
 internal/transport/httpapi/api.go
   s_ec117ba6cf48fd::t_a40a2fc61766b3 24,39,51,85-87,131-134,138-141,298-300
 ---
