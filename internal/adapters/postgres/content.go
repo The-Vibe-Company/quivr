@@ -222,6 +222,15 @@ func notFound(err error) error {
 	}
 	return err
 }
+
+// HasReceipt reports whether an ingestion idempotency key was accepted in the
+// Organization; connectors use it to skip unchanged items before downloading.
+func (s ContentStore) HasReceipt(ctx context.Context, org, key string) (bool, error) {
+	var exists bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND id=$2)`, org, content.StableID("receipt", org, "ingestion", key)).Scan(&exists)
+	return exists, err
+}
+
 func (s ContentStore) Receipt(ctx context.Context, org, id string) (content.Receipt, error) {
 	r := content.Receipt{Diagnostics: []content.Diagnostic{}}
 	var command []byte

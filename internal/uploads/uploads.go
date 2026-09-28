@@ -3,7 +3,12 @@ package uploads
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"time"
 	"unicode/utf8"
 
@@ -80,12 +85,20 @@ type Transfer interface {
 	Verify(context.Context, string, int64, string) error
 }
 
+// Writer streams server-side bytes into storage. The body is seekable so the
+// store can retry without buffering it; its length and digest are declared.
+type Writer interface {
+	PutStream(ctx context.Context, objectKey string, body io.ReadSeeker, size int64, sha256hex, mediaType string) error
+}
+
 // Service applies validation, verification and the upload state machine.
 type Service struct {
 	Store    Store
 	Transfer Transfer
-	TTL      time.Duration
-	Now      func() time.Time
+	// Writer enables server-side deposits (connector attachments).
+	Writer Writer
+	TTL    time.Duration
+	Now    func() time.Time
 }
 
 func (s Service) now() time.Time {
@@ -205,4 +218,48 @@ func (s Service) session(ctx context.Context, meta Meta) (Session, error) {
 	}
 	out.UploadURL, out.UploadHeaders = url, headers
 	return out, nil
+}
+
+// Deposit stores bytes collected server-side (e.g. a connector attachment) as
+// a verified Blob with the same identity as a client upload of the same bytes.
+// The stream is hashed while it is spooled to a temporary file through a fixed
+// buffer, so memory stays bounded whatever the attachment size. More than max
+// bytes, an empty stream or a missing media type wrap content.ErrInvalid.
+func (s Service) Deposit(ctx context.Context, org string, r io.Reader, mediaType string, max int64) (string, int64, error) {
+	if s.Writer == nil {
+		return "", 0, errors.New("blob deposits are not configured")
+	}
+	if mediaType == "" || !utf8.ValidString(mediaType) || max < 1 || max > MaxUploadBytes {
+		return "", 0, fmt.Errorf("%w: invalid deposit expectation", content.ErrInvalid)
+	}
+	spool, err := os.CreateTemp("", "quivr-deposit-*")
+	if err != nil {
+		return "", 0, err
+	}
+	defer os.Remove(spool.Name())
+	defer spool.Close()
+	h := sha256.New()
+	size, err := io.CopyBuffer(io.MultiWriter(spool, h), io.LimitReader(r, max+1), make([]byte, 64<<10))
+	if err != nil {
+		return "", 0, err
+	}
+	if size < 1 || size > max {
+		return "", 0, fmt.Errorf("%w: deposit size outside 1..%d bytes", content.ErrInvalid, max)
+	}
+	if _, err = spool.Seek(0, io.SeekStart); err != nil {
+		return "", 0, err
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	objectKey := content.Hash([]byte(org)) + "/blobs/sha256/" + digest
+	if err = s.Writer.PutStream(ctx, objectKey, spool, size, digest, mediaType); err != nil {
+		return "", 0, err
+	}
+	if err = s.Transfer.Verify(ctx, objectKey, size, digest); err != nil {
+		return "", 0, err
+	}
+	blobID := content.StableID("blob", org, digest, mediaType)
+	if err = s.Store.SaveBlob(ctx, org, blobID, objectKey, digest, size, mediaType); err != nil {
+		return "", 0, err
+	}
+	return blobID, size, nil
 }

@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -61,12 +61,34 @@ func (s *Store) Verify(ctx context.Context, objectKey string, size int64, sha256
 		return errors.New("transferred object unavailable")
 	}
 	defer object.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(object.Body, size+1))
+	// Hash while streaming so verification memory does not grow with the object.
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(object.Body, size+1))
 	if err != nil {
 		return errors.New("transferred object read failed")
 	}
-	if int64(len(data)) != size || content.Hash(data) != sha256hex {
+	if n != size || hex.EncodeToString(h.Sum(nil)) != sha256hex {
 		return fmt.Errorf("transferred bytes do not match expectation: %w", uploads.ErrVerificationMismatch)
+	}
+	return nil
+}
+
+// PutStream writes server-collected bytes under a content-addressed key. The
+// declared checksum is enforced by storage; an existing object with the same
+// key already holds the same bytes, so a precondition failure is not an error
+// (the caller verifies afterwards).
+func (s *Store) PutStream(ctx context.Context, objectKey string, body io.ReadSeeker, size int64, sha256hex, mediaType string) error {
+	checksum, err := hex.DecodeString(sha256hex)
+	if err != nil || len(checksum) != 32 || size < 1 || size > uploads.MaxUploadBytes || mediaType == "" {
+		return errors.New("invalid deposit expectation")
+	}
+	_, err = s.client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey), Body: body, ContentLength: aws.Int64(size), ContentType: aws.String(mediaType), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*")})
+	var status interface{ HTTPStatusCode() int }
+	if err != nil && errors.As(err, &status) && status.HTTPStatusCode() == 412 {
+		return nil
+	}
+	if err != nil {
+		return errors.New("deposit storage unavailable")
 	}
 	return nil
 }

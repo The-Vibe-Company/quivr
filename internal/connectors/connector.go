@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"time"
 
@@ -55,6 +56,27 @@ type Item struct {
 	Extensions content.Extensions
 	// Withdraw asks for a Tombstone instead of a new version (source terms, e.g. deleted posts).
 	Withdraw bool
+	// Attachments are binary Parts fetched lazily: the Acquirer streams each
+	// one into a verified Blob and appends it to the Manifest as a Blob Part,
+	// only when the item is not already accepted. A connector returning
+	// attachments should set Revision so an unchanged item is recognised
+	// before anything is downloaded.
+	Attachments []Attachment
+}
+
+// Attachment is one binary Part of an item, opened only when needed.
+type Attachment struct {
+	Key        string
+	ParentKey  string
+	Role       string
+	MediaType  string
+	Extensions content.Extensions
+	// Open streams the bytes; typed *Error failures end the run like a fetch.
+	Open func(context.Context) (io.ReadCloser, error)
+	// Skip, when set, is told why an attachment was left out (e.g. its bytes
+	// exceed MaxAttachmentBytes although the source announced less) and the
+	// item is submitted without it; otherwise the whole item is rejected.
+	Skip func(reason string)
 }
 
 // FetchRequest is one page request. Credential is the decrypted secret JSON,
@@ -85,6 +107,12 @@ type Connector interface {
 	CredentialSchema() []byte
 	DefaultInterval() time.Duration
 	Fetch(context.Context, FetchRequest) (Page, error)
+}
+
+// ConfigChecker is optionally implemented by a Connector whose configuration
+// has rules JSON Schema cannot express (e.g. a bounded backfill window).
+type ConfigChecker interface {
+	CheckConfig(config json.RawMessage, now time.Time) error
 }
 
 // Kinds known to the public contract, delivered or not.

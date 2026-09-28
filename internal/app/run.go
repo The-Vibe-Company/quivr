@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors/m365mail"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -56,6 +57,12 @@ type Config struct {
 	ConnectorFixtures bool `json:"connector_fixtures"`
 	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
 	ConnectorMinInterval string `json:"connector_min_interval"`
+	// M365 overrides the Microsoft identity and Graph endpoints of the
+	// m365_mail kind (national clouds, local fakes). Instances cannot.
+	M365 struct {
+		LoginEndpoint string `json:"login_endpoint"`
+		GraphEndpoint string `json:"graph_endpoint"`
+	} `json:"m365"`
 }
 
 func Run(command string) error {
@@ -86,7 +93,7 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	var kinds []connectors.Connector
+	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil)}
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}
@@ -135,7 +142,7 @@ func Run(command string) error {
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
 	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
-	uploadService := uploads.Service{Store: store, Transfer: blobs}
+	uploadService := uploads.Service{Store: store, Transfer: blobs, Writer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
 	encoder := &tokenizer.Server{Config: cfg.Tokenizer}
@@ -184,7 +191,7 @@ func Run(command string) error {
 		return nil
 	}
 	connectorStore := postgres.ConnectorStore{ContentStore: store}
-	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}}
+	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool

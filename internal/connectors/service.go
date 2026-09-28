@@ -138,6 +138,9 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if err := s.Registry.validate(in.Kind, in.Config, in.Secret); err != nil {
 		return Instance{}, err
 	}
+	if cc, ok := connector.(ConfigChecker); ok && cc.CheckConfig(in.Config, time.Now()) != nil {
+		return Instance{}, ErrInvalidConfig
+	}
 	interval := connector.DefaultInterval()
 	if in.IntervalSeconds != nil {
 		interval = time.Duration(*in.IntervalSeconds) * time.Second

@@ -81,3 +81,26 @@ func TestPresignedTransferVerifyAndRange(t *testing.T) {
 		t.Fatalf("range read failed: %q %v", window, err)
 	}
 }
+
+func TestStreamedDepositIsStoredOnceAndVerified(t *testing.T) {
+	cfg := transferConfig(t)
+	blobs := store.New(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	// Larger than the 2 MiB canonical-object read bound: verification must stream.
+	data := bytes.Repeat([]byte("pièce jointe "), 300_000)
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	objectKey := "adapter-transfers/deposit-" + digest
+	for i := 0; i < 2; i++ { // A repeated deposit of the same bytes converges.
+		if err := blobs.PutStream(ctx, objectKey, bytes.NewReader(data), int64(len(data)), digest, "application/pdf"); err != nil {
+			t.Fatalf("deposit %d: %v", i, err)
+		}
+	}
+	if err := blobs.Verify(ctx, objectKey, int64(len(data)), digest); err != nil {
+		t.Fatalf("deposited bytes did not verify: %v", err)
+	}
+	if err := blobs.Verify(ctx, objectKey, int64(len(data)), hex.EncodeToString(make([]byte, 32))); !errors.Is(err, uploads.ErrVerificationMismatch) {
+		t.Fatal("streamed verification did not detect a digest mismatch")
+	}
+}

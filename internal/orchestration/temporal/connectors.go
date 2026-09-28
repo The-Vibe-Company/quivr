@@ -28,6 +28,9 @@ const (
 	// run and is rejected while that run is still in flight, so a short lease
 	// is safe and bounds the delay after a crash between claim and start.
 	connectorLease = 30 * time.Second
+	// acquireHeartbeatTimeout bounds how long a run on a dead worker stays in
+	// flight before Temporal retries it.
+	acquireHeartbeatTimeout = 30 * time.Second
 )
 
 // ConnectorScheduler claims due Connector Instance runs.
@@ -50,13 +53,30 @@ type AcquireInput struct {
 }
 
 func acquireWorkflowFn(ctx workflow.Context, in AcquireInput) error {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+	// Five minutes leaves room for a run storing attachments (up to 25 MB each,
+	// bounded per run by connectors.DefaultAttachmentBudget); the heartbeat
+	// timeout still retries a run whose worker died within seconds.
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute, HeartbeatTimeout: acquireHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
 	return workflow.ExecuteActivity(ctx, acquireActivity, in).Get(ctx, nil)
 }
 
 func registerConnectors(w worker.Worker, c *Connectors) {
 	w.RegisterWorkflowWithOptions(acquireWorkflowFn, workflow.RegisterOptions{Name: acquireWorkflow})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			ticker := time.NewTicker(acquireHeartbeatTimeout / 3)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					activity.RecordHeartbeat(ctx)
+				}
+			}
+		}()
 		return c.Acquirer.Run(ctx, in.Organization, in.ConnectorID, in.Run)
 	}, activity.RegisterOptions{Name: acquireActivity})
 }
