@@ -1,0 +1,35 @@
+internal/retrieval/retrieval.go
+  s_ec117ba6cf48fd::t_f454092a8803b4 18-22
+internal/retrieval/retrieval_test.go
+  s_ec117ba6cf48fd::t_f10e3edacd106a 66-68
+  s_ec117ba6cf48fd::t_95d1aa3b3bf473 7
+  s_ec117ba6cf48fd::t_d9acff4e59e3c7 102-104,109-111
+  s_ec117ba6cf48fd::t_b1445d2d96a51e 129-159
+internal/adapters/weaviate/projection.go
+  s_ec117ba6cf48fd::t_8ad37cb2c594ef 241-244
+  s_ec117ba6cf48fd::t_b2159d734f218d 149-153,162
+  s_ec117ba6cf48fd::t_2bd841b4e7de56 166
+  s_ec117ba6cf48fd::t_53e8b7c614e41c 287-288,295-299,305
+  s_ec117ba6cf48fd::t_479b2f536ec19c 264-265,274,276-277
+internal/adapters/weaviate/parity_test.go
+  s_ec117ba6cf48fd::t_010e87eacd84d8 1-89
+  s_ec117ba6cf48fd::t_ff0e319b6a86e6 90-119
+internal/adapters/weaviate/attach_test.go
+  s_ec117ba6cf48fd::t_a933daf463636c 137-157,183-186,233-237,275-276,282,287,314,323-333,335,363-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d0e3ea26e094c98bd1cf51f0a3d064db76b3dfc",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
