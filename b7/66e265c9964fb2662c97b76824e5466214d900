@@ -1,0 +1,69 @@
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_87ee6b1b3d3c98 164-166
+internal/monitoring/evaluation_test.go
+  s_ec117ba6cf48fd::t_509f887bed2412 1-82
+internal/app/monitoring.go
+  s_ec117ba6cf48fd::t_c8ea14dc57df12 1-27
+internal/transport/httpapi/matches_test.go
+  s_ec117ba6cf48fd::t_548bb064e8cdc3 1-100
+internal/adapters/postgres/changes.go
+  s_ec117ba6cf48fd::t_24c42e6d351c81 27-28,36-38,50-51,55-59
+internal/monitoring/evaluation.go
+  s_ec117ba6cf48fd::t_07c9ebfea7ed33 1-133
+internal/monitoring/engine.go
+  s_ec117ba6cf48fd::t_e648fb67aac614 1-267
+internal/adapters/postgres/embeddings.go
+  s_ec117ba6cf48fd::t_267edde16bb45f 113
+internal/monitoring/engine_test.go
+  s_ec117ba6cf48fd::t_4dec23728d5f91 1-190
+internal/adapters/postgres/evaluation.go
+  s_ec117ba6cf48fd::t_ca54adf971a851 1-213,215-358
+  s_ec117ba6cf48fd::t_08328e0aaa470b 214
+internal/adapters/postgres/searchable.go
+  s_ec117ba6cf48fd::t_267edde16bb45f 142
+internal/adapters/postgres/content.go
+  s_ec117ba6cf48fd::t_267edde16bb45f 25-36,50
+  s_ec117ba6cf48fd::t_5608fbf20b54bd 260
+internal/transport/httpapi/matches.go
+  s_ec117ba6cf48fd::t_83e18917723b8c 1-185
+internal/changes/changes.go
+  s_ec117ba6cf48fd::t_24c42e6d351c81 47-55
+internal/transport/httpapi/changes.go
+  s_ec117ba6cf48fd::t_f1130a372f0310 64-72
+internal/adapters/postgres/evaluation_test.go
+  s_ec117ba6cf48fd::t_ede022a2c8bb12 1-59,61-138,165-270,282
+  s_ec117ba6cf48fd::t_877b4038182515 60,271-281
+  s_ec117ba6cf48fd::t_527478111db9f5 139-164
+tests/acceptance/matches_test.go
+  s_ec117ba6cf48fd::t_2bef94ac3a958f 4,42,175-176,187
+  s_ec117ba6cf48fd::t_687bfd1e703477 1-3,5-41,43-174,177-186,188-212
+internal/app/run.go
+  s_ec117ba6cf48fd::t_87ee6b1b3d3c98 156,197,211-224
+docs/quivr-v2-monitoring-tracer.md
+  s_ec117ba6cf48fd::t_72132d0ba29a3e 193-253
+internal/monitoring/monitoring.go
+  s_ec117ba6cf48fd::t_e24f3101a332bf 3-4,134-135
+migrations/011_evaluation.sql
+  s_ec117ba6cf48fd::t_36959754c998d4 1-91
+internal/transport/httpapi/monitoring_test.go
+  s_ec117ba6cf48fd::t_f0842e5e5b0e27 89
+internal/monitoring/matches.go
+  s_ec117ba6cf48fd::t_e24f3101a332bf 6-7,76,87,102
+  s_ec117ba6cf48fd::t_5fc23467e60f86 1-5,8-75,77-86,88-101,103-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b766e265c9964fb2662c97b76824e5466214d900",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
