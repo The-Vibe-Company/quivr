@@ -45,6 +45,34 @@ type Notice struct {
 	References    NoticeReferences `json:"references"`
 }
 
+// Monitoring notice kinds.
+const (
+	NoticeCreated         = "match.created"
+	NoticeCorrected       = "match.corrected"
+	NoticeNoLongerMatches = "match.no_longer_matches"
+	NoticeWithdrawn       = "match.withdrawn"
+)
+
+// AdmissionReason is the canonical admission rule shared by the delivery
+// worker and Delivery reads, after the destination check. It returns "" when
+// the notice may be attempted. A withdrawn Record refuses every ordinary
+// notice, while match.withdrawn has its own eligibility. superseded reports
+// that a later match.corrected or match.no_longer_matches exists for the same
+// Subscription and Record; it refuses only match.created and match.corrected,
+// so a stale positive never lands after its correction. match.no_longer_matches
+// and match.withdrawn are never superseded.
+func AdmissionReason(kind string, enabled, withdrawn, superseded bool) string {
+	switch {
+	case !enabled:
+		return "subscription_disabled"
+	case withdrawn && kind != NoticeWithdrawn:
+		return "record_withdrawn"
+	case superseded && (kind == NoticeCreated || kind == NoticeCorrected):
+		return "superseded"
+	}
+	return ""
+}
+
 // Admission is the current derived admission view of a Delivery.
 type Admission struct {
 	Allowed bool

@@ -92,19 +92,20 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, win
 	if !held {
 		return monitoring.AdmittedAttempt{}, "lease_lost", nil
 	}
-	var state, destination, eventID, corpusID string
+	var state, destination, eventID, corpusID, kind string
 	var count int
 	var body []byte
-	var enabled, withdrawn, elapsed bool
-	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,s.enabled,
+	var enabled, withdrawn, superseded, elapsed bool
+	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,n.kind,s.enabled,
   r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+  `+noticeSupersededSQL+`,
   coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>d.created_at+make_interval(secs => $3::double precision),false)
 FROM deliveries d
 JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.Seconds()).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &enabled, &withdrawn, &elapsed)
+WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.Seconds()).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &kind, &enabled, &withdrawn, &superseded, &elapsed)
 	if err != nil {
 		return monitoring.AdmittedAttempt{}, "", err
 	}
@@ -134,13 +135,12 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.
 			}
 		}
 	}
+	reason := monitoring.AdmissionReason(kind, enabled, withdrawn, superseded)
 	switch {
 	case !configured(org, destination):
 		return refuse("destination_unavailable")
-	case !enabled:
-		return refuse("subscription_disabled")
-	case withdrawn:
-		return refuse("record_withdrawn")
+	case reason != "":
+		return refuse(reason)
 	case elapsed:
 		if err = exhaust(ctx, tx, org, corpusID, w.DeliveryID, count, "window_elapsed"); err != nil {
 			return monitoring.AdmittedAttempt{}, "", err

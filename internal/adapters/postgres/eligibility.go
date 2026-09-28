@@ -16,3 +16,9 @@ const eligibleVersionSQL = `v.baseline_ready AND NOT v.quarantined AND NOT r.wit
 func routedGenerationSQL(org, corpusID string) string {
 	return `COALESCE((SELECT cr.generation_id FROM corpus_projection_routes cr WHERE cr.organization=` + org + ` AND cr.corpus_id=` + corpusID + `),(SELECT dg.id FROM projection_generations dg WHERE dg.active))`
 }
+
+// noticeSupersededSQL reports whether a later match.corrected or
+// match.no_longer_matches notice exists for the same Subscription and Record
+// as the notice aliased n. monitoring.AdmissionReason decides which notice
+// kinds it refuses. Delivery admission and Delivery reads share it.
+const noticeSupersededSQL = `EXISTS(SELECT 1 FROM monitoring_notices later WHERE later.organization=n.organization AND later.subscription_id=n.subscription_id AND later.record_id=n.record_id AND later.kind IN ('match.corrected','match.no_longer_matches') AND later.position>n.position)`

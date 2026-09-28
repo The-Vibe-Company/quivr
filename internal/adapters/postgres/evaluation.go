@@ -90,10 +90,10 @@ func (s EvaluationStore) dispatchStep(ctx context.Context, org string) (bool, er
 		return false, err
 	}
 	var sequence int64
-	var corpusID, recordID, versionID string
-	err = tx.QueryRow(ctx, `SELECT sequence,corpus_id,resource_id,coalesce(record_version_id,'') FROM change_events
-WHERE organization=$1 AND sequence>$2 AND sequence<=$3 AND event_type IN ('record.retrieval_ready','record.enrichment_available')
-ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &recordID, &versionID)
+	var corpusID, recordID, versionID, eventType string
+	err = tx.QueryRow(ctx, `SELECT sequence,corpus_id,resource_id,coalesce(record_version_id,''),event_type FROM change_events
+WHERE organization=$1 AND sequence>$2 AND sequence<=$3 AND event_type IN ('record.retrieval_ready','record.enrichment_available','record.withdrawn')
+ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &recordID, &versionID, &eventType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if position == head {
 			return false, nil
@@ -108,25 +108,40 @@ ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &rec
 	}
 	next, nextAfter := sequence, ""
 	// Pre-migration trigger events carry no Version and are skipped.
-	if versionID != "" {
-		rows, err := tx.Query(ctx, `SELECT s.id,v.id FROM subscription_corpora sc
+	if versionID != "" || eventType == "record.withdrawn" {
+		kind := monitoring.IntentEvaluation
+		var rows pgx.Rows
+		if eventType == "record.withdrawn" {
+			// A withdrawal concerns the enabled Subscriptions already alerted
+			// about the Record, whatever their activation. No Match commits
+			// after the Tombstone, so every relevant Match precedes this event.
+			kind = monitoring.IntentWithdrawal
+			rows, err = tx.Query(ctx, `SELECT s.id,s.current_version_id,latest.record_version_id
+FROM (SELECT DISTINCT subscription_id FROM matches WHERE organization=$1 AND record_id=$2 AND position<$3 AND subscription_id>$4) alerted
+JOIN subscriptions s ON s.organization=$1 AND s.id=alerted.subscription_id
+JOIN LATERAL (SELECT m.record_version_id FROM matches m WHERE m.organization=$1 AND m.record_id=$2 AND m.subscription_id=s.id ORDER BY m.position DESC LIMIT 1) latest ON true
+WHERE s.enabled
+ORDER BY s.id LIMIT $5`, org, recordID, sequence, after, s.page())
+		} else {
+			rows, err = tx.Query(ctx, `SELECT s.id,v.id,$6::text FROM subscription_corpora sc
 JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
 JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,s.current_version_id)
 WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND v.activation_position<$3 AND s.id>$4
-ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page())
+ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID)
+		}
 		if err != nil {
 			return false, err
 		}
-		type candidate struct{ subscription, version string }
+		type candidate struct{ subscription, version, recordVersion string }
 		page, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (candidate, error) {
 			var c candidate
-			return c, r.Scan(&c.subscription, &c.version)
+			return c, r.Scan(&c.subscription, &c.version, &c.recordVersion)
 		})
 		if err != nil {
 			return false, err
 		}
 		for _, c := range page {
-			if _, err = tx.Exec(ctx, `INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, org, c.version, sequence, c.subscription, corpusID, recordID, versionID); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, org, c.version, sequence, c.subscription, corpusID, recordID, c.recordVersion, kind); err != nil {
 				return false, err
 			}
 		}
@@ -148,8 +163,8 @@ FROM (SELECT organization,subscription_version_id,sequence FROM evaluation_inten
   WHERE state='pending' AND available_at<=now() AND lease_until<now()
   ORDER BY available_at,sequence LIMIT 1 FOR UPDATE SKIP LOCKED) due
 WHERE (i.organization,i.subscription_version_id,i.sequence)=(due.organization,due.subscription_version_id,due.sequence)
-RETURNING i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`, lease.Seconds()).Scan(
-		&in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
+RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`, lease.Seconds()).Scan(
+		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, monitoring.ErrNoWork
 	}
@@ -199,8 +214,42 @@ func (s EvaluationStore) Backlog(ctx context.Context) (monitoring.Backlog, error
 // journal lock, which disable and withdrawal also take, it rechecks the
 // enabled pinned Subscription Version, the Record Version's currentness and
 // canonical eligibility and the Subscription's Corpus scope, then creates the
-// unique Match with its Delivery, notice, public event and outbox work.
+// unique Match with its Delivery, notice, public event and outbox work. A
+// Match on a correction of an already matched Record links its predecessor
+// and is announced as match.corrected.
 func (s EvaluationStore) CommitMatch(ctx context.Context, in monitoring.Intent, evidence monitoring.MatchEvidence) (string, error) {
+	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitMatch(ctx, tx, in, evidence) })
+}
+
+// CommitNoMatch records a negative decision. On an eligible correction of a
+// Record with a prior positive Match it commits one match.no_longer_matches
+// notice referencing that Match and the non-matching Version, never a Match.
+func (s EvaluationStore) CommitNoMatch(ctx context.Context, in monitoring.Intent) (string, error) {
+	// Most negative decisions concern Records never matched on another
+	// Version: complete them without the journal lock. A Match on another
+	// Version commits only while that Version is current, so before this
+	// Version's trigger was dispatched; none can appear after this read.
+	var alerted bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND record_id=$2 AND subscription_id=$3 AND record_version_id<>$4)`, in.Organization, in.RecordID, in.SubscriptionID, in.VersionID).Scan(&alerted); err != nil {
+		return "", err
+	}
+	if !alerted {
+		return monitoring.OutcomeNoMatch, s.Complete(ctx, in, monitoring.OutcomeNoMatch)
+	}
+	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitNoMatch(ctx, tx, in) })
+}
+
+// CommitWithdrawal consumes a withdrawal intent. It does not run the positive
+// no-Tombstone guard: it requires the Tombstone, an enabled Subscription and
+// the Record's Corpus in its scope, then commits the match.withdrawn notice for
+// the latest positive Match once.
+func (s EvaluationStore) CommitWithdrawal(ctx context.Context, in monitoring.Intent) (string, error) {
+	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitWithdrawal(ctx, tx, in) })
+}
+
+// commit runs one decision under the journal lock and completes its intent in
+// the same transaction.
+func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decide func(pgx.Tx) (string, error)) (string, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -209,7 +258,7 @@ func (s EvaluationStore) CommitMatch(ctx context.Context, in monitoring.Intent, 
 	if err = lockJournal(ctx, tx, in.Organization); err != nil {
 		return "", err
 	}
-	outcome, err := s.commitMatch(ctx, tx, in, evidence)
+	outcome, err := decide(tx)
 	if err != nil {
 		return "", err
 	}
@@ -219,33 +268,61 @@ func (s EvaluationStore) CommitMatch(ctx context.Context, in monitoring.Intent, 
 	return outcome, tx.Commit(ctx)
 }
 
-func (s EvaluationStore) commitMatch(ctx context.Context, tx pgx.Tx, in monitoring.Intent, evidence monitoring.MatchEvidence) (string, error) {
+type subscriptionPin struct{ queryID, queryVersionID, destination string }
+
+// guardEvaluation is the core eligibility guard of an evaluated Version: the
+// Subscription is enabled on the pinned Version, the Version is the Record's
+// current eligible Version and its Corpus is in the Subscription's scope. A
+// refusal is returned as an outcome.
+func guardEvaluation(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (pinned subscriptionPin, corpusID, refused string, err error) {
 	org := in.Organization
 	var enabled bool
-	var current, queryID, queryVersionID, destination string
-	err := tx.QueryRow(ctx, `SELECT s.enabled,s.current_version_id,v.saved_query_id,v.saved_query_version_id,v.destination_id FROM subscriptions s JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID).Scan(&enabled, &current, &queryID, &queryVersionID, &destination)
+	var current string
+	err = tx.QueryRow(ctx, `SELECT s.enabled,s.current_version_id,v.saved_query_id,v.saved_query_version_id,v.destination_id FROM subscriptions s JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID).Scan(&enabled, &current, &pinned.queryID, &pinned.queryVersionID, &pinned.destination)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return monitoring.OutcomeIneligible, nil
+		return pinned, "", monitoring.OutcomeIneligible, nil
 	}
 	if err != nil {
-		return "", err
+		return pinned, "", "", err
 	}
 	if !enabled || current != in.SubscriptionVersionID {
-		return monitoring.OutcomeSubscriptionDisabled, nil
+		return pinned, "", monitoring.OutcomeSubscriptionDisabled, nil
 	}
-	var corpusID string
 	var eligible bool
 	err = tx.QueryRow(ctx, `SELECT r.corpus_id, r.current_version_id IS NOT DISTINCT FROM v.id AND `+eligibleVersionSQL+`
   AND EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=r.organization AND sc.corpus_id=r.corpus_id AND sc.subscription_id=$4)
 FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
 WHERE v.organization=$1 AND v.id=$2 AND r.id=$3`, org, in.VersionID, in.RecordID, in.SubscriptionID).Scan(&corpusID, &eligible)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !eligible) {
-		return monitoring.OutcomeIneligible, nil
+		return pinned, "", monitoring.OutcomeIneligible, nil
 	}
-	if err != nil {
-		return "", err
+	return pinned, corpusID, "", err
+}
+
+// priorMatch is the latest positive Match of a Subscription for a Record,
+// with the destination pinned by the Subscription Version that produced it.
+type priorMatch struct{ id, versionID, subscriptionVersionID, destination string }
+
+// latestMatch reads the latest Match of a Subscription for a Record on any
+// Record Version other than exceptVersion.
+func latestMatch(ctx context.Context, tx pgx.Tx, org, subscriptionID, recordID, exceptVersion string) (priorMatch, bool, error) {
+	var p priorMatch
+	err := tx.QueryRow(ctx, `SELECT m.id,m.record_version_id,m.subscription_version_id,v.destination_id FROM matches m
+JOIN subscription_versions v ON (v.organization,v.id)=(m.organization,m.subscription_version_id)
+WHERE m.organization=$1 AND m.record_id=$3 AND m.subscription_id=$2 AND m.record_version_id<>$4
+ORDER BY m.position DESC LIMIT 1`, org, subscriptionID, recordID, exceptVersion).Scan(&p.id, &p.versionID, &p.subscriptionVersionID, &p.destination)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, false, nil
 	}
-	matchID := content.StableID("match", org, in.SubscriptionVersionID, in.VersionID)
+	return p, err == nil, err
+}
+
+func commitMatch(ctx context.Context, tx pgx.Tx, in monitoring.Intent, evidence monitoring.MatchEvidence) (string, error) {
+	org := in.Organization
+	pinned, corpusID, refused, err := guardEvaluation(ctx, tx, in)
+	if err != nil || refused != "" {
+		return refused, err
+	}
 	var exists bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND subscription_version_id=$2 AND record_version_id=$3)`, org, in.SubscriptionVersionID, in.VersionID).Scan(&exists); err != nil {
 		return "", err
@@ -253,16 +330,7 @@ WHERE v.organization=$1 AND v.id=$2 AND r.id=$3`, org, in.VersionID, in.RecordID
 	if exists {
 		return monitoring.OutcomeDuplicate, nil
 	}
-	const kind = "match.created"
-	deliveryID := content.StableID("delivery", org, matchID, destination, kind)
-	event := eventInput{Organization: org, CorpusID: corpusID, Kind: kind, Resource: "match", ResourceID: matchID, MutationID: matchID}
-	// The notice time is the transaction time, which is also the event's occurred_at.
-	var now time.Time
-	if err = tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
-		return "", err
-	}
-	refs := monitoring.NoticeReferences{MatchID: matchID, RecordID: in.RecordID, RecordVersionID: in.VersionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: in.SubscriptionVersionID, DeliveryID: deliveryID}
-	body, err := json.Marshal(monitoring.Notice{EventID: eventID(event), Type: kind, SchemaVersion: "1", OccurredAt: now.UTC(), References: refs})
+	prior, corrected, err := latestMatch(ctx, tx, org, in.SubscriptionID, in.RecordID, in.VersionID)
 	if err != nil {
 		return "", err
 	}
@@ -270,25 +338,137 @@ WHERE v.organization=$1 AND v.id=$2 AND r.id=$3`, org, in.VersionID, in.RecordID
 	if err != nil {
 		return "", err
 	}
-	position, err := appendEventAt(ctx, tx, event)
+	// match.corrected carries every match.created reference plus its
+	// predecessor, so a consumer can act on it alone.
+	n := notice{Kind: monitoring.NoticeCreated, CorpusID: corpusID, Destination: pinned.destination,
+		References: monitoring.NoticeReferences{MatchID: content.StableID("match", org, in.SubscriptionVersionID, in.VersionID), RecordID: in.RecordID, RecordVersionID: in.VersionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: in.SubscriptionVersionID}}
+	var previous any
+	if corrected {
+		n.Kind, n.References.PreviousMatchID, previous = monitoring.NoticeCorrected, prior.id, prior.id
+	}
+	created, err := commitNotice(ctx, tx, org, n, func(position int64) error {
+		_, err := tx.Exec(ctx, `INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,previous_match_id,evidence,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			org, n.References.MatchID, in.SubscriptionID, in.SubscriptionVersionID, pinned.queryID, pinned.queryVersionID, corpusID, in.RecordID, in.VersionID, previous, evidenceJSON, position)
+		return err
+	})
+	if err != nil || !created {
+		return monitoring.OutcomeDuplicate, err
+	}
+	return monitoring.OutcomeMatched, nil
+}
+
+func commitNoMatch(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (string, error) {
+	org := in.Organization
+	_, corpusID, refused, err := guardEvaluation(ctx, tx, in)
+	if err != nil || refused != "" {
+		return refused, err
+	}
+	// A Version that matched is never invalidated by a later decision about itself.
+	var matched bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND subscription_id=$2 AND record_version_id=$3)`, org, in.SubscriptionID, in.VersionID).Scan(&matched); err != nil {
+		return "", err
+	}
+	if matched {
+		return monitoring.OutcomeNoMatch, nil
+	}
+	prior, found, err := latestMatch(ctx, tx, org, in.SubscriptionID, in.RecordID, in.VersionID)
+	if err != nil || !found {
+		return monitoring.OutcomeNoMatch, err
+	}
+	created, err := commitNotice(ctx, tx, org, notice{Kind: monitoring.NoticeNoLongerMatches, CorpusID: corpusID, Destination: prior.destination,
+		References: monitoring.NoticeReferences{MatchID: prior.id, RecordID: in.RecordID, RecordVersionID: in.VersionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: prior.subscriptionVersionID}}, nil)
+	if err != nil || !created {
+		return monitoring.OutcomeDuplicate, err
+	}
+	return monitoring.OutcomeNoLongerMatches, nil
+}
+
+func commitWithdrawal(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (string, error) {
+	org := in.Organization
+	var enabled, tombstoned, scoped bool
+	var corpusID string
+	err := tx.QueryRow(ctx, `SELECT s.enabled,r.corpus_id,
+  EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+  EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=r.organization AND sc.corpus_id=r.corpus_id AND sc.subscription_id=s.id)
+FROM subscriptions s JOIN records r ON r.organization=s.organization AND r.id=$3
+WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.RecordID).Scan(&enabled, &corpusID, &tombstoned, &scoped)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoring.OutcomeIneligible, nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,evidence,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		org, matchID, in.SubscriptionID, in.SubscriptionVersionID, queryID, queryVersionID, corpusID, in.RecordID, in.VersionID, evidenceJSON, position); err != nil {
-		return "", err
+	if !enabled {
+		return monitoring.OutcomeSubscriptionDisabled, nil
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id) VALUES($1,$2,$3,$4,$5,$6)`, org, deliveryID, matchID, destination, kind, eventID(event)); err != nil {
-		return "", err
+	if !tombstoned || !scoped {
+		return monitoring.OutcomeIneligible, nil
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,body) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		org, eventID(event), kind, matchID, in.RecordID, in.VersionID, in.SubscriptionID, in.SubscriptionVersionID, deliveryID, body); err != nil {
-		return "", err
+	prior, found, err := latestMatch(ctx, tx, org, in.SubscriptionID, in.RecordID, "")
+	if err != nil || !found {
+		return monitoring.OutcomeIneligible, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id) VALUES($1,$2)`, org, deliveryID); err != nil {
-		return "", err
+	created, err := commitNotice(ctx, tx, org, notice{Kind: monitoring.NoticeWithdrawn, CorpusID: corpusID, Destination: prior.destination,
+		References: monitoring.NoticeReferences{MatchID: prior.id, RecordID: in.RecordID, RecordVersionID: prior.versionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: prior.subscriptionVersionID}}, nil)
+	if err != nil || !created {
+		return monitoring.OutcomeDuplicate, err
 	}
-	return monitoring.OutcomeMatched, nil
+	return monitoring.OutcomeWithdrawalNotified, nil
+}
+
+// notice is one monitoring notice to commit; its Delivery ID is derived.
+type notice struct {
+	Kind, CorpusID, Destination string
+	References                  monitoring.NoticeReferences
+}
+
+// commitNotice commits a notice's public event, optional Match (withMatch runs
+// after the event so it can store the journal position), unique Delivery,
+// immutable body and outbox work. The event identity derives from the kind and
+// the referenced Match, as does the Delivery (match, destination, kind); an
+// existing Delivery commits nothing and reports false, so a repeat never
+// reaches a unique violation.
+func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatch func(position int64) error) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM deliveries WHERE organization=$1 AND match_id=$2 AND destination_id=$3 AND event_kind=$4)`, org, n.References.MatchID, n.Destination, n.Kind).Scan(&exists); err != nil || exists {
+		return false, err
+	}
+	r := &n.References
+	r.DeliveryID = content.StableID("delivery", org, r.MatchID, n.Destination, n.Kind)
+	event := eventInput{Organization: org, CorpusID: n.CorpusID, Kind: n.Kind, Resource: "match", ResourceID: r.MatchID, MutationID: r.MatchID}
+	// The notice time is the transaction time, which is also the event's occurred_at.
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+		return false, err
+	}
+	body, err := json.Marshal(monitoring.Notice{EventID: eventID(event), Type: n.Kind, SchemaVersion: "1", OccurredAt: now.UTC(), References: *r})
+	if err != nil {
+		return false, err
+	}
+	position, err := appendEventAt(ctx, tx, event)
+	if err != nil {
+		return false, err
+	}
+	if withMatch != nil {
+		if err = withMatch(position); err != nil {
+			return false, err
+		}
+	}
+	var previous any
+	if r.PreviousMatchID != "" {
+		previous = r.PreviousMatchID
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id) VALUES($1,$2,$3,$4,$5,$6)`, org, r.DeliveryID, r.MatchID, n.Destination, n.Kind, eventID(event)); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		org, eventID(event), n.Kind, r.MatchID, r.RecordID, r.RecordVersionID, r.SubscriptionID, r.SubscriptionVersionID, r.DeliveryID, previous, body, position); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id) VALUES($1,$2)`, org, r.DeliveryID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 const matchColumns = `id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,record_id,record_version_id,coalesce(previous_match_id,''),evidence,position`
@@ -331,10 +511,11 @@ func (s ContentStore) Matches(ctx context.Context, org, subscriptionID string, a
 // current admission view derived from canonical state.
 func (s ContentStore) Delivery(ctx context.Context, org, id string) (monitoring.Delivery, error) {
 	var d monitoring.Delivery
-	var enabled, withdrawn bool
+	var enabled, withdrawn, superseded bool
+	var kind string
 	var next *time.Time
-	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,s.enabled,
-  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,n.kind,s.enabled,
+  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),`+noticeSupersededSQL+`,
   d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,''),
   (SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id AND o.available_at<'infinity')
 FROM deliveries d
@@ -345,7 +526,7 @@ JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &enabled, &withdrawn,
+WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &kind, &enabled, &withdrawn, &superseded,
 		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, monitoring.ErrNotFound
@@ -356,10 +537,8 @@ WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.Subscr
 	switch {
 	case d.State == "delivered" || d.State == "exhausted":
 		d.Admission = monitoring.Admission{Reason: "terminal"}
-	case !enabled:
-		d.Admission = monitoring.Admission{Reason: "subscription_disabled"}
-	case withdrawn:
-		d.Admission = monitoring.Admission{Reason: "record_withdrawn"}
+	case monitoring.AdmissionReason(kind, enabled, withdrawn, superseded) != "":
+		d.Admission = monitoring.Admission{Reason: monitoring.AdmissionReason(kind, enabled, withdrawn, superseded)}
 	default:
 		d.Admission = monitoring.Admission{Allowed: true}
 		// Scheduled work of an admissible pending Delivery; a claimed or

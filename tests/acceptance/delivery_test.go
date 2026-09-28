@@ -71,8 +71,9 @@ type reply struct {
 }
 
 // captureReceiver verifies every request, records its raw bytes and answers
-// according to the Subscription the notice references: the n-th request for
-// a Subscription gets its n-th scripted reply, the last one repeating.
+// according to the Subscription (and optionally notice type) the notice
+// references: the n-th request for a script gets its n-th scripted reply, the
+// last one repeating.
 type captureReceiver struct {
 	key      []byte
 	mu       sync.Mutex
@@ -88,6 +89,12 @@ func (c *captureReceiver) script(subscriptionID string, replies ...reply) {
 	c.scripts[subscriptionID] = replies
 }
 
+// scriptType sets the replies for one Subscription's notices of one type; it
+// takes precedence over the Subscription's script.
+func (c *captureReceiver) scriptType(subscriptionID, eventType string, replies ...reply) {
+	c.script(subscriptionID+" "+eventType, replies...)
+}
+
 func (c *captureReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	answer := reply{status: http.StatusNoContent}
@@ -96,16 +103,21 @@ func (c *captureReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Parse only after authenticity was verified on the raw bytes.
 		var event struct {
+			Type       string `json:"type"`
 			References struct {
 				SubscriptionID string `json:"subscription_id"`
 			} `json:"references"`
 		}
 		if json.Unmarshal(body, &event) == nil {
 			c.mu.Lock()
-			if replies := c.scripts[event.References.SubscriptionID]; len(replies) > 0 {
-				n := c.served[event.References.SubscriptionID]
+			key := event.References.SubscriptionID + " " + event.Type
+			if len(c.scripts[key]) == 0 {
+				key = event.References.SubscriptionID
+			}
+			if replies := c.scripts[key]; len(replies) > 0 {
+				n := c.served[key]
 				answer = replies[min(n, len(replies)-1)]
-				c.served[event.References.SubscriptionID] = n + 1
+				c.served[key] = n + 1
 			}
 			c.mu.Unlock()
 		}

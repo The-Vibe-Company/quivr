@@ -18,6 +18,10 @@ type fakeEvaluation struct {
 	completed []string
 	retried   []string
 	committed []monitoring.MatchEvidence
+	negative  int
+	withdrawn int
+	targeted  int
+	failing   bool
 }
 
 func (f *fakeEvaluation) FanOut(context.Context) (int, error) { return 0, nil }
@@ -30,6 +34,7 @@ func (f *fakeEvaluation) Claim(context.Context, time.Duration) (monitoring.Inten
 	return in, nil
 }
 func (f *fakeEvaluation) Target(context.Context, monitoring.Intent) (monitoring.Target, error) {
+	f.targeted++
 	return f.target, nil
 }
 func (f *fakeEvaluation) Complete(_ context.Context, _ monitoring.Intent, outcome string) error {
@@ -46,6 +51,17 @@ func (f *fakeEvaluation) Retry(_ context.Context, _ monitoring.Intent, code stri
 func (f *fakeEvaluation) CommitMatch(_ context.Context, _ monitoring.Intent, ev monitoring.MatchEvidence) (string, error) {
 	f.committed = append(f.committed, ev)
 	return monitoring.OutcomeMatched, nil
+}
+func (f *fakeEvaluation) CommitNoMatch(context.Context, monitoring.Intent) (string, error) {
+	f.negative++
+	return monitoring.OutcomeNoLongerMatches, nil
+}
+func (f *fakeEvaluation) CommitWithdrawal(context.Context, monitoring.Intent) (string, error) {
+	if f.failing {
+		return "", errors.New("storage down")
+	}
+	f.withdrawn++
+	return monitoring.OutcomeWithdrawalNotified, nil
 }
 func (f *fakeEvaluation) Backlog(context.Context) (monitoring.Backlog, error) {
 	return monitoring.Backlog{}, nil
@@ -78,13 +94,16 @@ func TestEngineStepOutcomes(t *testing.T) {
 		completed string
 		retried   string
 		committed bool
+		negative  bool
 	}{
-		{"match commits", map[string]any{"ALERTE": "match"}, true, "", "", true},
-		{"no_match completes", map[string]any{"default": "no_match"}, true, monitoring.OutcomeNoMatch, "", false},
-		{"not_ready completes without a Match", map[string]any{"ALERTE": "not_ready"}, true, monitoring.OutcomeNotReady, "", false},
-		{"error retries and is never negative", map[string]any{"ALERTE": "error"}, true, "", "evaluator_error", false},
-		{"invalid configuration retries", map[string]any{"ALERTE": "perhaps"}, true, "", "evaluator_configuration_invalid", false},
-		{"disabled Subscription stops", map[string]any{"ALERTE": "match"}, false, monitoring.OutcomeSubscriptionDisabled, "", false},
+		{"match commits", map[string]any{"ALERTE": "match"}, true, "", "", true, false},
+		// Only a completed negative decision reaches the negative commit, which
+		// decides under the lock whether it invalidates a prior positive Match.
+		{"no_match commits a negative decision", map[string]any{"default": "no_match"}, true, "", "", false, true},
+		{"not_ready completes without a Match", map[string]any{"ALERTE": "not_ready"}, true, monitoring.OutcomeNotReady, "", false, false},
+		{"error retries and is never negative", map[string]any{"ALERTE": "error"}, true, "", "evaluator_error", false, false},
+		{"invalid configuration retries", map[string]any{"ALERTE": "perhaps"}, true, "", "evaluator_configuration_invalid", false, false},
+		{"disabled Subscription stops", map[string]any{"ALERTE": "match"}, false, monitoring.OutcomeSubscriptionDisabled, "", false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -102,6 +121,9 @@ func TestEngineStepOutcomes(t *testing.T) {
 			if c.committed != (len(store.committed) == 1) {
 				t.Fatalf("committed %v", store.committed)
 			}
+			if c.negative != (store.negative == 1) || store.withdrawn != 0 {
+				t.Fatalf("negative %d withdrawn %d", store.negative, store.withdrawn)
+			}
 		})
 	}
 	store := &fakeEvaluation{}
@@ -111,6 +133,58 @@ func TestEngineStepOutcomes(t *testing.T) {
 	}
 	if progressed, err := engine.Step(ctx); err != nil || progressed {
 		t.Fatal("idle step progressed", err)
+	}
+}
+
+// TestEngineWithdrawalIntents proves withdrawal work never reaches an
+// evaluator or the evaluation target, and a storage failure keeps it pending.
+func TestEngineWithdrawalIntents(t *testing.T) {
+	ctx := context.Background()
+	for _, failing := range []bool{false, true} {
+		store := &fakeEvaluation{failing: failing}
+		engine := engineFor(store, map[string]any{"ALERTE": "error"}, true)
+		store.intents[0].Kind = monitoring.IntentWithdrawal
+		if progressed, err := engine.Step(ctx); err != nil || !progressed {
+			t.Fatal(progressed, err)
+		}
+		if store.targeted != 0 || len(store.committed) != 0 || store.negative != 0 || len(store.completed) != 0 {
+			t.Fatalf("withdrawal ran evaluation: %+v", store)
+		}
+		if failing && (len(store.retried) != 1 || store.retried[0] != "storage_unavailable") {
+			t.Fatalf("failed withdrawal commit must stay pending: %v", store.retried)
+		}
+		if !failing && (store.withdrawn != 1 || len(store.retried) != 0) {
+			t.Fatalf("withdrawal commit: %+v", store)
+		}
+	}
+}
+
+// TestAdmissionReason pins which notice kinds each refusal applies to:
+// match.withdrawn has its own eligibility, and only match.created and
+// match.corrected are superseded by a later correction notice.
+func TestAdmissionReason(t *testing.T) {
+	kinds := []string{monitoring.NoticeCreated, monitoring.NoticeCorrected, monitoring.NoticeNoLongerMatches, monitoring.NoticeWithdrawn}
+	for _, kind := range kinds {
+		if got := monitoring.AdmissionReason(kind, true, false, false); got != "" {
+			t.Fatal(kind, got)
+		}
+		if got := monitoring.AdmissionReason(kind, false, true, true); got != "subscription_disabled" {
+			t.Fatal(kind, got)
+		}
+		want := "record_withdrawn"
+		if kind == monitoring.NoticeWithdrawn {
+			want = ""
+		}
+		if got := monitoring.AdmissionReason(kind, true, true, false); got != want {
+			t.Fatal(kind, got)
+		}
+		want = ""
+		if kind == monitoring.NoticeCreated || kind == monitoring.NoticeCorrected {
+			want = "superseded"
+		}
+		if got := monitoring.AdmissionReason(kind, true, false, true); got != want {
+			t.Fatal(kind, got)
+		}
 	}
 }
 

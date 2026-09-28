@@ -184,6 +184,22 @@ Operations are supported.
   shows `state`, `admission`, `last_error` and, while a retry is scheduled,
   `next_attempt_at`; `GET /v0/deliveries/{delivery_id}/attempts` pages the append-only
   attempt history. Disabling the Subscription stops further attempts.
+- When an alerted Record changes, the Subscription receives a linked follow-up notice
+  (reference-only, like `match.created`, with the same feed and webhook identity):
+  - a correction that still matches creates a new Match with `previous_match_id` and a
+    `match.corrected` notice carrying every `match.created` reference plus
+    `previous_match_id`, so it can be acted on alone;
+  - a correction that no longer matches sends `match.no_longer_matches`, whose
+    `match_id` is the earlier Match and `record_version_id` the correction; no Match
+    is created. An evaluator failure never sends it;
+  - a withdrawal sends `match.withdrawn` for the latest Match. Search stops returning
+    the Record at once; the notice follows asynchronously and is delivered even though
+    the Record is withdrawn. Subscriptions disabled at that point get none.
+
+  A `match.created` or `match.corrected` not yet delivered when a later correction
+  notice exists for the same Subscription and Record is not sent any more: its
+  Delivery stays `pending` with admission `superseded`. The earlier Match stays
+  readable through `GET /v0/matches/{match_id}`.
 
 ## Connectors
 

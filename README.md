@@ -116,6 +116,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
   Delivery. Matching uses a deterministic built-in evaluator for now.
+- **Correction and withdrawal notices** for alerted Records: a correction that still
+  matches gets a linked successor Match (`match.corrected`), one that no longer matches
+  gets `match.no_longer_matches` without a new Match, and a withdrawal gets
+  `match.withdrawn`. Earlier Matches stay readable.
 - **Signed webhook delivery** (Standard Webhooks) to deployment-configured destinations,
   with append-only attempt history, jittered exponential retries within a bounded
   delivery window, exhaustion, and no new attempt once a Subscription is disabled.
@@ -143,7 +147,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Correction and withdrawal notices, and plugin-owned match criteria.
+- Plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
 - The rest of the plugin platform: the Contract Runner (`quivr plugin test`) and

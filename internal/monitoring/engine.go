@@ -22,11 +22,26 @@ const (
 	OutcomeNotReady             = "not_ready"
 	OutcomeIneligible           = "ineligible"
 	OutcomeSubscriptionDisabled = "subscription_disabled"
+	// OutcomeNoLongerMatches: a negative decision on a correction committed a
+	// match.no_longer_matches notice for the prior positive Match.
+	OutcomeNoLongerMatches = "no_longer_matches"
+	// OutcomeWithdrawalNotified: a withdrawal intent committed its match.withdrawn notice.
+	OutcomeWithdrawalNotified = "withdrawal_notified"
 )
 
-// Intent is durable evaluation work for one Subscription Version and one
-// committed trigger event naming a Record Version.
+// Intent kinds. An evaluation intent runs the pinned evaluator on one Record
+// Version; a withdrawal intent consumes a committed record.withdrawn event and
+// runs no evaluator.
+const (
+	IntentEvaluation = "evaluation"
+	IntentWithdrawal = "withdrawal"
+)
+
+// Intent is durable monitoring work for one Subscription Version and one
+// committed trigger event. An evaluation intent names the evaluated Record
+// Version; a withdrawal intent names the Record's latest matched Version.
 type Intent struct {
+	Kind                  string
 	Organization          string
 	SubscriptionID        string
 	SubscriptionVersionID string
@@ -76,6 +91,15 @@ type EvaluationStore interface {
 	// its logical Delivery, notice, public event and outbox work. It completes
 	// the intent in the same transaction and returns the outcome.
 	CommitMatch(ctx context.Context, in Intent, evidence MatchEvidence) (string, error)
+	// CommitNoMatch records a completed negative decision. When the evaluated
+	// Version is an eligible correction of a Record with a prior positive
+	// Match, it atomically commits a match.no_longer_matches notice for that
+	// Match; it never creates a Match. It completes the intent.
+	CommitNoMatch(ctx context.Context, in Intent) (string, error)
+	// CommitWithdrawal rechecks the Tombstone and Subscription eligibility and
+	// idempotently commits the match.withdrawn notice for the Record's latest
+	// positive Match. It completes the intent.
+	CommitWithdrawal(ctx context.Context, in Intent) (string, error)
 	Backlog(ctx context.Context) (Backlog, error)
 }
 
@@ -176,6 +200,14 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if in.Kind == IntentWithdrawal {
+		outcome, err := e.Store.CommitWithdrawal(ctx, in)
+		if err != nil {
+			return true, e.retry(ctx, in, "storage_unavailable")
+		}
+		slog.Info("withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
+		return true, nil
+	}
 	target, err := e.Store.Target(ctx, in)
 	if errors.Is(err, ErrNotFound) {
 		return true, e.Store.Complete(ctx, in, OutcomeIneligible)
@@ -204,7 +236,12 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	}
 	switch result.Decision {
 	case DecisionNoMatch:
-		return true, e.Store.Complete(ctx, in, OutcomeNoMatch)
+		outcome, err := e.Store.CommitNoMatch(ctx, in)
+		if err != nil {
+			return true, e.retry(ctx, in, "storage_unavailable")
+		}
+		slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
+		return true, nil
 	case DecisionNotReady:
 		// A later trigger (for example enrichment) creates a new intent.
 		return true, e.Store.Complete(ctx, in, OutcomeNotReady)

@@ -240,9 +240,9 @@ Current authorization is checked again before exposing explanations or content.
   Delivery, the immutable `match.created` notice bytes, the public event with
   the same `event_id` and `occurred_at`, and the delivery outbox work. An
   existing Match commits nothing.
-- **Corrections:** a matching correction Version gets its own plain
-  `match.created` Match for now; `previous_match_id`, `match.corrected`,
-  `match.no_longer_matches` and withdrawal notices belong to THE-657.
+- **Corrections:** a matching correction Version of an already matched
+  Record creates a linked `match.corrected` Match; see "Implemented
+  corrections and withdrawal" below.
 - **Reads:** `GET /v0/matches?subscription_id=` pages by commit order with a
   signed cursor bound to the Subscription and key scope; `GET /v0/matches/{id}`
   and `GET /v0/deliveries/{id}` require `monitoring:read` and a key that
@@ -261,13 +261,16 @@ Current authorization is checked again before exposing explanations or content.
 - **Admission before I/O:** under the Organization journal lock, which disable
   and withdrawal also take, the worker rechecks that the Delivery is pending,
   its destination is configured for the Organization, the Subscription is
-  enabled and the Record is neither withdrawn nor Tombstoned. An admitted
+  enabled and the Record is neither withdrawn nor Tombstoned (a
+  `match.withdrawn` notice is exempt, and a superseded notice is refused;
+  see "Implemented corrections and withdrawal"). An admitted
   attempt commits an append-only attempt fact, the Delivery's move to
   `delivering` and a `delivery.updated` feed event; only then is the HTTP
   request sent. A refused admission records no attempt and parks the work;
   the Delivery stays `pending` and its admission view explains why
-  (`subscription_disabled`, `record_withdrawn`, or `destination_unavailable`
-  when its destination is no longer configured for the Organization). Claims
+  (`subscription_disabled`, `record_withdrawn`, `superseded`, or
+  `destination_unavailable` when its destination is no longer configured for
+  the Organization). Claims
   are fenced by their lease, so a step that outlived its lease admits nothing.
   The Match transaction never performs network I/O.
 - **Request:** HTTP POST of the stored notice bytes, unchanged, with
@@ -330,10 +333,9 @@ Current authorization is checked again before exposing explanations or content.
   `pending` (disabling fabricates no transport outcome). The window is never
   extended: parked work that becomes claimable after its window end (for
   example through a future re-enable) ends `exhausted` with reason
-  `window_elapsed` without an attempt. `superseded` and `access_denied` have
-  no producer yet: there is no Subscription reconfiguration or destination
-  rights revocation, and newer-Record-Version semantics belong to the
-  correction notices (THE-657).
+  `window_elapsed` without an attempt. `access_denied` has no producer yet:
+  there is no Subscription reconfiguration or destination rights revocation.
+  `superseded` is described under "Implemented corrections and withdrawal".
 - **Reads:** `GET /v0/deliveries/{id}` adds `next_attempt_at` while the
   Delivery is `pending`, admission is allowed and a retry is scheduled. No
   retry administration or other delivery channel exists.
@@ -346,6 +348,78 @@ Current authorization is checked again before exposing explanations or content.
   excluded, so a disabled Subscription's Deliveries never read as stuck work;
   a Delivery disabled while already scheduled is counted until its next
   claim parks it. No identifier is used as a label.
+
+### Implemented corrections and withdrawal (THE-657)
+
+- **Prior positive Match:** for one Subscription and Record, the latest Match
+  by commit position on another Record Version. Follow-up notices use the
+  destination pinned by the Subscription Version of the Match they reference,
+  which is also the one its Delivery identity names.
+- **Positive correction:** under the journal lock and the same guard as any
+  Match, a matching correction creates its own Match (identity unchanged:
+  Subscription Version + Record Version) with `previous_match_id`, and a
+  `match.corrected` notice. That notice carries every `match.created`
+  reference (Match, Record and corrected Version, Subscription and Version,
+  Delivery) plus `previous_match_id`, so a consumer that never received the
+  earlier notice can act on it alone.
+- **Negative correction:** only a completed `no_match` decision, never
+  `not_ready` or an evaluator error, reaches the negative commit. Under the
+  same guard (enabled pinned Subscription Version, current eligible Version,
+  Corpus in scope), when the Version has no Match and a prior positive Match
+  exists, it commits `match.no_longer_matches` with `match_id` = prior Match
+  and `record_version_id` = the correction, its Delivery, event and outbox,
+  and records the intent outcome `no_longer_matches`. No Match is created.
+  The notice and Delivery are unique per prior Match: a further non-matching
+  correction of the same Match commits nothing (`duplicate`). Without a prior
+  Match the outcome stays `no_match`.
+- **Withdrawal:** the Content transaction intent is the `record.withdrawn`
+  event that Withdraw commits with the Tombstone (once per Record). The
+  evaluation dispatch checkpoint also consumes it and records one withdrawal
+  intent (`evaluation_intents.kind = withdrawal`) per enabled Subscription
+  with a Match on the Record, in the same paged, checkpointed transaction. No
+  Match commits after the Tombstone, so every relevant Match precedes the
+  event. The evaluation workers claim withdrawal intents with the same lease
+  and backoff and run no evaluator: under the journal lock they require the
+  Tombstone, an enabled Subscription and the Record's Corpus in its scope
+  (not the positive no-Tombstone guard), then commit `match.withdrawn` for
+  the latest positive Match, with that Match's Version, once. A Subscription
+  disabled after dispatch gets no notice (outcome `subscription_disabled`).
+  Limitation: a Subscription disabled when the withdrawal is dispatched never
+  gets that notice; there is no re-enable. Withdraw itself is unchanged, so
+  search, matching and ordinary admission stop at once, independently of
+  this worker.
+- **Identities:** each notice's `event_id` derives from its type and its
+  referenced Match, and its Delivery from (Match, destination, type); every
+  commit checks for an existing Delivery first, so a repeat commits nothing
+  instead of failing. Feed events and webhooks share each notice's ID, type,
+  time and references.
+- **Admission by notice type:** after the destination check, a disabled
+  Subscription refuses every notice (`subscription_disabled`). A withdrawn
+  Record refuses `match.created`, `match.corrected` and
+  `match.no_longer_matches` (`record_withdrawn`); `match.withdrawn` has its
+  own eligibility and is admitted. The worker and `GET /v0/deliveries/{id}`
+  share this rule.
+- **Superseded:** a `match.created` or `match.corrected` notice is
+  superseded once a later `match.corrected` or `match.no_longer_matches`
+  notice exists for the same Subscription and Record; `match.no_longer_matches`
+  and `match.withdrawn` are never superseded. Deliveries are unordered, so
+  sending a stale positive after its correction would re-assert a match the
+  consumer was just told had changed; the later notice names the earlier Match,
+  which stays readable. A superseded Delivery is refused like other refusals:
+  no attempt, it stays `pending` with admission `superseded` and its work is
+  parked. Parked work never becomes claimable again, so it stays `pending`
+  rather than `exhausted`, like a disabled Subscription's. An attempt already
+  admitted finishes, and a delivered notice is unaffected. Notice order uses
+  `monitoring_notices.position`, the journal position of the notice's event,
+  not change events subject to retention. Residual case, outside this
+  slice's scope (no successive-corrections policy): a `match.no_longer_matches`
+  still retrying when a later correction matches again can arrive after that
+  `match.corrected`.
+- **Negative decisions stay cheap:** a `no_match` for a Record without a Match
+  on another Version completes without the journal lock, as before; only a
+  possible invalidation takes it. This is safe because a Match on another
+  Version commits only while that Version is current, before this Version's
+  intent is dispatched.
 
 ## Evaluation and transactions
 
