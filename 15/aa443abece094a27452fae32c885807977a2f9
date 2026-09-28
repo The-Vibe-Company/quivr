@@ -1,0 +1,123 @@
+tests/plugin-contract/malformed-part/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+tests/plugin-contract/wrong-error-class/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+tests/plugin-contract/malformed-part/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_a51f76e5167db4 1-210
+tests/plugin-contract/nondeterministic/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+tests/plugin-contract/bad-checksum/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+tests/plugin-contract/undeclared-namespace/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+tests/plugin-contract/oversize/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_8a0e9e008285e7 250-253
+tests/plugin-contract/bad-checksum/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+internal/plugins/output_test.go
+  s_54b80c92daa9cb::t_9be9d8660c88f8 1-124
+internal/plugins/cli/test.go
+  s_54b80c92daa9cb::t_78925ec69061f8 109,111,118
+  s_54b80c92daa9cb::t_70f5337539635b 1-108,110,112-117,119-122
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_01397d4c687d9f 35,445-451,474
+  s_54b80c92daa9cb::t_c68c60f592a782 177-186,191,206-207,209
+tests/plugin-contract/incompatible-range/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_f470723747a2fa 1-14,16-38,40-156,158-170
+  s_54b80c92daa9cb::t_ba61b3da2ed09d 15,39,157
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_54d9d541b4a58d 24-30
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_c09e89c165af2c 195
+  s_54b80c92daa9cb::t_d9fd720dd4fdc0 28-32
+  s_54b80c92daa9cb::t_1c95230084169b 61-65
+  s_54b80c92daa9cb::t_982aa32453f411 17,19
+  s_54b80c92daa9cb::t_885e5e96972f0e 107-109,116-127,130-145,147-173
+tests/plugin-contract/oversize/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+internal/plugins/protocol.go
+  s_54b80c92daa9cb::t_088a8044329abd 153
+tests/plugin-contract/valid/fixtures/note.json
+  s_54b80c92daa9cb::t_f66ba75dcec46a 1-7
+contracts/contracts.go
+  s_54b80c92daa9cb::t_b66db4338a52c5 22-34
+tests/plugin-contract/valid/fixtures/note.txt
+  s_54b80c92daa9cb::t_538c27046edb72 1
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_a23efb0d9afe92 50-54
+  s_54b80c92daa9cb::t_c0e130e97d856c 6-9
+tests/plugin-contract/valid/expect.json
+  s_54b80c92daa9cb::t_ddc6654a78e1cc 1-4
+internal/content/content.go
+  s_54b80c92daa9cb::t_13a48ef3a0e1c9 518
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_cc88746753bbf5 188-192
+  s_54b80c92daa9cb::t_c9cdfdb1ed171e 20
+  s_54b80c92daa9cb::t_713ad9af226d92 19,396,412-413,418-441
+  s_54b80c92daa9cb::t_cbd1d519dab527 1-18,21-136,138-187,193-204,206-304,307-308,313-395,397-411,414-417,442-613
+  s_54b80c92daa9cb::t_3cbe6cc581a406 137
+  s_54b80c92daa9cb::t_b28880230e9d1f 205
+  s_54b80c92daa9cb::t_3765004f2d5ec1 305-306,309-312
+tests/plugin-contract/nondeterministic/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+internal/plugins/output.go
+  s_54b80c92daa9cb::t_6e32392e84f363 1-266
+tests/plugin-contract/timeout/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+tests/plugin-contract/valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f980331ffcd5f5 1-22
+README.md
+  s_54b80c92daa9cb::t_d4a285a206cf59 147-153
+  s_54b80c92daa9cb::t_367ca9b0d83eff 160-161
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_57bf430baef32a 229-230
+  s_54b80c92daa9cb::t_958f54efb4e429 19
+  s_54b80c92daa9cb::t_d3732e03dd90a5 236-263
+  s_54b80c92daa9cb::t_56505a316427c9 128-133,136-141,143-155
+tests/plugin-contract/timeout/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-13
+tests/plugin-contract/incompatible-range/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-12
+internal/plugins/scaffold/template/README.md
+  s_54b80c92daa9cb::t_9dd15736e9f899 25,28-30
+  s_ec117ba6cf48fd::t_4548e13bd43093 31
+tests/plugin-contract/wrong-error-class/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+tests/plugin-contract/undeclared-namespace/expect.json
+  s_54b80c92daa9cb::t_383bb973a1edbe 1-6
+internal/content/extensions.go
+  s_54b80c92daa9cb::t_c0e2e279bc934b 17-33
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_3804bf531cfd89 42
+  s_54b80c92daa9cb::t_6df03a6047cf0e 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15aa443abece094a27452fae32c885807977a2f9",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
