@@ -205,7 +205,9 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 		slog.Info("delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused)
 		return true, nil
 	}
+	sent := time.Now()
 	outcome, known := d.send(ctx, a)
+	elapsed := time.Since(sent)
 	if !known {
 		// Shutdown interrupted the request after admission: the receiver may
 		// have processed it. Leave the attempt without an outcome; lease
@@ -224,7 +226,8 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	d.Metrics.Observe(outcome.Outcome)
-	slog.Info("delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds())
+	d.Metrics.ObserveDuration(elapsed)
+	slog.Info("delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds(), "duration_ms", elapsed.Milliseconds())
 	return true, nil
 }
 

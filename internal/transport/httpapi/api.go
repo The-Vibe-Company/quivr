@@ -29,6 +29,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 
@@ -58,6 +59,8 @@ type API struct {
 	connectorSchema  *jsonschema.Schema
 	scheduleSchema   *jsonschema.Schema
 	credentialSchema *jsonschema.Schema
+	// Commands counts accepted durable commands; the zero value ignores them.
+	Commands telemetry.Commands
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {

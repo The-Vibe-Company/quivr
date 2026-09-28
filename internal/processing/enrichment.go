@@ -3,6 +3,8 @@ package processing
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
@@ -27,18 +29,21 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	if err = s.Content.EnrichmentProgress(ctx, org, v.ID, "running", ""); err != nil {
 		return err
 	}
+	started := time.Now()
 	err = s.enrich(ctx, org, v)
 	if err != nil {
 		state, code := "retrying", "enrichment_unavailable"
 		if errors.Is(err, content.ErrConflict) {
 			state, code = "blocked", "derivation_conflict"
 		}
+		s.outcome("enrichment", state, receiptID, v, started, code)
 		_ = s.Content.EnrichmentProgress(ctx, org, v.ID, state, code)
 		if state == "blocked" {
 			return nil
 		}
 		return errors.New("enrichment unavailable")
 	}
+	s.outcome("enrichment", "succeeded", receiptID, v, started, "")
 	return nil
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) error {

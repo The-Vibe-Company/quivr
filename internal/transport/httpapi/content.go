@@ -7,6 +7,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"log/slog"
 	"net/http"
@@ -100,6 +101,8 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		if code != "" {
 			failure(w, status, code)
 		} else {
+			a.Commands.Accepted(telemetry.CommandRecord, 1)
+			slog.Info("command accepted", "component", "api", "command", telemetry.CommandRecord, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
 			w.Header().Set("Location", "/v0/ingestion-receipts/"+receipt.ID)
 			send(w, 202, receiptToTransport(receipt))
 		}
@@ -143,6 +146,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 			}
 			result.Items = append(result.Items, item)
 		}
+		a.Commands.Accepted(telemetry.CommandBatchEntry, receipts)
 		slog.Info("ingestion batch", "request_id", w.Header().Get("X-Request-ID"), "entries", len(entries), "receipts", receipts, "rejected", len(entries)-receipts, "retryable", retryable)
 		send(w, 200, result)
 		return true
@@ -174,6 +178,8 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		if err != nil {
 			contentError(w, err)
 		} else {
+			a.Commands.Accepted(telemetry.CommandWithdrawal, 1)
+			slog.Info("command accepted", "component", "api", "command", telemetry.CommandWithdrawal, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
 			w.Header().Set("Location", "/v0/ingestion-receipts/"+receipt.ID)
 			send(w, 202, receiptToTransport(receipt))
 		}

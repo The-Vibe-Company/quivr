@@ -72,6 +72,10 @@ stay visible. The Spec 1 obligation map is in
 
 - Metrics are a small Prometheus-text set on the probe listeners. There are no
   dashboards, distributed tracing or alerting.
+- Counters and histograms reset when a process restarts.
+- The ingestion backlog counts Receipts that are not yet materialized, not later
+  processing stages. Receipts accepted before the `accepted_at` migration are
+  dated at migration time.
 
 **Supply chain**
 

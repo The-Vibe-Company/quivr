@@ -17,8 +17,11 @@ func TestDeliveryMetricsExposeOutcomesAndBacklog(t *testing.T) {
 	for _, o := range []string{monitoring.AttemptAcknowledged, monitoring.AttemptRetryableError, monitoring.AttemptRetryableError, monitoring.AttemptUnknown, "not-an-outcome"} {
 		m.Observe(o)
 	}
+	m.ObserveDuration(120 * time.Millisecond)
+	m.Extra = func(w io.Writer) { io.WriteString(w, "quivr_extra 1\n") }
 	var nilMetrics *monitoring.DeliveryMetrics
 	nilMetrics.Observe(monitoring.AttemptAcknowledged) // nil-safe
+	nilMetrics.ObserveDuration(time.Second)
 	h := m.Handler(func(context.Context) (monitoring.DeliveryBacklog, error) {
 		return monitoring.DeliveryBacklog{Pending: 3, OldestAge: 90 * time.Second}, nil
 	})
@@ -34,6 +37,10 @@ func TestDeliveryMetricsExposeOutcomesAndBacklog(t *testing.T) {
 		"quivr_delivery_oldest_pending_age_seconds 90",
 		"# TYPE quivr_delivery_attempts_total counter",
 		"# TYPE quivr_delivery_pending gauge",
+		`quivr_delivery_request_duration_seconds_bucket{le="0.1"} 0`,
+		`quivr_delivery_request_duration_seconds_bucket{le="0.25"} 1`,
+		"quivr_delivery_request_duration_seconds_count 1",
+		"quivr_extra 1",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, text)

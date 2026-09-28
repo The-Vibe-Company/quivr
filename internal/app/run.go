@@ -20,6 +20,7 @@ import (
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -274,14 +275,23 @@ func Run(command string) error {
 	})
 	deliveryStore := postgres.DeliveryStore{ContentStore: store}
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
+	commands := telemetry.NewCommands()
 	if command == "worker" {
-		// Delivery attempt outcomes and admissible backlog, in Prometheus text format.
+		// Delivery attempt outcomes and admissible backlog, processing outcomes and
+		// acceptance-to-searchable durations, in Prometheus text format.
+		processingMetrics := telemetry.NewProcessing()
+		processor.Observer = processingObserver{metrics: processingMetrics, store: store}
+		deliveryMetrics.Extra = processingMetrics.Write
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
+	} else {
+		// Accepted durable commands and the ingestion backlog: what the API committed
+		// and how much of it still waits for the worker.
+		probes.Handle("GET /metrics", apiMetrics(commands, store.IngestionBacklog))
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval}))
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval}), httpapi.WithCommands(commands))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}

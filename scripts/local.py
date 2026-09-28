@@ -296,6 +296,11 @@ class Stack:
             # other restart scenarios this restores api and worker only, not the short-retention API.
             self.stop_processes();self.start_processes()
     def capture(self):
+        # Last metrics of the processes still running; bounded labels, no secrets.
+        for name,key in [('api','probe_port'),('worker','worker_probe_port')]:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/metrics",timeout=2) as r:(self.directory/f'metrics-{name}.txt').write_bytes(r.read())
+            except OSError:pass
         with (self.directory/'services.json').open('w') as out:self.compose('ps','--all','--format','json',stdout=out)
         for service in ['postgres','temporal','seaweed','weaviate','tei']:
             with (self.directory/(service+'.log')).open('w') as log:self.compose('logs','--no-color',service,stdout=log,stderr=log)
@@ -341,12 +346,17 @@ def delivery_restart(stack):
     stack.tests('TestDeliveryRestartBefore');stack.stop_worker();stack.start_worker();stack.tests('TestDeliveryRestartAfter')
 
 def journey(stack,steps):
-    """The assembled public journey (THE-662) around a real worker outage."""
+    """The assembled public journey (THE-662) around a real worker outage, which the
+    failure drill then explains from probes, metrics and logs alone."""
+    import failure_drill
     steps.run('journey_before_restart',stack.tests,'^TestJourneyBeforeRestart$')
     steps.run('stop_worker',stack.stop_worker)
-    try:steps.run('journey_worker_stopped',stack.tests,'^TestJourneyWorkerStopped$')
+    try:
+        steps.run('journey_worker_stopped',stack.tests,'^TestJourneyWorkerStopped$')
+        drill=steps.run('failure_drill_during_outage',failure_drill.during,stack)
     finally:steps.run('start_worker',stack.start_worker)
     steps.run('journey_after_restart',stack.tests,'^TestJourneyAfterRestart$')
+    steps.run('failure_drill_after_restart',failure_drill.after,stack,drill)
 
 def connectors(stack):
     # Connector acquisition keeps polling on its schedule; run it after every

@@ -4,6 +4,8 @@ package processing
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
@@ -29,6 +31,28 @@ type Service struct {
 	Retrieval  Indexer
 	Embedder   Embedder
 	Enrichment EnrichmentIndexer
+	// Observer receives processing outcomes for metrics; nil disables them.
+	Observer Observer
+}
+
+// Observer is told each processing outcome (bounded stage and outcome names)
+// and when a Receipt's Version became searchable.
+type Observer interface {
+	Outcome(stage, outcome string)
+	Searchable(ctx context.Context, org, receiptID string)
+}
+
+// outcome reports one stage outcome to the Observer and a correlated log line.
+func (s Service) outcome(stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
+	if s.Observer != nil {
+		s.Observer.Outcome(stage, outcome)
+	}
+	level := slog.LevelInfo
+	if outcome != "succeeded" {
+		level = slog.LevelWarn
+	}
+	slog.Log(context.Background(), level, "processing outcome", "component", "worker", "stage", stage, "outcome", outcome, "code", code,
+		"receipt_id", receiptID, "record_id", v.RecordID, "version_id", v.ID, "duration_ms", time.Since(started).Milliseconds())
 }
 
 func (s Service) Run(ctx context.Context, org, receiptID string) error {
@@ -45,8 +69,10 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 	if err = s.Content.BaselineProgress(ctx, org, v.ID, "running", "", false); err != nil {
 		return err
 	}
+	started := time.Now()
 	result, err := s.Processor.Process(ctx, Input{Organization: org, Version: v})
 	if errors.Is(err, ErrUnsupported) {
+		s.outcome("baseline", "blocked", receiptID, v, started, "segmentation_limit")
 		return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "segmentation_limit", true)
 	}
 	if err == nil {
@@ -56,8 +82,13 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		err = s.Retrieval.Index(ctx, org, v, result)
 	}
 	if err != nil {
+		s.outcome("baseline", "retrying", receiptID, v, started, "baseline_unavailable")
 		_ = s.Content.BaselineProgress(ctx, org, v.ID, "retrying", "baseline_unavailable", false)
 		return errors.New("baseline processing unavailable")
+	}
+	s.outcome("baseline", "succeeded", receiptID, v, started, "")
+	if s.Observer != nil {
+		s.Observer.Searchable(ctx, org, receiptID)
 	}
 	return nil
 }

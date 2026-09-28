@@ -149,6 +149,14 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   create, change the interval, rotate credentials and disable Connector Instances,
   with health following the change feed. Forms are generated from the kind schemas,
   so new kinds need no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
+- **Operational metrics and correlated logs** on each process's private probe
+  listener (`/metrics`, Prometheus text, bounded labels):
+  - API: accepted commands and the pending-ingestion backlog;
+  - worker: processing outcomes, time from acceptance to searchable, and delivery
+    attempts and durations.
+
+  JSON logs link request, Receipt, Record and Version IDs
+  ([harness](docs/quivr-v2-local-harness.md)).
 - **Retrieval measurement** with a frozen workload (`make measure`).
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,

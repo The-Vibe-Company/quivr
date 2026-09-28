@@ -9,6 +9,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
@@ -111,6 +112,7 @@ func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 			if err != nil {
 				uploadError(w, err)
 			} else {
+				a.Commands.Accepted(telemetry.CommandUploadConfirm, 1)
 				send(w, 202, sessionToTransport(session))
 			}
 			return true

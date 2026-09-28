@@ -151,6 +151,24 @@ class StepsAndReport(unittest.TestCase):
             self.assertIn(want, text)
 
 
+class FailureDrill(unittest.TestCase):
+    def test_samples_and_correlated_log_lines(self):
+        import failure_drill as fd
+        metrics = 'quivr_ingestion_pending 2\nquivr_commands_accepted_total{command="record"} 5\nquivr_x_bucket{le="1"} 0\n'
+        self.assertEqual(fd.sample(metrics, 'quivr_ingestion_pending'), 2)
+        self.assertEqual(fd.sample(metrics, 'quivr_commands_accepted_total', '{command="record"}'), 5)
+        self.assertEqual(fd.sample(metrics, 'quivr_x_bucket', '{le="1"}'), 0)
+        self.assertIsNone(fd.sample(metrics, 'quivr_missing'))
+        with tempfile.TemporaryDirectory() as d:
+            log = pathlib.Path(d) / 'api.log'
+            log.write_text('\n'.join([json.dumps({'msg': 'command accepted', 'receipt_id': 'r1', 'request_id': 'q1'}),
+                                      'not json', json.dumps({'msg': 'http request', 'request_id': 'q1'}),
+                                      json.dumps({'msg': 'command accepted', 'receipt_id': 'r2', 'request_id': 'q2'})]))
+            (pathlib.Path(d) / 'api.log.1').write_text(json.dumps({'msg': 'command accepted', 'receipt_id': 'r1', 'request_id': 'q0'}))
+            self.assertEqual(sorted(e['request_id'] for e in fd._lines(log, 'r1', 'command accepted')), ['q0', 'q1'])
+            self.assertEqual(fd._lines(pathlib.Path(d) / 'absent.log', 'r1', 'command accepted'), [])
+
+
 class FakeStack:
     def __init__(self, directory):
         self.name, self.directory, self.calls = 'quivr-verify-fake', pathlib.Path(directory), []

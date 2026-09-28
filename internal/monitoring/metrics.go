@@ -3,9 +3,13 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 )
 
 // DeliveryBacklog is the admissible scheduled delivery work: Deliveries that
@@ -26,6 +30,24 @@ var attemptOutcomes = []string{AttemptAcknowledged, AttemptRetryableError, Attem
 // Its zero value is ready; a nil receiver ignores observations.
 type DeliveryMetrics struct {
 	counts [3]atomic.Int64
+	// Extra renders further process metrics on the same endpoint (processing, THE-662).
+	Extra    func(io.Writer)
+	once     sync.Once
+	duration *telemetry.Histogram
+}
+
+func (m *DeliveryMetrics) histogram() *telemetry.Histogram {
+	m.once.Do(func() {
+		m.duration = telemetry.NewHistogram("quivr_delivery_request_duration_seconds", "Duration of webhook delivery requests with a known outcome.", 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30)
+	})
+	return m.duration
+}
+
+// ObserveDuration records one request's duration; a nil receiver ignores it.
+func (m *DeliveryMetrics) ObserveDuration(d time.Duration) {
+	if m != nil {
+		m.histogram().Observe(d)
+	}
 }
 
 // Observe counts one request outcome; other labels are dropped.
@@ -49,6 +71,10 @@ func (m *DeliveryMetrics) Handler(backlog func(context.Context) (DeliveryBacklog
 		fmt.Fprintln(w, "# TYPE quivr_delivery_attempts_total counter")
 		for i, o := range attemptOutcomes {
 			fmt.Fprintf(w, "quivr_delivery_attempts_total{outcome=%q} %d\n", o, m.counts[i].Load())
+		}
+		m.histogram().Write(w)
+		if m.Extra != nil {
+			m.Extra(w)
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

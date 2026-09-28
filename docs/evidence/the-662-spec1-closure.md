@@ -55,7 +55,7 @@ Verdicts: **met**; **met, caveat** (met, with an open limit that has a ticket);
 | 35 | Cancel does not undo; rerun gets a new, linked identity | THE-659 | met, caveat: THE-698 |
 | 36 | One command each to start, verify, reset and migrate | Harness, THE-673, THE-662: `lifecycle.json`, `scripts/test_local.py` | met by THE-662 |
 | 37 | Isolated acceptance, diagnostics and scoped cleanup | THE-662: per-run project, secrets and ports; step report; capture before cleanup on failure or interrupt | met by THE-662 |
-| 38 | Correlated logs, bounded errors and a few metrics | THE-656 delivery metrics; THE-662 command, processing, backlog and duration metrics with the failure drill | met by THE-662, second pull request |
+| 38 | Correlated logs, bounded errors and a few metrics | THE-656 delivery metrics; THE-662 command, processing, backlog and duration metrics with the failure drill | met by THE-662 (`failure-drill.json`) |
 | 39 | Language-neutral contracts and generated checks | Every `make verify`: original 24 examples and 31 boundaries guarded, Go/Python/TypeScript round trips, captured responses validated | met |
 | 40 | Honest limitation reporting | [remaining limits](../quivr-v2-remaining-limits.md), [dependency notices](../../third_party/README.md), `report.md` | met by THE-662 |
 

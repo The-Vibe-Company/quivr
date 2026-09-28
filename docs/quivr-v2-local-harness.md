@@ -332,6 +332,41 @@ project that:
 
 It writes `lifecycle.json`.
 
+**Metrics and the failure drill.** Each process serves Prometheus text on its
+private probe listener at `GET /metrics`. There is no client library, and labels
+come only from fixed sets: no identifiers or secrets.
+
+| Process | Metric | Kind |
+| --- | --- | --- |
+| API | `quivr_commands_accepted_total{command=record\|batch_entry\|withdrawal\|upload_confirm}` (replays included) | counter |
+| API | `quivr_ingestion_pending`, `quivr_ingestion_oldest_pending_age_seconds` (Receipts accepted but not yet materialized) | gauges |
+| Worker | `quivr_processing_outcomes_total{stage=baseline\|enrichment,outcome=succeeded\|retrying\|blocked}` | counter |
+| Worker | `quivr_acceptance_to_searchable_seconds` (from the Receipt's durable `accepted_at`) | histogram |
+| Worker | `quivr_delivery_attempts_total{outcome}` (THE-656), `quivr_delivery_request_duration_seconds` | counter, histogram |
+| Worker | `quivr_delivery_pending`, `quivr_delivery_oldest_pending_age_seconds` (THE-656) | gauges |
+
+Logs are structured JSON with bounded fields:
+- `command accepted`: `request_id`, `receipt_id`, `record_id`.
+- `processing outcome`: `stage`, `outcome`, `code`, `receipt_id`, `record_id`,
+  `version_id`, `duration_ms`.
+- `delivery attempt`: now carries `duration_ms`.
+
+**Failure drill** (`scripts/failure_drill.py`). This drill checks diagnostics only.
+It runs around the journey's real worker outage and asserts:
+- during the outage:
+  - the API `/readyz` answers 204, so durable acceptance is unaffected;
+  - the worker probe does not answer;
+  - the ingestion backlog gauges show the Receipt pending for at least 1 s;
+  - the API log correlates its `request_id` with the Receipt.
+- after the restart:
+  - the API backlog gauge drops, so the Receipt drained;
+  - the worker's processing counter records the outcome;
+  - its acceptance-to-searchable histogram records an observation over 1 s;
+  - its log names the same Receipt with its Record and Version.
+
+It writes `failure-drill.json` and the metric snapshots it read. The final
+`metrics-api.txt` and `metrics-worker.txt` are captured before cleanup.
+
 **Dependencies.** [third_party/README.md](../third_party/README.md) indexes the
 notices. `scripts/inventory.py` lists the Go modules linked into the built
 binary, the pinned images, the model and tokenizer, and the demo UI's npm
