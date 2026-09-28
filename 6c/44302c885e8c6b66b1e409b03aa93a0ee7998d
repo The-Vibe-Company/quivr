@@ -4,6 +4,7 @@ internal/transport/httpapi/search.go
   s_ec117ba6cf48fd::t_19b5ad166c528a 50,52
 scripts/local.py
   s_ec117ba6cf48fd::t_f5846cb378d6bc 51-52,54,66-80,82-99,113-114,244-245
+  s_ec117ba6cf48fd::t_afa1dc53e5c38f 246,248
 internal/orchestration/temporal/ingestion.go
   s_ec117ba6cf48fd::t_fe9819edebd7e6 11,13,45,59,80,104-105
   s_ec117ba6cf48fd::t_fddb04c77d9d1c 83
@@ -22,6 +23,7 @@ internal/adapters/postgres/eligibility.go
   s_ec117ba6cf48fd::t_91e87b253c2ef1 11-18
 internal/app/run.go
   s_ec117ba6cf48fd::t_9e8af777ec494a 16,104-107,187,204
+  s_ec117ba6cf48fd::t_b473fd6253bc33 146
 scripts/rebuild_recovery.py
   s_ec117ba6cf48fd::t_80f500fffa8311 1-87
 docs/quivr-v2-ingestion-contracts.md
