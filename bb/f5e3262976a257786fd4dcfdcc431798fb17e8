@@ -1,0 +1,89 @@
+tests/acceptance/rebuild_test.go
+  s_ec117ba6cf48fd::t_670a57ad1ee0cf 1-154
+internal/transport/httpapi/search.go
+  s_ec117ba6cf48fd::t_19b5ad166c528a 50,52
+scripts/local.py
+  s_ec117ba6cf48fd::t_f5846cb378d6bc 51-52,54,66-80,82-99,113-114,244-246,248
+internal/orchestration/temporal/ingestion.go
+  s_ec117ba6cf48fd::t_fe9819edebd7e6 11,13,45,59,80,104-105
+  s_ec117ba6cf48fd::t_fddb04c77d9d1c 83
+internal/retrieval/retrieval.go
+  s_ec117ba6cf48fd::t_19b5ad166c528a 25-32,35-37,40,45,63,67,114-125,127,134,142,165-169
+internal/adapters/postgres/searchable.go
+  s_ec117ba6cf48fd::t_ad3ec69d9ed240 18,36
+  s_ec117ba6cf48fd::t_91e87b253c2ef1 19-20,22,37-40,124,128,159,172
+internal/transport/httpapi/operations_test.go
+  s_ec117ba6cf48fd::t_06275deac13fe1 1-156
+docs/quivr-v2-search-contracts.md
+  s_ec117ba6cf48fd::t_5d8d86eefb37c8 76-105
+internal/adapters/weaviate/generation_test.go
+  s_ec117ba6cf48fd::t_6ec27ee1c6bfcd 1-98
+internal/adapters/postgres/eligibility.go
+  s_ec117ba6cf48fd::t_91e87b253c2ef1 11-18
+internal/app/run.go
+  s_ec117ba6cf48fd::t_fddb04c77d9d1c 146
+  s_ec117ba6cf48fd::t_9e8af777ec494a 16,104-107,187,204
+scripts/rebuild_recovery.py
+  s_ec117ba6cf48fd::t_80f500fffa8311 1-87
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_d9993ac68a3cc3 117-118
+internal/retrieval/rebuild_test.go
+  s_ec117ba6cf48fd::t_b49430bdcf9559 1-164
+internal/orchestration/temporal/rebuild.go
+  s_ec117ba6cf48fd::t_fe9819edebd7e6 1-101
+migrations/009_projection_rebuilds.sql
+  s_ec117ba6cf48fd::t_7ea3b8d7ee32fa 4-5
+  s_ec117ba6cf48fd::t_f5527ae3631673 1-3,6-47
+internal/adapters/weaviate/projection.go
+  s_ec117ba6cf48fd::t_f68e76fff93c72 21-23,78,88-89,97-98,131-135,137,139-143,154,158-159,171,177,180,198
+  s_ec117ba6cf48fd::t_ad3ec69d9ed240 130
+internal/adapters/postgres/operations.go
+  s_ec117ba6cf48fd::t_4d84686a69d767 1-120
+internal/content/searchable.go
+  s_ec117ba6cf48fd::t_19b5ad166c528a 46
+internal/adapters/postgres/embeddings.go
+  s_ec117ba6cf48fd::t_91e87b253c2ef1 80,84
+internal/adapters/postgres/operations_test.go
+  s_ec117ba6cf48fd::t_8dfdcd77eebc2e 1-125
+internal/operations/operations.go
+  s_ec117ba6cf48fd::t_ff4adb8d70e5b1 31-33
+  s_ec117ba6cf48fd::t_0d66bea02f2b68 1-30,34-100
+internal/retrieval/rebuild.go
+  s_ec117ba6cf48fd::t_94623217fe198e 1-4,6-7,9-42,188
+  s_ec117ba6cf48fd::t_1f06040c91de1a 5,8,43-75,77,79-98,100-128,130-151,153-163,165-175,177-179,181-187
+  s_ec117ba6cf48fd::t_e8a475411d0450 76,78,99,129,152,164,176,180
+internal/adapters/postgres/rebuild_test.go
+  s_ec117ba6cf48fd::t_0986419217ad98 1-53,55-216
+  s_ec117ba6cf48fd::t_0ded90516034f0 54
+internal/adapters/postgres/rebuild.go
+  s_ec117ba6cf48fd::t_0d7e63b6d9a0e3 1-17,19-239
+  s_ec117ba6cf48fd::t_f01647cddb1ab2 18
+.github/workflows/verify.yml
+  s_ec117ba6cf48fd::t_d9993ac68a3cc3 42
+internal/adapters/postgres/embeddings_test.go
+  s_ec117ba6cf48fd::t_2360a88c729ef1 100
+internal/adapters/postgres/searchable_test.go
+  s_ec117ba6cf48fd::t_1d0c3c77a17103 78
+internal/adapters/weaviate/relevance_test.go
+  s_ec117ba6cf48fd::t_4ad5fa8867f03b 98
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_6ffd6f278e668d 27,41-42,87-91,159-161
+internal/transport/httpapi/operations.go
+  s_ec117ba6cf48fd::t_392b6b380196f2 1-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bbf5e3262976a257786fd4dcfdcc431798fb17e8",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
