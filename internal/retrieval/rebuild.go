@@ -40,6 +40,9 @@ type RebuildStore interface {
 	ActivateRebuild(ctx context.Context, org, operationID string) (bool, error)
 	// FailRebuild records a terminal failure for a queued or running Operation.
 	FailRebuild(ctx context.Context, org, operationID string, failure operations.Error) error
+	// ConfirmCancel settles a cancel_requested Operation as canceled once this
+	// worker stops; it leaves every other state unchanged.
+	ConfirmCancel(ctx context.Context, org, operationID string) error
 }
 
 // RebuildContent reads canonical Versions and verified durable Embedding Artifacts.
@@ -86,7 +89,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 		return false, err
 	}
 	if target.Operation.State != operations.StateRunning {
-		return true, nil
+		return r.stop(ctx, org, operationID)
 	}
 	candidates, err := r.Store.RebuildCandidates(ctx, org, operationID, rebuildBatch)
 	if err != nil {
@@ -96,10 +99,14 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 		err = r.cover(ctx, org, target, c)
 		var failure terminal
 		if errors.As(err, &failure) {
-			return true, r.Store.FailRebuild(ctx, org, operationID, failure.failure)
+			// A failure never overrides an earlier cancellation request.
+			if err = r.Store.FailRebuild(ctx, org, operationID, failure.failure); err != nil {
+				return false, err
+			}
+			return r.stop(ctx, org, operationID)
 		}
 		if errors.Is(err, operations.ErrNotRunning) {
-			return true, nil
+			return r.stop(ctx, org, operationID)
 		}
 		if err != nil {
 			return false, err
@@ -110,9 +117,18 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	}
 	activated, err := r.Store.ActivateRebuild(ctx, org, operationID)
 	if errors.Is(err, operations.ErrNotRunning) {
-		return true, nil
+		return r.stop(ctx, org, operationID)
 	}
 	return activated, err
+}
+
+// stop ends work on an Operation that left the running state. Every canonical
+// effect is fenced on running, so a pending cancellation is now safe to settle.
+func (r Rebuilder) stop(ctx context.Context, org, operationID string) (bool, error) {
+	if err := r.Store.ConfirmCancel(ctx, org, operationID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, c RebuildCandidate) error {

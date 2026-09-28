@@ -48,10 +48,10 @@ class Stack:
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],[s.get('scoped_id','corpus_not_granted')]),
+            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*'])},
             # One deployment-configured webhook destination per Organization. These are obvious
@@ -247,6 +247,8 @@ def main():
                 verify_embedding_outage(stack)
                 from rebuild_recovery import verify as verify_rebuild_recovery
                 verify_rebuild_recovery(stack)
+                from operation_control import verify as verify_operation_control
+                verify_operation_control(stack)
                 # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them last so they cannot skew
                 # order-sensitive acceptance or timed outage scenarios.
                 stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild')

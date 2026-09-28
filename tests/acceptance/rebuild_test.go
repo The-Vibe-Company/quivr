@@ -13,8 +13,14 @@ import (
 // postRebuild initiates a rebuild and returns the Operation and its Location.
 func postRebuild(t *testing.T, token, corpusID, key string, want int) (map[string]any, string) {
 	t.Helper()
+	return postAction(t, token, "/v0/corpora/"+corpusID+"/rebuilds", key, want)
+}
+
+// postAction sends an ActionRequest and returns the response and its Location.
+func postAction(t *testing.T, token, path, key string, want int) (map[string]any, string) {
+	t.Helper()
 	data, _ := json.Marshal(map[string]any{"idempotency_key": key})
-	req, err := http.NewRequest("POST", os.Getenv("QUIVR_TEST_URL")+"/v0/corpora/"+corpusID+"/rebuilds", bytes.NewReader(data))
+	req, err := http.NewRequest("POST", os.Getenv("QUIVR_TEST_URL")+path, bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +36,7 @@ func postRebuild(t *testing.T, token, corpusID, key string, want int) (map[strin
 		t.Fatal(err)
 	}
 	if res.StatusCode != want {
-		t.Fatalf("rebuild %s: got %d want %d: %v", corpusID, res.StatusCode, want, body)
+		t.Fatalf("%s: got %d want %d: %v", path, res.StatusCode, want, body)
 	}
 	if dir := os.Getenv("QUIVR_TEST_CAPTURES"); dir != "" {
 		f, e := os.CreateTemp(dir, "response-*.json")
@@ -65,7 +71,7 @@ func awaitOperation(t *testing.T, location string) map[string]any {
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		op := request(t, "GET", location, os.Getenv("QUIVR_TEST_ADMIN"), nil, 200)
-		if op["state"] == "succeeded" || op["state"] == "failed" {
+		if op["state"] == "succeeded" || op["state"] == "failed" || op["state"] == "canceled" {
 			return op
 		}
 		if time.Now().After(deadline) {
@@ -165,5 +171,90 @@ func TestRebuildActivatesScopedGenerationAndReplays(t *testing.T) {
 		if e["type"] == "operation.updated" && e["resource"].(map[string]any)["kind"] != "operation" {
 			t.Fatalf("operation event resource %v", e)
 		}
+	}
+}
+
+// Public Operation control on a terminal rebuild: cancel returns the existing
+// outcome, rerun creates a new linked Operation that progresses to its own
+// activated generation, and unauthorized callers cannot act. Uses its own Corpus.
+// Cancellation of queued work before activation runs in scripts/operation_control.py,
+// which can hold the worker stopped.
+func TestRebuildCancelAndRerunTerminalOperation(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := fmt.Sprint(time.Now().UnixNano())
+	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Operation control", "idempotency_key": "operation-control-" + run}, 201)["corpus_id"].(string)
+	accepted := request(t, "POST", "/v0/records", admin, inlineCommand(c, "control-"+run, "balise", "Balise cardinale du chenal"), 202)
+	version := awaitRetrievalReady(t, accepted["receipt_id"].(string))["version_id"].(string)
+	cursor := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
+
+	source, location := postRebuild(t, admin, c, "control-1", 202)
+	sourceID := source["operation_id"].(string)
+	done := awaitOperation(t, location)
+	if done["state"] != "succeeded" {
+		t.Fatalf("source rebuild %v", done)
+	}
+	first := done["result"].(map[string]any)["projection_generation_id"].(string)
+
+	// Terminal cancel returns the existing outcome, whatever the key.
+	for _, key := range []string{"cancel-1", "cancel-1", "cancel-2"} {
+		got, _ := postAction(t, admin, location+"/cancel", key, 202)
+		if got["operation_id"] != sourceID || got["state"] != "succeeded" || got["result"].(map[string]any)["projection_generation_id"] != first {
+			t.Fatalf("terminal cancel %v", got)
+		}
+	}
+	// Unauthorized control is rejected without revealing foreign Operations.
+	for _, action := range []string{"/cancel", "/rerun"} {
+		postAction(t, os.Getenv("QUIVR_TEST_READER"), location+action, "denied", 403)
+		postAction(t, os.Getenv("QUIVR_TEST_DENIED"), location+action, "denied", 403)
+		postAction(t, os.Getenv("QUIVR_TEST_SCOPED"), location+action, "out-of-scope", 404)
+		postAction(t, os.Getenv("QUIVR_TEST_OTHER"), location+action, "foreign", 404)
+		postAction(t, admin, "/v0/operations/operation_absent_"+run+action, "absent", 404)
+	}
+
+	// Rerun creates a new linked Operation with its own target and dispatch.
+	rerun, rerunLocation := postAction(t, admin, location+"/rerun", "rerun-1", 202)
+	rerunID, _ := rerun["operation_id"].(string)
+	if rerunID == "" || rerunID == sourceID || rerun["previous_operation_id"] != sourceID || rerun["kind"] != "projection_rebuild" || rerun["corpus_id"] != c || rerunLocation != "/v0/operations/"+rerunID {
+		t.Fatalf("rerun %v at %q", rerun, rerunLocation)
+	}
+	if replay, again := postAction(t, admin, location+"/rerun", "rerun-1", 202); replay["operation_id"] != rerunID || again != rerunLocation {
+		t.Fatalf("rerun replay %v %q", replay, again)
+	}
+	// The rebuild route's own idempotency still names the source.
+	if replay, _ := postRebuild(t, admin, c, "control-1", 202); replay["operation_id"] != sourceID {
+		t.Fatalf("rebuild replay after rerun %v", replay)
+	}
+	finished := awaitOperation(t, rerunLocation)
+	if finished["state"] != "succeeded" || finished["previous_operation_id"] != sourceID {
+		t.Fatalf("rerun outcome %v", finished)
+	}
+	second := finished["result"].(map[string]any)["projection_generation_id"].(string)
+	if second == first {
+		t.Fatalf("rerun reused the source target generation %s", second)
+	}
+	if routed := generationsByVersion(t, []string{c}, "balise")[version]; routed != second {
+		t.Fatalf("search served generation %s, want rerun target %s", routed, second)
+	}
+	if again, _ := postRebuild(t, admin, c, "control-1", 202); again["operation_id"] != sourceID || again["result"].(map[string]any)["projection_generation_id"] != first {
+		t.Fatalf("source outcome changed after rerun %v", again)
+	}
+
+	// The journal records the rerun's transitions and nothing for terminal cancels.
+	deadline := time.Now().Add(15 * time.Second)
+	var seen []map[string]any
+	for typed(seen, "operation.updated", sourceID) < 3 || typed(seen, "operation.updated", rerunID) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("operation.updated transitions %v", seen)
+		}
+		var items []map[string]any
+		items, cursor = drain(t, admin, c, cursor, 0)
+		seen = append(seen, items...)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if typed(seen, "operation.updated", sourceID) != 3 || typed(seen, "operation.updated", rerunID) != 3 {
+		t.Fatalf("operation.updated counts source=%d rerun=%d, want 3 each", typed(seen, "operation.updated", sourceID), typed(seen, "operation.updated", rerunID))
 	}
 }

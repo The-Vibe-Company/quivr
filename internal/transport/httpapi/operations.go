@@ -10,7 +10,7 @@ import (
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-// WithOperations enables scoped rebuild initiation and Operation reads.
+// WithOperations enables scoped rebuild initiation, Operation reads, cancel and rerun.
 func WithOperations(service operations.Service) Option {
 	return func(a *API) { a.Operations = service }
 }
@@ -36,6 +36,12 @@ func operationToTransport(op operations.Operation) transport.Operation {
 }
 
 func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/v0/operations/"); ok {
+		if id, action, ok := strings.Cut(rest, "/"); ok && id != "" && (action == "cancel" || action == "rerun") {
+			a.operationAction(w, r, scope, id, action)
+			return true
+		}
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, "/v0/operations/"); ok && id != "" && !strings.Contains(id, "/") {
 		if r.Method != "GET" {
 			failure(w, 405, "method_not_allowed")
@@ -92,4 +98,49 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		send(w, 202, operationToTransport(op))
 	}
 	return true
+}
+
+// operationAction serves cancel and rerun. Both are 202 with the resulting
+// Operation: cancel returns the current state (terminal outcomes unchanged),
+// rerun the new linked Operation.
+func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id, action string) {
+	if r.Method != "POST" {
+		failure(w, 405, "method_not_allowed")
+		return
+	}
+	if !scope.Allows("operations:write") {
+		failure(w, 403, "forbidden")
+		return
+	}
+	raw, ok := decodeRequest(w, r, a.actionSchema)
+	if !ok {
+		return
+	}
+	key, _ := raw.(map[string]any)["idempotency_key"].(string)
+	var op operations.Operation
+	var err error
+	if action == "cancel" {
+		op, err = a.Operations.Cancel(r.Context(), scope, id, key)
+	} else {
+		op, err = a.Operations.Rerun(r.Context(), scope, id, key)
+	}
+	switch {
+	case errors.Is(err, corpus.ErrForbidden):
+		failure(w, 403, "forbidden")
+	case errors.Is(err, corpus.ErrNotFound):
+		failure(w, 404, "not_found")
+	case errors.Is(err, operations.ErrNotTerminal):
+		failure(w, 409, "operation_not_terminal")
+	case errors.Is(err, operations.ErrConflict):
+		failure(w, 409, "idempotency_conflict")
+	case errors.Is(err, operations.ErrUnsupportedKind):
+		failure(w, 422, "unsupported_operation_kind")
+	case err != nil:
+		failure(w, 503, "storage_unavailable")
+	default:
+		if action == "rerun" {
+			w.Header().Set("Location", "/v0/operations/"+op.ID)
+		}
+		send(w, 202, operationToTransport(op))
+	}
 }

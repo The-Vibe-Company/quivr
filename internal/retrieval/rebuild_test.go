@@ -19,10 +19,31 @@ type fakeRebuildStore struct {
 	failed     []operations.Error
 	activated  bool
 	gap        bool
+	// state mirrors the canonical Operation state; empty means running.
+	state string
+	// cancelAfterCovers requests cancellation once that many Versions are covered.
+	cancelAfterCovers int
+	// cancelBeforeActivate requests cancellation just before activation commits.
+	cancelBeforeActivate bool
+	confirms             int
+}
+
+func (f *fakeRebuildStore) current() string {
+	if f.state == "" {
+		return operations.StateRunning
+	}
+	return f.state
 }
 
 func (f *fakeRebuildStore) BeginRebuild(context.Context, string, string) (retrieval.RebuildTarget, error) {
-	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: operations.StateRunning}, Generation: content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}}, nil
+	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}}, nil
+}
+func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error {
+	if f.current() == operations.StateCancelRequested {
+		f.state = operations.StateCanceled
+		f.confirms++
+	}
+	return nil
 }
 func (f *fakeRebuildStore) RebuildCandidates(context.Context, string, string, int) ([]retrieval.RebuildCandidate, error) {
 	out := []retrieval.RebuildCandidate{}
@@ -37,18 +58,30 @@ func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg cont
 	if f.coverErr != nil {
 		return false, f.coverErr
 	}
+	if f.current() != operations.StateRunning {
+		return false, operations.ErrNotRunning
+	}
 	f.covered[seg.VersionID] = artifacts
+	if f.cancelAfterCovers > 0 && len(f.covered) >= f.cancelAfterCovers {
+		f.state = operations.StateCancelRequested
+	}
 	return true, nil
 }
 func (f *fakeRebuildStore) ActivateRebuild(context.Context, string, string) (bool, error) {
-	if len(f.failed) > 0 {
+	if f.cancelBeforeActivate {
+		f.state = operations.StateCancelRequested
+	}
+	if len(f.failed) > 0 || f.current() != operations.StateRunning {
 		return false, operations.ErrNotRunning
 	}
 	f.activated = !f.gap
 	return f.activated, nil
 }
 func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operations.Error) error {
-	f.failed = append(f.failed, e)
+	// Like the adapter, a failure only lands on a queued or running Operation.
+	if f.current() == operations.StateRunning || f.current() == operations.StateQueued {
+		f.failed = append(f.failed, e)
+	}
 	return nil
 }
 
@@ -56,6 +89,7 @@ type fakeRebuildContent struct {
 	versionErr error
 	loadErr    error
 	loads      int
+	onLoad     func()
 }
 
 func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID, id string) (content.Version, error) {
@@ -66,6 +100,9 @@ func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID
 }
 func (f *fakeRebuildContent) LoadEmbedding(_ context.Context, org, derivation string) (content.Embedding, []float32, error) {
 	f.loads++
+	if f.onLoad != nil {
+		f.onLoad()
+	}
 	if f.loadErr != nil {
 		return content.Embedding{}, nil, f.loadErr
 	}
@@ -181,5 +218,56 @@ func TestRebuildWaitsWhileCoverageGapsRemain(t *testing.T) {
 	done, err := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}).Step(context.Background(), "org", "op")
 	if err != nil || done {
 		t.Fatalf("gap step = %v %v", done, err)
+	}
+}
+
+// Cancellation landing mid-batch stops remaining work, keeps committed coverage
+// and settles the Operation as canceled without activating the target.
+func TestRebuildStopsRemainingWorkWhenCancellationIsRequested(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}, {RecordID: "r2", VersionID: "v2"}}, covered: map[string][]content.Embedding{}, cancelAfterCovers: 1}
+	p := &fakeRebuildProjection{}
+	run(t, rebuilder(store, &fakeRebuildContent{}, p))
+	if store.activated || store.state != operations.StateCanceled || store.confirms != 1 || len(store.failed) != 0 {
+		t.Fatalf("activated=%v state=%s confirms=%d failed=%v", store.activated, store.state, store.confirms, store.failed)
+	}
+	if _, ok := store.covered["v1"]; !ok || len(store.covered) != 1 {
+		t.Fatalf("committed coverage %v", store.covered)
+	}
+}
+
+// A request observed at the start of a step settles before any content work.
+func TestRebuildConfirmsCancellationRequestedBetweenSteps(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}, state: operations.StateCancelRequested}
+	c, p := &fakeRebuildContent{}, &fakeRebuildProjection{}
+	done, err := rebuilder(store, c, p).Step(context.Background(), "org", "op")
+	if err != nil || !done || store.state != operations.StateCanceled || p.lexical != 0 || c.loads != 0 {
+		t.Fatalf("done=%v err=%v state=%s projection=%+v loads=%d", done, err, store.state, p, c.loads)
+	}
+	// A queued Operation canceled directly never runs and needs no confirmation.
+	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}, state: operations.StateCanceled}
+	done, err = rebuilder(store, c, p).Step(context.Background(), "org", "op")
+	if err != nil || !done || store.state != operations.StateCanceled || store.confirms != 0 || p.lexical != 0 {
+		t.Fatalf("canceled step done=%v err=%v state=%s", done, err, store.state)
+	}
+}
+
+// Completion racing cancellation: once cancellation is committed first,
+// activation refuses and the Operation settles as canceled.
+func TestRebuildCancellationBeforeActivationPreventsCutover(t *testing.T) {
+	store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, cancelBeforeActivate: true}
+	run(t, rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}))
+	if store.activated || store.state != operations.StateCanceled {
+		t.Fatalf("activated=%v state=%s", store.activated, store.state)
+	}
+}
+
+// A terminal failure discovered after cancellation was requested settles as
+// canceled: the earlier operator request wins over the later failure.
+func TestRebuildTerminalFailureAfterCancelRequestSettlesCanceled(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+	c := &fakeRebuildContent{loadErr: corpus.ErrNotFound, onLoad: func() { store.state = operations.StateCancelRequested }}
+	run(t, rebuilder(store, c, &fakeRebuildProjection{}))
+	if store.activated || store.state != operations.StateCanceled || len(store.failed) != 0 {
+		t.Fatalf("activated=%v state=%s failed=%v", store.activated, store.state, store.failed)
 	}
 }

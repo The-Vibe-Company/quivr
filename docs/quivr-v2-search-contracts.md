@@ -52,7 +52,7 @@ Idempotency is scoped to Organization, Corpus and the rebuild route. Replaying
 the same key/request returns the same Operation even after completion; changing
 the canonical request conflicts. Retries and worker restarts keep both Operation
 identity and the target generation. A new independent rebuild command uses a new
-key; explicit rerun/cancel retain the existing Operation semantics.
+key; explicit cancel and rerun are described below.
 
 The worker rebuilds from canonical content and durable artifacts, validates the
 target generation, then activates it under the existing currentness/withdrawal
@@ -105,6 +105,58 @@ evaluation schema migrations are separate from rebuilding search projections.
   capped backoff (30 s maximum) and are logged with Operation ID and attempt.
 - `operation.updated` is emitted only on state transitions. Counters (`indexed`,
   `vectors_reused`) are only visible through the Operation read.
+
+### Cancel and rerun (THE-659)
+
+`POST /v0/operations/{operation_id}/cancel` and `/rerun` accept the existing
+`ActionRequest`, require `operations:write` and the Operation's Corpus in the
+key's scope (otherwise 404), and return HTTP 202 with an Operation. Only
+`projection_rebuild` Operations are controllable so far; a kind whose worker
+does not honor cancellation is rejected with 422 `unsupported_operation_kind`.
+
+Cancellation:
+
+- A `queued` Operation becomes `canceled` at once. No worker step has begun, so
+  no effect can be in flight; a workflow dispatched earlier sees `canceled` and
+  ends without work.
+- A `running` Operation becomes `cancel_requested`. The worker checks state at
+  the start of every step and at every commit, stops, and records `canceled`.
+  A cancellation normally settles within one batch. A dependency call that is
+  already in flight can delay it by up to one step timeout (2 min) plus one
+  retry backoff (30 s maximum); while PostgreSQL itself is unavailable it stays
+  `cancel_requested`, and no effect can commit in the meantime.
+- Coverage, counters and route activation all commit only while the Operation
+  is `running`, under the same Organization journal lock and Operation row lock
+  as cancellation. Completion racing cancellation has exactly one winner: if
+  activation commits first the Operation is `succeeded` and the cancel request
+  returns it; otherwise activation refuses and the Corpus keeps its prior
+  generation. A partially covered target is never activated.
+- Cancellation does not undo committed effects. Target-generation objects
+  already written stay in the shared collection and are never served; no purge
+  runs.
+- A terminal failure found after a cancel request settles as `canceled`.
+- Idempotency follows Operation state. The key is validated but not stored:
+  repeating a cancel with any key returns the current state and appends no
+  event, and a terminal Operation keeps its outcome.
+
+Rerun:
+
+- Only a terminal (`succeeded`, `failed`, `canceled`) Operation can be rerun;
+  otherwise 409 `operation_not_terminal`.
+- The caller's current permissions are revalidated: `operations:write` plus the
+  originating command's permission (`projections:rebuild`), and Corpus scope.
+- The rerun is a new Operation with a new ID, a new target generation and
+  `previous_operation_id` naming the source, committed with its dispatch intent
+  and `operation.updated` before HTTP 202 and a `Location` for the new
+  Operation. Reruns chain: a rerun can itself be rerun once terminal.
+- Idempotency is Organization + source Operation + key; the same key returns the
+  same rerun, a changed canonical request conflicts with 409
+  `idempotency_conflict`. Rerun keys never collide with keys sent to the rebuild
+  route. Technical retries of the rerun keep its own identity.
+- The source Operation and its outcome are unchanged.
+
+State changes (`queued`, `running`, `cancel_requested`, `canceled`,
+`succeeded`, `failed`) each append one `operation.updated` to the shared journal.
 
 ## Verification boundary
 

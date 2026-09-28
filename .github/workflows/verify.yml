@@ -40,6 +40,7 @@ jobs:
             .scratch/quivr-verify-*/embedding-provenance.json
             .scratch/quivr-verify-*/embedding-outage.json
             .scratch/quivr-verify-*/rebuild-recovery.json
+            .scratch/quivr-verify-*/operation-control.json
             .scratch/quivr-verify-*/relevance-report.json
             .scratch/quivr-verify-*/tei.log
             .scratch/quivr-verify-*/response-*.json

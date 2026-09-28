@@ -160,7 +160,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='011_projection_rebuilds.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='012_operation_control.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
