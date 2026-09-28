@@ -1,6 +1,16 @@
-# Railway evaluation demo (THE-664)
+# Railway evaluation demo
 
-This deployment runs the real THE-663 UI and V2 core. One dedicated Railway project,
+## Local demo first
+
+`make demo` runs the same web UI against a real local stack at http://127.0.0.1:5183.
+It keeps its own data across restarts; `make demo-reset` deletes only that demo's data
+and `make verify-demo` runs the browser checks. See
+[`quivr-search/README.md`](../../quivr-search/README.md) for prerequisites, frontend
+development and the optional shared password.
+
+## Hosted deployment
+
+This deployment runs the real [`quivr-search`](../../quivr-search/) UI and V2 core. One dedicated Railway project,
 `quivr-v2-demo`, contains eight single-replica services. Only `web` is exposed publicly.
 
 | Service | Runtime / responsibility | Persistence |
@@ -106,4 +116,4 @@ header. TLS terminates at Railway; no public API key belongs in the browser bund
   directly rather than supplying an invalid builder enum.
 
 Deployment IDs, final URL/DNS state, restart evidence and observed resource usage
-are recorded on THE-664 and in the deployment evidence once verified.
+are recorded in the [deployment evidence](../../docs/evidence/) once verified.

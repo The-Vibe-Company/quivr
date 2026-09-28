@@ -1,0 +1,222 @@
+# API walkthrough
+
+A guided tour of the implemented `v0` HTTP API and of the local stack's behaviour.
+[`contracts/http/v0/openapi.yaml`](../contracts/http/v0/openapi.yaml) is authoritative
+for request and response shapes; this page explains the semantics around them.
+
+## Local stack and API keys
+
+`make dev` builds a single `quivr` binary, starts PostgreSQL, Temporal, SeaweedFS
+(S3), Weaviate and TEI through Docker Compose, applies migrations and runs the API
+and worker as local processes. It prints the API address and the path of the
+generated `config.json`. Ports are dynamic and bound to loopback.
+
+Throwaway keys, settings and logs live in the private `.scratch/quivr-dev-…`
+directory. Never publish it: `state.json`, `config.json`, `worker.json` and `s3.json`
+contain credentials. The `keys` field of `config.json` maps each Bearer token to an
+Organization, a list of actions and a list of Corpora (`*` grants the whole
+Organization).
+
+| Command | Effect |
+| --- | --- |
+| `make down` | Stop the stack, keep development volumes |
+| `make reset` | Stop the stack and delete its volumes |
+| `make migrate` | Apply versioned migrations to the running stack |
+| `make generate` | Regenerate transport bindings after a contract change |
+| `GO=/path/to/go make …` | Use a specific Go toolchain |
+
+Local logs are capped at four 1 MiB files per process; Compose services keep three
+1 MiB files each. The private `/healthz` and `/readyz` probes use a separate port and
+are not part of the public API. No hosted model service or external key is required.
+Hot migrations can break running processes during evaluation; restart API and
+workers after migrating.
+
+## Corpora
+
+`POST /v0/corpora` with `name` and `idempotency_key` creates a Corpus; `GET /v0/corpora`
+and `GET /v0/corpora/{corpus_id}` read them. Replaying the same request under the same
+key returns the same Corpus; changing the request under that key is a conflict.
+Creating a Corpus requires `corpora:write` and the `*` Corpus scope, so a key bound to
+existing Corpora cannot create new ones. Explicit retrieval field mappings are
+validated and stored; an uninstalled `plugin_profile` is refused.
+
+## Ingesting text
+
+`POST /v0/records` takes an `idempotency_key`, a `source` (`corpus_id`, `namespace`,
+`record_key`) and `content` (`{"kind": "text", "text": "…"}`). The API answers `202`
+once the Receipt and the work to dispatch are committed, even if Temporal or S3 are
+down. Follow the `Location` header to the Receipt, then read
+`/v0/records/{record_id}/versions/{version_id}` for the Manifest and its text.
+Permissions are `content:write` and `content:read`, limited to authorized Corpora.
+
+- A Receipt resolves to `created`, `duplicate`, `withdrawal_applied` or `conflict`. It
+  never becomes "failed" because of an infrastructure outage; work is retried.
+- Without a `source_revision`, the canonical Manifest digest identifies the Version.
+  Reusing a revision with different content keeps history and reports a conflict.
+- `source_position` is an optional decimal string of 1 to 1000 digits; leading zeros
+  are normalized.
+- A single command is limited to 1 MiB.
+- Structured Manifests (`kind: "manifest"`), extensions and relations are accepted
+  and preserved; see [ingestion contracts](quivr-v2-ingestion-contracts.md).
+- `POST /v0/records/withdrawals` withdraws a Record; withdrawn Records are fenced so a
+  late or stale submission cannot resurrect them.
+
+### Batches
+
+`POST /v0/records/batch` with `{"items": [...]}` accepts up to 100 commands and
+10 MiB, each entry at most 1 MiB raw; upload and processing share the request's 5 s
+deadline. The `200` response lists, in order (`index`), either a Receipt or an error
+per entry, with the same codes as a single submission; one invalid entry does not
+block the others. A malformed envelope is refused as a whole (400, 413 or 422)
+without any Receipt. Every entry keeps its own key: after a lost or interrupted
+response, resending the same keys, as a batch or through `POST /v0/records`, returns
+the same Receipts without duplicates.
+
+### Uploads
+
+`POST /v0/uploads` with `size_bytes`, `sha256` and `media_type` (1 GiB maximum)
+returns `201` with an `upload_id`, a presigned PUT URL, its mandatory signed headers
+and `expires_at` (15 minutes). The client uploads the bytes, then calls
+`POST /v0/uploads/{upload_id}/confirm`, which re-reads the object to check size and
+checksum and exposes a stable `blob_id` once `verified` (read back through
+`GET /v0/uploads/{upload_id}` and `GET /v0/blobs/{blob_id}`). A missing, altered or
+cross-Organization transfer is rejected (`rejected`, or 404 for another tenant;
+holding an ID is not access).
+
+Then submit `POST /v0/records` with
+`content: {"kind": "blob", "blob_id": …, "media_type": "text/plain"}`. The verified
+text follows the same Receipt/Version path, keeps its original bytes, and the source
+Blob is recorded in `provenance.source_blob_ids`. Only `text/*` media are accepted
+for now; unverified references return `422 unverified_blob`. Permissions are
+`blobs:write` (create, confirm) and `blobs:read` (read session and Blob). Expired and
+absent sessions stay readable in their terminal state. There is no orphan sweep,
+retention or media extraction yet.
+
+## Processing: segmentation and embeddings
+
+Text Parts go through `quivr.normalized-text.token-windows.v1`, using the pinned E5
+tokenizer and Hugging Face Tokenizers 0.23.2: 384-token windows, 48 tokens of overlap
+(up to 56 to step back to a word start), preferring paragraph, line, sentence and
+then space boundaries. Excerpts are exact slices of the Part; no first line is turned
+into a title. Unicode and UTF-8 offsets, forced cuts and checksums are persisted. An
+explicit title Part next to body Parts is supported; its model view is capped at 64
+tokens while its lexical text stays complete.
+
+Preparation installs the verified wheel and downloads the pinned E5 snapshot (weights
+and ONNX export, about 940 MB, plus tokenizer and configuration). Token offsets and
+counts come from a local, offline Python subprocess; the recipe and its checks are in
+Go. See [tokenizer provenance](../third_party/tokenizer/NOTICE.md).
+
+Processing limits: 256 KiB of UTF-8 per processing input, 64 Parts, 256 segments,
+4,096 code points per excerpt, 512 tokens per assembled model input, and 2 MiB of text
+/ 4 MiB of JSON per assembled batch. Exceeding a limit, or a NUL character, keeps the
+accepted content readable but blocks processing with `segmentation_limit` and a
+`quarantined` availability; no partial result is published as successful.
+
+After a verified publication to Weaviate, the lexical coverage, the promotion of the
+desired revision and its event are committed atomically. A failure leaves the
+previous Version current and the new one in recovery. A separate activity then
+embeds segments with local E5. The float32 little-endian payloads (1,536 bytes) and
+their immutable manifests are verified in S3, then referenced in PostgreSQL before
+projection. Retries reuse artifacts; divergent output for the same derivation blocks
+enrichment with `derivation_conflict` without removing lexical coverage.
+
+TEI 1.9.3 uses mean pooling, L2 normalization, 384 dimensions and `float32`, with
+`passage: …` and `query: …` prefixes and no truncation. The image and the seven
+snapshot files are pinned; TEI mounts its cache read-only on an internal Docker
+network without outbound access. No hosted provider and no fake vectors are used. A
+TEI outage keeps lexical search available and returns 503 for semantic and hybrid
+search. See [E5 provenance](../third_party/e5/NOTICE.md).
+
+## Search
+
+```http
+POST /v0/search
+Authorization: Bearer <key with content:read and search:query>
+Content-Type: application/json
+
+{"query":"eclipse","corpus_ids":["<corpus_id>"],"mode":"lexical","profile":"balanced","limit":10}
+```
+
+- Modes are `lexical`, `semantic` and `hybrid`. Defaults: `hybrid`, `balanced`, 10
+  results; 50 maximum. Other profiles return 422.
+- The resolved profile `balanced.e5-token-windows.v1` accepts non-empty queries of at
+  most 256 tokens (8,192 code points on the wire), without truncation. CRLF/CR become
+  LF and surrounding whitespace is trimmed; case, accents and language are kept.
+- Hybrid uses alpha 0.5, relative score fusion and title/body weights of 2/1.
+- Every requested Corpus must be authorized. PostgreSQL selects the logical
+  generation and physical routing; rehydration re-reads the S3 bytes, validates
+  excerpts and rechecks access, current Version, quarantine and withdrawal.
+- Excerpt coordinates are Unicode code points. No raw score, physical collection name
+  or vector is exposed. A dependency outage returns 503, never an empty success.
+
+`POST /v0/corpora/{corpus_id}/rebuilds` starts an asynchronous projection rebuild from
+durable artifacts and returns an Operation readable at `/v0/operations/{operation_id}`.
+`POST /v0/operations/{operation_id}/cancel` cancels queued work at once; running work
+moves to `cancel_requested` and settles as canceled at its next fenced step, so a
+partial target never activates. `POST /v0/operations/{operation_id}/rerun` requires a
+terminal source (otherwise `409 operation_not_terminal`) and creates a new linked
+Operation. Both take an `idempotency_key` body, return 202 and need `operations:write`;
+rerun also rechecks `projections:rebuild` and the Corpus scope. Only projection rebuild
+Operations are supported.
+
+## Changes, catalog and monitoring
+
+- `GET /v0/changes` (polling) and `GET /v0/changes/stream` (resumable SSE) expose
+  committed changes per Organization behind opaque cursors.
+- `GET /v0/records?corpus_id=…` traverses the authorized Record catalog; when a change
+  cursor expires, use it as the `resync_url` to resynchronize.
+- `/v0/saved-queries` and `/v0/subscriptions` create pinned, versioned Saved Queries and
+  activate or disable Subscriptions.
+- Enabled Subscriptions evaluate Record Versions that become searchable or enriched
+  after their activation boundary. Each positive evaluation creates one unique Match
+  with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through
+  `GET /v0/matches`, `GET /v0/matches/{match_id}` and `GET /v0/deliveries/{delivery_id}`.
+  The evaluator is a deterministic fixture for now; plugin-owned criteria, signed
+  webhook sending and `GET /v0/deliveries/{delivery_id}/attempts` are not implemented
+  yet.
+
+## Connectors
+
+`/v0/connectors` configures Connector Instances that pull content from an external
+source into one Corpus and Source Namespace on a schedule. Collected items go through
+the same ingestion path as `POST /v0/records`. Credentials are write-only and never
+returned. Kinds that have not shipped yet are refused with
+`422 unsupported_connector_kind`. See the [operator guide](connectors/README.md).
+
+## Verification
+
+`make verify` regenerates and compares transports, checks the examples in all three
+languages, runs Go and Python unit tests, then drives the HTTP journeys against an
+isolated real stack: restart, isolation, pagination and concurrency; ingestion,
+duplicates, revision conflicts and recovery after stopping Temporal/S3 and
+interrupting the worker; the three search modes, long texts, Unicode excerpts,
+permissions, limits and Weaviate and model outages. Reports stay in
+`.scratch/quivr-verify-…` (including `embedding-outage.json`,
+`embedding-provenance.json` and `relevance-report.json`) after processes, containers
+and volumes are removed. The first run downloads pinned dependencies and images.
+
+## Retrieval measurement
+
+`make measure` (Linux x86_64) runs the frozen
+[workload](../tests/measurement/workload-v1.json) against an isolated real stack and
+writes `measurement.json` and `measurement.md` under `.scratch/quivr-measure-*`:
+lexical, semantic and hybrid MRR and Recall, p50/p95 latency per load condition against
+a p95 < 1 s target, cold/warm phase timings, resource peaks and pins. It is not part of
+`make verify`; the non-required `Retrieval baseline` workflow runs it on manual
+dispatch (`gh workflow run measure.yml --ref <branch>`). Recorded results are in
+[`docs/evidence/`](evidence/).
+
+Separately, `make verify` scores an original CC0 fixture of 24 French and English
+queries, with explicit title/body Parts, through the real adapters in a collection
+reserved for the fixture (to isolate BM25 statistics) and writes
+`relevance-report.json`. Last recorded result:
+
+| Mode | MRR@10 | Recall@3 |
+| --- | ---: | ---: |
+| Lexical | 0.6993 | 0.8333 |
+| Semantic | 0.9583 | 1.0000 |
+| Hybrid | 0.7969 | 0.9583 |
+
+Hybrid currently trails semantic on this fixture. These small synthetic judgements do
+not measure production relevance or latency.
