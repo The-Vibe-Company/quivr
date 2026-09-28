@@ -1,0 +1,49 @@
+internal/adapters/postgres/migrate.go
+  s_ec117ba6cf48fd::t_afb0183071fc52 1-109
+migrations/embed.go
+  s_ec117ba6cf48fd::t_cad7b704edd145 1-7
+internal/adapters/postgres/migrate_test.go
+  s_ec117ba6cf48fd::t_ceccefce9af591 1-158
+scripts/test_migrations.py
+  s_ec117ba6cf48fd::t_e0e9b509b76013 1-84
+  s_ec117ba6cf48fd::t_aa97031466507c 85-88
+scripts/migrations.py
+  s_ec117ba6cf48fd::t_47bf4475f7b6ce 66
+  s_ec117ba6cf48fd::t_88c3685cb52c84 1-64,67-73,75,77-167
+  s_ec117ba6cf48fd::t_ea75f53c540c95 74,76
+  s_ec117ba6cf48fd::t_7c8051d8d7b3a0 65
+  s_ec117ba6cf48fd::t_20a4fca6234dc0 168-178
+migrations/migrations_test.go
+  s_ec117ba6cf48fd::t_56151368c71ed4 1-56
+migrations/migrations.go
+  s_ec117ba6cf48fd::t_f8346415441641 1-73
+internal/app/run.go
+  s_ec117ba6cf48fd::t_29adc021a191eb 196
+  s_ec117ba6cf48fd::t_4865c6a303aafa 217
+.github/workflows/verify.yml
+  s_ec117ba6cf48fd::t_32d14503e7a454 11-12
+Makefile
+  s_ec117ba6cf48fd::t_cf554fa498fe45 2,12,29-37
+README.md
+  s_ec117ba6cf48fd::t_e720a63d9843e3 160
+docs/agents/fleet-workflow.md
+  s_ec117ba6cf48fd::t_3168834e5c7495 18,54
+docs/quivr-v2-module-boundaries.md
+  s_ec117ba6cf48fd::t_551735f3bc69a5 228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81e799010e51e49cfb5e70a8a61799dd24592171",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
