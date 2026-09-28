@@ -1,0 +1,28 @@
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_26a1850d26de74 18,153-187,196-219
+docs/quivr-v2-module-boundaries.md
+  s_54b80c92daa9cb::t_f4a9f290e24a33 225,231
+README.md
+  s_54b80c92daa9cb::t_8d0cf2144e1fd1 147-148
+  s_54b80c92daa9cb::t_de6386fb09b165 137-140,160
+sdks/python/README.md
+  s_54b80c92daa9cb::t_5f68c0e40df20c 1-77
+CONTEXT.md
+  s_54b80c92daa9cb::t_0a044b6a6a8b1c 281-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "860fc7c5495887d1cfefc1c3d423c1788837d1b2",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+sdks/python/src/quivr_plugin/server.py
+  s_54b80c92daa9cb::t_25b3050fdd968c 136-138,216-224,228-233,239-240,251-253,257-261
+  s_54b80c92daa9cb::t_afb3ece11026ba 262
+internal/plugins/scaffold/template/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_d124ca37deb151 20-23
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_d124ca37deb151 110-112,349-356
+internal/plugins/devhost/devhost_test.go
+  s_54b80c92daa9cb::t_d124ca37deb151 125
+sdks/python/src/quivr_plugin/testing.py
+  s_54b80c92daa9cb::t_d124ca37deb151 35,37
+sdks/python/tests/test_server.py
+  s_54b80c92daa9cb::t_25b3050fdd968c 59-65,176-198
+  s_54b80c92daa9cb::t_bc5e529176595a 199-200
+internal/plugins/scaffold/scaffold.go
+  s_54b80c92daa9cb::t_60c7929b5534af 74-76
+  s_54b80c92daa9cb::t_ccc6f341edc858 37-61
+internal/plugins/scaffold/scaffold_test.go
+  s_54b80c92daa9cb::t_990596bdd817a3 77
+contracts/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_b809add621a1fc 27
+internal/plugins/scaffold/template/__PLUGIN_MODULE__/normalizer.py
+  s_54b80c92daa9cb::t_d124ca37deb151 26-27
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_12a32c04f74246 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f0e9b9c76faf4a56cb20a4e7d493726f23ccd654",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

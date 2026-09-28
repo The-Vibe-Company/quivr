@@ -1,0 +1,59 @@
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_dd99d9be5f81e8 1-11,13-98,110-155,167-286
+  s_54b80c92daa9cb::t_61937dc9f0523c 12,99-100,156-166
+  s_54b80c92daa9cb::t_ae940d6ca82fda 101-109
+Makefile
+  s_54b80c92daa9cb::t_487a7849a6ee6a 19
+internal/plugins/cli/dev_test.go
+  s_54b80c92daa9cb::t_b9da2d9252ba8b 1-124,127-131,133-203,205-207
+  s_54b80c92daa9cb::t_f5c5323b01fadf 204
+  s_54b80c92daa9cb::t_5f6c94e9b438c6 125-126,132
+internal/plugins/scaffold/template/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_528bd7a32b7aef 1-4
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_10b4c0b6408732 1-62
+internal/plugins/scaffold/template/fixtures/sample.json
+  s_54b80c92daa9cb::t_bb34e3d168b734 1-10
+internal/plugins/scaffold/template/.gitignore
+  s_54b80c92daa9cb::t_2a3665f0f6ade1 1-3
+sdks/python/src/quivr_plugin/logs.py
+  s_54b80c92daa9cb::t_487a7849a6ee6a 64
+internal/plugins/scaffold/scaffold_test.go
+  s_54b80c92daa9cb::t_40ab28ea9c9460 1-91
+internal/plugins/cli/init.go
+  s_54b80c92daa9cb::t_af6b19f79689d1 1-63
+internal/plugins/scaffold/template/README.md
+  s_54b80c92daa9cb::t_2c0762d0b48371 1-46
+internal/plugins/scaffold/template/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_c263f9e2e1334a 1-26
+internal/plugins/scaffold/template/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_76d0de37d7c843 1-72
+internal/plugins/scaffold/template/__PLUGIN_MODULE__/normalizer.py
+  s_54b80c92daa9cb::t_1d265c8036d299 1-88
+internal/plugins/scaffold/template/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_327b0341650ad1 1
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_6ecbc88c21fd32 6,10-11,14,29,32-33,41-42,59-60,62-68,77,80
+internal/plugins/scaffold/template/pyproject.toml
+  s_54b80c92daa9cb::t_b5eaf1b0433ea7 1-14
+internal/plugins/scaffold/scaffold.go
+  s_54b80c92daa9cb::t_45250e9147108e 1-91
+internal/plugins/scaffold/template/fixtures/sample.md
+  s_54b80c92daa9cb::t_d305c53e1a4071 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ad602343eb7272d923467e689a4b9fe5d3b4e49",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
