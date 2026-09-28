@@ -1,0 +1,96 @@
+sdks/python/src/quivr_plugin_sdk.egg-info/PKG-INFO
+  s_54b80c92daa9cb::t_c1656f8d0f82ee 1-9
+sdks/python/src/quivr_plugin/testing.py
+  s_54b80c92daa9cb::t_2550c0857fdefa 1-72
+sdks/python/src/quivr_plugin/schemas/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-207
+sdks/python/src/quivr_plugin/schemas/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-145
+contracts/plugins/v0/fixtures/invocations/markdown.json
+  s_54b80c92daa9cb::t_0b0d8c7b6a350e 1-15
+sdks/python/tests/data/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_a90da6c24e106c 1-23
+sdks/python/src/quivr_plugin_sdk.egg-info/dependency_links.txt
+  s_54b80c92daa9cb::t_c1656f8d0f82ee 1
+sdks/python/tests/support.py
+  s_54b80c92daa9cb::t_05af5c18faeb2c 1-69
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_f0a74474f5c17b 292-305
+sdks/python/src/quivr_plugin_sdk.egg-info/requires.txt
+  s_54b80c92daa9cb::t_c1656f8d0f82ee 1-2
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_80307593c892d8 119,131,167,194,201,226-228,266-267,269,279
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-118,120-130,132-166,168-193,195-200,202-225,229-265,268,270-278,280-286
+sdks/python/src/quivr_plugin/schemas/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-27
+sdks/python/tests/test_server.py
+  s_54b80c92daa9cb::t_ad67b043f50549 1-164,167-192
+  s_54b80c92daa9cb::t_0deda452ca2b92 165-166
+sdks/python/src/quivr_plugin/schema.py
+  s_54b80c92daa9cb::t_1ed66f481e9095 1-51
+contracts/plugins/v0/fixtures/invocations/missing-media-type.json
+  s_54b80c92daa9cb::t_0978b7de938187 1-5
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_6b55bf955e4b12 1-84
+sdks/python/src/quivr_plugin/blob.py
+  s_54b80c92daa9cb::t_b8431b32086a9d 1-60,62-73
+  s_54b80c92daa9cb::t_f9028939494319 61
+sdks/python/src/quivr_plugin_sdk.egg-info/top_level.txt
+  s_54b80c92daa9cb::t_c1656f8d0f82ee 1
+contracts/plugins/v0/fixtures/invocations/notes.md
+  s_54b80c92daa9cb::t_de84f945292e33 1-7
+sdks/python/tests/test_blob.py
+  s_54b80c92daa9cb::t_610c4e45421560 1-99
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_8693a82de37c71 1-44,49-168,170-232
+  s_54b80c92daa9cb::t_dbf35d0a45bec2 45-48
+  s_54b80c92daa9cb::t_b11d9ef185f39d 169
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-51
+sdks/python/src/quivr_plugin/errors.py
+  s_54b80c92daa9cb::t_75a00e6dbdcfa4 1-63
+sdks/python/src/quivr_plugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-50
+sdks/python/src/quivr_plugin/server.py
+  s_54b80c92daa9cb::t_6b9ec5a3792c03 1-258,261-266
+  s_54b80c92daa9cb::t_802c6f570b1879 259-260
+sdks/python/src/quivr_plugin/schemas/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-48
+sdks/python/src/quivr_plugin/schemas/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-15
+sdks/python/src/quivr_plugin/_codec.py
+  s_54b80c92daa9cb::t_ace4d69b016a3a 1-123
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_fffc2a27f266f8 1-223
+sdks/python/src/quivr_plugin/__init__.py
+  s_54b80c92daa9cb::t_0deda452ca2b92 5-6,16-18
+  s_54b80c92daa9cb::t_d8a0f308ad1c62 1-4,7-15,19-38
+sdks/python/src/quivr_plugin/logs.py
+  s_54b80c92daa9cb::t_1bda4c86b3e78a 1-83
+contracts/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_a2721ffe1a996f 1-51
+sdks/python/pyproject.toml
+  s_54b80c92daa9cb::t_e99d5939a81de4 10
+  s_54b80c92daa9cb::t_fb91641b746270 2
+  s_54b80c92daa9cb::t_c33525eb145c04 1,3-9,11-22
+sdks/python/src/quivr_plugin/manifest.py
+  s_54b80c92daa9cb::t_49e099f746b505 1-102
+sdks/python/src/quivr_plugin_sdk.egg-info/SOURCES.txt
+  s_54b80c92daa9cb::t_c1656f8d0f82ee 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a0df2e5402571fd6520065de0673f591d5335bbd",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
