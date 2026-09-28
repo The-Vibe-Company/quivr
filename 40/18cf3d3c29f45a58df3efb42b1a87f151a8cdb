@@ -16,6 +16,7 @@ docs/quivr-v2-local-harness.md
   s_54b80c92daa9cb::t_faa3af69eec73d 349-361
 scripts/local.py
   s_54b80c92daa9cb::t_de37d811b4abc3 6,81-83,183-184,310
+  s_54b80c92daa9cb::t_e42f2cfc02a645 385-389
 tests/acceptance/normalizer_test.go
   s_54b80c92daa9cb::t_82ac0b0fddaee0 1-24,26-169
   s_54b80c92daa9cb::t_de37d811b4abc3 25
