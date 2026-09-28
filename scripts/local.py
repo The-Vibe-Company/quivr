@@ -226,9 +226,9 @@ def main():
                 stack.ingestion_outages()
                 from embedding_outage import verify as verify_embedding_outage
                 verify_embedding_outage(stack)
-                # Change-feed tests add Corpora and ingestion load; run them last so they cannot skew
+                # Change-feed and catalog resync tests add Corpora and ingestion load; run them last so they cannot skew
                 # order-sensitive acceptance or timed outage scenarios.
-                stack.start_short_retention_api();stack.tests('TestChange')
+                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog')
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()

@@ -92,7 +92,7 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}

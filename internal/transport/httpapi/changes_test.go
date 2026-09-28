@@ -224,13 +224,13 @@ func TestExpiredCursorBeforeStreamIs410WithResync(t *testing.T) {
 	journal.expired = func(int64) bool { return true }
 
 	e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor="+cursor, feedReader, 410)
-	if e["code"] != "cursor_expired" || e["resync_url"] != changes.ResyncURL {
+	if e["code"] != "cursor_expired" || e["resync_url"] != "/v0/records?corpus_id=corpus_a" {
 		t.Fatal(e)
 	}
 	_, res := openStream(t, server, "/v0/changes/stream?corpus_id=corpus_a", feedReader, cursor)
 	var body map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&body)
-	if res.StatusCode != 410 || body["code"] != "cursor_expired" || body["resync_url"] != changes.ResyncURL {
+	if res.StatusCode != 410 || body["code"] != "cursor_expired" || body["resync_url"] != "/v0/records?corpus_id=corpus_a" {
 		t.Fatal("stream did not reject expired cursor before headers", res.StatusCode, body)
 	}
 }
@@ -295,7 +295,7 @@ func TestStreamErrorOnInStreamExpiryDoesNotAdvanceID(t *testing.T) {
 	journal.append("corpus_a", "record.accepted", "late")
 	f, ok := stream.next(t)
 	var e map[string]any
-	if !ok || f.event != "stream_error" || f.id != "" || json.Unmarshal([]byte(f.data), &e) != nil || e["code"] != "cursor_expired" || e["resync_url"] != changes.ResyncURL {
+	if !ok || f.event != "stream_error" || f.id != "" || json.Unmarshal([]byte(f.data), &e) != nil || e["code"] != "cursor_expired" || e["resync_url"] != "/v0/records?corpus_id=corpus_a" {
 		t.Fatal("expected stream_error without id", f)
 	}
 	if f, ok := stream.next(t); ok {

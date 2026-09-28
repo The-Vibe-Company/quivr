@@ -174,6 +174,10 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 	if r.Method != "GET" {
 		return false
 	}
+	if r.URL.Path == "/v0/records" {
+		a.listRecords(w, r, scope)
+		return true
+	}
 	path := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if len(path) == 3 && path[0] == "v0" && path[1] == "ingestion-receipts" {
 		receipt, err := a.Content.Receipt(r.Context(), scope, path[2])

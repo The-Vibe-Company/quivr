@@ -40,9 +40,13 @@ paths:
       - content:write
     get:
       operationId: listRecords
-      description: Stable keyset traversal of authorized canonical Records, including withdrawn Records.
-        Not an atomic historical snapshot. Capture a Change Cursor before scanning, then reconcile changes
-        as invalidations by rereading current resources; see resynchronization procedure.
+      description: Stable keyset traversal of one Corpus's authorized canonical Records in Record ID
+        order, including withdrawn Records. Each page is an independent read, not an atomic historical
+        snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as
+        invalidations by rereading current resources; see resynchronization procedure. The opaque page
+        cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor
+        for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to
+        the API base, is the resync_url of change-feed and catalog cursor errors.
       responses:
         '200':
           description: Successful response
@@ -505,7 +509,8 @@ paths:
         position as next_cursor (start now). With cursor, return authorized events after it, in commit
         order; duplicates possible. Cursor binds Organization, Corpus filter and authorization scope.
         Expiry is 410 cursor_expired with resync_url, never silent reset; changed scope/filter is 409
-        cursor_scope_changed. next_cursor advances over scanned events even when none are visible. Public
+        cursor_scope_changed with resync_url. resync_url is the API-relative Record catalog route for
+        the Corpus (/v0/records?corpus_id=...). next_cursor advances over scanned events even when none are visible. Public
         events are invalidations; reread current state, do not replay historical content into a current
         mirror.
       responses:

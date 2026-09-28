@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -28,8 +29,11 @@ var (
 // DefaultRetention is the public event-retention window.
 const DefaultRetention = 7 * 24 * time.Hour
 
-// ResyncURL documents the resynchronization procedure until a catalog route exists.
-const ResyncURL = "/docs/quivr-v2-ingestion-contracts.md#change-feed-and-resynchronization"
+// ResyncURL is the API-relative reference from which a client restarts
+// resynchronization of a Corpus: the first page of its authorized Record catalog.
+func ResyncURL(corpusID string) string {
+	return "/v0/records?" + url.Values{"corpus_id": {corpusID}}.Encode()
+}
 
 // Event is one committed journal fact visible to a Corpus.
 type Event struct {

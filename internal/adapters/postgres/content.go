@@ -243,6 +243,23 @@ func (s ContentStore) Record(ctx context.Context, org, id string) (content.Recor
 	err := s.Pool.QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND id=$2", org, id).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID)
 	return r, notFound(err)
 }
+// Records reads one keyset page of a Corpus catalog in a single statement.
+func (s ContentStore) Records(ctx context.Context, org, corpusID, after string, limit int) ([]content.Record, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND corpus_id=$2 AND id > $3 COLLATE "C" ORDER BY id COLLATE "C" LIMIT $4`, org, corpusID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := []content.Record{}
+	for rows.Next() {
+		var r content.Record
+		if err = rows.Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID); err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
 func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (content.StoredVersion, error) {
 	v := content.StoredVersion{}
 	var provenance, extensions []byte

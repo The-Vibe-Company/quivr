@@ -222,12 +222,20 @@ type Repository interface {
 	Progress(context.Context, string, string, string, string) error
 	Publish(context.Context, Work, Publication) error
 }
+
+// RecordCatalog lists one Corpus's Records, withdrawn ones included, in stable
+// key order after an exclusive key. Each call is an independent short read:
+// traversal is not a snapshot, and the change journal covers concurrent writes.
+type RecordCatalog interface {
+	Records(ctx context.Context, org, corpusID, after string, limit int) ([]Record, error)
+}
 type Blobs interface {
 	Put(context.Context, string, []byte) (Blob, error)
 	Read(context.Context, Blob) ([]byte, error)
 }
 type Service struct {
 	Repository Repository
+	Catalog    RecordCatalog
 	Blobs      Blobs
 	Baseline   BaselineRepository
 	Embeddings EmbeddingRepository
@@ -503,6 +511,17 @@ func (s Service) Record(ctx context.Context, scope corpus.Scope, id string) (Rec
 		return Record{}, corpus.ErrNotFound
 	}
 	return r, err
+}
+
+// Records returns up to limit authorized Records of a Corpus after key after.
+func (s Service) Records(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]Record, error) {
+	if !scope.Allows("content:read") {
+		return nil, corpus.ErrForbidden
+	}
+	if !scope.Contains(corpusID) {
+		return nil, corpus.ErrNotFound
+	}
+	return s.Catalog.Records(ctx, scope.Organization, corpusID, after, limit)
 }
 func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
 	if !scope.Allows("content:read") {
