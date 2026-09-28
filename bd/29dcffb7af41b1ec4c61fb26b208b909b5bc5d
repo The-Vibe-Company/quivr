@@ -1,0 +1,38 @@
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_de37d811b4abc3 9,144
+  s_54b80c92daa9cb::t_5ab25eff51ff31 26-32
+  s_54b80c92daa9cb::t_fd19388c1f8ab2 33
+  s_54b80c92daa9cb::t_0c2dd3929150cd 1-8,10-25,34-143
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_04f4960073c5da 89-149
+README.md
+  s_54b80c92daa9cb::t_62e8094a3cd6bf 158-160
+  s_54b80c92daa9cb::t_eae279f440a630 142-147
+docs/quivr-v2-module-boundaries.md
+  s_54b80c92daa9cb::t_09970430a535a0 224-226
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_1062cb26a96e1c 40-42
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_faa3af69eec73d 240-252
+scripts/local.py
+  s_54b80c92daa9cb::t_de37d811b4abc3 5,77-79,157-158,264,305-307
+tests/acceptance/normalizer_test.go
+  s_54b80c92daa9cb::t_82ac0b0fddaee0 1-24,26-169
+  s_54b80c92daa9cb::t_de37d811b4abc3 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd29dcffb7af41b1ec4c61fb26b208b909b5bc5d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
