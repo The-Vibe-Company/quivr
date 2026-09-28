@@ -11,6 +11,8 @@ internal/connectors/connector.go
   s_ec117ba6cf48fd::t_addfec4e9ded59 1-178
 internal/app/run.go
   s_ec117ba6cf48fd::t_665b077f5cc13d 14,52-56,75-94,178-179,225,242
+  s_ec117ba6cf48fd::t_8e91b29fcf5a15 224
+  s_ec117ba6cf48fd::t_13e5f4c5f179fc 57,183
 contracts/http/v0/checks/roundtrip.cjs
   s_ec117ba6cf48fd::t_4395e8f90dca14 16-18
 internal/connectors/credentials_test.go
@@ -55,6 +57,7 @@ contracts/http/v0/checks/roundtrip_test.go
   s_ec117ba6cf48fd::t_55debf80ed301a 63-66
 scripts/local.py
   s_ec117ba6cf48fd::t_4e9607a2dd6982 30,50,53-54,116,240-244
+  s_ec117ba6cf48fd::t_61240aecdf6171 52
 internal/adapters/postgres/connectors.go
   s_ec117ba6cf48fd::t_498a5bcd53e90d 1-7,9-99,101-372
   s_ec117ba6cf48fd::t_674c4e6b52e6a9 8,100
@@ -70,6 +73,7 @@ tests/acceptance/connectors_test.go
   s_ec117ba6cf48fd::t_49d1b57e3124eb 1-171,175-264
 internal/transport/httpapi/api.go
   s_ec117ba6cf48fd::t_9716ee41e7f781 25,53-56,98-109,181-183
+  s_ec117ba6cf48fd::t_44216ed47f808c 110
 internal/transport/httpapi/content.go
   s_ec117ba6cf48fd::t_a00f92e30c5ea4 7,58-60,169-172
 ---
