@@ -51,6 +51,8 @@ type Config struct {
 	// Destinations are deployment-configured webhook receivers. Real
 	// deployments reference their signing secret through secret_env.
 	Destinations map[string]monitoring.Destination `json:"destinations"`
+	// Delivery overrides the webhook retry policy (worker only).
+	Delivery DeliveryConfig `json:"delivery"`
 	// CredentialKey encrypts Deposited Credentials at rest (32+ bytes).
 	CredentialKey string `json:"credential_key"`
 	// ConnectorFixtures enables the deterministic fixture connector kind (local/CI only).
@@ -132,6 +134,10 @@ func Run(command string) error {
 			return errors.New("invalid webhook destination configuration")
 		}
 		cfg.Destinations[id] = d
+	}
+	retryPolicy, deliveryTimeout, err := cfg.Delivery.parse()
+	if err != nil {
+		return err
 	}
 	retention := changes.DefaultRetention
 	if cfg.ChangeRetention != "" {
@@ -250,6 +256,12 @@ func Run(command string) error {
 		}
 		w.WriteHeader(204)
 	})
+	deliveryStore := postgres.DeliveryStore{ContentStore: store}
+	deliveryMetrics := &monitoring.DeliveryMetrics{}
+	if command == "worker" {
+		// Delivery attempt outcomes and admissible backlog, in Prometheus text format.
+		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
+	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}),
@@ -293,7 +305,7 @@ func Run(command string) error {
 		// outcome facts commit around, never inside, the network attempt.
 		go func() {
 			defer close(deliveryDone)
-			monitoring.Deliverer{Store: postgres.DeliveryStore{ContentStore: store}, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: 10 * time.Second}.Run(ctx)
+			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)

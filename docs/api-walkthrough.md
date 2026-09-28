@@ -172,9 +172,18 @@ Operations are supported.
   after their activation boundary. Each positive evaluation creates one unique Match
   with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through
   `GET /v0/matches`, `GET /v0/matches/{match_id}` and `GET /v0/deliveries/{delivery_id}`.
-  The evaluator is a deterministic fixture for now; plugin-owned criteria, signed
-  webhook sending and `GET /v0/deliveries/{delivery_id}/attempts` are not implemented
-  yet.
+  The evaluator is a deterministic fixture for now; plugin-owned criteria are not
+  implemented yet.
+- The worker POSTs each notice to the Subscription's destination, signed with
+  Standard Webhooks headers (`webhook-id` is the notice `event_id`). A 2xx response
+  marks the Delivery `delivered`. Network errors, timeouts, 408, 429 and 5xx are
+  retried with jittered exponential backoff (1 s doubling to 5 min, or a valid
+  `Retry-After` on 429/503) within a 24-hour window; other responses, or a failure
+  after the window, mark it `exhausted`. Retries resend the same `event_id` and body
+  bytes, so receivers deduplicate on `webhook-id`. `GET /v0/deliveries/{delivery_id}`
+  shows `state`, `admission`, `last_error` and, while a retry is scheduled,
+  `next_attempt_at`; `GET /v0/deliveries/{delivery_id}/attempts` pages the append-only
+  attempt history. Disabling the Subscription stops further attempts.
 
 ## Connectors
 

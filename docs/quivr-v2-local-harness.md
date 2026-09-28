@@ -131,11 +131,21 @@ is covered by transport tests.
 The harness configuration provisions one webhook destination per test
 Organization (`local-receiver-org-a`, `local-receiver-org-b`) with obvious
 local test signing secrets. Nothing listens on those URLs, so their Deliveries
-record a failed attempt. A third org_a destination, `local-receiver-capture`,
-points at a harness-allocated port where the signed-delivery acceptance test
-runs its own verifying receiver (`QUIVR_TEST_RECEIVER_ADDR`,
-`QUIVR_TEST_RECEIVER_SECRET`). Monitoring acceptance (`TestMonitoring*`) runs
-after the timed change-feed and outage scenarios on its own Corpora.
+retry and end exhausted. A third org_a destination, `local-receiver-capture`,
+points at a harness-allocated port where the delivery acceptance tests run
+their own verifying receiver (`QUIVR_TEST_RECEIVER_ADDR`,
+`QUIVR_TEST_RECEIVER_SECRET`) with scripted per-Subscription replies. Monitoring
+acceptance (`TestMonitoring*`) runs after the timed change-feed and outage
+scenarios on its own Corpora; then `TestDeliveryRestartBefore` records a failed
+attempt, the harness kills and restarts the worker, and
+`TestDeliveryRestartAfter` proves the same Delivery converges to delivered.
+
+The local harness (`make dev` and `make verify`) shortens the webhook retry
+policy through the worker's `delivery` block (initial 2 s, cap 5 s, window 60 s
+instead of 1 s / 5 min / 24 h); verification records it under
+`timing_overrides` in `report.json`. The worker probe's
+`/metrics` (`QUIVR_TEST_WORKER_PROBE_URL`) is scraped by the exhaustion test and
+saved as `delivery-metrics.txt`.
 
 ## Webhook fixture and bounded recovery scenarios
 

@@ -789,10 +789,13 @@ type Delivery struct {
 	DestinationId string            `json:"destination_id"`
 
 	// Event Immutable reference-only notification. Retries preserve event_id and the exact stored body bytes; signing timestamp changes per attempt. No document content, excerpt, explanation, cursor or secret is embedded.
-	Event     WebhookEvent  `json:"event"`
-	LastError *Error        `json:"last_error,omitempty"`
-	MatchId   string        `json:"match_id"`
-	State     DeliveryState `json:"state"`
+	Event     WebhookEvent `json:"event"`
+	LastError *Error       `json:"last_error,omitempty"`
+	MatchId   string       `json:"match_id"`
+
+	// NextAttemptAt When the next automatic attempt becomes eligible. Present only while the Delivery is pending and admission is allowed; a retry waits with jittered exponential backoff (or a valid Retry-After on 429/503), never beyond the delivery window.
+	NextAttemptAt *time.Time    `json:"next_attempt_at,omitempty"`
+	State         DeliveryState `json:"state"`
 }
 
 // DeliveryState defines model for Delivery.State.

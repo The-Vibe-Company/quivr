@@ -179,7 +179,12 @@ func deliveryToTransport(d monitoring.Delivery) (transport.Delivery, error) {
 		out.Admission.Reason = &reason
 	}
 	if d.LastErrorCode != "" {
-		out.LastError = &transport.Error{Code: d.LastErrorCode, Message: d.LastErrorMessage, Retryable: d.LastOutcome != monitoring.AttemptPermanentError}
+		// Nothing retries an exhausted Delivery automatically.
+		out.LastError = &transport.Error{Code: d.LastErrorCode, Message: d.LastErrorMessage, Retryable: d.LastOutcome != monitoring.AttemptPermanentError && d.State != "exhausted"}
+	}
+	if d.NextAttemptAt != nil {
+		next := d.NextAttemptAt.UTC()
+		out.NextAttemptAt = &next
 	}
 	return out, json.Unmarshal(d.Event, &out.Event)
 }

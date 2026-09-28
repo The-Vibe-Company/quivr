@@ -215,8 +215,8 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 	}
 
 	// Match read, Delivery and SSE share the committed notice identity. The
-	// destination does not listen, so the Delivery is pending or delivering,
-	// with at most its one failed attempt (retry scheduling is a later slice).
+	// destination does not listen, so the Delivery keeps retrying and is never
+	// delivered.
 	event := byRecord[positive["record_id"].(string)]
 	refs := event["monitoring"].(map[string]any)
 	match := request(t, "GET", "/v0/matches/"+refs["match_id"].(string), admin, nil, 200)
@@ -227,8 +227,12 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 	}
 	delivery := request(t, "GET", "/v0/deliveries/"+refs["delivery_id"].(string), admin, nil, 200)
 	notice := delivery["event"].(map[string]any)
-	if (delivery["state"] != "pending" && delivery["state"] != "delivering") || delivery["attempt_count"].(float64) > 1 || delivery["match_id"] != refs["match_id"] || delivery["destination_id"] != destinationA ||
-		delivery["admission"].(map[string]any)["allowed"] != true || notice["event_id"] != event["event_id"] || notice["type"] != "match.created" ||
+	// Nothing listens on destinationA: the Delivery retries within the shortened
+	// window and may already be exhausted, but it is never delivered.
+	retrying := (delivery["state"] == "pending" || delivery["state"] == "delivering") && delivery["admission"].(map[string]any)["allowed"] == true
+	exhausted := delivery["state"] == "exhausted" && delivery["admission"].(map[string]any)["reason"] == "terminal"
+	if !(retrying || exhausted) || delivery["match_id"] != refs["match_id"] || delivery["destination_id"] != destinationA ||
+		notice["event_id"] != event["event_id"] || notice["type"] != "match.created" ||
 		notice["occurred_at"] != event["occurred_at"] || !reflect.DeepEqual(notice["references"], refs) {
 		t.Fatal("pending Delivery must carry the feed notice identity", delivery, event)
 	}
@@ -268,7 +272,12 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 		t.Fatal("disabled Subscription committed a new Match", items)
 	}
 	delivery = request(t, "GET", "/v0/deliveries/"+refs["delivery_id"].(string), admin, nil, 200)
-	if admission := delivery["admission"].(map[string]any); admission["allowed"] != false || admission["reason"] != "subscription_disabled" || delivery["state"] == "delivered" {
+	// A Delivery already exhausted before the disable reports terminal instead.
+	want := "subscription_disabled"
+	if delivery["state"] == "exhausted" {
+		want = "terminal"
+	}
+	if admission := delivery["admission"].(map[string]any); admission["allowed"] != false || admission["reason"] != want || delivery["state"] == "delivered" {
 		t.Fatal("disabled admission view", delivery)
 	}
 }

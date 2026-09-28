@@ -115,7 +115,11 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   cursor expiry.
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
-  pending Delivery record. Matching uses a deterministic built-in evaluator for now.
+  Delivery. Matching uses a deterministic built-in evaluator for now.
+- **Signed webhook delivery** (Standard Webhooks) to deployment-configured destinations,
+  with append-only attempt history, jittered exponential retries within a bounded
+  delivery window, exhaustion, and no new attempt once a Subscription is disabled.
+  The worker exposes delivery metrics on its probe listener (`/metrics`).
 - **Projection rebuilds** from durable artifacts as recoverable Operations, with cancel
   and rerun.
 - **Typed retrieval mappings** per Corpus (`PUT /v0/corpora/{id}/retrieval`): logical
@@ -133,7 +137,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Signed webhook delivery with retried attempts, and plugin-owned match criteria.
+- Correction and withdrawal notices, and plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
 - The plugin platform: a Python SDK, the Contract Runner, and out-of-process

@@ -332,9 +332,11 @@ func (s ContentStore) Matches(ctx context.Context, org, subscriptionID string, a
 func (s ContentStore) Delivery(ctx context.Context, org, id string) (monitoring.Delivery, error) {
 	var d monitoring.Delivery
 	var enabled, withdrawn bool
+	var next *time.Time
 	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,s.enabled,
   r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
-  d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,'')
+  d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,''),
+  (SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id AND o.available_at<'infinity')
 FROM deliveries d
 LEFT JOIN LATERAL (SELECT o.error_code,o.error_message FROM delivery_attempts a
   JOIN delivery_attempt_outcomes o ON (o.organization,o.attempt_id)=(a.organization,a.id)
@@ -344,7 +346,7 @@ JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
 WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &enabled, &withdrawn,
-		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage)
+		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, monitoring.ErrNotFound
 	}
@@ -360,6 +362,11 @@ WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.Subscr
 		d.Admission = monitoring.Admission{Reason: "record_withdrawn"}
 	default:
 		d.Admission = monitoring.Admission{Allowed: true}
+		// Scheduled work of an admissible pending Delivery; a claimed or
+		// delivering one has no future eligibility to report.
+		if d.State == "pending" && next != nil {
+			d.NextAttemptAt = next
+		}
 	}
 	return d, nil
 }

@@ -47,6 +47,17 @@ func park(ctx context.Context, tx pgx.Tx, org, deliveryID string) error {
 	return err
 }
 
+// exhaust ends automatic attempts for a pending Delivery without a new attempt.
+func exhaust(ctx context.Context, tx pgx.Tx, org, corpusID, deliveryID string, number int, reason string) error {
+	if _, err := tx.Exec(ctx, `UPDATE deliveries SET state='exhausted',exhausted_reason=$3 WHERE organization=$1 AND id=$2`, org, deliveryID, reason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2`, org, deliveryID); err != nil {
+		return err
+	}
+	return deliveryUpdated(ctx, tx, org, corpusID, deliveryID, number, "exhausted")
+}
+
 func attemptID(org, deliveryID string, number int) string {
 	return content.StableID("attempt", org, deliveryID, fmt.Sprint(number))
 }
@@ -55,7 +66,14 @@ func attemptID(org, deliveryID string, number int) string {
 // attempt fact with the Delivery's move to delivering. A Delivery found still
 // delivering was lost by a crashed worker (its lease expired): its attempt is
 // recorded unknown and a fresh attempt is admitted for the same notice.
-func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
+//
+// Refusals are checked before the window: work that is not admissible stays
+// pending and parked. Retries are always scheduled no later than the window
+// end (the final one exactly at the edge), so work that became due after the
+// window end can only be parked work made claimable again (for example by a
+// re-enable): it ends exhausted without an attempt, and disabling and
+// re-enabling never extends the window.
+func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
 	org := w.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -77,15 +95,16 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, con
 	var state, destination, eventID, corpusID string
 	var count int
 	var body []byte
-	var enabled, withdrawn bool
+	var enabled, withdrawn, elapsed bool
 	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,s.enabled,
-  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
+  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+  coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>d.created_at+make_interval(secs => $3::double precision),false)
 FROM deliveries d
 JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &enabled, &withdrawn)
+WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.Seconds()).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &enabled, &withdrawn, &elapsed)
 	if err != nil {
 		return monitoring.AdmittedAttempt{}, "", err
 	}
@@ -122,6 +141,11 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID).Scan(&s
 		return refuse("subscription_disabled")
 	case withdrawn:
 		return refuse("record_withdrawn")
+	case elapsed:
+		if err = exhaust(ctx, tx, org, corpusID, w.DeliveryID, count, "window_elapsed"); err != nil {
+			return monitoring.AdmittedAttempt{}, "", err
+		}
+		return monitoring.AdmittedAttempt{}, "window_elapsed", tx.Commit(ctx)
 	}
 	a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: w.DeliveryID, Number: count + 1, EventID: eventID, DestinationID: destination, Body: body}
 	a.AttemptID = attemptID(org, w.DeliveryID, a.Number)
@@ -138,10 +162,11 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID).Scan(&s
 }
 
 // Record appends the attempt outcome once and moves the Delivery: delivered on
-// acknowledgement, otherwise back to pending with its work parked until retry
-// scheduling exists. An outcome already recorded (for example unknown after a
-// lease expiry) is never overwritten.
-func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome) error {
+// acknowledgement; exhausted on a permanent failure or once its window has
+// elapsed; otherwise pending with its work scheduled at the window-bounded
+// retry time. An outcome already recorded (for example unknown after a lease
+// expiry) is never overwritten.
+func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
 	org := a.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -160,14 +185,19 @@ func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt,
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
-	state := "pending"
-	if o.Outcome == monitoring.AttemptAcknowledged {
-		state = "delivered"
-	}
-	var corpusID string
-	err = tx.QueryRow(ctx, `UPDATE deliveries d SET state=$4,last_outcome=$5 FROM matches m
+	// The window is judged on the database clock against the Delivery's
+	// creation; every wait, including a receiver's Retry-After, is capped at
+	// the window end so one final attempt can happen at the edge.
+	var corpusID, state string
+	var next time.Time
+	err = tx.QueryRow(ctx, `UPDATE deliveries d SET
+  state=CASE WHEN $4='acknowledged' THEN 'delivered' WHEN $4='permanent_error' OR now()>=d.created_at+make_interval(secs => $6::double precision) THEN 'exhausted' ELSE 'pending' END,
+  exhausted_reason=CASE WHEN $4='acknowledged' THEN '' WHEN $4='permanent_error' THEN 'permanent_error' WHEN now()>=d.created_at+make_interval(secs => $6::double precision) THEN 'window_elapsed' ELSE '' END,
+  last_outcome=$4
+FROM matches m
 WHERE d.organization=$1 AND d.id=$2 AND d.state='delivering' AND d.attempt_count=$3 AND (m.organization,m.id)=(d.organization,d.match_id)
-RETURNING m.corpus_id`, org, a.DeliveryID, a.Number, state, o.Outcome).Scan(&corpusID)
+RETURNING m.corpus_id,d.state,LEAST(now()+make_interval(secs => $5::double precision),d.created_at+make_interval(secs => $6::double precision))`,
+		org, a.DeliveryID, a.Number, o.Outcome, r.Delay.Seconds(), r.Window.Seconds()).Scan(&corpusID, &state, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tx.Commit(ctx)
 	}
@@ -177,15 +207,28 @@ RETURNING m.corpus_id`, org, a.DeliveryID, a.Number, state, o.Outcome).Scan(&cor
 	if err = deliveryUpdated(ctx, tx, org, corpusID, a.DeliveryID, a.Number, state); err != nil {
 		return err
 	}
-	if state == "delivered" {
-		_, err = tx.Exec(ctx, `DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2`, org, a.DeliveryID)
+	if state == "pending" {
+		_, err = tx.Exec(ctx, `UPDATE delivery_outbox SET available_at=$3,lease_until='-infinity' WHERE organization=$1 AND delivery_id=$2`, org, a.DeliveryID, next)
 	} else {
-		err = park(ctx, tx, org, a.DeliveryID)
+		_, err = tx.Exec(ctx, `DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2`, org, a.DeliveryID)
 	}
 	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// DeliveryBacklog reads the admissible scheduled delivery work: pending or
+// delivering Deliveries whose outbox work is due or waiting for a retry.
+// Parked work (refused admission) is not stuck work and is excluded.
+func (s DeliveryStore) DeliveryBacklog(ctx context.Context) (monitoring.DeliveryBacklog, error) {
+	var b monitoring.DeliveryBacklog
+	var age float64
+	err := s.Pool.QueryRow(ctx, `SELECT count(*),coalesce(extract(epoch FROM now()-min(d.created_at)),0)::double precision
+FROM delivery_outbox o JOIN deliveries d ON (d.organization,d.id)=(o.organization,o.delivery_id)
+WHERE o.available_at<'infinity' AND d.state IN ('pending','delivering')`).Scan(&b.Pending, &age)
+	b.OldestAge = time.Duration(age * float64(time.Second))
+	return b, err
 }
 
 // Attempts reads a Delivery's attempt facts in number order.

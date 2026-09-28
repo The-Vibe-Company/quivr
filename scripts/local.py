@@ -12,6 +12,9 @@ def run(args, **kwargs):
 # Obvious local test signing secret of the capture receiver destination.
 CAPTURE_DESTINATION='local-receiver-capture'
 CAPTURE_SECRET='whsec_'+base64.b64encode(b'local-test-signing-secret-capture').decode()
+# Shortened webhook retry policy of the local harness, like its other short intervals (dev and verify;
+# deployment defaults: 1s/5m/24h/10s). Verification reports it in report.json.
+DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'5s','window':'60s'}
 def port():
     import socket
     with socket.socket() as s:
@@ -69,7 +72,8 @@ class Stack:
             destinations={'local-receiver-org-a':dict(organization='org_a',url='http://127.0.0.1:9/local-receiver-org-a',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-a!').decode()),
                           'local-receiver-org-b':dict(organization='org_b',url='http://127.0.0.1:9/local-receiver-org-b',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-b!').decode()),
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
-                          CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)})
+                          CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
+            delivery=DELIVERY_OVERRIDES)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -143,7 +147,7 @@ class Stack:
         self.migrate();self.migrate();self.start_processes()
     def tests(self,pattern):
         s=self.state
-        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -271,6 +275,8 @@ def main():
                 stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration')
                 # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
                 stack.tests('TestMonitoring')
+                # A Delivery with one failed attempt converges after the worker is killed and restarted.
+                stack.tests('TestDeliveryRestartBefore');stack.stop_worker();stack.start_worker();stack.tests('TestDeliveryRestartAfter')
                 # Connector acquisition keeps polling on its schedule; run it after every
                 # timed scenario, in its own Organization, then prove restart resumption.
                 # The x_list kind polls a local fake X API served from this process.
@@ -292,6 +298,6 @@ def main():
         if verification:
             try:stack.capture()
             finally:stack.down(True)
-            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion, lexical/semantic/hybrid HTTP acceptance, E5 enrichment/outage and FR/EN relevance; real PostgreSQL, Temporal, S3, Weaviate and TEI','artifacts':str(stack.directory)},indent=2))
+            (stack.directory/'report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3),'source':run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),'scope':'Corpus, ingestion, lexical/semantic/hybrid HTTP acceptance, E5 enrichment/outage and FR/EN relevance; real PostgreSQL, Temporal, S3, Weaviate and TEI','timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s'},'artifacts':str(stack.directory)},indent=2))
             print('Verification artifacts:',stack.directory)
 if __name__=='__main__':main()

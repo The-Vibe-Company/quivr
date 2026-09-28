@@ -278,12 +278,11 @@ Current authorization is checked again before exposing explanations or content.
 - **Outcome after I/O:** an append-only outcome fact per attempt. 2xx is
   `acknowledged` and marks the Delivery `delivered`. Network errors, timeouts,
   408, 429 and 5xx are `retryable_error`; other statuses, including an
-  unfollowed 3xx or a status outside 100-599, are `permanent_error`. Both failures return the Delivery to
-  `pending` with its work parked: this slice schedules no retry and never
-  reports a failure as delivered. The Delivery keeps the latest outcome
-  (`last_outcome`), so the retry slice can end a permanent failure as
-  `exhausted` without rereading attempts. Error text is a fixed, bounded
-  message per code and never contains the destination URL.
+  unfollowed 3xx or a status outside 100-599, are `permanent_error`. A failure
+  is never reported as delivered; retry scheduling and exhaustion are
+  described under "Implemented retries" below. The Delivery keeps the latest
+  outcome (`last_outcome`). Error text is a fixed, bounded message per code
+  and never contains the destination URL.
 - **Crash recovery is at least once:** if a worker dies between admission and
   outcome, the lease expires and the next claim records that attempt as
   `unknown`, then admits a new attempt for the same notice. That attempt resends
@@ -298,6 +297,55 @@ Current authorization is checked again before exposing explanations or content.
   key scope. Neither exposes signatures, secrets, receiver bodies or
   destination URLs. `delivery.updated` events are feed-only: they create no
   Delivery, so they never cause a webhook.
+
+### Implemented retries (THE-656)
+
+- **Policy:** after a `retryable_error`, the next attempt waits
+  `min(initial·2^(n-1), max)` with equal jitter (uniformly between half and
+  all of that step). Defaults are 1 s initial, 5 min cap, 24 h window and a
+  10 s request timeout; the worker's `delivery` configuration block
+  (`retry_initial`, `retry_max`, `window`, `timeout`, Go durations) overrides
+  them. A valid `Retry-After` (delta-seconds or HTTP-date) on 429 or 503
+  replaces the backoff, floored at the initial delay; it is ignored on other
+  statuses and when invalid.
+- **Window:** it starts when the Delivery is created (`deliveries.created_at`;
+  Deliveries that existed before this slice start at migration time) and is
+  judged on the database clock. The upgrade ends earlier permanent failures
+  `exhausted` and makes other parked Deliveries due, so admission is
+  rechecked and retryable failures resume within their new window. Every wait, including a long `Retry-After`,
+  is capped at the window end, so one final attempt can happen at the edge.
+  A retryable failure recorded after the window end ends the Delivery
+  `exhausted`; a `permanent_error` ends it `exhausted` at once. Exhaustion
+  removes the work, keeps `last_outcome` and `last_error` (then reported as
+  not retryable) and appends `delivery.updated`. A crash-recovered `unknown`
+  attempt is re-admitted immediately, as before, and its outcome follows the
+  same rules.
+- **Admission per retry:** every retry is claimed and admitted through the
+  same canonical checks as the first attempt, under the journal lock that
+  disable and withdrawal also take. Work refused because the Subscription is
+  disabled, the Record withdrawn or the destination unavailable makes no
+  attempt, stays `pending` and is parked; the admission view says why. An
+  attempt admitted before a disable finishes and records its outcome; its
+  retry is then refused. A refused Delivery whose window passes stays
+  `pending` (disabling fabricates no transport outcome). The window is never
+  extended: parked work that becomes claimable after its window end (for
+  example through a future re-enable) ends `exhausted` with reason
+  `window_elapsed` without an attempt. `superseded` and `access_denied` have
+  no producer yet: there is no Subscription reconfiguration or destination
+  rights revocation, and newer-Record-Version semantics belong to the
+  correction notices (THE-657).
+- **Reads:** `GET /v0/deliveries/{id}` adds `next_attempt_at` while the
+  Delivery is `pending`, admission is allowed and a retry is scheduled. No
+  retry administration or other delivery channel exists.
+- **Metrics:** the worker's probe listener serves `GET /metrics` in the
+  Prometheus text format: `quivr_delivery_attempts_total{outcome}` counts the
+  outcomes (`acknowledged`, `retryable_error`, `permanent_error`) of requests
+  this process sent; `unknown` outcomes are inferred from lost leases and read
+  from attempt history. The gauges `quivr_delivery_pending` and
+  `quivr_delivery_oldest_pending_age_seconds` cover admissible scheduled work only. Parked work refused by admission is
+  excluded, so a disabled Subscription's Deliveries never read as stuck work;
+  a Delivery disabled while already scheduled is counted until its next
+  claim parks it. No identifier is used as a label.
 
 ## Evaluation and transactions
 

@@ -67,6 +67,9 @@ type Delivery struct {
 	// LastErrorCode and LastErrorMessage describe the latest attempt when it failed.
 	LastErrorCode    string
 	LastErrorMessage string
+	// NextAttemptAt is when the next automatic attempt becomes eligible; nil
+	// unless the Delivery is pending and admission is allowed.
+	NextAttemptAt *time.Time
 }
 
 // MatchStore reads Match history and Deliveries.
@@ -121,6 +124,7 @@ func (s Service) Delivery(ctx context.Context, scope corpus.Scope, id string) (D
 	// Organization; the admission view says so rather than claiming eligibility.
 	if dest, ok := s.Destinations[d.DestinationID]; d.Admission.Allowed && (!ok || dest.Organization != scope.Organization) {
 		d.Admission = Admission{Reason: "destination_unavailable"}
+		d.NextAttemptAt = nil
 	}
 	return d, nil
 }

@@ -24,6 +24,8 @@ type deliveryFake struct {
 	refuse    string
 	admitted  []monitoring.AdmittedAttempt
 	recorded  []monitoring.AttemptOutcome
+	retries   []monitoring.Retry
+	windows   []time.Duration
 	destCheck []string
 }
 
@@ -38,9 +40,10 @@ func (f *deliveryFake) ClaimDelivery(context.Context, time.Duration) (monitoring
 	return w, nil
 }
 
-func (f *deliveryFake) Admit(_ context.Context, w monitoring.DeliveryWork, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
+func (f *deliveryFake) Admit(_ context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.windows = append(f.windows, window)
 	f.destCheck = append(f.destCheck, w.DeliveryID)
 	if !configured(w.Organization, "receiver") {
 		return monitoring.AdmittedAttempt{}, "destination_unavailable", nil
@@ -54,10 +57,11 @@ func (f *deliveryFake) Admit(_ context.Context, w monitoring.DeliveryWork, confi
 	return a, "", nil
 }
 
-func (f *deliveryFake) Record(_ context.Context, _ monitoring.AdmittedAttempt, o monitoring.AttemptOutcome) error {
+func (f *deliveryFake) Record(_ context.Context, _ monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.recorded = append(f.recorded, o)
+	f.retries = append(f.retries, r)
 	return nil
 }
 
@@ -243,5 +247,50 @@ func TestDeliveryShutdownRecordsNoFalseOutcome(t *testing.T) {
 	}
 	if len(fake.admitted) != 1 || len(fake.recorded) != 0 {
 		t.Fatalf("admitted %d recorded %v", len(fake.admitted), fake.recorded)
+	}
+}
+
+// The deliverer hands the store a policy delay for retryable failures only,
+// honours a valid Retry-After on 429/503 and passes the delivery window to
+// both admission and recording.
+func TestDeliverySchedulesRetriesFromPolicy(t *testing.T) {
+	policy := monitoring.RetryPolicy{Initial: 2 * time.Second, Max: 8 * time.Second, Window: time.Minute, Jitter: func() float64 { return 0.999 }}
+	step := func(status int, header map[string]string) (monitoring.AttemptOutcome, monitoring.Retry, *deliveryFake) {
+		srv, _ := receiver(t, status, header)
+		fake := &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
+		d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}, Retry: policy, Metrics: &monitoring.DeliveryMetrics{}, Timeout: time.Second}
+		if progressed, err := d.Step(context.Background()); !progressed || err != nil {
+			t.Fatal(progressed, err)
+		}
+		return fake.recorded[0], fake.retries[0], fake
+	}
+	o, r, fake := step(500, nil)
+	if o.Outcome != monitoring.AttemptRetryableError || r.Window != time.Minute || r.Delay < time.Second || r.Delay > 2*time.Second || fake.windows[0] != time.Minute {
+		t.Fatalf("500: %+v %+v %v", o, r, fake.windows)
+	}
+	o, r, _ = step(503, map[string]string{"Retry-After": "20"})
+	if !o.HasRetryAfter || o.RetryAfter != 20*time.Second || r.Delay != 20*time.Second {
+		t.Fatalf("503 Retry-After: %+v %+v", o, r)
+	}
+	// Retry-After is ignored outside 429/503 and when invalid.
+	if _, r, _ = step(500, map[string]string{"Retry-After": "20"}); r.Delay > 2*time.Second {
+		t.Fatalf("500 must ignore Retry-After: %+v", r)
+	}
+	if o, r, _ = step(429, map[string]string{"Retry-After": "later"}); o.HasRetryAfter || r.Delay > 2*time.Second {
+		t.Fatalf("invalid Retry-After: %+v %+v", o, r)
+	}
+	// Terminal outcomes carry no delay; the store ends or completes them.
+	if _, r, _ = step(404, nil); r.Delay != 0 || r.Window != time.Minute {
+		t.Fatalf("404: %+v", r)
+	}
+	if _, r, _ = step(204, nil); r.Delay != 0 {
+		t.Fatalf("204: %+v", r)
+	}
+	// Defaults apply when no policy is configured.
+	srv, _ := receiver(t, 503, nil)
+	fake = &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
+	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}}
+	if _, err := d.Step(context.Background()); err != nil || fake.retries[0].Window != 24*time.Hour || fake.retries[0].Delay > time.Second {
+		t.Fatalf("defaults: %+v %v", fake.retries, err)
 	}
 }

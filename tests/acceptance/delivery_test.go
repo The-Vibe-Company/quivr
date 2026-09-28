@@ -64,20 +64,35 @@ type webhookCapture struct {
 	Status int
 }
 
+// reply is one scripted receiver answer; retryAfter sets Retry-After when non-empty.
+type reply struct {
+	status     int
+	retryAfter string
+}
+
 // captureReceiver verifies every request, records its raw bytes and answers
-// according to the Subscription the notice references.
+// according to the Subscription the notice references: the n-th request for
+// a Subscription gets its n-th scripted reply, the last one repeating.
 type captureReceiver struct {
 	key      []byte
 	mu       sync.Mutex
 	captures []webhookCapture
-	statuses map[string]int
+	scripts  map[string][]reply
+	served   map[string]int
+}
+
+// script sets the replies for one Subscription's notices.
+func (c *captureReceiver) script(subscriptionID string, replies ...reply) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scripts[subscriptionID] = replies
 }
 
 func (c *captureReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	status := http.StatusNoContent
+	answer := reply{status: http.StatusNoContent}
 	if verifyWebhook(c.key, r.Header.Get("webhook-id"), r.Header.Get("webhook-timestamp"), r.Header.Get("webhook-signature"), body, time.Now()) != nil {
-		status = http.StatusUnauthorized
+		answer = reply{status: http.StatusUnauthorized}
 	} else {
 		// Parse only after authenticity was verified on the raw bytes.
 		var event struct {
@@ -87,20 +102,36 @@ func (c *captureReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(body, &event) == nil {
 			c.mu.Lock()
-			if s, ok := c.statuses[event.References.SubscriptionID]; ok {
-				status = s
+			if replies := c.scripts[event.References.SubscriptionID]; len(replies) > 0 {
+				n := c.served[event.References.SubscriptionID]
+				answer = replies[min(n, len(replies)-1)]
+				c.served[event.References.SubscriptionID] = n + 1
 			}
 			c.mu.Unlock()
 		}
 	}
 	c.mu.Lock()
-	c.captures = append(c.captures, webhookCapture{Path: r.URL.Path, Header: r.Header.Clone(), Body: body, Status: status})
+	c.captures = append(c.captures, webhookCapture{Path: r.URL.Path, Header: r.Header.Clone(), Body: body, Status: answer.status})
 	c.mu.Unlock()
-	if status == http.StatusTemporaryRedirect {
+	if answer.status == http.StatusTemporaryRedirect {
 		w.Header().Set("Location", "/capture/redirected")
 	}
-	w.WriteHeader(status)
+	if answer.retryAfter != "" {
+		w.Header().Set("Retry-After", answer.retryAfter)
+	}
+	w.WriteHeader(answer.status)
 	_, _ = w.Write([]byte(receiverBody))
+}
+
+// capturesOf returns the captured requests carrying one webhook-id.
+func (c *captureReceiver) capturesOf(eventID string) []webhookCapture {
+	var out []webhookCapture
+	for _, capture := range c.snapshot() {
+		if capture.Header.Get("webhook-id") == eventID {
+			out = append(out, capture)
+		}
+	}
+	return out
 }
 
 func (c *captureReceiver) snapshot() []webhookCapture {
@@ -123,7 +154,7 @@ func startReceiver(t *testing.T) *captureReceiver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &captureReceiver{key: key, statuses: map[string]int{}}
+	c := &captureReceiver{key: key, scripts: map[string][]reply{}, served: map[string]int{}}
 	srv := &http.Server{Handler: c, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
@@ -148,8 +179,8 @@ func awaitDelivery(t *testing.T, token, id string, done func(map[string]any) boo
 
 // TestMonitoringDeliverySignedNotifications drives signed webhook delivery
 // through a real receiver: an acknowledged, authentic, reference-only notice
-// with the poll/SSE identity; tampering and staleness rejection; truthful
-// failed attempts for 503 and an unfollowed redirect; bounded attempt history
+// with the poll/SSE identity; tampering and staleness rejection; an unfollowed
+// redirect that ends exhausted after one attempt; bounded attempt history
 // without secrets; and no webhook for feed-only delivery.updated.
 func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
@@ -164,15 +195,13 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	subscribe := func(name string, status int) string {
 		sub := request(t, "POST", "/v0/subscriptions", admin, subscriptionCommand("delivery-"+name+"-"+run, query, destinationCapture), 201)
 		id := sub["subscription_id"].(string)
-		receiver.mu.Lock()
-		receiver.statuses[id] = status
-		receiver.mu.Unlock()
+		receiver.script(id, reply{status: status})
 		return id
 	}
-	acked, unavailable, redirected := subscribe("acked", 204), subscribe("unavailable", 503), subscribe("redirected", 307)
+	acked, redirected := subscribe("acked", 204), subscribe("redirected", 307)
 
 	ingestSearchable(t, c, "delivery-"+run, "Dépêche livrée "+run)
-	_, created := awaitMatches(t, admin, c, start, 3)
+	_, created := awaitMatches(t, admin, c, start, 2)
 	notices := map[string]map[string]any{}
 	for _, event := range created {
 		notices[event["monitoring"].(map[string]any)["subscription_id"].(string)] = event
@@ -252,29 +281,22 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 		}
 	}
 
-	// A retryable failure is recorded truthfully and the Delivery stays pending.
-	failed := awaitDelivery(t, admin, deliveryOf(unavailable), func(d map[string]any) bool { return d["state"] == "pending" && d["attempt_count"] == float64(1) })
-	if !reflect.DeepEqual(failed["last_error"], map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 503", "retryable": true}) || failed["admission"].(map[string]any)["allowed"] != true {
-		t.Fatal("retryable failure", failed)
-	}
-	attempts = request(t, "GET", "/v0/deliveries/"+deliveryOf(unavailable)+"/attempts", admin, nil, 200)
-	if item := attempts["items"].([]any)[0].(map[string]any); item["outcome"] != "retryable_error" || item["http_status"] != float64(503) {
-		t.Fatal("retryable attempt", attempts)
-	}
-	// A redirect is not followed and ends automatic attempts.
-	moved := awaitDelivery(t, admin, deliveryOf(redirected), func(d map[string]any) bool { return d["state"] == "pending" && d["attempt_count"] == float64(1) })
-	if last := moved["last_error"].(map[string]any); last["code"] != "webhook_redirect_refused" || last["retryable"] != false {
+	// A redirect is not followed and, being non-retryable, ends automatic
+	// attempts at once: exhausted after its single attempt.
+	moved := awaitDelivery(t, admin, deliveryOf(redirected), func(d map[string]any) bool { return d["state"] == "exhausted" })
+	if last := moved["last_error"].(map[string]any); last["code"] != "webhook_redirect_refused" || last["retryable"] != false || moved["attempt_count"] != float64(1) ||
+		!reflect.DeepEqual(moved["admission"], map[string]any{"allowed": false, "reason": "terminal"}) || moved["next_attempt_at"] != nil {
 		t.Fatal("redirect failure", moved)
 	}
 	attempts = request(t, "GET", "/v0/deliveries/"+deliveryOf(redirected)+"/attempts", admin, nil, 200)
-	if item := attempts["items"].([]any)[0].(map[string]any); item["outcome"] != "permanent_error" || item["http_status"] != float64(307) {
+	if items := attempts["items"].([]any); len(items) != 1 || items[0].(map[string]any)["outcome"] != "permanent_error" || items[0].(map[string]any)["http_status"] != float64(307) {
 		t.Fatal("redirect attempt", attempts)
 	}
 
 	// SSE carries the same notice identities as polling and the webhook.
 	stream := openChangeStream(t, os.Getenv("QUIVR_TEST_URL"), admin, "/v0/changes/stream?corpus_id="+url.QueryEscape(c), start)
 	streamed := map[string]map[string]any{}
-	for len(streamed) < 3 {
+	for len(streamed) < 2 {
 		_, change := stream.nextChange(t)
 		if change["type"] == "match.created" {
 			streamed[change["event_id"].(string)] = change
@@ -286,7 +308,7 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	}
 
 	// delivery.updated is feed-only: after a settle window the receiver saw
-	// exactly the three match.created notices, never the redirect target.
+	// exactly the two match.created notices once each, never the redirect target.
 	time.Sleep(3 * time.Second)
 	feed, _ := drain(t, admin, c, start, 0)
 	updates := 0
@@ -317,8 +339,8 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	for _, event := range created {
 		want[event["event_id"].(string)] = true
 	}
-	if !reflect.DeepEqual(ids, want) || len(captures) != 4 {
-		t.Fatalf("receiver must see only the three notices (plus the forged probe): %d requests, ids %v", len(captures), ids)
+	if !reflect.DeepEqual(ids, want) || len(captures) != 3 {
+		t.Fatalf("receiver must see only the two notices (plus the forged probe): %d requests, ids %v", len(captures), ids)
 	}
 }
 

@@ -2592,6 +2592,12 @@ components:
           $ref: '#/components/schemas/DeliveryAdmission'
         last_error:
           $ref: '#/components/schemas/Error'
+        next_attempt_at:
+          type: string
+          format: date-time
+          description: When the next automatic attempt becomes eligible. Present only while the Delivery
+            is pending and admission is allowed; a retry waits with jittered exponential backoff (or a
+            valid Retry-After on 429/503), never beyond the delivery window.
       required:
       - delivery_id
       - match_id

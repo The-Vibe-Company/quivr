@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 )
@@ -42,6 +43,17 @@ func (history) Delivery(_ context.Context, org, id string) (monitoring.Delivery,
 		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
 		d.ID, d.AttemptCount, d.Admission = id, 3, monitoring.Admission{Allowed: true}
 		d.LastOutcome, d.LastErrorCode, d.LastErrorMessage = monitoring.AttemptPermanentError, "webhook_http_status", "receiver returned HTTP 400"
+		return d, nil
+	}
+	if (id == "delivery_3" || id == "delivery_4") && org == "org_a" {
+		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
+		d.ID, d.AttemptCount, d.Admission = id, 2, monitoring.Admission{Allowed: true}
+		d.LastOutcome, d.LastErrorCode, d.LastErrorMessage = monitoring.AttemptRetryableError, "webhook_http_status", "receiver returned HTTP 503"
+		next := time.Date(2026, 9, 28, 14, 0, 15, 0, time.FixedZone("CEST", 2*3600))
+		d.NextAttemptAt = &next
+		if id == "delivery_4" {
+			d.State, d.Admission, d.NextAttemptAt = "exhausted", monitoring.Admission{Reason: "terminal"}, nil
+		}
 		return d, nil
 	}
 	if id != "delivery_1" || org != "org_a" {
@@ -114,6 +126,17 @@ func TestDeliveryAttemptsPageBoundedHistory(t *testing.T) {
 	if failed["state"] != "pending" || !reflect.DeepEqual(failed["last_error"], map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 400", "retryable": false}) ||
 		!reflect.DeepEqual(failed["admission"], map[string]any{"allowed": true}) {
 		t.Fatalf("failed delivery: %v", failed)
+	}
+	// A retrying Delivery reports its next eligibility in UTC; an exhausted one
+	// keeps its last error, which nothing retries automatically any more.
+	retrying, _ := call(t, server, "GET", "/v0/deliveries/delivery_3", monitorReader, "", 200)
+	if retrying["next_attempt_at"] != "2026-09-28T12:00:15Z" || retrying["last_error"].(map[string]any)["retryable"] != true {
+		t.Fatalf("retrying delivery: %v", retrying)
+	}
+	exhausted, _ := call(t, server, "GET", "/v0/deliveries/delivery_4", monitorReader, "", 200)
+	if _, ok := exhausted["next_attempt_at"]; ok || exhausted["state"] != "exhausted" ||
+		!reflect.DeepEqual(exhausted["last_error"], map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 503", "retryable": false}) {
+		t.Fatalf("exhausted delivery: %v", exhausted)
 	}
 }
 

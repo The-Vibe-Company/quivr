@@ -51,6 +51,16 @@ type AttemptOutcome struct {
 	HTTPStatus   int
 	ErrorCode    string
 	ErrorMessage string
+	// RetryAfter is a valid Retry-After the receiver sent (never persisted).
+	RetryAfter    time.Duration
+	HasRetryAfter bool
+}
+
+// Retry tells the store how to schedule a failed Delivery: Delay is the
+// policy wait before the next attempt; Window bounds every wait and, once
+// elapsed since the Delivery's creation, ends it exhausted.
+type Retry struct {
+	Delay, Window time.Duration
 }
 
 // Attempt is the read view of one attempt's admission and outcome facts.
@@ -71,10 +81,14 @@ type DeliveryStore interface {
 	// Admit rechecks canonical admission and, when allowed, commits the attempt
 	// fact before any I/O. A refusal returns its reason and parks the work
 	// without an attempt. configured reports whether the Delivery's destination
-	// is usable for its Organization.
-	Admit(ctx context.Context, w DeliveryWork, configured func(org, destinationID string) bool) (AdmittedAttempt, string, error)
-	// Record appends the attempt outcome and updates the logical Delivery.
-	Record(ctx context.Context, a AdmittedAttempt, o AttemptOutcome) error
+	// is usable for its Organization. Pending work claimed after its delivery
+	// window ends exhausted (reason window_elapsed) without an attempt: the
+	// window is never extended by disabling and re-enabling.
+	Admit(ctx context.Context, w DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (AdmittedAttempt, string, error)
+	// Record appends the attempt outcome and updates the logical Delivery:
+	// delivered on acknowledgement, exhausted on a permanent failure or an
+	// elapsed window, otherwise pending until the window-bounded retry time.
+	Record(ctx context.Context, a AdmittedAttempt, o AttemptOutcome, r Retry) error
 }
 
 // Deliverer sends admitted notices to deployment-configured destinations.
@@ -86,6 +100,10 @@ type Deliverer struct {
 	Lease        time.Duration
 	// Timeout bounds one HTTP attempt (default 10 s).
 	Timeout time.Duration
+	// Retry schedules failed attempts (accepted defaults when zero).
+	Retry RetryPolicy
+	// Metrics counts attempt outcomes when set.
+	Metrics *DeliveryMetrics
 	// Poll is the initial idle poll interval, doubled up to MaxPoll while idle.
 	Poll, MaxPoll time.Duration
 	Now           func() time.Time
@@ -178,7 +196,8 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	a, refused, err := d.Store.Admit(ctx, w, d.configured)
+	policy := d.Retry.WithDefaults()
+	a, refused, err := d.Store.Admit(ctx, w, policy.Window, d.configured)
 	if err != nil {
 		return true, err
 	}
@@ -197,10 +216,15 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 	// The outcome is recorded even when the step context is ending.
 	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err = d.Store.Record(record, a, outcome); err != nil {
+	retry := Retry{Window: policy.Window}
+	if outcome.Outcome == AttemptRetryableError {
+		retry.Delay = policy.Delay(a.Number, outcome)
+	}
+	if err = d.Store.Record(record, a, outcome, retry); err != nil {
 		return true, err
 	}
-	slog.Info("delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode)
+	d.Metrics.Observe(outcome.Outcome)
+	slog.Info("delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds())
 	return true, nil
 }
 
@@ -257,7 +281,11 @@ func (d Deliverer) attempt(ctx context.Context, a AdmittedAttempt) (AttemptOutco
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxReceiverBody))
 	_ = resp.Body.Close()
-	return ClassifyStatus(resp.StatusCode), nil
+	o := ClassifyStatus(resp.StatusCode)
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		o.RetryAfter, o.HasRetryAfter = ParseRetryAfter(resp.Header.Get("Retry-After"), d.now())
+	}
+	return o, nil
 }
 
 // ClassifyStatus maps a receiver HTTP status to an attempt outcome: 2xx
