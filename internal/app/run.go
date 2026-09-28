@@ -104,7 +104,8 @@ func Run(command string) error {
 			d.Secret = os.Getenv(d.SecretEnv)
 		}
 		target, err := url.Parse(d.URL)
-		if id == "" || d.Organization == "" || d.Secret == "" || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+		_, secretErr := monitoring.ParseSecret(d.Secret)
+		if id == "" || d.Organization == "" || secretErr != nil || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
 			return errors.New("invalid webhook destination configuration")
 		}
 		cfg.Destinations[id] = d
@@ -187,7 +188,7 @@ func Run(command string) error {
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error {
 		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='015_retrieval_configs.sql')").Scan(&exists)
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name='016_delivery_attempts.sql')").Scan(&exists)
 		if err == nil && !exists {
 			return errors.New("schema migration missing")
 		}
@@ -262,6 +263,20 @@ func Run(command string) error {
 		go func() {
 			defer close(evaluationDone)
 			monitoring.Engine{Store: postgres.EvaluationStore{ContentStore: store}, Versions: versionParts{contents}, Evaluators: map[string]monitoring.EvaluationPort{monitoring.EvaluatorKey(monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion}): monitoring.Fixture{}}, Workers: 4, Lease: time.Minute}.Run(ctx)
+		}()
+		deliveryDone := make(chan struct{})
+		defer func() {
+			stop()
+			select {
+			case <-deliveryDone:
+			case <-time.After(15 * time.Second):
+			}
+		}()
+		// Webhook delivery is a separate PostgreSQL-leased loop: admission and
+		// outcome facts commit around, never inside, the network attempt.
+		go func() {
+			defer close(deliveryDone)
+			monitoring.Deliverer{Store: postgres.DeliveryStore{ContentStore: store}, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: 10 * time.Second}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)

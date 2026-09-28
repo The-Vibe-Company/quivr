@@ -2658,11 +2658,13 @@ components:
           - record_withdrawn
           - superseded
           - access_denied
+          - destination_unavailable
           - terminal
       required:
       - allowed
       description: Current derived admission view, separate from durable Delivery state. A disallowed
         pending Delivery makes no new network attempt; it does not become a new lifecycle state.
+        destination_unavailable means its destination is no longer configured for the Organization.
     Delivery:
       type: object
       additionalProperties: false

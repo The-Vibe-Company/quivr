@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -37,11 +38,83 @@ func (history) Matches(_ context.Context, org, sub string, after int64, limit in
 	return out, nil
 }
 func (history) Delivery(_ context.Context, org, id string) (monitoring.Delivery, error) {
+	if id == "delivery_2" && org == "org_a" {
+		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
+		d.ID, d.AttemptCount, d.Admission = id, 3, monitoring.Admission{Allowed: true}
+		d.LastOutcome, d.LastErrorCode, d.LastErrorMessage = monitoring.AttemptPermanentError, "webhook_http_status", "receiver returned HTTP 400"
+		return d, nil
+	}
 	if id != "delivery_1" || org != "org_a" {
 		return monitoring.Delivery{}, monitoring.ErrNotFound
 	}
 	return monitoring.Delivery{ID: id, MatchID: "match_1", SubscriptionID: "subscription_s1", DestinationID: "receiver_a", State: "pending", Admission: monitoring.Admission{Reason: "subscription_disabled"},
 		Event: []byte(`{"event_id":"event_1","type":"match.created","schema_version":"1","occurred_at":"2026-09-28T12:00:00.123456Z","references":{"match_id":"match_1","record_id":"record_match_1","record_version_id":"version_match_1","subscription_id":"subscription_s1","subscription_version_id":"subscription_version_s1","delivery_id":"delivery_1"}}`)}, nil
+}
+
+func (history) Attempts(_ context.Context, org, id string, after, limit int) ([]monitoring.Attempt, error) {
+	all := []monitoring.Attempt{
+		{ID: "attempt_1", DeliveryID: id, Number: 1, Outcome: monitoring.AttemptUnknown, ErrorCode: "webhook_outcome_unknown", ErrorMessage: "attempt outcome unknown after worker interruption"},
+		{ID: "attempt_2", DeliveryID: id, Number: 2, Outcome: monitoring.AttemptRetryableError, HTTPStatus: 503, ErrorCode: "webhook_http_status", ErrorMessage: "receiver returned HTTP 503"},
+		{ID: "attempt_3", DeliveryID: id, Number: 3, Outcome: monitoring.AttemptPermanentError, HTTPStatus: 400, ErrorCode: "webhook_http_status", ErrorMessage: "receiver returned HTTP 400"},
+		{ID: "attempt_4", DeliveryID: id, Number: 4, Outcome: monitoring.AttemptInFlight},
+		{ID: "attempt_5", DeliveryID: id, Number: 5, Outcome: monitoring.AttemptAcknowledged, HTTPStatus: 204},
+	}
+	out := []monitoring.Attempt{}
+	for _, a := range all {
+		if id == "delivery_1" && a.Number > after && len(out) < limit {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func TestDeliveryAttemptsPageBoundedHistory(t *testing.T) {
+	server := monitoringServer(t)
+	call(t, server, "POST", "/v0/saved-queries", monitor, savedQueryBody, 201)
+	call(t, server, "POST", "/v0/subscriptions", monitor, subscriptionBody("s1", "quivr.fixture", "receiver_a"), 201)
+	first, raw := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?limit=3", monitorReader, "", 200)
+	next, _ := first["next_page_cursor"].(string)
+	items := first["items"].([]any)
+	if len(items) != 3 || next == "" {
+		t.Fatalf("first page: %v", first)
+	}
+	want := []map[string]any{
+		{"attempt_id": "attempt_1", "delivery_id": "delivery_1", "number": float64(1), "outcome": "unknown", "error": map[string]any{"code": "webhook_outcome_unknown", "message": "attempt outcome unknown after worker interruption", "retryable": true}},
+		{"attempt_id": "attempt_2", "delivery_id": "delivery_1", "number": float64(2), "outcome": "retryable_error", "http_status": float64(503), "error": map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 503", "retryable": true}},
+		{"attempt_id": "attempt_3", "delivery_id": "delivery_1", "number": float64(3), "outcome": "permanent_error", "http_status": float64(400), "error": map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 400", "retryable": false}},
+	}
+	for i := range want {
+		if !reflect.DeepEqual(items[i], want[i]) {
+			t.Fatalf("attempt %d: %v", i, items[i])
+		}
+	}
+	if strings.Contains(raw, "whsec_") || strings.Contains(raw, "receiver.invalid") || strings.Contains(raw, "signature") {
+		t.Fatal("attempt history leaks destination secrets or URL", raw)
+	}
+	second, _ := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?limit=3&page_cursor="+url.QueryEscape(next), monitorReader, "", 200)
+	items = second["items"].([]any)
+	if len(items) != 2 || second["next_page_cursor"] != nil || !reflect.DeepEqual(items[0], map[string]any{"attempt_id": "attempt_4", "delivery_id": "delivery_1", "number": float64(4), "outcome": "in_flight"}) ||
+		!reflect.DeepEqual(items[1], map[string]any{"attempt_id": "attempt_5", "delivery_id": "delivery_1", "number": float64(5), "outcome": "acknowledged", "http_status": float64(204)}) {
+		t.Fatalf("second page: %v", second)
+	}
+	// Cursors bind the Delivery and the key scope.
+	if body, _ := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?page_cursor="+url.QueryEscape(next), monitorNarrow, "", 409); body["code"] != "cursor_scope_changed" {
+		t.Fatal(body)
+	}
+	for _, q := range []string{"limit=0", "limit=101", "page_cursor=" + url.QueryEscape(next+"x"), "page_cursor=", "other=1"} {
+		call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?"+q, monitorReader, "", 422)
+	}
+	call(t, server, "GET", "/v0/deliveries/delivery_1/attempts", monitorOther, "", 404)
+	call(t, server, "GET", "/v0/deliveries/missing/attempts", monitorReader, "", 404)
+	call(t, server, "GET", "/v0/deliveries/delivery_1/attempts", noMonitoring, "", 403)
+	call(t, server, "POST", "/v0/deliveries/delivery_1/attempts", monitor, "{}", 405)
+	call(t, server, "GET", "/v0/deliveries/delivery_1/other", monitorReader, "", 404)
+	// The Delivery exposes its latest failure, distinguishable as permanent.
+	failed, _ := call(t, server, "GET", "/v0/deliveries/delivery_2", monitorReader, "", 200)
+	if failed["state"] != "pending" || !reflect.DeepEqual(failed["last_error"], map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 400", "retryable": false}) ||
+		!reflect.DeepEqual(failed["admission"], map[string]any{"allowed": true}) {
+		t.Fatalf("failed delivery: %v", failed)
+	}
 }
 
 func TestMatchHistoryPagesAndDeliveryRead(t *testing.T) {
@@ -96,5 +169,4 @@ func TestMatchHistoryPagesAndDeliveryRead(t *testing.T) {
 		t.Fatalf("delivery: %v", delivery)
 	}
 	call(t, server, "GET", "/v0/deliveries/delivery_1", monitorOther, "", 404)
-	call(t, server, "GET", "/v0/deliveries/delivery_1/attempts", monitorReader, "", 404)
 }

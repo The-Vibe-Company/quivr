@@ -246,10 +246,58 @@ Current authorization is checked again before exposing explanations or content.
 - **Reads:** `GET /v0/matches?subscription_id=` pages by commit order with a
   signed cursor bound to the Subscription and key scope; `GET /v0/matches/{id}`
   and `GET /v0/deliveries/{id}` require `monitoring:read` and a key that
-  covers every pinned Corpus, otherwise 404. A Delivery stays `pending` with no
-  attempts until the delivery slice; its admission view reports
+  covers every pinned Corpus, otherwise 404. A new Delivery is `pending` (the
+  delivery worker below then attempts it); its admission view reports
   `subscription_disabled` or `record_withdrawn`. Change events for notices
   carry `monitoring` references in both polling and SSE.
+
+### Implemented delivery (THE-655)
+
+- **Runtime:** webhook delivery runs in the `worker` process as its own
+  PostgreSQL claim loop over `delivery_outbox`, with two deliverers separate
+  from the four evaluators and independent of Temporal, for the same reasons
+  as evaluation. Idle deliverers back off from 200 ms to 2 s and reset when
+  they find work.
+- **Admission before I/O:** under the Organization journal lock, which disable
+  and withdrawal also take, the worker rechecks that the Delivery is pending,
+  its destination is configured for the Organization, the Subscription is
+  enabled and the Record is neither withdrawn nor Tombstoned. An admitted
+  attempt commits an append-only attempt fact, the Delivery's move to
+  `delivering` and a `delivery.updated` feed event; only then is the HTTP
+  request sent. A refused admission records no attempt and parks the work;
+  the Delivery stays `pending` and its admission view explains why
+  (`subscription_disabled`, `record_withdrawn`, or `destination_unavailable`
+  when its destination is no longer configured for the Organization). Claims
+  are fenced by their lease, so a step that outlived its lease admits nothing.
+  The Match transaction never performs network I/O.
+- **Request:** HTTP POST of the stored notice bytes, unchanged, with
+  `webhook-id` (the notice `event_id`), a fresh `webhook-timestamp` and its
+  `webhook-signature`. The client has a ten-second timeout, follows no
+  redirects, keeps no cookies and discards at most 64 KiB of the response,
+  which is never stored.
+- **Outcome after I/O:** an append-only outcome fact per attempt. 2xx is
+  `acknowledged` and marks the Delivery `delivered`. Network errors, timeouts,
+  408, 429 and 5xx are `retryable_error`; other statuses, including an
+  unfollowed 3xx or a status outside 100-599, are `permanent_error`. Both failures return the Delivery to
+  `pending` with its work parked: this slice schedules no retry and never
+  reports a failure as delivered. The Delivery keeps the latest outcome
+  (`last_outcome`), so the retry slice can end a permanent failure as
+  `exhausted` without rereading attempts. Error text is a fixed, bounded
+  message per code and never contains the destination URL.
+- **Crash recovery is at least once:** if a worker dies between admission and
+  outcome, the lease expires and the next claim records that attempt as
+  `unknown`, then admits a new attempt for the same notice. That attempt resends
+  the same `event_id` and body bytes with a new timestamp and signature, so a
+  receiver may see an event it already accepted. A request interrupted by
+  worker shutdown is handled the same way rather than recorded as a failure.
+  Receivers deduplicate on `webhook-id`.
+- **Reads:** `GET /v0/deliveries/{id}` adds `last_error` for a failed latest
+  attempt and reports admission `terminal` once delivered;
+  `GET /v0/deliveries/{id}/attempts` pages the attempt history (number,
+  outcome, HTTP status, bounded error) with a cursor bound to the Delivery and
+  key scope. Neither exposes signatures, secrets, receiver bodies or
+  destination URLs. `delivery.updated` events are feed-only: they create no
+  Delivery, so they never cause a webhook.
 
 ## Evaluation and transactions
 
@@ -342,6 +390,24 @@ superseded or inaccessible work makes no new attempt. Workers stop scheduling
 ineligible work; an already admitted request can finish. Attempt reads expose
 bounded outcome/error/status details without signatures, keys or receiver bodies.
 Exhausted work remains inspectable; retry administration is later work.
+
+## Security and limitations
+
+- **Destinations are configuration only.** Webhook URLs and signing secrets
+  come from deployment configuration (`secret_env` for real deployments),
+  never from the API, and are validated at startup (http/https URL with a
+  host, `whsec_` secret of 24 to 64 bytes). Subscriptions only name a
+  configured destination of their own Organization.
+- **Residual SSRF exposure.** Delivery does not filter private, loopback or
+  link-local addresses and does not pin DNS resolution: an operator-configured
+  destination is trusted, and the local harness itself delivers to loopback.
+  Refusing redirects keeps a receiver from bouncing requests to another
+  address, and response bodies never reach the API. A hosted multi-tenant
+  deployment in which tenants influence destination URLs needs an egress
+  policy (address filtering after resolution, or an egress proxy) first.
+- **Signatures.** Attempts are signed with the destination's own key; the key
+  and signatures are never stored in attempt facts or returned by the API.
+  Key rotation remains outside this tracer.
 
 ## Verification and handoff
 

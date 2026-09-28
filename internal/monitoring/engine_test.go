@@ -155,6 +155,10 @@ func (m matchStore) Delivery(_ context.Context, _, id string) (monitoring.Delive
 	return m.delivery, nil
 }
 
+func (m matchStore) Attempts(_ context.Context, _, id string, after, limit int) ([]monitoring.Attempt, error) {
+	return []monitoring.Attempt{{ID: "a1", DeliveryID: id, Number: 1, Outcome: monitoring.AttemptAcknowledged}}, nil
+}
+
 func TestMatchReadsRequireReadScopeAndVisibleSubscription(t *testing.T) {
 	ctx := context.Background()
 	store := newStore()
@@ -167,8 +171,24 @@ func TestMatchReadsRequireReadScopeAndVisibleSubscription(t *testing.T) {
 	if _, err := service.Delivery(ctx, full, "d"); err != nil {
 		t.Fatal(err)
 	}
+	// A Delivery whose destination is no longer configured is not admissible.
+	allowed := service
+	allowed.MatchStore = matchStore{match: monitoring.Match{ID: "m", SubscriptionID: "sub"}, delivery: monitoring.Delivery{ID: "d", SubscriptionID: "sub", DestinationID: "gone", Admission: monitoring.Admission{Allowed: true}}}
+	if d, err := allowed.Delivery(ctx, full, "d"); err != nil || d.Admission.Allowed || d.Admission.Reason != "destination_unavailable" {
+		t.Fatal("unconfigured destination admission", d.Admission, err)
+	}
+	allowed.Destinations = map[string]monitoring.Destination{"gone": {Organization: "org"}}
+	if d, err := allowed.Delivery(ctx, full, "d"); err != nil || !d.Admission.Allowed {
+		t.Fatal("configured destination admission", d.Admission, err)
+	}
 	if items, err := service.Matches(ctx, full, "sub", 0, 10); err != nil || len(items) != 1 {
 		t.Fatal(items, err)
+	}
+	if items, err := service.Attempts(ctx, full, "d", 0, 10); err != nil || len(items) != 1 {
+		t.Fatal(items, err)
+	}
+	if _, err := service.Attempts(ctx, full, "missing", 0, 10); !errors.Is(err, monitoring.ErrNotFound) {
+		t.Fatal("attempts of a missing Delivery", err)
 	}
 	partial := corpus.Scope{Organization: "org", Actions: []string{"monitoring:read"}, Corpora: []string{"a"}}
 	other := corpus.Scope{Organization: "other", Actions: []string{"monitoring:read"}, Corpora: []string{"*"}}
@@ -181,6 +201,9 @@ func TestMatchReadsRequireReadScopeAndVisibleSubscription(t *testing.T) {
 		}
 		if _, err := service.Matches(ctx, s, "sub", 0, 10); !errors.Is(err, monitoring.ErrNotFound) {
 			t.Fatal("list visible", err)
+		}
+		if _, err := service.Attempts(ctx, s, "d", 0, 10); !errors.Is(err, monitoring.ErrNotFound) {
+			t.Fatal("attempts visible", err)
 		}
 	}
 	writeOnly := corpus.Scope{Organization: "org", Actions: []string{"monitoring:write"}, Corpora: []string{"*"}}

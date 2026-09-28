@@ -134,17 +134,20 @@ func (e DeliveryState) Valid() bool {
 
 // Defines values for DeliveryAdmissionReason.
 const (
-	AccessDenied         DeliveryAdmissionReason = "access_denied"
-	RecordWithdrawn      DeliveryAdmissionReason = "record_withdrawn"
-	SubscriptionDisabled DeliveryAdmissionReason = "subscription_disabled"
-	Superseded           DeliveryAdmissionReason = "superseded"
-	Terminal             DeliveryAdmissionReason = "terminal"
+	AccessDenied           DeliveryAdmissionReason = "access_denied"
+	DestinationUnavailable DeliveryAdmissionReason = "destination_unavailable"
+	RecordWithdrawn        DeliveryAdmissionReason = "record_withdrawn"
+	SubscriptionDisabled   DeliveryAdmissionReason = "subscription_disabled"
+	Superseded             DeliveryAdmissionReason = "superseded"
+	Terminal               DeliveryAdmissionReason = "terminal"
 )
 
 // Valid indicates whether the value is a known member of the DeliveryAdmissionReason enum.
 func (e DeliveryAdmissionReason) Valid() bool {
 	switch e {
 	case AccessDenied:
+		return true
+	case DestinationUnavailable:
 		return true
 	case RecordWithdrawn:
 		return true
@@ -764,7 +767,7 @@ type CredentialReplace struct {
 
 // Delivery defines model for Delivery.
 type Delivery struct {
-	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state.
+	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization.
 	Admission     DeliveryAdmission `json:"admission"`
 	AttemptCount  int               `json:"attempt_count"`
 	DeliveryId    string            `json:"delivery_id"`
@@ -780,7 +783,7 @@ type Delivery struct {
 // DeliveryState defines model for Delivery.State.
 type DeliveryState string
 
-// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state.
+// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization.
 type DeliveryAdmission struct {
 	Allowed bool                     `json:"allowed"`
 	Reason  *DeliveryAdmissionReason `json:"reason,omitempty"`

@@ -62,6 +62,11 @@ type Delivery struct {
 	// Event holds the exact immutable notice bytes.
 	Event     []byte
 	Admission Admission
+	// LastOutcome is the latest recorded attempt outcome ("" before any).
+	LastOutcome string
+	// LastErrorCode and LastErrorMessage describe the latest attempt when it failed.
+	LastErrorCode    string
+	LastErrorMessage string
 }
 
 // MatchStore reads Match history and Deliveries.
@@ -70,6 +75,8 @@ type MatchStore interface {
 	// Matches returns up to limit Matches of a Subscription committed after position.
 	Matches(ctx context.Context, org, subscriptionID string, after int64, limit int) ([]Match, error)
 	Delivery(ctx context.Context, org, id string) (Delivery, error)
+	// Attempts returns up to limit attempts of a Delivery numbered after after.
+	Attempts(ctx context.Context, org, deliveryID string, after, limit int) ([]Attempt, error)
 }
 
 // Matches lists a visible Subscription's Match history in commit order.
@@ -110,5 +117,18 @@ func (s Service) Delivery(ctx context.Context, scope corpus.Scope, id string) (D
 	if _, err = s.visible(ctx, scope, d.SubscriptionID); err != nil {
 		return Delivery{}, err
 	}
+	// The delivery worker refuses a destination no longer configured for the
+	// Organization; the admission view says so rather than claiming eligibility.
+	if dest, ok := s.Destinations[d.DestinationID]; d.Admission.Allowed && (!ok || dest.Organization != scope.Organization) {
+		d.Admission = Admission{Reason: "destination_unavailable"}
+	}
 	return d, nil
+}
+
+// Attempts lists a visible Delivery's append-only attempt history.
+func (s Service) Attempts(ctx context.Context, scope corpus.Scope, deliveryID string, after, limit int) ([]Attempt, error) {
+	if _, err := s.Delivery(ctx, scope, deliveryID); err != nil {
+		return nil, err
+	}
+	return s.MatchStore.Attempts(ctx, scope.Organization, deliveryID, after, limit)
 }

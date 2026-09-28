@@ -45,7 +45,7 @@ func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int
 	return p.After, nil
 }
 
-// matchRoutes serves /v0/matches and /v0/deliveries/{id}.
+// matchRoutes serves /v0/matches, /v0/deliveries/{id} and its attempts.
 func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	path := r.URL.Path
 	if path != "/v0/matches" && !strings.HasPrefix(path, "/v0/matches/") && !strings.HasPrefix(path, "/v0/deliveries/") {
@@ -59,6 +59,9 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 		resource, id = "match", strings.TrimPrefix(path, "/v0/matches/")
 	default:
 		resource, id = "delivery", strings.TrimPrefix(path, "/v0/deliveries/")
+		if d, ok := strings.CutSuffix(id, "/attempts"); ok {
+			resource, id = "attempts", d
+		}
 	}
 	if a.Monitoring.MatchStore == nil || (resource != "matches" && (id == "" || strings.Contains(id, "/"))) {
 		failure(w, 404, "not_found")
@@ -89,6 +92,8 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 			return true
 		}
 		send(w, 200, out)
+	case "attempts":
+		a.listAttempts(w, r, scope, id)
 	default:
 		a.listMatches(w, r, scope)
 	}
@@ -173,5 +178,102 @@ func deliveryToTransport(d monitoring.Delivery) (transport.Delivery, error) {
 		reason := transport.DeliveryAdmissionReason(d.Admission.Reason)
 		out.Admission.Reason = &reason
 	}
+	if d.LastErrorCode != "" {
+		out.LastError = &transport.Error{Code: d.LastErrorCode, Message: d.LastErrorMessage, Retryable: d.LastOutcome != monitoring.AttemptPermanentError}
+	}
 	return out, json.Unmarshal(d.Event, &out.Event)
+}
+
+// attemptPage is the signed payload of a Delivery attempt page cursor, bound
+// to the Delivery and authorization scope in its own signature domain.
+type attemptPage struct {
+	Version  int    `json:"v"`
+	Delivery string `json:"d"`
+	Scope    string `json:"s"`
+	After    int    `json:"a"`
+}
+
+func (a *API) encodeAttemptPage(p attemptPage) string {
+	b, _ := json.Marshal(p)
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(attemptPageDomain, b))
+}
+
+func (a *API) decodeAttemptPage(token, deliveryID string, s corpus.Scope) (int, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return 0, errors.New("invalid_cursor")
+	}
+	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+	var p attemptPage
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(attemptPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
+		return 0, errors.New("invalid_cursor")
+	}
+	if p.Delivery != deliveryID || p.Scope != scopeDigest(s) {
+		return 0, errPageScope
+	}
+	return p.After, nil
+}
+
+// listAttempts pages a Delivery's append-only attempt history. It exposes
+// bounded outcome, status and error only: no signature, secret or receiver body.
+func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.Scope, deliveryID string) {
+	q := r.URL.Query()
+	for k, v := range q {
+		if (k != "page_cursor" && k != "limit") || len(v) != 1 {
+			failure(w, 422, "invalid_query")
+			return
+		}
+	}
+	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
+		failure(w, 422, "invalid_cursor")
+		return
+	}
+	limit := 100
+	if q.Has("limit") {
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 100 {
+			failure(w, 422, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	after := 0
+	if q.Has("page_cursor") {
+		var err error
+		if after, err = a.decodeAttemptPage(q.Get("page_cursor"), deliveryID, scope); errors.Is(err, errPageScope) {
+			failure(w, 409, "cursor_scope_changed")
+			return
+		} else if err != nil {
+			failure(w, 422, "invalid_cursor")
+			return
+		}
+	}
+	attempts, err := a.Monitoring.Attempts(r.Context(), scope, deliveryID, after, limit+1)
+	if err != nil {
+		monitoringFailure(w, err)
+		return
+	}
+	page := transport.DeliveryAttemptPage{Items: make([]transport.DeliveryAttempt, 0, min(len(attempts), limit))}
+	for i, at := range attempts {
+		if i == limit {
+			next := a.encodeAttemptPage(attemptPage{Version: 1, Delivery: deliveryID, Scope: scopeDigest(scope), After: attempts[limit-1].Number})
+			page.NextPageCursor = &next
+			break
+		}
+		page.Items = append(page.Items, attemptToTransport(at))
+	}
+	send(w, 200, page)
+}
+
+func attemptToTransport(at monitoring.Attempt) transport.DeliveryAttempt {
+	out := transport.DeliveryAttempt{AttemptId: at.ID, DeliveryId: at.DeliveryID, Number: at.Number, Outcome: transport.DeliveryAttemptOutcome(at.Outcome)}
+	if at.HTTPStatus != 0 {
+		status := at.HTTPStatus
+		out.HttpStatus = &status
+	}
+	if at.ErrorCode != "" {
+		out.Error = &transport.Error{Code: at.ErrorCode, Message: at.ErrorMessage, Retryable: at.Outcome != monitoring.AttemptPermanentError}
+	}
+	return out
 }

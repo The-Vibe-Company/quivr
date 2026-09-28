@@ -333,13 +333,18 @@ func (s ContentStore) Delivery(ctx context.Context, org, id string) (monitoring.
 	var d monitoring.Delivery
 	var enabled, withdrawn bool
 	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,s.enabled,
-  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
+  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+  d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,'')
 FROM deliveries d
+LEFT JOIN LATERAL (SELECT o.error_code,o.error_message FROM delivery_attempts a
+  JOIN delivery_attempt_outcomes o ON (o.organization,o.attempt_id)=(a.organization,a.id)
+  WHERE a.organization=d.organization AND a.delivery_id=d.id AND a.number=d.attempt_count AND o.outcome<>'acknowledged') last ON true
 JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &enabled, &withdrawn)
+WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &enabled, &withdrawn,
+		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, monitoring.ErrNotFound
 	}
@@ -347,6 +352,8 @@ WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.Subscr
 		return d, err
 	}
 	switch {
+	case d.State == "delivered" || d.State == "exhausted":
+		d.Admission = monitoring.Admission{Reason: "terminal"}
 	case !enabled:
 		d.Admission = monitoring.Admission{Reason: "subscription_disabled"}
 	case withdrawn:

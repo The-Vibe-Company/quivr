@@ -6,3 +6,8 @@ import _ "embed"
 //
 //go:embed openapi.yaml
 var OpenAPI []byte
+
+// WebhookVector is the public Standard Webhooks interoperability vector.
+//
+//go:embed webhook-vector.json
+var WebhookVector []byte

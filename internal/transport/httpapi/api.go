@@ -287,6 +287,7 @@ const (
 	recordPageDomain    = "record-page"
 	connectorPageDomain = "connector-page"
 	matchPageDomain     = "match-page"
+	attemptPageDomain   = "attempt-page"
 )
 
 // signCursor is the only signer for CursorKey tokens; the domain is required.
