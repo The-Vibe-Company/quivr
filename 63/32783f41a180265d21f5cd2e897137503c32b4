@@ -1,0 +1,69 @@
+internal/connectors/kinds.go
+  s_ec117ba6cf48fd::t_cd72438cb47016 1-144
+contracts/http/v0/examples.json
+  s_ec117ba6cf48fd::t_dcd1fc081077b4 865-935
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_eded90caa27e4a 1026,1195-1252,1355-1356,1876-1948
+internal/adapters/postgres/connectors.go
+  s_ec117ba6cf48fd::t_98fcc9c5fbc072 6-7,251-287
+internal/adapters/postgres/connectors_test.go
+  s_ec117ba6cf48fd::t_57774b4d601d7b 282-357
+internal/connectors/connector.go
+  s_ec117ba6cf48fd::t_d7b8934bdc7606 202-205,211,214-218
+internal/connectors/fixture.go
+  s_ec117ba6cf48fd::t_70fc0d548df60c 39-41,46
+internal/connectors/fixture_test.go
+  s_ec117ba6cf48fd::t_7ab8c66612065c 60,63,66,69
+internal/connectors/m365mail/connector.go
+  s_ec117ba6cf48fd::t_1ff9f7e578eec0 78-82,86-90,92-93,96-98
+internal/connectors/rss.go
+  s_ec117ba6cf48fd::t_422ab3370ec052 100-102,105-107
+internal/connectors/rss_test.go
+  s_ec117ba6cf48fd::t_d6d62c9f1171a1 445
+internal/connectors/service.go
+  s_ec117ba6cf48fd::t_e5254cd5818dbd 104-106,148-151,160,164,170-171,181,255,260,265,284-311
+internal/connectors/service_test.go
+  s_ec117ba6cf48fd::t_593024a07c3cdb 9,60-70
+internal/connectors/xlist.go
+  s_ec117ba6cf48fd::t_2c23d1e7229f08 159-164,167-173
+internal/connectors/xlist_test.go
+  s_ec117ba6cf48fd::t_d3f31e7c74392e 184,190,194
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_7bc877fed43231 111-149,413-414,420,422,754-791,911-913,1180-1184,1413-1415,1666-1668,1684-1686,1939-1952,2104-2129,3112-3113,3266-3303,3501-3540,4742-4744,4760-4762,4971-4994,5144-5176
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_5fdffae478e981 59,112-116
+internal/transport/httpapi/connectors.go
+  s_ec117ba6cf48fd::t_efaa52cad61893 39,93-97,104-112,122-125,144,199-209,225-268
+internal/transport/httpapi/connectors_test.go
+  s_ec117ba6cf48fd::t_a5be3bd35e9ca0 89-100,102-105,127,273-391
+tests/acceptance/connectors_config_test.go
+  s_ec117ba6cf48fd::t_8225d735c02cb8 1-65
+tests/acceptance/keyless_test.go
+  s_ec117ba6cf48fd::t_5a3d3adcad485d 18-20
+internal/connectors/kinds_test.go
+  s_c42856dc40cd16::t_e749948250f7b3 1-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6332783f41a180265d21f5cd2e897137503c32b4",
+  "prompts": {},
+  "sessions": {
+    "s_c42856dc40cd16": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a022de9ef524b3cd1",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
