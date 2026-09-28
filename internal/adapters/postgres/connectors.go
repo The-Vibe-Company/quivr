@@ -3,7 +3,6 @@ package postgres
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -23,7 +22,14 @@ type ConnectorStore struct{ ContentStore }
 
 const connectorColumns = `c.organization,c.id,c.corpus_id,c.source_namespace,c.kind,c.config,c.interval_seconds,c.silent_after_seconds,c.credential_warning_seconds,c.enabled,c.created_at,c.disabled_at,
 c.health_state,c.health_evaluated_at,c.last_success_at,c.last_item_at,c.last_error_code,c.last_error_class,c.last_error_at,c.access_error_at,
-k.version,k.deposited_at,k.expires_at`
+k.version,k.deposited_at,k.expires_at,
+CASE WHEN c.usage_day IS NULL THEN NULL ELSE ` + utcToday + ` END,
+CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_items ELSE 0 END,
+CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_previous_items WHEN c.usage_day=` + utcToday + `-1 THEN c.usage_items ELSE 0 END,
+c.diagnostics`
+
+// utcToday is the current UTC calendar day, the window of usage counters.
+const utcToday = `(now() AT TIME ZONE 'UTC')::date`
 
 const connectorFrom = ` FROM connector_instances c LEFT JOIN LATERAL (
   SELECT version,deposited_at,expires_at FROM connector_credentials WHERE organization=c.organization AND connector_id=c.id ORDER BY version DESC LIMIT 1
@@ -35,9 +41,12 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	var code, class *string
 	var errorAt *time.Time
 	var version *int
-	var deposited, expires *time.Time
+	var deposited, expires, usageDay *time.Time
+	var usageToday, usagePrevious int64
+	var diagnostics []byte
 	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt,
-		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires)
+		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires,
+		&usageDay, &usageToday, &usagePrevious, &diagnostics)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, corpus.ErrNotFound
 	}
@@ -53,6 +62,12 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	}
 	if version != nil {
 		in.Credential = &connectors.CredentialInfo{Version: *version, DepositedAt: *deposited, ExpiresAt: expires}
+	}
+	if usageDay != nil {
+		in.Health.Usage = &connectors.Usage{Day: *usageDay, ItemsRead: usageToday, PreviousDayItemsRead: usagePrevious}
+	}
+	if len(diagnostics) > 0 {
+		in.Health.Diagnostics = diagnostics
 	}
 	return in, nil
 }
@@ -320,6 +335,9 @@ func (s ConnectorStore) LoadRun(ctx context.Context, org, id string) (connectors
 		return connectors.Target{}, err
 	}
 	t := connectors.Target{Instance: in}
+	if in.Health.Usage != nil {
+		t.ReadsToday = in.Health.Usage.ItemsRead
+	}
 	if err = s.Pool.QueryRow(ctx, "SELECT run_sequence,checkpoint FROM connector_instances WHERE organization=$1 AND id=$2", org, id).Scan(&t.RunSequence, &t.Checkpoint); err != nil {
 		return t, err
 	}
@@ -333,15 +351,26 @@ func (s ConnectorStore) LoadRun(ctx context.Context, org, id string) (connectors
 	return t, nil
 }
 
-// CommitCheckpoint advances the Acquisition Checkpoint of a live run.
-func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, run int64, checkpoint json.RawMessage, items bool) (bool, error) {
-	tag, err := s.Pool.Exec(ctx, `UPDATE connector_instances SET checkpoint=$4, last_item_at=CASE WHEN $5 THEN now() ELSE last_item_at END
-WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, []byte(checkpoint), items)
+// CommitCheckpoint advances the Acquisition Checkpoint of a live run, adds
+// the page's reads to the current UTC day's usage (rolling the counters over
+// on a new day) and replaces the kind's diagnostics when the page has any.
+func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, run int64, p connectors.Progress) (bool, error) {
+	var diagnostics any
+	if len(p.Diagnostics) > 0 {
+		diagnostics = []byte(p.Diagnostics)
+	}
+	tag, err := s.Pool.Exec(ctx, `UPDATE connector_instances SET checkpoint=$4, last_item_at=CASE WHEN $5 THEN now() ELSE last_item_at END,
+ usage_previous_items=CASE WHEN usage_day=`+utcToday+` THEN usage_previous_items WHEN usage_day=`+utcToday+`-1 THEN usage_items ELSE 0 END,
+ usage_items=CASE WHEN usage_day=`+utcToday+` THEN usage_items+$6 ELSE $6 END,
+ usage_day=CASE WHEN usage_day IS NULL AND $6=0 THEN NULL ELSE `+utcToday+` END,
+ diagnostics=COALESCE($7::jsonb,diagnostics)
+WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics)
 	return tag.RowsAffected() == 1, err
 }
 
 // FinishRun ends a live run: it records its outcome, schedules the next run
-// one interval later, releases the lease and commits re-evaluated health.
+// one interval later (or after the failure's RetryAfter when longer),
+// releases the lease and commits re-evaluated health.
 func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -362,14 +391,15 @@ func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64
 	// failures only update the last error.
 	success := failure == nil || failure.Completed
 	var code, class any
+	retry := 0.0
 	if failure != nil && !failure.Skipped {
-		code, class = failure.Code, string(failure.Class)
+		code, class, retry = failure.Code, string(failure.Class), failure.RetryAfter.Seconds()
 	}
-	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => interval_seconds),
+	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision)),
  last_success_at=CASE WHEN $3 THEN now() ELSE last_success_at END,
  access_error_at=CASE WHEN $3 THEN NULL WHEN $5='access' THEN now() ELSE access_error_at END,
  last_error_code=COALESCE($4,last_error_code),last_error_class=COALESCE($5,last_error_class),last_error_at=CASE WHEN $4::text IS NULL THEN last_error_at ELSE now() END
-WHERE organization=$1 AND id=$2`, org, id, success, code, class)
+WHERE organization=$1 AND id=$2`, org, id, success, code, class, retry)
 	if err != nil {
 		return err
 	}

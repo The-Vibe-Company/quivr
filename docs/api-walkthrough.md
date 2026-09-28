@@ -184,6 +184,21 @@ the same ingestion path as `POST /v0/records`. Credentials are write-only and ne
 returned. Kinds that have not shipped yet are refused with
 `422 unsupported_connector_kind`. See the [operator guide](connectors/README.md).
 
+The `x_list` kind polls one X list with a deposited bearer token:
+
+```http
+POST /v0/connectors
+Authorization: Bearer <key with connectors:write>
+Content-Type: application/json
+
+{"idempotency_key":"x-watchlist-1","corpus_id":"<corpus_id>","source_namespace":"x-watchlist","kind":"x_list","config":{"list_id":"1234567890123456789"},"credential":{"secret":{"bearer_token":"<X app bearer token>"}}}
+```
+
+Each post becomes a Record keyed by its original post id; an edit is a correction,
+and a post deleted or made protected on X within the recheck window is withdrawn.
+`GET /v0/connectors/{id}` shows `health.usage` (estimated billed reads per UTC day)
+and `health.diagnostics` (recheck coverage). See the [X guide](connectors/x.md).
+
 ## Verification
 
 `make verify` regenerates and compares transports, checks the examples in all three

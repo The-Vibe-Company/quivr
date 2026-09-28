@@ -206,6 +206,10 @@ _Avoid_: API key, stored password
 The committed, evaluated condition of a connector instance's collection (active, silent, access error, credential expiring or disabled) that distinguishes a source refusing access from a source that simply published nothing new.
 _Avoid_: Uptime, workflow status
 
+**Connector Usage**:
+The per-UTC-day count of source resources a connector instance read (current and previous day), reported by kinds whose source bills or rate-limits per resource; an estimate of what the source bills.
+_Avoid_: Quota, cost
+
 **Plugin**:
 A versioned installation unit that contributes one or more extensions to the engine through public contracts.
 _Avoid_: One plugin type per extension point

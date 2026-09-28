@@ -54,6 +54,17 @@ type Target struct {
 	RunSequence int64
 	Checkpoint  json.RawMessage
 	Sealed      *Sealed
+	// ReadsToday is the usage counter of the current UTC day at run start.
+	ReadsToday int64
+}
+
+// Progress is what one accepted page advances: the checkpoint, whether it
+// carried items, the source resources it read and the kind's diagnostics.
+type Progress struct {
+	Checkpoint  json.RawMessage
+	Items       bool
+	Reads       int64
+	Diagnostics json.RawMessage
 }
 
 // RunStore persists acquisition progress.
@@ -61,8 +72,9 @@ type RunStore interface {
 	LoadRun(ctx context.Context, org, id string) (Target, error)
 	// CommitCheckpoint durably advances the Acquisition Checkpoint of the
 	// given run; it reports false when the run is stale or the instance is
-	// disabled, which ends the run.
-	CommitCheckpoint(ctx context.Context, org, id string, run int64, checkpoint json.RawMessage, items bool) (bool, error)
+	// disabled, which ends the run. Reads are added to the current UTC day's
+	// usage in the same transaction.
+	CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error)
 	// FinishRun ends the run, schedules the next one and commits re-evaluated
 	// Connector Health (with its event) in one transaction.
 	FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error
@@ -113,6 +125,10 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		slog.Warn("connector acquisition failed", "connector_id", id, "class", string(class), "code", code)
 		return a.Store.FinishRun(ctx, org, id, run, &RunError{Class: class, Code: code, At: a.now()})
 	}
+	deferred := func(typed *Error) error {
+		slog.Warn("connector acquisition failed", "connector_id", id, "class", string(typed.Class), "code", typed.Code, "retry_after", typed.RetryAfter.String())
+		return a.Store.FinishRun(ctx, org, id, run, &RunError{Class: typed.Class, Code: typed.Code, At: a.now(), RetryAfter: typed.RetryAfter})
+	}
 	connector, ok := a.Registry.Lookup(target.Kind)
 	if !ok {
 		return failure(ClassSource, "unsupported_connector_kind")
@@ -140,8 +156,10 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	}
 	var stored int64
 	var rejected string
+	var notice string
+	reads := target.ReadsToday
 	for i := 0; i < pages; i++ {
-		page, err := connector.Fetch(ctx, FetchRequest{Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now()})
+		page, err := connector.Fetch(ctx, FetchRequest{Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
 		if errors.Is(err, ErrNotDue) && i == 0 {
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
@@ -152,7 +170,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		if err != nil {
 			var typed *Error
 			if errors.As(err, &typed) {
-				return failure(typed.Class, typed.Code)
+				return deferred(typed)
 			}
 			return failure(ClassTransient, "source_unavailable")
 		}
@@ -165,7 +183,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 				var typed *Error
 				switch {
 				case errors.As(err, &typed):
-					return failure(typed.Class, typed.Code)
+					return deferred(typed)
 				case errors.Is(err, errSourceRead):
 					return failure(ClassTransient, "source_unavailable")
 				case errors.Is(err, errSkipped):
@@ -184,7 +202,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			stored += size
 			fresh = fresh || created
 		}
-		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, page.Checkpoint, fresh)
+		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: page.Diagnostics})
 		if err != nil {
 			return err
 		}
@@ -192,9 +210,17 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			return nil
 		}
 		checkpoint = page.Checkpoint
+		reads += page.Reads
+		if page.Notice != "" {
+			notice = page.Notice
+		}
 		if !page.More || stored >= budget {
 			break
 		}
+	}
+	if notice != "" && rejected == "" {
+		slog.Info("connector run notice", "connector_id", id, "code", notice)
+		return a.Store.FinishRun(ctx, org, id, run, &RunError{Class: ClassSource, Code: notice, At: a.now(), Completed: true})
 	}
 	if rejected != "" {
 		slog.Warn("connector item rejected", "connector_id", id, "code", rejected)
@@ -233,6 +259,17 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 	if item.Withdraw {
 		_, err := a.Ingest.Withdraw(ctx, scope, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
 		return 0, false, err
+	}
+	if item.Manifest != nil && len(item.Manifest.Relations) > 0 {
+		// Unbound relation targets refer to Records of the same Source Namespace.
+		m := *item.Manifest
+		m.Relations = append([]content.Relation(nil), m.Relations...)
+		for i, r := range m.Relations {
+			if r.Target.CorpusID == "" && r.Target.Namespace == "" {
+				m.Relations[i].Target.CorpusID, m.Relations[i].Target.Namespace = inst.CorpusID, inst.Namespace
+			}
+		}
+		item.Manifest = &m
 	}
 	key := KeyPrefix + content.StableID("item", inst.ID, item.RecordKey, revision)
 	manifest := item.Manifest

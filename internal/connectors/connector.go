@@ -29,7 +29,9 @@ const (
 )
 
 // Error is a typed acquisition failure. Code is a stable public diagnostic
-// (never a message containing source data or secrets).
+// (never a message containing source data or secrets). RetryAfter, when set,
+// defers the next run until the source accepts requests again (e.g. a rate
+// limit reset); it never shortens the configured interval.
 type Error struct {
 	Class      ErrorClass
 	Code       string
@@ -91,6 +93,11 @@ type FetchRequest struct {
 	Credential json.RawMessage
 	Checkpoint json.RawMessage
 	Now        time.Time
+	// PageInRun is 0 for the first page of a run, then counts up.
+	PageInRun int
+	// ReadsToday is the number of source resources read during the current
+	// UTC day, including earlier pages of this run.
+	ReadsToday int64
 }
 
 // Page is a fetched page and the checkpoint that resumes after it. More asks
@@ -99,6 +106,15 @@ type Page struct {
 	Items      []Item
 	Checkpoint json.RawMessage
 	More       bool
+	// Reads counts the source resources this page read (for sources that bill
+	// or rate-limit per resource). It feeds the per-UTC-day usage counters.
+	Reads int64
+	// Diagnostics is an optional kind-defined JSON object exposed as
+	// health.diagnostics; the latest page's value replaces the previous one.
+	Diagnostics json.RawMessage
+	// Notice is a diagnostic code for a run that completed normally but must
+	// report a condition (e.g. a spend cap); it ends the run.
+	Notice string
 }
 
 // Connector is the internal contract of one connector kind. It is shaped so a

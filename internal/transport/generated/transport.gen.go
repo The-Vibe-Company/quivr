@@ -654,7 +654,7 @@ type Connector struct {
 		SilentAfterSeconds       int `json:"silent_after_seconds"`
 	} `json:"health_policy"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 	Kind     ConnectorKind `json:"kind"`
 	Schedule struct {
 		IntervalSeconds int `json:"interval_seconds"`
@@ -671,7 +671,7 @@ type ConnectorCreate struct {
 	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
 	IdempotencyKey string                 `json:"idempotency_key"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 	Kind            ConnectorKind      `json:"kind"`
 	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
 	SourceNamespace string             `json:"source_namespace"`
@@ -685,11 +685,16 @@ type ConnectorError struct {
 
 // ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
 type ConnectorHealth struct {
-	EvaluatedAt   time.Time            `json:"evaluated_at"`
-	LastError     *ConnectorError      `json:"last_error,omitempty"`
-	LastItemAt    *time.Time           `json:"last_item_at,omitempty"`
-	LastSuccessAt *time.Time           `json:"last_success_at,omitempty"`
-	State         ConnectorHealthState `json:"state"`
+	// Diagnostics Kind-defined diagnostics from the latest acquisition page, documented on the kind's operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a secret or source content.
+	Diagnostics   *map[string]interface{} `json:"diagnostics,omitempty"`
+	EvaluatedAt   time.Time               `json:"evaluated_at"`
+	LastError     *ConnectorError         `json:"last_error,omitempty"`
+	LastItemAt    *time.Time              `json:"last_item_at,omitempty"`
+	LastSuccessAt *time.Time              `json:"last_success_at,omitempty"`
+	State         ConnectorHealthState    `json:"state"`
+
+	// Usage Per-UTC-day source read counters, present only for kinds that report reads.
+	Usage *ConnectorUsage `json:"usage,omitempty"`
 }
 
 // ConnectorHealthState defines model for ConnectorHealth.State.
@@ -704,7 +709,7 @@ type ConnectorHealthPolicy struct {
 	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
 }
 
-// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 type ConnectorKind string
 
 // ConnectorPage defines model for ConnectorPage.
@@ -717,6 +722,16 @@ type ConnectorPage struct {
 type ConnectorSchedule struct {
 	// IntervalSeconds Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
 	IntervalSeconds *int `json:"interval_seconds,omitempty"`
+}
+
+// ConnectorUsage Per-UTC-day source read counters, present only for kinds that report reads.
+type ConnectorUsage struct {
+	// Day Current UTC calendar day (YYYY-MM-DD).
+	Day string `json:"day"`
+
+	// ItemsRead Source resources read during the current UTC day, counted as the source bills them (for x_list, an estimate of billed post reads after X's per-UTC-day deduplication).
+	ItemsRead            int `json:"items_read"`
+	PreviousDayItemsRead int `json:"previous_day_items_read"`
 }
 
 // Corpus defines model for Corpus.

@@ -8,7 +8,9 @@ the change feed behave exactly as they do for pushed content.
 
 This guide covers what every kind has in common. Each kind gets its own page
 here when it ships (`rss`, `microsoft-365`, `x`). Until a kind is delivered, the
-API refuses it with `422 unsupported_connector_kind`. The authoritative request
+API refuses it with `422 unsupported_connector_kind`.
+
+The authoritative request
 and response shapes are in the [OpenAPI contract](../../contracts/http/v0/openapi.yaml).
 The design rationale is in [ingestion contracts](../quivr-v2-ingestion-contracts.md#pull-acquisition-connector-instances).
 
@@ -16,6 +18,7 @@ Delivered kinds:
 
 - [RSS and Atom feeds (`rss`)](rss.md)
 - [Microsoft 365 mailbox (`m365_mail`)](microsoft-365.md)
+- [X lists (`x_list`)](x.md)
 
 ## Before you start
 
@@ -88,7 +91,12 @@ POST /v0/connectors
 
 - **Other failures.** Timeouts, 5xx responses and rejected items show only in
   `last_error{code, at}`. `last_success_at` and `last_item_at` date the last
-  good poll and the last new item.
+  good poll and the last new item. A source rate limit postpones the next run
+  until its reset.
+- **Usage and diagnostics.** Kinds that read billed or rate-limited resources
+  show `health.usage` (`items_read` today and `previous_day_items_read`, UTC
+  days). `health.diagnostics` holds kind-specific details described on the
+  kind's page.
 - **Freshness.** `evaluated_at` shows when health was last committed. If it
   stops advancing, check the worker.
 - **Alerting.** Subscribe to `connector.health_changed`, `connector.created`,

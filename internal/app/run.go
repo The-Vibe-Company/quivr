@@ -66,6 +66,14 @@ type Config struct {
 	// ConnectorRSSAllowPrivateAddresses lets the rss kind reach loopback and
 	// private addresses (local/CI fake feeds only; refused by default).
 	ConnectorRSSAllowPrivateAddresses bool `json:"connector_rss_allow_private_addresses"`
+	// X configures the x_list connector kind.
+	X XConfig `json:"x"`
+}
+
+// XConfig points the x_list connector at the X API; api_endpoint defaults to
+// https://api.x.com and is overridden only for local fakes.
+type XConfig struct {
+	APIEndpoint string `json:"api_endpoint"`
 }
 
 func Run(command string) error {
@@ -96,7 +104,12 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.RSS{AllowPrivateAddresses: cfg.ConnectorRSSAllowPrivateAddresses}}
+	if cfg.X.APIEndpoint != "" {
+		if u, err := url.Parse(cfg.X.APIEndpoint); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return errors.New("x.api_endpoint must be an http(s) URL")
+		}
+	}
+	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.RSS{AllowPrivateAddresses: cfg.ConnectorRSSAllowPrivateAddresses}, connectors.XList{BaseURL: cfg.X.APIEndpoint}}
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}

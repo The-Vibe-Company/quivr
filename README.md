@@ -123,13 +123,16 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   validated and activated.
 - **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
   deposited credentials and health, through the same ingestion path as pushed content.
+  Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
+  and `x_list`, which polls an X list: edits become corrections, deleted or protected
+  posts are withdrawn, and health shows daily reads ([guide](docs/connectors/x.md)).
 - **Retrieval measurement** with a frozen workload (`make measure`).
 
 ## What comes next
 
 - Signed webhook delivery with retried attempts, and plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
-- Concrete pull connector kinds: RSS, Microsoft 365, X.
+- X Filtered Stream webhooks as a lower-latency alternative to list polling.
 - The plugin platform: out-of-process plugin workers, packaging and SDKs.
 
 The contract already describes some of these routes; the ones not implemented yet are

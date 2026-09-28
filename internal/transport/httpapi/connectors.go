@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -64,6 +65,15 @@ func connectorToTransport(in connectors.Instance) transport.Connector {
 	}
 	if h.LastError != nil {
 		out.Health.LastError = &transport.ConnectorError{Code: h.LastError.Code, At: h.LastError.At.UTC()}
+	}
+	if u := h.Usage; u != nil {
+		out.Health.Usage = &transport.ConnectorUsage{Day: u.Day.Format(time.DateOnly), ItemsRead: int(u.ItemsRead), PreviousDayItemsRead: int(u.PreviousDayItemsRead)}
+	}
+	if len(h.Diagnostics) > 0 {
+		var d map[string]any
+		if json.Unmarshal(h.Diagnostics, &d) == nil && d != nil {
+			out.Health.Diagnostics = &d
+		}
 	}
 	return out
 }

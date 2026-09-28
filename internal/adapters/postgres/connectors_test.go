@@ -101,11 +101,35 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if plain, err := sealer.Open(scope.Organization, created.ID, *target.Sealed); err != nil || string(plain) != `{"token":"fixture-test-secret-adapter"}` {
 		t.Fatalf("open %v %s", err, plain)
 	}
-	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run+1, json.RawMessage(`{"step":9}`), true); ok || err != nil {
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run+1, connectors.Progress{Checkpoint: json.RawMessage(`{"step":9}`), Items: true, Reads: 50}); ok || err != nil {
 		t.Fatalf("stale checkpoint committed: %v %v", ok, err)
 	}
-	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, json.RawMessage(`{"step":1}`), true); !ok || err != nil {
+	if fresh, _ := store.ReadConnector(ctx, scope.Organization, created.ID); fresh.Health.Usage != nil || fresh.Health.Diagnostics != nil {
+		t.Fatalf("a kind that never reported reads has no usage: %+v", fresh.Health)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, connectors.Progress{Checkpoint: json.RawMessage(`{"step":0}`), Reads: 30, Diagnostics: json.RawMessage(`{"window":1}`)}); !ok || err != nil {
 		t.Fatalf("checkpoint: %v %v", ok, err)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, connectors.Progress{Checkpoint: json.RawMessage(`{"step":1}`), Items: true, Reads: 12}); !ok || err != nil {
+		t.Fatalf("checkpoint: %v %v", ok, err)
+	}
+	// Reads accumulate per UTC day; a page without diagnostics keeps the last ones.
+	counted, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil || counted.ReadsToday != 42 || counted.Health.Usage == nil || counted.Health.Usage.ItemsRead != 42 || counted.Health.Usage.PreviousDayItemsRead != 0 || string(counted.Health.Diagnostics) != `{"window": 1}` {
+		t.Fatalf("usage %v %+v %s", err, counted.Health.Usage, counted.Health.Diagnostics)
+	}
+	// A new UTC day rolls today's reads over to the previous day.
+	if _, err = pool.Exec(ctx, "UPDATE connector_instances SET usage_day=usage_day-1 WHERE organization=$1 AND id=$2", scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rolled, _ := store.ReadConnector(ctx, scope.Organization, created.ID); rolled.Health.Usage == nil || rolled.Health.Usage.ItemsRead != 0 || rolled.Health.Usage.PreviousDayItemsRead != 42 {
+		t.Fatalf("rollover on read %+v", rolled.Health.Usage)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, connectors.Progress{Checkpoint: json.RawMessage(`{"step":1}`), Reads: 5}); !ok || err != nil {
+		t.Fatalf("checkpoint: %v %v", ok, err)
+	}
+	if rolled, _ := store.ReadConnector(ctx, scope.Organization, created.ID); rolled.Health.Usage.ItemsRead != 5 || rolled.Health.Usage.PreviousDayItemsRead != 42 {
+		t.Fatalf("rollover on commit %+v", rolled.Health.Usage)
 	}
 	feed := changes.Service{Journal: store.ContentStore, Key: []byte("adapter-cursor-key-0123456789abcdef")}
 	start, err := feed.Start(ctx, scope, c.ID, "")
@@ -135,8 +159,13 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if len(next) != 1 || next[0].Run != run[0].Run+1 {
 		t.Fatalf("next run %+v", next)
 	}
-	if err = store.FinishRun(ctx, scope.Organization, created.ID, next[0].Run, &connectors.RunError{Class: connectors.ClassTransient, Code: "source_unavailable"}); err != nil {
+	if err = store.FinishRun(ctx, scope.Organization, created.ID, next[0].Run, &connectors.RunError{Class: connectors.ClassTransient, Code: "source_unavailable", RetryAfter: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
+	}
+	// RetryAfter longer than the interval defers the next run past the source's reset.
+	var deferredFor float64
+	if err = pool.QueryRow(ctx, "SELECT EXTRACT(EPOCH FROM next_run_at-now()) FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&deferredFor); err != nil || deferredFor < 590 {
+		t.Fatalf("next run not deferred: %v %v", err, deferredFor)
 	}
 	if still, _ := store.ReadConnector(ctx, scope.Organization, created.ID); still.Health.State != connectors.HealthAccessError || still.Health.LastError.Code != "source_unavailable" {
 		t.Fatalf("transient failure cleared the access error: %+v", still.Health)

@@ -62,6 +62,17 @@ type Health struct {
 	LastError     *RunError
 	// AccessErrorAt is internal: the unresolved access refusal, if any.
 	AccessErrorAt *time.Time
+	// Usage is nil for kinds that never report source reads.
+	Usage *Usage
+	// Diagnostics is the kind-defined object of the latest committed page.
+	Diagnostics json.RawMessage
+}
+
+// Usage counts source resources read per UTC day (current and previous).
+type Usage struct {
+	Day                  time.Time
+	ItemsRead            int64
+	PreviousDayItemsRead int64
 }
 
 // NewInstance is a validated creation request ready to persist.

@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -89,7 +90,12 @@ const connectorKey = "connector-key-0123456789abcdef0123456"
 
 func connectorAPI(t *testing.T) http.Handler {
 	t.Helper()
-	registry, err := connectors.NewRegistry(connectors.Fixture{})
+	return connectorAPIWith(t, &memoryConnectors{items: map[string]connectors.Instance{}})
+}
+
+func connectorAPIWith(t *testing.T, store *memoryConnectors) http.Handler {
+	t.Helper()
+	registry, err := connectors.NewRegistry(connectors.Fixture{}, connectors.XList{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +105,7 @@ func connectorAPI(t *testing.T) http.Handler {
 		readerKey:    {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
 	}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
-		httpapi.WithConnectors(connectors.Service{Store: &memoryConnectors{items: map[string]connectors.Instance{}}, Registry: registry, Sealer: sealer}))
+		httpapi.WithConnectors(connectors.Service{Store: store, Registry: registry, Sealer: sealer}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,4 +174,46 @@ func readJSON(t *testing.T, handler http.Handler, path, key string) (int, map[st
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	return rec.Code, out
+}
+
+func TestXListInstancesValidateTheirWindowAndExposeUsageAndDiagnostics(t *testing.T) {
+	store := &memoryConnectors{items: map[string]connectors.Instance{}}
+	handler := connectorAPIWith(t, store)
+	body := func(config map[string]any) map[string]any {
+		return map[string]any{"idempotency_key": fmt.Sprint(config), "corpus_id": "corpus_news", "source_namespace": fmt.Sprint(len(store.items)), "kind": "x_list", "config": config,
+			"credential": map[string]any{"secret": map[string]any{"bearer_token": "x-handler-token-not-real", "consumer_secret": "x-handler-consumer-not-real"}}}
+	}
+	status, created := postJSON(t, handler, "/v0/connectors", connectorKey, body(map[string]any{"list_id": "1234567890123456789", "backfill_since": time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)}))
+	if status != 201 || created["schedule"].(map[string]any)["interval_seconds"].(float64) != 120 {
+		t.Fatalf("create: %d %v", status, created)
+	}
+	if raw, _ := json.Marshal(created); strings.Contains(string(raw), "x-handler") {
+		t.Fatalf("secret echoed: %s", raw)
+	}
+	for _, config := range []map[string]any{
+		{"list_id": "1", "backfill_since": time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+		{"list_id": "not-a-list"},
+		{"list_id": "1", "recheck_window_seconds": 10},
+	} {
+		if status, e := postJSON(t, handler, "/v0/connectors", connectorKey, body(config)); status != 422 || e["code"] != "invalid_config" {
+			t.Errorf("%v: %d %v", config, status, e)
+		}
+	}
+	id := created["connector_id"].(string)
+	in := store.items[id]
+	in.Health.Usage = &connectors.Usage{Day: time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC), ItemsRead: 412, PreviousDayItemsRead: 1830}
+	in.Health.Diagnostics = json.RawMessage(`{"recheck_window_seconds":86400,"recheck_tracked_posts":3}`)
+	store.items[id] = in
+	status, read := readJSON(t, handler, "/v0/connectors/"+id, readerKey)
+	if status != 200 {
+		t.Fatalf("read %d %v", status, read)
+	}
+	conforms(t, "Connector", read)
+	h := read["health"].(map[string]any)
+	if u := h["usage"].(map[string]any); u["day"] != "2026-09-28" || u["items_read"].(float64) != 412 || u["previous_day_items_read"].(float64) != 1830 {
+		t.Fatalf("usage %v", h)
+	}
+	if d := h["diagnostics"].(map[string]any); d["recheck_window_seconds"].(float64) != 86400 {
+		t.Fatalf("diagnostics %v", h)
+	}
 }

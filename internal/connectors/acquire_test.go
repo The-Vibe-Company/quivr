@@ -16,17 +16,19 @@ type fakeRuns struct {
 	target      Target
 	checkpoints []string
 	items       []bool
+	progress    []Progress
 	finished    []*RunError
 }
 
 func (f *fakeRuns) LoadRun(context.Context, string, string) (Target, error) { return f.target, nil }
-func (f *fakeRuns) CommitCheckpoint(_ context.Context, _, _ string, run int64, cp json.RawMessage, items bool) (bool, error) {
+func (f *fakeRuns) CommitCheckpoint(_ context.Context, _, _ string, run int64, p Progress) (bool, error) {
 	if run != f.target.RunSequence {
 		return false, nil
 	}
-	f.checkpoints = append(f.checkpoints, string(cp))
-	f.items = append(f.items, items)
-	f.target.Checkpoint = cp
+	f.checkpoints = append(f.checkpoints, string(p.Checkpoint))
+	f.items = append(f.items, p.Items)
+	f.progress = append(f.progress, p)
+	f.target.Checkpoint = p.Checkpoint
 	return true, nil
 }
 func (f *fakeRuns) FinishRun(_ context.Context, _, _ string, _ int64, failure *RunError) error {
@@ -224,6 +226,79 @@ func TestANotDueRunFinishesAsSkippedWithoutPolling(t *testing.T) {
 		t.Fatalf("skipped run acted: %v %v", ingest.accepted, runs.checkpoints)
 	}
 	if f := runs.finished[0]; f == nil || !f.Skipped || f.Code != "" || f.Completed {
+		t.Fatalf("finish %+v", f)
+	}
+}
+
+// stubConnector serves scripted pages or errors and records every request.
+type stubConnector struct {
+	pages    []Page
+	err      error
+	requests []FetchRequest
+}
+
+func (s *stubConnector) Kind() string                   { return "stub" }
+func (s *stubConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
+func (s *stubConnector) CredentialSchema() []byte       { return nil }
+func (s *stubConnector) DefaultInterval() time.Duration { return time.Minute }
+func (s *stubConnector) Fetch(_ context.Context, r FetchRequest) (Page, error) {
+	s.requests = append(s.requests, r)
+	if len(s.requests) > len(s.pages) {
+		return Page{}, s.err
+	}
+	return s.pages[len(s.requests)-1], nil
+}
+
+func stubAcquirer(t *testing.T, stub *stubConnector, readsToday int64) (Acquirer, *fakeRuns) {
+	t.Helper()
+	registry, err := NewRegistry(stub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, _ := NewSealer(testDeploymentKey)
+	runs := &fakeRuns{target: Target{Instance: Instance{Organization: "org_a", ID: "connector_1", CorpusID: "corpus_1", Namespace: "wire", Kind: "stub", Config: json.RawMessage(`{}`), Enabled: true}, RunSequence: 1, ReadsToday: readsToday}}
+	return Acquirer{Store: runs, Registry: registry, Sealer: sealer, Ingest: &fakeIngest{}}, runs
+}
+
+func TestARateLimitedSourceDefersTheNextRunUntilItsReset(t *testing.T) {
+	stub := &stubConnector{err: &Error{Class: ClassTransient, Code: "rate_limited", RetryAfter: 7 * time.Minute}}
+	a, runs := stubAcquirer(t, stub, 0)
+	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if f := runs.finished[0]; f == nil || f.Code != "rate_limited" || f.Class != ClassTransient || f.RetryAfter != 7*time.Minute {
+		t.Fatalf("finish %+v", f)
+	}
+}
+
+func TestPagesReportReadsAndDiagnosticsWithTheirCheckpoint(t *testing.T) {
+	stub := &stubConnector{pages: []Page{
+		{Checkpoint: json.RawMessage(`{"n":1}`), Reads: 40, Diagnostics: json.RawMessage(`{"d":1}`), More: true},
+		{Checkpoint: json.RawMessage(`{"n":2}`), Reads: 2, Diagnostics: json.RawMessage(`{"d":2}`)},
+	}}
+	a, runs := stubAcquirer(t, stub, 100)
+	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs.progress) != 2 || runs.progress[0].Reads != 40 || runs.progress[1].Reads != 2 || string(runs.progress[1].Diagnostics) != `{"d":2}` {
+		t.Fatalf("progress %+v", runs.progress)
+	}
+	// Each page sees the reads already spent today, including earlier pages of this run.
+	if stub.requests[0].ReadsToday != 100 || stub.requests[1].ReadsToday != 140 || stub.requests[0].PageInRun != 0 || stub.requests[1].PageInRun != 1 {
+		t.Fatalf("requests %+v", stub.requests)
+	}
+	if runs.finished[0] != nil {
+		t.Fatalf("finish %+v", runs.finished[0])
+	}
+}
+
+func TestAPageNoticeCompletesTheRunWithADiagnostic(t *testing.T) {
+	stub := &stubConnector{pages: []Page{{Checkpoint: json.RawMessage(`{}`), Notice: "daily_read_cap_reached"}}}
+	a, runs := stubAcquirer(t, stub, 0)
+	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if f := runs.finished[0]; f == nil || f.Code != "daily_read_cap_reached" || f.Class != ClassSource || !f.Completed {
 		t.Fatalf("finish %+v", f)
 	}
 }

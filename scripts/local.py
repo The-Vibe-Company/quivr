@@ -28,7 +28,7 @@ class Stack:
         else:
             self.state={'password':secrets.token_hex(24),'cursor_key':secrets.token_hex(32), 'admin':secrets.token_hex(32),'other':secrets.token_hex(32),'reader':secrets.token_hex(32),'scoped':secrets.token_hex(32),'denied':secrets.token_hex(32),'pids':[], 'api_port':port(),'probe_port':port(),'worker_probe_port':port()}
             self.save()
-        for key,value in [('short_api_port',port()),('short_probe_port',port()),('receiver_port',port()),('graph_port',port())]:
+        for key,value in [('short_api_port',port()),('short_probe_port',port()),('receiver_port',port()),('graph_port',port()),('fake_x_port',port())]:
             self.state.setdefault(key,value)
         for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer']:
             self.state.setdefault(key,secrets.token_hex(24))
@@ -52,7 +52,7 @@ class Stack:
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',connector_rss_allow_private_addresses=True,
             # The m365_mail kind talks to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
-            m365=dict(login_endpoint=f"http://127.0.0.1:{s['graph_port']}",graph_endpoint=f"http://127.0.0.1:{s['graph_port']}/v1.0"),keys={
+            x=dict(api_endpoint=f"http://127.0.0.1:{s['fake_x_port']}"),m365=dict(login_endpoint=f"http://127.0.0.1:{s['graph_port']}",graph_endpoint=f"http://127.0.0.1:{s['graph_port']}/v1.0"),keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
@@ -143,7 +143,7 @@ class Stack:
         self.migrate();self.migrate();self.start_processes()
     def tests(self,pattern):
         s=self.state
-        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}"}
+        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -273,11 +273,16 @@ def main():
                 stack.tests('TestMonitoring')
                 # Connector acquisition keeps polling on its schedule; run it after every
                 # timed scenario, in its own Organization, then prove restart resumption.
+                # The x_list kind polls a local fake X API served from this process.
+                import fake_x
+                fake_x.start(stack.state['fake_x_port'])
                 stack.tests('TestConnector')
                 from connector_restart import verify as verify_connector_restart
                 verify_connector_restart(stack)
                 from m365_restart import verify as verify_m365_restart
                 verify_m365_restart(stack)
+                from connector_x_restart import verify as verify_connector_x_restart
+                verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()

@@ -29,6 +29,8 @@ type RunError struct {
 	// Skipped marks a run that did not poll the source (ErrNotDue): it only
 	// schedules the next run, recording neither a success nor an error.
 	Skipped bool
+	// RetryAfter defers the next run beyond the interval (source rate limit).
+	RetryAfter time.Duration
 }
 
 // HealthInput is everything Connector Health depends on.

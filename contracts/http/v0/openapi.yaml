@@ -1896,7 +1896,7 @@ components:
       - x_list
       description: Built-in connector kind. fixture is a deterministic test connector available only when
         the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional
-        honor_ttl; optional credential username+password or token). Other kinds are refused with 422
+        honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422
         unsupported_connector_kind until they are delivered.
     CredentialDeposit:
       type: object
@@ -2013,6 +2013,27 @@ components:
       required:
       - code
       - at
+    ConnectorUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        day:
+          type: string
+          pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          description: Current UTC calendar day (YYYY-MM-DD).
+        items_read:
+          type: integer
+          minimum: 0
+          description: Source resources read during the current UTC day, counted as the source bills them
+            (for x_list, an estimate of billed post reads after X's per-UTC-day deduplication).
+        previous_day_items_read:
+          type: integer
+          minimum: 0
+      required:
+      - day
+      - items_read
+      - previous_day_items_read
+      description: Per-UTC-day source read counters, present only for kinds that report reads.
     ConnectorHealth:
       type: object
       additionalProperties: false
@@ -2036,6 +2057,13 @@ components:
           format: date-time
         last_error:
           $ref: '#/components/schemas/ConnectorError'
+        usage:
+          $ref: '#/components/schemas/ConnectorUsage'
+        diagnostics:
+          type: object
+          description: Kind-defined diagnostics from the latest acquisition page, documented on the kind's
+            operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a
+            secret or source content.
       required:
       - state
       - evaluated_at
