@@ -1,0 +1,23 @@
+internal/transport/httpapi/api.go
+  s_1ca0b5b00fc7ce::t_99c7e136183ce2 140-142
+internal/publicerr/publicerr.go
+  s_1ca0b5b00fc7ce::t_99c7e136183ce2 43,45-47
+internal/publicerr/publicerr_test.go
+  s_1ca0b5b00fc7ce::t_99c7e136183ce2 54-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4caca24583dd2c68021596bd4bdf812b0082d4b",
+  "prompts": {},
+  "sessions": {
+    "s_1ca0b5b00fc7ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e106ac59-4a0e-458f-8cda-9a5a04bad1fd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+internal/publicerr/publicerr_test.go
+  s_1ca0b5b00fc7ce::t_b8ea77a96f7ac7 1-53
+internal/transport/httpapi/api.go
+  s_1ca0b5b00fc7ce::t_2cd3d7c4ff15da 30
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 137-146,263
+internal/transport/httpapi/connectors.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 31,33
+internal/content/content.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 16,20-23
+  s_1ca0b5b00fc7ce::t_29a9f2056a6245 361-365
+internal/transport/httpapi/content.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 29
+internal/transport/httpapi/monitoring.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 36
+internal/monitoring/monitoring.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 13,17
+  s_54b80c92daa9cb::t_f2bd82490b0310 18-24
+internal/publicerr/publicerr.go
+  s_1ca0b5b00fc7ce::t_44725f68f42477 1-56
+internal/corpus/corpus.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 7-8,12-15
+internal/transport/httpapi/operations.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 177
+internal/transport/httpapi/public_codes_test.go
+  s_1ca0b5b00fc7ce::t_b378054cde5dd0 1-111
+internal/connectors/service.go
+  s_1ca0b5b00fc7ce::t_1b87f2a1c5e819 13,17
+  s_1ca0b5b00fc7ce::t_3bc724559ebf69 18-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b7330ad0c9c2dd68482e938514aeaa28bdb3e540",
+  "prompts": {},
+  "sessions": {
+    "s_1ca0b5b00fc7ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e106ac59-4a0e-458f-8cda-9a5a04bad1fd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
