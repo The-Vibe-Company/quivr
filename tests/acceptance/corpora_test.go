@@ -18,6 +18,12 @@ func request(t *testing.T, method, path, token string, body any, want int) map[s
 	if err != nil {
 		t.Fatal(err)
 	}
+	return rawRequest(t, method, path, token, data, want)
+}
+
+// rawRequest sends exact JSON bytes, including envelopes no typed body can express.
+func rawRequest(t *testing.T, method, path, token string, data []byte, want int) map[string]any {
+	t.Helper()
 	req, err := http.NewRequest(method, os.Getenv("QUIVR_TEST_URL")+path, bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)

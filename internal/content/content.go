@@ -433,6 +433,9 @@ func (s Service) validateSourceBlobIDs(ctx context.Context, org string, provenan
 			return ErrUnverifiedBlob
 		}
 		verified, err := s.BlobSource.VerifiedBlob(ctx, org, id)
+		if err != nil && !errors.Is(err, ErrUnverifiedBlob) {
+			return err
+		}
 		if err != nil || verified.ID != id {
 			return ErrUnverifiedBlob
 		}
@@ -447,6 +450,9 @@ func (s Service) verifyPartBlob(ctx context.Context, org string, ref Text) (stri
 		return "", ErrUnverifiedBlob
 	}
 	verified, err := s.BlobSource.VerifiedBlob(ctx, org, ref.BlobID)
+	if err != nil && !errors.Is(err, ErrUnverifiedBlob) {
+		return "", err
+	}
 	if err != nil || verified.ID != ref.BlobID || verified.MediaType != ref.MediaType {
 		return "", ErrUnverifiedBlob
 	}
@@ -595,6 +601,9 @@ func (s Service) resolveBlob(ctx context.Context, org string, ref Text) ([]byte,
 		return nil, ErrUnverifiedBlob
 	}
 	verified, err := s.BlobSource.VerifiedBlob(ctx, org, ref.BlobID)
+	if err != nil && !errors.Is(err, ErrUnverifiedBlob) {
+		return nil, err
+	}
 	if err != nil || verified.MediaType != ref.MediaType {
 		return nil, ErrUnverifiedBlob
 	}

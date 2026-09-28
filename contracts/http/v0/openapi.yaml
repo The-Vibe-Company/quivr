@@ -82,10 +82,12 @@ paths:
   /v0/records/batch:
     post:
       operationId: ingestBatch
-      description: 'Initial bound: 100, envelope 10 MiB. Validate envelope structure/size first, then
-        each entry independently against IngestCommand, including wrong types or missing fields. HTTP
-        200 carries Receipt or Error per entry. Same ingestion family/key as single submission. Reuse
-        entry keys after unknown transport outcomes.'
+      description: 'Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large).
+        Validate envelope structure/size first, then each entry independently against IngestCommand,
+        including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request
+        bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP
+        200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion
+        family/key as single submission. Reuse entry keys after unknown transport outcomes.'
       responses:
         '200':
           description: Successful response

@@ -275,10 +275,17 @@
         {
           "index": 1,
           "error": {
-            "code": "invalid_input",
-            "message": "content is required",
-            "retryable": false,
-            "field": "content"
+            "code": "invalid_schema",
+            "message": "invalid schema",
+            "retryable": false
+          }
+        },
+        {
+          "index": 2,
+          "error": {
+            "code": "invalid_schema",
+            "message": "invalid schema",
+            "retryable": false
           }
         }
       ]

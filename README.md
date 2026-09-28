@@ -47,6 +47,16 @@ accepte un entier décimal de 1 à 1000 chiffres ; les zéros initiaux sont norm
 Les commandes sont limitées à 1 MiB. Les Manifests explicites et extensions
 non vides sont refusés jusqu'à leurs tickets dédiés, sans fausse acceptation.
 
+Pour un import en lot, envoyer `POST /v0/records/batch` avec `{"items": [...]}` :
+jusqu'à 100 commandes et 10 MiB, chacune au plus 1 MiB brut ; l'envoi et le
+traitement partagent le délai de 5 s de la requête. La réponse 200 donne,
+pour chaque entrée et dans l'ordre (`index`), soit son Receipt, soit une erreur
+avec les mêmes codes qu'une soumission unitaire ; une entrée invalide ne bloque
+pas les autres. Une enveloppe mal formée est refusée en bloc (400, 413 ou 422)
+sans aucun Receipt. Chaque entrée garde sa propre clé : après une réponse perdue
+ou interrompue, renvoyer les mêmes clés, par lot ou via `POST /v0/records`,
+rend les mêmes Receipts sans doublon.
+
 Pour un upload, envoyer `POST /v0/uploads` avec `size_bytes`, `sha256` et
 `media_type` (1 GiB maximum). La réponse 201 fournit `upload_id`, une URL PUT
 présignée, ses en-têtes signés obligatoires et `expires_at` (15 minutes). Le

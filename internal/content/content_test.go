@@ -263,3 +263,24 @@ func TestOversizedGenericJSONIsBounded(t *testing.T) {
 		t.Fatalf("oversized generic JSON accepted: %v", err)
 	}
 }
+
+// A verification lookup that cannot complete is an infrastructure failure, not
+// proof that the Blob is unverified: callers must be able to retry it.
+func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
+	outage := stubSource{err: context.DeadlineExceeded}
+	withSourceBlob := manifestCommand()
+	withSourceBlob.Manifest.Parts = withSourceBlob.Manifest.Parts[:2]
+	withSourceBlob.Provenance = map[string]any{"source_blob_ids": []any{"blob_1"}}
+	cases := map[string]content.Command{
+		"Blob content":         blobCommand(),
+		"Manifest Blob Part":   manifestCommand(),
+		"provenance Blob refs": withSourceBlob,
+	}
+	for name, command := range cases {
+		service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: outage}
+		_, err := service.Accept(context.Background(), scope(), command)
+		if errors.Is(err, content.ErrUnverifiedBlob) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%s: outage reported as %v", name, err)
+		}
+	}
+}

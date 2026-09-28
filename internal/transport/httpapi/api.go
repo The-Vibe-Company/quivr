@@ -39,6 +39,7 @@ type API struct {
 	ingestSchema   *jsonschema.Schema
 	uploadSchema   *jsonschema.Schema
 	withdrawSchema *jsonschema.Schema
+	batchSchema    *jsonschema.Schema
 	Service        corpus.Service
 	Keys           map[string]corpus.Scope
 	CursorKey      []byte
@@ -74,16 +75,32 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	batchSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/BatchRequest")
+	if err != nil {
+		return nil, err
+	}
+	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	return http.HandlerFunc(a.serve), nil
 }
+
+const (
+	// maxRequestBytes bounds one single-command request body.
+	maxRequestBytes = 1 << 20
+	// maxBatchBytes and maxBatchEntries bound one ingestion batch envelope.
+	maxBatchBytes   = 10 << 20
+	maxBatchEntries = 100
+)
+
 func send(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+func apiError(status int, code string) transport.Error {
+	return transport.Error{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retryable: status == 503}
+}
 func failure(w http.ResponseWriter, status int, code string) {
-	send(w, status, transport.Error{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retryable: status == 503})
+	send(w, status, apiError(status, code))
 }
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -271,12 +288,26 @@ func (w *responseWriter) WriteHeader(status int) {
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Schema) (any, bool) {
+	raw, _, ok := readJSON(w, r, maxRequestBytes)
+	if !ok {
+		return nil, false
+	}
+	if err := schema.Validate(raw); err != nil {
+		failure(w, 422, "invalid_schema")
+		return nil, false
+	}
+	return raw, true
+}
+
+// readJSON reads one bounded UTF-8 JSON document without interpreting its
+// shape, returning it decoded and as the raw payload.
+func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte, bool) {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		failure(w, 415, "unsupported_media_type")
-		return nil, false
+		return nil, nil, false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
 		var large *http.MaxBytesError
@@ -285,11 +316,11 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Sc
 		} else {
 			failure(w, 400, "malformed_json")
 		}
-		return nil, false
+		return nil, nil, false
 	}
 	if !utf8.Valid(payload) {
 		failure(w, 400, "malformed_json")
-		return nil, false
+		return nil, nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
@@ -301,15 +332,11 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Sc
 		} else {
 			failure(w, 400, "malformed_json")
 		}
-		return nil, false
+		return nil, nil, false
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		failure(w, 400, "malformed_json")
-		return nil, false
+		return nil, nil, false
 	}
-	if err := schema.Validate(raw); err != nil {
-		failure(w, 422, "invalid_schema")
-		return nil, false
-	}
-	return raw, true
+	return raw, payload, true
 }
