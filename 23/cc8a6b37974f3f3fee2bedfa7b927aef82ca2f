@@ -1,0 +1,28 @@
+internal/adapters/s3/blobs_test.go
+  s_ec117ba6cf48fd::t_75930d8a4858ee 17,75-81
+internal/retrieval/rebuild.go
+  s_ec117ba6cf48fd::t_b9fb9f0351795b 124-126,177,181
+internal/adapters/s3/blobs.go
+  s_ec117ba6cf48fd::t_b9fb9f0351795b 65-68,78
+  s_ec117ba6cf48fd::t_e1fbe5617505cd 9,18
+internal/content/content.go
+  s_ec117ba6cf48fd::t_b9fb9f0351795b 22-25
+internal/retrieval/rebuild_test.go
+  s_ec117ba6cf48fd::t_75930d8a4858ee 6,56-58,62-64,136-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23cc8a6b37974f3f3fee2bedfa7b927aef82ca2f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
