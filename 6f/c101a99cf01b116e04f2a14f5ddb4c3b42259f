@@ -1,0 +1,34 @@
+scripts/measure_metrics.py
+  s_ec117ba6cf48fd::t_3d29449090c82a 1-83
+scripts/test_measure.py
+  s_ec117ba6cf48fd::t_7a50b5122916ed 1-98
+scripts/measure.py
+  s_ec117ba6cf48fd::t_2886ab7d2cfb03 1-96,98-105,125-136,138-198,200-202,204-222,225-267,269-283,285-297,299-362
+  s_ec117ba6cf48fd::t_bb574189f55b2a 137,223-224
+  s_ec117ba6cf48fd::t_4f2284d36d94cd 115-124
+  s_ec117ba6cf48fd::t_4886f1f097e952 97,106-114,199,203,268,284,298
+Makefile
+  s_ec117ba6cf48fd::t_7aa8b8f1352202 2,18-21
+.github/workflows/measure.yml
+  s_ec117ba6cf48fd::t_7aa8b8f1352202 1-56
+README.md
+  s_ec117ba6cf48fd::t_8e2a6231ae511f 280-288
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_8e2a6231ae511f 204-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6fc101a99cf01b116e04f2a14f5ddb4c3b42259f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
