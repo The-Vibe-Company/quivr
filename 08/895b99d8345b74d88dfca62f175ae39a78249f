@@ -1,0 +1,41 @@
+docs/quivr-v2-search-contracts.md
+  s_ec117ba6cf48fd::t_b15d3fa239291a 84-94
+internal/retrieval/retrieval.go
+  s_ec117ba6cf48fd::t_7949a1cd514614 14-17,21-22
+  s_ec117ba6cf48fd::t_e3cc42d9783ace 198-203
+  s_ec117ba6cf48fd::t_34e107c2512d7a 103
+  s_ec117ba6cf48fd::t_68d813af0fbf1a 18-20
+  s_ec117ba6cf48fd::t_d10cc325ea66ae 177-180,182-185
+internal/retrieval/retrieval_test.go
+  s_ec117ba6cf48fd::t_dce50f58939962 1-25,27-179
+  s_ec117ba6cf48fd::t_52fe4d8d921a97 26
+internal/adapters/weaviate/projection.go
+  s_ec117ba6cf48fd::t_c7e0ec5e65e470 270-273
+  s_ec117ba6cf48fd::t_35e3beb3585254 88-89,92-182,191-193,195-196,198,201-203,205-206
+  s_ec117ba6cf48fd::t_0d1e2eb5044a97 239
+  s_ec117ba6cf48fd::t_620683a44f317d 287-289,292-311,313,316-342
+internal/adapters/postgres/embeddings.go
+  s_ec117ba6cf48fd::t_27b778417b6214 61-62,64-68
+  s_ec117ba6cf48fd::t_9d5ab9d7f0710e 63
+internal/content/embeddings.go
+  s_ec117ba6cf48fd::t_78dd7942e763fc 38-48
+internal/adapters/postgres/eligibility_test.go
+  s_ec117ba6cf48fd::t_de164b84388dce 1-17,19,23-27,29,32-33,36,57-59,61-64,70,72-73,76-77,79-81,83
+  s_ec117ba6cf48fd::t_a903e316eff80c 18,20-22,28,30-31,34-35,37-56,60,65-69,71,74-75,78,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08895b99d8345b74d88dfca62f175ae39a78249f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
