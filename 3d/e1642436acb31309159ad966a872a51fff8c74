@@ -1,0 +1,115 @@
+internal/adapters/postgres/delivery_fixture_test.go
+  s_ec117ba6cf48fd::t_a554cc3b18be35 189-199,201-202,211-213
+  s_ec117ba6cf48fd::t_5e10197760d3b8 214-226
+  s_ec117ba6cf48fd::t_6981bdd5ef1df4 200,203-210
+  s_ec117ba6cf48fd::t_cc9264bb6c72cb 1-188,227-232
+internal/app/monitoring.go
+  s_ec117ba6cf48fd::t_0cccaca713980d 30-63
+  s_ec117ba6cf48fd::t_d15c2cff35df2a 5-6
+internal/monitoring/retry_test.go
+  s_ec117ba6cf48fd::t_f12de7befc0ba9 1-68
+internal/monitoring/delivery.go
+  s_ec117ba6cf48fd::t_27ee05b1a56f8e 199-200
+  s_ec117ba6cf48fd::t_47c5cee65507bf 54-63
+  s_ec117ba6cf48fd::t_2d40185bbddc74 84-91
+  s_ec117ba6cf48fd::t_d5fbc7dc14a3d5 219-223,226-227
+  s_ec117ba6cf48fd::t_121434f8dc47cf 284-288
+  s_ec117ba6cf48fd::t_ba624d9490f823 103-106
+internal/app/run.go
+  s_ec117ba6cf48fd::t_a517f6d37908c2 197
+  s_ec117ba6cf48fd::t_3d6c19ec33c3c9 291
+  s_ec117ba6cf48fd::t_4c8e8d00d8e7f7 115-118
+  s_ec117ba6cf48fd::t_0a564c30fded5e 53-54
+  s_ec117ba6cf48fd::t_15753d25293aa8 242-247
+internal/monitoring/matches.go
+  s_ec117ba6cf48fd::t_093c7b9e50a293 127
+  s_ec117ba6cf48fd::t_d12e81f17aff8f 70-72
+internal/monitoring/metrics_test.go
+  s_ec117ba6cf48fd::t_b89d4d25595f2a 1-47,51-54
+  s_ec117ba6cf48fd::t_d63b354aa4fae6 48-50
+internal/adapters/postgres/delivery.go
+  s_ec117ba6cf48fd::t_8b8be0a8f35aa5 50-60,232
+  s_ec117ba6cf48fd::t_bd73dc50e1547a 144-148
+  s_ec117ba6cf48fd::t_2f531cb73171aa 71-75
+  s_ec117ba6cf48fd::t_30eecb592ecfbe 165-169
+  s_ec117ba6cf48fd::t_9a1a56ece8f0bd 69-70,76
+  s_ec117ba6cf48fd::t_0ec8a48a276aac 188-197,199-200,210-211,213,221-231
+  s_ec117ba6cf48fd::t_3d82ba212b4c71 101
+  s_ec117ba6cf48fd::t_897874bc989724 107
+  s_ec117ba6cf48fd::t_a7bc740d38ba2f 98,100
+  s_ec117ba6cf48fd::t_7de282b0d7c547 233
+internal/transport/httpapi/matches_test.go
+  s_ec117ba6cf48fd::t_00589cd442b49b 9
+  s_ec117ba6cf48fd::t_7e30ef16f7757e 130-140
+  s_ec117ba6cf48fd::t_9064ac0cc6733b 48-58
+internal/adapters/postgres/delivery_retry_test.go
+  s_ec117ba6cf48fd::t_0d52be092f9843 23
+  s_ec117ba6cf48fd::t_ef98d55f76bc05 44-47
+  s_ec117ba6cf48fd::t_18098fb1d2a4d2 1-22,24-43,48-127
+internal/adapters/postgres/evaluation.go
+  s_ec117ba6cf48fd::t_b86b97daeb9ae9 335
+  s_ec117ba6cf48fd::t_6b19529f6574f5 338-339
+  s_ec117ba6cf48fd::t_33e806ff7b2db8 349
+  s_ec117ba6cf48fd::t_adf493accbcb77 365-369
+internal/transport/httpapi/matches.go
+  s_ec117ba6cf48fd::t_bb0149648c7479 182-187
+migrations/017_delivery_retries.sql
+  s_ec117ba6cf48fd::t_1acf0f12731a5d 1-11
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_dca8f2cd08d70e 777-783
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_49735ea0b08f25 2697-2702
+tests/acceptance/matches_test.go
+  s_ec117ba6cf48fd::t_5687f266acf3f1 275-280
+  s_ec117ba6cf48fd::t_f21b9244cbf25f 218-219
+  s_ec117ba6cf48fd::t_3cdefc427b8036 230-235
+tests/acceptance/delivery_test.go
+  s_ec117ba6cf48fd::t_2d33d61ec17270 67-72,74-75,80-88,93,95,105-108,114,116,119-122,126-135
+  s_ec117ba6cf48fd::t_c363f162f48a33 157
+  s_ec117ba6cf48fd::t_52fd05ef22539b 182-183
+  s_ec117ba6cf48fd::t_5c157b7a2fa740 311
+  s_ec117ba6cf48fd::t_51615799dd31b3 284-288,292,299
+  s_ec117ba6cf48fd::t_24bfdc8649e78f 198,201,204
+  s_ec117ba6cf48fd::t_d5e58711d115fb 342-343
+  s_54b80c92daa9cb::t_1943eba9dd5188 136
+tests/acceptance/delivery_retry_test.go
+  s_ec117ba6cf48fd::t_d232ecc31281cc 1-319,321-323
+  s_ec117ba6cf48fd::t_0a3d60bd12e86f 320
+internal/adapters/postgres/delivery_test.go
+  s_ec117ba6cf48fd::t_f99669d4afd1ca 16-17,26-29,43-44,49,53-54,56,65,69,71-72,78,80-82,85-89,91-94,97-101,106-107,112-114,117,120-121,124,126-128,137,150,160-161,164,169,172,177,181,184
+internal/app/delivery_config_test.go
+  s_ec117ba6cf48fd::t_2e5bf147bec4dd 1-22
+internal/monitoring/metrics.go
+  s_ec117ba6cf48fd::t_47958e7554ab27 1-64
+internal/monitoring/delivery_test.go
+  s_ec117ba6cf48fd::t_dfb7ade5265444 60,64
+  s_ec117ba6cf48fd::t_3556715b464720 43,46
+  s_ec117ba6cf48fd::t_8299ed3850c6ad 252-296
+  s_ec117ba6cf48fd::t_c453cb1c65b532 27-28
+internal/monitoring/retry.go
+  s_ec117ba6cf48fd::t_d13ef2361a2330 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3de1642436acb31309159ad966a872a51fff8c74",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
