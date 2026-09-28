@@ -1,6 +1,6 @@
 # Agent fleet workflow
 
-Several coding agents may work on Quivr V2 at the same time. Each agent takes exactly one of two roles. Nothing here changes the Linear rules in `AGENTS.md`; this document adds how agents share the work.
+Several coding agents may work on Quivr V2 at the same time. **Linear is the fleet's database:** claims, phases and hand-offs are written to and read from Linear only, never from local files, session memory or worktrees. The canonical protocol is the Linear document [Registre de la flotte d'agents — protocole](https://linear.app/thevibecompany/document/registre-de-la-flotte-dagents-protocole-fffbdd359a1d); this file mirrors it for agents working from the repository. Each agent takes exactly one of two roles.
 
 ## Roles
 
@@ -10,13 +10,15 @@ Several coding agents may work on Quivr V2 at the same time. Each agent takes ex
 ## Worker lifecycle
 
 1. **Pick a ticket.** Take a ticket only if the coordinator assigned it to you, or if it is on the frontier: under `THE-531`, labelled `ready-for-agent`, not started, and every blocked-by ticket is Done. Prefer the coordinator's order when one was given.
-2. **Claim it before any work.** Re-read the ticket in Linear. If it is already In Progress or assigned to someone else, stop and pick another. Otherwise assign it, move it to In Progress, set the labels **Agent phase = `planning`** and **Agent runtime = your tool** (`Claude Code`, `Codex` or `Conductor`), and post `Agent status: planning — <what you are about to plan>`.
+2. **Claim it before any work.** Re-read the ticket in Linear. If it is already In Progress or assigned to someone else, stop and pick another. Otherwise assign it, move it to In Progress, set the labels **Agent phase = `planning`** and **Agent runtime = your tool** (`Claude Code`, `Codex` or `Conductor`), and post a first comment `Agent claim — runtime: <tool> · session: <session name or id> · branche: feature/the-<n>-… · démarré: <ISO date>`, then `Agent status: planning — <what you are about to plan>`. Re-read the ticket afterwards: if another claim appeared meanwhile, the older claim wins and you withdraw.
 3. **Branch.** Create the Linear-suggested branch (`feature/the-<number>-…`) from the latest `origin/main`, in your own worktree.
 4. **Plan.** Run the `plan-pr` skill for the ticket. Put the complete plan in the Linear comment, starting with `Agent status: awaiting-approval — …` (set Agent phase = `awaiting-approval`), because local plan files under the gitignored `plans/` can disappear with a worktree. Then stop and wait for the coordinator's approval. Do not implement before it arrives.
 5. **Implement.** After approval, set Agent phase = `implementing`, post `Agent status: implementing — …` and build the approved plan test-first. A material change to the approved plan needs a new approval.
 6. **Ship.** Run the `ship-pr-dev` skill: it verifies, reviews, opens the pull request and drives CI to green. Set Agent phase = `shipping`, post `Agent status: shipping — …`, and link the pull request on the ticket.
 7. **Rebase before hand-back.** Rebase on the latest `origin/main`, resolve conflicts, renumber your migration if its number is taken, and get CI green on the final head.
 8. **Hand back.** Set Agent phase = `ready-to-merge` and post `Agent status: ready-to-merge — PR #<n>, head <sha>, CI green` with the iteration record required by `AGENTS.md`. Leave the ticket In Progress; the coordinator closes it.
+
+If you stop without finishing, remove your Agent phase and Agent runtime labels, move the ticket back to Todo or Backlog, and post `Agent status: released — <reason>` so the ticket is free again.
 
 If you are blocked, set Agent phase = `blocked`, post `Agent status: blocked — <reason and what would unblock it>` and stop.
 
