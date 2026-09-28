@@ -1,0 +1,65 @@
+quivr-search/src/components/connectors/ErrorSummary.tsx
+  s_ec117ba6cf48fd::t_e38d8b155e3632 1-53
+quivr-search/src/lib/connectors.ts
+  s_ec117ba6cf48fd::t_6905e9e7d3492c 1-204
+quivr-search/src/components/connectors/ConnectorDetail.tsx
+  s_ec117ba6cf48fd::t_c4f047f115a0a5 1-382
+  s_ec117ba6cf48fd::t_b98176f45e4401 383-409
+quivr-search/src/components/connectors/SchemaForm.tsx
+  s_ec117ba6cf48fd::t_1b2cab5bf1c6f8 1-354
+  s_ec117ba6cf48fd::t_a8a2fe7c90d3f3 355-378
+quivr-search/src/components/connectors/CreateConnector.tsx
+  s_ec117ba6cf48fd::t_6033c65dcdfc68 1-260,262,264-265
+  s_ec117ba6cf48fd::t_4373fa4ea887a0 261,263,266-285
+quivr-search/src/components/connectors/useSubmit.ts
+  s_ec117ba6cf48fd::t_ee89812ea1ab07 1-69
+  s_ec117ba6cf48fd::t_2751061de8303b 70-75
+quivr-search/tests/connectors.spec.ts
+  s_ec117ba6cf48fd::t_616cefd1b9771b 1-203
+  s_ec117ba6cf48fd::t_65ed7b28532953 204-279
+quivr-search/src/components/connectors/HealthBadge.tsx
+  s_ec117ba6cf48fd::t_1993e31ecf3cc8 1-41
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_ec117ba6cf48fd::t_c991128849f412 1-360
+  s_ec117ba6cf48fd::t_039ba3743adbc2 361-378
+quivr-search/src/components/connectors/summary.ts
+  s_ec117ba6cf48fd::t_690e6f0fcf3528 1-18
+README.md
+  s_ec117ba6cf48fd::t_dc98c9ae49499d 139-145
+docs/api-walkthrough.md
+  s_ec117ba6cf48fd::t_09d6dda16386bf 229-254
+docs/connectors/README.md
+  s_ec117ba6cf48fd::t_5f9bc72b1770f3 67-71,78-89,129-130,141-178
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_9b22639f660a71 362-367,432
+quivr-search/README.md
+  s_ec117ba6cf48fd::t_cb6e55a1f618a3 17-24,43
+quivr-search/src/App.tsx
+  s_ec117ba6cf48fd::t_7bf4a15f75b53d 16,21,25,54,108,120-126,134,165,186,191,265-270,282-304,318-331,333,335,337-361,364,366,368-369,371-384,386,388-450
+quivr-search/src/components/Dialog.tsx
+  s_ec117ba6cf48fd::t_25ee2723ac3ef6 8,14,60-63
+quivr-search/src/components/connectors/fields.tsx
+  s_ec117ba6cf48fd::t_effd1bd424b300 1-80
+quivr-search/src/lib/search.ts
+  s_ec117ba6cf48fd::t_e7192cd4a6a113 7-8,17,20,42-43
+quivr-search/src/styles.css
+  s_ec117ba6cf48fd::t_0391fa540d3d36 15,36,48,782-1191
+quivr-search/tests/server.test.mjs
+  s_ec117ba6cf48fd::t_27b5d8ff13c76c 158-161,195-199,223-224,248-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ea5ab0a38611a58d7ee23d9a56d29358bd045e5",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
