@@ -24,6 +24,7 @@ docs/api-walkthrough.md
   s_ec117ba6cf48fd::t_4216c20b7a29db 194-196
 internal/transport/httpapi/connectors.go
   s_ec117ba6cf48fd::t_0879a66eab289e 32-34,36-37
+  s_ec117ba6cf48fd::t_ba4bfe72ce0147 35
 internal/transport/generated/transport.gen.go
   s_ec117ba6cf48fd::t_e72b351ff8d8ad 765
 internal/connectors/credentials_test.go
@@ -32,6 +33,7 @@ internal/connectors/credentials.go
   s_ec117ba6cf48fd::t_c535859b95e931 41,55-74,103-108,112
 internal/connectors/service.go
   s_ec117ba6cf48fd::t_02452d87234740 25-26,148-150,182-185,190,257-259,267-270,276
+  s_ec117ba6cf48fd::t_ba4bfe72ce0147 27
 docs/quivr-v2-ingestion-contracts.md
   s_ec117ba6cf48fd::t_4216c20b7a29db 367-368,372-381
 deploy/railway/README.md
