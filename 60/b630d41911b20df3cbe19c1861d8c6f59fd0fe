@@ -1,0 +1,39 @@
+internal/changes/changes.go
+  s_ec117ba6cf48fd::t_cfd6747c2af053 1-194
+tests/acceptance/changes_test.go
+  s_ec117ba6cf48fd::t_241e1cfc6ba301 1-380
+internal/adapters/postgres/changes.go
+  s_ec117ba6cf48fd::t_74dfbd6069613c 1-68
+internal/transport/httpapi/changes_test.go
+  s_ec117ba6cf48fd::t_a628ace0f61201 1-303
+internal/transport/httpapi/changes.go
+  s_ec117ba6cf48fd::t_df649f72faaa1b 1-207
+internal/adapters/postgres/changes_test.go
+  s_ec117ba6cf48fd::t_2e43b3026abbd2 1-103
+docs/quivr-v2-ingestion-contracts.md
+  s_ec117ba6cf48fd::t_7cc6f390d73dea 269-276
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_5dbba2bf3d1fbd 126-129
+internal/app/run.go
+  s_ec117ba6cf48fd::t_5746b09203e864 13,44,71-76,182
+scripts/local.py
+  s_ec117ba6cf48fd::t_591aab2f65e10b 28-29,51-52,54,59-60,80-91,110,221
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_a40a2fc61766b3 24,39,50,80-82,114-117,121-124,281-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "60b630d41911b20df3cbe19c1861d8c6f59fd0fe",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
