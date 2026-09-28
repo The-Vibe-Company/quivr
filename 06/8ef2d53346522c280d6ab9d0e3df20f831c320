@@ -1,0 +1,122 @@
+contracts/http/v0/checks/validate.py
+  s_ec117ba6cf48fd::t_ce7de723da0bfe 18-33,94-95
+README.md
+  s_ec117ba6cf48fd::t_5c398063c0c33a 70-75
+  s_ec117ba6cf48fd::t_3624ca9932f09b 203-204
+  s_ec117ba6cf48fd::t_f30de8dcbcb1cf 152-159
+tests/acceptance/journey_test.go
+  s_ec117ba6cf48fd::t_69ade36147e44a 37-41
+  s_ec117ba6cf48fd::t_006ae50e6155e9 1-36,42-394
+scripts/inventory.py
+  s_ec117ba6cf48fd::t_c401587a132104 1-69,71-116
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 70
+contracts/http/v0/README.md
+  s_ec117ba6cf48fd::t_e93462381ae222 25-31
+tests/acceptance/README.md
+  s_ec117ba6cf48fd::t_0254f1b55628f9 1-44
+docs/evidence/the-662-spec1-closure.md
+  s_ec117ba6cf48fd::t_912c348f46033d 1-47,49-57,59-70,72-85,86-107
+  s_ec117ba6cf48fd::t_6d494bd74f0dd1 58
+docs/quivr-v2-remaining-limits.md
+  s_ec117ba6cf48fd::t_9f37c4b056ce90 1-17,18-34,38-74,79-85
+  s_ec117ba6cf48fd::t_808d183886cce0 75-78
+.github/workflows/verify.yml
+  s_ec117ba6cf48fd::t_3840d868b0362c 7,9-10
+  s_ec117ba6cf48fd::t_383dccaa36c918 79-80
+  s_ec117ba6cf48fd::t_6f3c7bf05350c7 41-50
+  s_ec117ba6cf48fd::t_0a498d15bb25c9 51-52
+scripts/lifecycle.py
+  s_ec117ba6cf48fd::t_e2d5187c5b0148 1-26,33-64
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 27-32
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_576f099b500d1f 236-279,282-286,299-334,369-373
+  s_ec117ba6cf48fd::t_f7b634f355cd82 5-10
+  s_ec117ba6cf48fd::t_159b9fd09809ab 34-39
+  s_ec117ba6cf48fd::t_90a9677666b65d 287-298
+  s_ec117ba6cf48fd::t_f444567498542a 335-368
+scripts/verify_report.py
+  s_ec117ba6cf48fd::t_d0db797d292169 1-6,8-13,16-44,46,48-71,73-113
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 7,14-15,45,47,72
+third_party/README.md
+  s_ec117ba6cf48fd::t_5b0bc56d28c036 1-30
+scripts/local.py
+  s_ec117ba6cf48fd::t_7999381b4e1e67 108-111,114,116-122,124-125,139-140
+  s_ec117ba6cf48fd::t_4a14119480c4c0 307-309,311-313
+  s_ec117ba6cf48fd::t_6e1868a0062c27 31
+  s_ec117ba6cf48fd::t_d7aa4890c8d2b3 93-95,97-98
+  s_ec117ba6cf48fd::t_5c0c98e1c47e5b 303
+  s_ec117ba6cf48fd::t_e10ee3ca862502 169
+  s_ec117ba6cf48fd::t_19224a37b5b0ef 5,315-347,351,357,359-401,410-413,416-424,425-429,433-434,440-443,445,448-449,451,454-455,457
+  s_ec117ba6cf48fd::t_445ca862fd1dd8 314
+  s_ec117ba6cf48fd::t_512efba0e746b0 415,435
+  s_ec117ba6cf48fd::t_35df7c8971749a 126-138
+  s_ec117ba6cf48fd::t_b79ddafbfef0da 402-409,414,430-432
+  s_ec117ba6cf48fd::t_02700c783f0cdd 352,356
+  s_ec117ba6cf48fd::t_bda81d069d1e9b 260-262
+  s_ec117ba6cf48fd::t_2f070f96efae59 348-350,353-355,358
+  s_ec117ba6cf48fd::t_fbf8f5b4706a9b 298-302
+scripts/test_local.py
+  s_ec117ba6cf48fd::t_be1e9477341d6e 1-53,71-107,116-132,134,136-151,169-211
+  s_ec117ba6cf48fd::t_512efba0e746b0 108-115,133,135
+  s_ec117ba6cf48fd::t_13a36dc3012f85 152-168
+internal/telemetry/telemetry_test.go
+  s_ec117ba6cf48fd::t_6abedfb95667b8 1-81
+internal/processing/processing.go
+  s_ec117ba6cf48fd::t_203245b27b81a2 7-8,34-55,72,75,85,89-92
+internal/monitoring/metrics.go
+  s_ec117ba6cf48fd::t_11ecd1930d0780 6,8,11-12,33-50,75-77
+  s_ec117ba6cf48fd::t_c0a574d281ca34 78
+internal/processing/enrichment.go
+  s_ec117ba6cf48fd::t_203245b27b81a2 6-7,32,39,46
+internal/telemetry/telemetry.go
+  s_ec117ba6cf48fd::t_c1a2685dba46c1 1-10,12-19,21,26-27,31-32,35-37,40-45,47-50,57-117,119-129,132,139-141,144-156,158-159,161-163,165-171,173-187
+  s_ec117ba6cf48fd::t_df508ac9cc4795 11,20,22-25,28-30,33-34,38-39,46,51-56,118,130-131,133-138,142-143,157,160,164,172
+internal/monitoring/delivery.go
+  s_ec117ba6cf48fd::t_11ecd1930d0780 208,210,229-230
+internal/transport/httpapi/telemetry.go
+  s_ec117ba6cf48fd::t_2648e3af75c7da 1-8
+internal/app/metrics_test.go
+  s_ec117ba6cf48fd::t_cf4f038991ad72 1-55
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_a698e21d8934bd 62-63
+  s_ec117ba6cf48fd::t_8ade63424307e2 32
+internal/adapters/postgres/telemetry.go
+  s_ec117ba6cf48fd::t_520728cecb8628 1-23
+scripts/failure_drill.py
+  s_ec117ba6cf48fd::t_94b2ec54ec1ba5 1-100
+internal/app/run.go
+  s_ec117ba6cf48fd::t_d458eb1ec2f03e 278,280-284,286-289
+  s_ec117ba6cf48fd::t_9979e0f323f8d6 294
+  s_ec117ba6cf48fd::t_79f7df252dc00f 23
+internal/app/metrics.go
+  s_ec117ba6cf48fd::t_925878a7b4d52e 1-46
+internal/transport/httpapi/content.go
+  s_ec117ba6cf48fd::t_3337fa1d9056ad 104-105
+  s_ec117ba6cf48fd::t_0934bef6ade5b9 181-182
+  s_ec117ba6cf48fd::t_46f3b0b8d5b410 10
+  s_ec117ba6cf48fd::t_274476a5818b2f 149
+internal/monitoring/metrics_test.go
+  s_ec117ba6cf48fd::t_3b7a6f349558e3 20-21,24
+  s_ec117ba6cf48fd::t_1f61c52fddbb2d 40-43
+internal/transport/httpapi/uploads.go
+  s_ec117ba6cf48fd::t_ea3433c142d6d6 12
+  s_ec117ba6cf48fd::t_8ade63424307e2 115
+migrations/20260928T1838Z_receipt_accepted_at.sql
+  s_ec117ba6cf48fd::t_8cbb56c24377c6 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "068ef2d53346522c280d6ab9d0e3df20f831c320",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
