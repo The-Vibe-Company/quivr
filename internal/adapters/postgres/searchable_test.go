@@ -75,7 +75,7 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err = service.SaveSegmentation(ctx, scope.Organization, v, divergent); err == nil {
 		t.Fatal("invalid contribution accepted")
 	}
-	g, err := store.ActiveGeneration(ctx)
+	g, err := store.Generation(ctx, scope.Organization, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
@@ -39,6 +40,8 @@ type API struct {
 	Uploads        uploads.Service
 	Changes        changes.Service
 	Monitoring     monitoring.Service
+	Operations     operations.Service
+	actionSchema   *jsonschema.Schema
 	searchSchema   *jsonschema.Schema
 	ingestSchema   *jsonschema.Schema
 	uploadSchema   *jsonschema.Schema
@@ -90,7 +93,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 			return nil, err
 		}
 	}
-	a := &API{monitoringSchemas: monitored, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}
@@ -159,6 +162,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.monitoringRoutes(w, r, scope) {
+		return
+	}
+	if a.operationRoutes(w, r, scope) {
 		return
 	}
 	if r.URL.Path == "/v0/corpora" {

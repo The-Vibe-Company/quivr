@@ -48,10 +48,10 @@ class Stack:
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write'],[s.get('scoped_id','corpus_not_granted')]),
+            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*'])},
             # One deployment-configured webhook destination per Organization. These are obvious
@@ -67,20 +67,40 @@ class Stack:
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
             run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
+    def spawn(self,command,config):
+        with (self.directory/(command+'-startup.log')).open('a') as log:
+            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
+        self.state['pids'].append(p.pid)
+        if command=='worker':self.state['worker_pid']=p.pid
+        self.save()
+    def await_ready(self,key):
+        deadline=time.monotonic()+20
+        while True:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/readyz",timeout=1) as r:
+                    if r.status==204:break
+            except OSError:pass
+            if time.monotonic()>deadline:raise RuntimeError('readiness timeout; inspect scoped logs')
+            time.sleep(.1)
     def start_processes(self):
-        for command,config in [('api','config.json'),('worker','worker.json')]:
-            with (self.directory/(command+'-startup.log')).open('w') as log:
-                p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
-            self.state['pids'].append(p.pid);self.save()
-        for key in ['probe_port','worker_probe_port']:
-            deadline=time.monotonic()+20
-            while True:
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{self.state[key]}/readyz",timeout=1) as r:
-                        if r.status==204:break
-                except OSError:pass
-                if time.monotonic()>deadline:raise RuntimeError('readiness timeout; inspect scoped logs')
-                time.sleep(.1)
+        for command,config in [('api','config.json'),('worker','worker.json')]:self.spawn(command,config)
+        for key in ['probe_port','worker_probe_port']:self.await_ready(key)
+    def signal_owned(self,pid,sig):
+        try:
+            # Refuse to signal a reused PID belonging to any unrelated program.
+            cmd=pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
+            if cmd==str(self.directory/'quivr').encode():os.kill(pid,sig)
+        except (FileNotFoundError,ProcessLookupError):pass
+    def stop_worker(self):
+        """Stop only the worker; the API keeps accepting durable commands."""
+        pid=self.state.pop('worker_pid',None)
+        if pid is None:raise RuntimeError('worker not tracked')
+        self.signal_owned(pid,signal.SIGKILL)
+        self.state['pids']=[p for p in self.state['pids'] if p!=pid];self.save()
+        deadline=time.monotonic()+10
+        while pathlib.Path(f'/proc/{pid}').exists() and time.monotonic()<deadline:time.sleep(.05)
+    def start_worker(self):
+        self.spawn('worker','worker.json');self.await_ready('worker_probe_port')
     def start_short_retention_api(self):
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
@@ -94,13 +114,8 @@ class Stack:
             if time.monotonic()>deadline:raise RuntimeError('short-retention API readiness timeout')
             time.sleep(.1)
     def stop_processes(self):
-        for pid in self.state['pids']:
-            try:
-                # Refuse to signal a reused PID belonging to any unrelated program.
-                cmd=pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
-                if cmd==str(self.directory/'quivr').encode():os.kill(pid,signal.SIGTERM)
-            except (FileNotFoundError,ProcessLookupError):pass
-        self.state['pids']=[];self.save()
+        for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
+        self.state['pids']=[];self.state.pop('worker_pid',None);self.save()
         time.sleep(.15)
     def up(self):
         self.stop_processes()
@@ -230,9 +245,11 @@ def main():
                 stack.ingestion_outages()
                 from embedding_outage import verify as verify_embedding_outage
                 verify_embedding_outage(stack)
-                # Change-feed and catalog resync tests add Corpora and ingestion load; run them last so they cannot skew
+                from rebuild_recovery import verify as verify_rebuild_recovery
+                verify_rebuild_recovery(stack)
+                # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them last so they cannot skew
                 # order-sensitive acceptance or timed outage scenarios.
-                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog')
+                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild')
                 # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
                 stack.tests('TestMonitoring')
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])

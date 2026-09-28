@@ -95,7 +95,7 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			hits, err := projection.Search(ctx, g, scope, q)
+			hits, err := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: g}}, scope, q)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type Config struct {
@@ -60,6 +62,10 @@ func (s *Store) Read(ctx context.Context, b content.Blob) ([]byte, error) {
 		return nil, errors.New("unsupported canonical object size")
 	}
 	object, err := s.client.GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key)})
+	var missing *types.NoSuchKey
+	if errors.As(err, &missing) {
+		return nil, fmt.Errorf("canonical S3 object absent: %w", content.ErrArtifactMissing)
+	}
 	if err != nil {
 		return nil, errors.New("canonical S3 object unavailable")
 	}
@@ -69,7 +75,7 @@ func (s *Store) Read(ctx context.Context, b content.Blob) ([]byte, error) {
 		return nil, errors.New("canonical S3 read failed")
 	}
 	if int64(len(data)) != b.Size || content.Hash(data) != b.SHA256 {
-		return nil, errors.New("canonical S3 checksum mismatch")
+		return nil, fmt.Errorf("canonical S3 checksum mismatch: %w", content.ErrArtifactCorrupt)
 	}
 	return data, nil
 }

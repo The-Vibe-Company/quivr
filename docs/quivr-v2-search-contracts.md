@@ -73,6 +73,39 @@ activation but before recording success, recovery recognizes the same target
 generation and completes the existing Operation. Live potentially breaking
 evaluation schema migrations are separate from rebuilding search projections.
 
+### Implemented behavior (THE-658)
+
+- PostgreSQL routes each Corpus to one logical generation. A Corpus without a
+  route uses the default generation. All generations share one physical
+  collection, and each projected object carries its logical generation.
+- Search sends one query covering every requested (Corpus, routed generation)
+  pair. Each hit's `projection_generation_id` is its Corpus's routed generation.
+- Promotion, enrichment and hydration all check routing. They serialize with
+  activation on the Organization journal lock. Work still aimed at a replaced
+  generation fails its guard and retries on the new route.
+- The worker handles bounded batches of current eligible Versions:
+  - It re-derives each segmentation locally from canonical text and requires the
+    stored segmentation digest to match.
+  - It publishes into the target generation.
+  - It reuses verified stored vectors for Versions that the routed generation
+    serves with vectors.
+  - It never calls inference. A missing, corrupt or mismatched artifact fails
+    the Operation with a bounded error (`embedding_artifact_unavailable`,
+    `embedding_artifact_corrupt`, `segmentation_mismatch` or, when the
+    canonical text objects themselves are missing or fail their checksum,
+    `canonical_content_unavailable`). Object-storage unavailability is
+    transient and retried.
+  - Versions not yet enriched go into the target lexical-only and are enriched
+    later on whichever generation is routed.
+- Activation runs in one transaction. It rechecks coverage gaps left by
+  concurrent promotions or enrichment, and if any remain it reconciles and tries
+  again. Otherwise it installs the route, records `succeeded` with the result,
+  and appends `operation.updated`.
+- Transient failures leave the Operation `running` with no errors. Retries use
+  capped backoff (30 s maximum) and are logged with Operation ID and attempt.
+- `operation.updated` is emitted only on state transitions. Counters (`indexed`,
+  `vectors_reused`) are only visible through the Operation read.
+
 ## Verification boundary
 
 Contract fixtures cover semantic and lexical-only hit representations, non-ASCII

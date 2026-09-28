@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -40,7 +42,7 @@ type Runtime struct {
 	Store  DispatchStore
 }
 
-func Start(ctx context.Context, address string, service processing.Service, store DispatchStore) (*Runtime, error) {
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore) (*Runtime, error) {
 	// The application retries startup after transient connection failures.
 	connect, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -54,6 +56,7 @@ func Start(ctx context.Context, address string, service processing.Service, stor
 		return service.Run(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "process-token-windows"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
+	registerRebuild(w, rebuilder)
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
 		c.Close()
@@ -74,9 +77,10 @@ func (r *Runtime) dispatch(ctx context.Context) {
 		case <-ticker.C:
 		}
 		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
+		r.dispatchOperation(attempt)
 		d, err := r.Store.Claim(attempt)
 		if err == nil {
-			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v3", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
+			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
 			var already *serviceerror.WorkflowExecutionAlreadyStarted
 			if err == nil || errors.As(err, &already) {
 				err = r.Store.Dispatched(attempt, d)
@@ -97,5 +101,7 @@ func (r *Runtime) dispatch(ctx context.Context) {
 type DispatchStore interface {
 	Claim(context.Context) (content.Dispatch, error)
 	Dispatched(context.Context, content.Dispatch) error
+	ClaimOperation(context.Context) (operations.Dispatch, error)
+	OperationDispatched(context.Context, operations.Dispatch) error
 	Progress(context.Context, string, string, string, string) error
 }

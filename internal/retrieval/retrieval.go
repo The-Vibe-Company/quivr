@@ -22,17 +22,27 @@ type Request struct {
 	Vector        []float32
 }
 type Result struct {
-	Hits       []content.Hydrated
+	Hits []content.Hydrated
+	// ProfileVersion is the immutable profile shared by every routed generation.
+	ProfileVersion string
+}
+
+// Route pairs a Corpus with the logical generation PostgreSQL currently routes it to.
+type Route struct {
+	CorpusID   string
 	Generation content.Generation
 }
+
+// Routing resolves canonical per-Corpus generation routing. It never consults
+// physical engine aliases.
 type Routing interface {
 	Authorize(context.Context, corpus.Scope, []string) error
-	ActiveGeneration(context.Context) (content.Generation, error)
+	Generation(ctx context.Context, org, corpusID string) (content.Generation, error)
 }
 type Projection interface {
 	Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error
 	PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error
-	Search(context.Context, content.Generation, corpus.Scope, Request) ([]content.Candidate, error)
+	Search(context.Context, []Route, corpus.Scope, Request) ([]content.Candidate, error)
 }
 type QueryNormalizer interface {
 	NormalizeQuery(context.Context, string) (string, error)
@@ -50,11 +60,11 @@ type Service struct {
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
-	g, err := s.Routing.ActiveGeneration(ctx)
+	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
 	if err != nil {
 		return err
 	}
-	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
+	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
 	if err != nil {
 		return err
 	}
@@ -101,21 +111,27 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		return out, ErrUnavailable
 	}
 	q.Query = normalized
-	g, err := s.Routing.ActiveGeneration(ctx)
-	if err != nil {
-		return out, ErrUnavailable
+	routes := make([]Route, 0, len(q.CorpusIDs))
+	routed := map[string]string{}
+	for _, id := range q.CorpusIDs {
+		g, err := s.Routing.Generation(ctx, scope.Organization, id)
+		if err != nil {
+			return out, ErrUnavailable
+		}
+		if g.ProfileVersion != ProfileVersion || g.SpaceID != s.Embedder.Space().ID {
+			return out, ErrUnsupported
+		}
+		routes = append(routes, Route{CorpusID: id, Generation: g})
+		routed[g.ID] = id
 	}
-	if g.ProfileVersion != ProfileVersion || g.SpaceID != s.Embedder.Space().ID {
-		return out, ErrUnsupported
-	}
-	out.Generation = g
+	out.ProfileVersion = ProfileVersion
 	if q.Mode != "lexical" {
 		q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
 		if err != nil {
 			return out, ErrUnavailable
 		}
 	}
-	candidates, err := s.Projection.Search(ctx, g, scope, q)
+	candidates, err := s.Projection.Search(ctx, routes, scope, q)
 	if err != nil {
 		return out, ErrUnavailable
 	}
@@ -123,7 +139,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	scope.Corpora = q.CorpusIDs
 	segments := map[string]bool{}
 	for _, c := range candidates {
-		if c.GenerationID != g.ID || segments[c.SegmentID] {
+		if routed[c.GenerationID] == "" || segments[c.SegmentID] {
 			continue
 		}
 		h, err := s.Content.Hydrate(ctx, scope, c)
@@ -146,7 +162,11 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 }
 
 func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData) error {
-	g, err := s.Routing.ActiveGeneration(ctx)
+	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
+	if err != nil {
+		return err
+	}
+	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
 	if err != nil {
 		return err
 	}

@@ -15,9 +15,11 @@ func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, space
 	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id) VALUES($1,$2,$3,true,$4) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
-func (s ContentStore) ActiveGeneration(ctx context.Context) (content.Generation, error) {
+
+// Generation returns the logical generation PostgreSQL routes the Corpus to.
+func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
-	err := s.Pool.QueryRow(ctx, `SELECT id,collection,profile_version,space_id FROM projection_generations WHERE active`).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID)
+	err := s.Pool.QueryRow(ctx, `SELECT id,collection,profile_version,space_id FROM projection_generations WHERE id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID)
 	return g, err
 }
 func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
@@ -31,6 +33,11 @@ func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []s
 	}
 	return nil
 }
+
+// ErrGenerationChanged means routing moved while work targeted an older
+// generation; the caller retries against the current route.
+var ErrGenerationChanged = errors.New("projection generation changed")
+
 func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result content.Segmentation) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -114,11 +121,11 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	if withdrawn || quarantined {
 		return tx.Commit(ctx)
 	}
-	if err = tx.QueryRow(ctx, `SELECT active FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT $3=`+routedGenerationSQL("$1", "$2"), org, corpusID, g.ID).Scan(&active); err != nil {
 		return err
 	}
 	if !active {
-		return errors.New("projection generation changed")
+		return ErrGenerationChanged
 	}
 	var digest string
 	if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
@@ -149,7 +156,7 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, c content
 	var h content.Hydrated
 	var blob content.Blob
 	var corpusID string
-	err := s.Pool.QueryRow(ctx, `SELECT r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length FROM segments sg JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id) JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN version_parts p ON (p.organization,p.version_id,p.part_key)=(sg.organization,sg.version_id,sg.part_key) JOIN content_blobs b ON (b.organization,b.blob_id)=(p.organization,p.blob_id) JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id)=(sg.organization,sg.version_id,sg.segmentation_id) JOIN projection_generations g ON g.id=pc.generation_id WHERE sg.organization=$1 AND sg.id=$2 AND g.id=$3 AND g.active AND r.current_version_id=v.id AND `+eligibleVersionSQL, scope.Organization, c.SegmentID, c.GenerationID).Scan(&h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256, &blob.Key, &blob.SHA256, &blob.Size)
+	err := s.Pool.QueryRow(ctx, `SELECT r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length FROM segments sg JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id) JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN version_parts p ON (p.organization,p.version_id,p.part_key)=(sg.organization,sg.version_id,sg.part_key) JOIN content_blobs b ON (b.organization,b.blob_id)=(p.organization,p.blob_id) JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id)=(sg.organization,sg.version_id,sg.segmentation_id) WHERE sg.organization=$1 AND sg.id=$2 AND pc.generation_id=$3 AND $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+` AND r.current_version_id=v.id AND `+eligibleVersionSQL, scope.Organization, c.SegmentID, c.GenerationID).Scan(&h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256, &blob.Key, &blob.SHA256, &blob.Size)
 	if err == nil && !scope.Contains(corpusID) {
 		err = corpus.ErrNotFound
 	}
@@ -162,6 +169,7 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, c content
 			err = e
 		}
 	}
+	h.GenerationID = c.GenerationID
 	h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
 	return h, blob, notFound(err)
 }

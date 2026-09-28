@@ -97,7 +97,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if _, err = service.SaveEmbedding(ctx, input, model.Space(), divergent); !errors.Is(err, content.ErrConflict) {
 		t.Fatal("divergence accepted", err)
 	}
-	g, err := store.ActiveGeneration(ctx)
+	g, err := store.Generation(ctx, scope.Organization, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -77,11 +77,11 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 		return tx.Commit(ctx)
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT active AND space_id=$2 FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID, g.SpaceID).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT id=`+routedGenerationSQL("$3", "$4")+` AND space_id=$2 FROM projection_generations WHERE id=$1`, g.ID, g.SpaceID, org, corpusID).Scan(&active); err != nil {
 		return err
 	}
 	if !active {
-		return errors.New("generation changed")
+		return ErrGenerationChanged
 	}
 	if len(artifacts) != len(seg.Segments) {
 		return content.ErrInvalid

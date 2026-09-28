@@ -14,6 +14,7 @@ import (
 	"time"
 
 	store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
 
 func TestImmutableObjectSurvivesLostPutAcknowledgment(t *testing.T) {
@@ -71,8 +72,13 @@ func TestImmutableObjectSurvivesLostPutAcknowledgment(t *testing.T) {
 	}
 	corrupt := first
 	corrupt.SHA256 = "wrong-digest"
-	if _, err = blobs.Read(ctx, corrupt); err == nil {
-		t.Fatal("wrong checksum was accepted")
+	if _, err = blobs.Read(ctx, corrupt); !errors.Is(err, content.ErrArtifactCorrupt) {
+		t.Fatal("wrong checksum must be reported as a corrupt durable artifact", err)
+	}
+	absent := first
+	absent.Key = first.Key + "-absent"
+	if _, err = blobs.Read(ctx, absent); !errors.Is(err, content.ErrArtifactMissing) {
+		t.Fatal("absent object must be reported as a missing durable artifact", err)
 	}
 	other, err := blobs.Put(ctx, "another-organization", []byte("Canonical bytes 🌞"))
 	if err != nil {

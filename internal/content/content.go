@@ -19,6 +19,10 @@ var (
 	ErrUnsupported    = errors.New("unsupported_content")
 	ErrInvalid        = errors.New("invalid_input")
 	ErrUnverifiedBlob = errors.New("unverified_blob")
+	// ErrArtifactMissing and ErrArtifactCorrupt report durable object-storage
+	// integrity failures, distinct from transient unavailability.
+	ErrArtifactMissing = errors.New("durable_artifact_missing")
+	ErrArtifactCorrupt = errors.New("durable_artifact_corrupt")
 )
 
 // maxCanonicalBlobBytes bounds a single canonical object the content service reads.
