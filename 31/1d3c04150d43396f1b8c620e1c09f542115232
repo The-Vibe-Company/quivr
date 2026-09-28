@@ -1,0 +1,37 @@
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_24ed33ebfbc39d 31-32
+  s_54b80c92daa9cb::t_003bb16aa2dc37 128-131
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_bf82859cf83668 29,31
+tests/plugin-contract/accepted-invalid-request/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_8b53061e2a2d92 1-12
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_f984e83c062424 588
+  s_f26448a44ad9a9::t_3dc57643b26f7b 589
+tests/plugin-contract/accepted-invalid-request/expect.json
+  s_54b80c92daa9cb::t_25c1fb6ac7c988 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "311d3c04150d43396f1b8c620e1c09f542115232",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_f26448a44ad9a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af25d7d1-ce01-4d86-bf3d-11fb1c2f7a14",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
