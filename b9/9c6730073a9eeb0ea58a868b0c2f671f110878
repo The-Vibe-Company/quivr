@@ -1,0 +1,32 @@
+internal/connectors/xlist_test.go
+  s_ec117ba6cf48fd::t_d1b870a49913b8 242-244,247,249-251,253-254,256,418,424
+  s_ec117ba6cf48fd::t_e288f82f80b574 252,255
+docs/connectors/README.md
+  s_ec117ba6cf48fd::t_87b516bb8891df 15-17
+internal/connectors/xlist.go
+  s_ec117ba6cf48fd::t_d1b870a49913b8 89-91,103-104,114,117,121,299-308,328,371-382
+docs/connectors/x.md
+  s_ec117ba6cf48fd::t_87b516bb8891df 35,137-141
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_87b516bb8891df 2027-2028
+CONTEXT.md
+  s_ec117ba6cf48fd::t_87b516bb8891df 210
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_e0345bfc2aee70 732
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b99c6730073a9eeb0ea58a868b0c2f671f110878",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
