@@ -1,0 +1,25 @@
+docs/evidence/the-675-query-floor.md
+  s_ec117ba6cf48fd::t_f77867e3d5e79c 1-101
+docs/evidence/the-675-retrieval-before.json
+  s_ec117ba6cf48fd::t_2328eb666b5056 1-1453
+docs/evidence/the-675-retrieval-after.json
+  s_ec117ba6cf48fd::t_2328eb666b5056 1-1449
+README.md
+  s_ec117ba6cf48fd::t_0eb8ddc57910f1 289-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fd0dafc9eb0cd0b3c099152a538b4e4eb9d8749",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
