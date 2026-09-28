@@ -279,3 +279,79 @@ func TestBackfillIsBoundedAtCreationOnly(t *testing.T) {
 		t.Fatalf("rotation after the backfill window aged: %v", err)
 	}
 }
+
+// TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn drives the
+// schedule command against the real store.
+func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-schedule-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Schedules"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
+	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
+	hour := 3600
+	created, err := service.Create(ctx, scope, connectors.CreateInput{Key: "k", CorpusID: c.ID, Namespace: "wire", Kind: "fixture", Config: json.RawMessage(`{"script":[]}`), IntervalSeconds: &hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Push the pending run an hour out, as after a completed run.
+	if _, err = pool.Exec(ctx, "UPDATE connector_instances SET next_run_at=now()+interval '1 hour' WHERE organization=$1 AND id=$2", scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	feed := changes.Service{Journal: store.ContentStore, Key: []byte("adapter-cursor-key-0123456789abcdef")}
+	start, err := feed.Start(ctx, scope, c.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRunIn := func() float64 {
+		var seconds float64
+		if err := pool.QueryRow(ctx, "SELECT EXTRACT(EPOCH FROM next_run_at-now()) FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&seconds); err != nil {
+			t.Fatal(err)
+		}
+		return seconds
+	}
+	shorter, err := service.ChangeSchedule(ctx, scope, created.ID, 60)
+	if err != nil || shorter.Interval != time.Minute {
+		t.Fatalf("shorten %v %+v", err, shorter)
+	}
+	if in := nextRunIn(); in > 61 {
+		t.Fatalf("shorter interval did not pull the next run in: %v s", in)
+	}
+	// Repeating the same value commits nothing.
+	if _, err = service.ChangeSchedule(ctx, scope, created.ID, 60); err != nil {
+		t.Fatal(err)
+	}
+	longer, err := service.ChangeSchedule(ctx, scope, created.ID, 7200)
+	if err != nil || longer.Interval != 2*time.Hour {
+		t.Fatalf("lengthen %v %+v", err, longer)
+	}
+	if in := nextRunIn(); in > 61 {
+		t.Fatalf("longer interval moved the pending run: %v s", in)
+	}
+	if read, _ := store.ReadConnector(ctx, scope.Organization, created.ID); read.Interval != 2*time.Hour {
+		t.Fatalf("persisted %v", read.Interval)
+	}
+	page, err := feed.Read(ctx, scope, c.ID, start, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range page.Items {
+		kinds = append(kinds, e.Type)
+	}
+	if want := []string{"connector.schedule_changed", "connector.schedule_changed"}; fmt.Sprint(kinds) != fmt.Sprint(want) {
+		t.Fatalf("events %v want %v", kinds, want)
+	}
+	if _, err = service.Disable(ctx, scope, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ChangeSchedule(ctx, scope, created.ID, 120); !errors.Is(err, connectors.ErrDisabled) {
+		t.Fatalf("disabled: %v", err)
+	}
+}

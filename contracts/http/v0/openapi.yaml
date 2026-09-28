@@ -1023,7 +1023,7 @@ paths:
     post:
       operationId: createConnector
       description: Create a Connector Instance bound to exactly one authorized Corpus and one Source Namespace.
-        Kind-specific config and credential secret are validated against the kind's JSON Schema. Replaying
+        Kind-specific config and credential secret are validated against the kind's JSON Schema (see listConnectorKinds); a failure is 422 invalid_config or invalid_credential with field pointing at the offending member. Replaying
         the same idempotency key and request returns the same instance (without re-enabling a disabled one);
         a different request under the same key is 409 idempotency_conflict. Another enabled instance on the
         same Corpus and Source Namespace is 409 source_namespace_in_use. The interval defaults per kind and
@@ -1192,6 +1192,64 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CredentialReplace'
+  /v0/connectors/{connector_id}/schedule:
+    put:
+      operationId: changeConnectorSchedule
+      description: Set the polling interval of an enabled instance. Setting the current value commits nothing,
+        so repeating the request is harmless. A shorter interval pulls the next scheduled run in; a longer
+        one applies after the run already scheduled. A disabled instance is 409 connector_disabled; an interval
+        below the deployment floor (30 s by default) or above 24 h is 422 invalid_interval with field
+        /interval_seconds. Commits connector.schedule_changed only when the interval changes.
+      x-required-permissions:
+      - connectors:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleChange'
+  /v0/connector-kinds:
+    get:
+      operationId: listConnectorKinds
+      description: Connector kinds enabled in this deployment, with the JSON Schemas that validate their
+        config and credential secret, so clients can render configuration forms without knowing the kinds.
+        credential_deposits tells whether this deployment accepts Deposited Credentials at all; when unavailable,
+        any create carrying a credential and every rotation is 503 credentials_unavailable.
+      x-required-permissions:
+      - connectors:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorKindCatalog'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v0/search:
     post:
       operationId: searchRecords
@@ -1294,6 +1352,8 @@ components:
         field:
           type: string
           minLength: 1
+          description: JSON Pointer (RFC 6901) to the request member that caused a 422, when known (for
+            example /config/url or /credential/secret/token on connector commands).
         resync_url:
           type: string
           format: uri-reference
@@ -1813,6 +1873,79 @@ components:
           maximum: 86400
           description: Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120);
             values below the deployment floor (30 s by default) are 422 invalid_interval.
+    ScheduleChange:
+      type: object
+      additionalProperties: false
+      properties:
+        interval_seconds:
+          type: integer
+          description: Seconds between runs. Bounds are the deployment floor and 86400; values outside
+            them are 422 invalid_interval with field /interval_seconds.
+      required:
+      - interval_seconds
+    ConnectorKindDescription:
+      type: object
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: Kind identifier accepted by createConnector for this deployment. A plain string so kinds
+            added by future providers need no contract change here.
+        title:
+          type: string
+          minLength: 1
+          description: Display name, from the config schema's title annotation (the kind when absent).
+        description:
+          type: string
+          description: Short explanation, from the config schema's description annotation.
+        config_schema:
+          type: object
+          description: JSON Schema (2020-12) validating config. Annotations (title, description, examples)
+            are informational.
+        credential_schema:
+          type: object
+          description: JSON Schema validating credential.secret. Members annotated writeOnly are secrets.
+            Absent when the kind takes no credential.
+        credential:
+          type: string
+          enum:
+          - none
+          - optional
+          - required
+          description: Whether an instance of this kind takes, may take or needs a Deposited Credential.
+        default_interval_seconds:
+          type: integer
+          minimum: 1
+      required:
+      - kind
+      - title
+      - config_schema
+      - credential
+      - default_interval_seconds
+    ConnectorKindCatalog:
+      type: object
+      additionalProperties: false
+      properties:
+        credential_deposits:
+          type: string
+          enum:
+          - available
+          - unavailable
+          description: unavailable on a deployment without a credential key, where credential deposits and
+            rotations are refused with 503 credentials_unavailable.
+        min_interval_seconds:
+          type: integer
+          minimum: 1
+          description: Shortest polling interval this deployment accepts.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorKindDescription'
+      required:
+      - credential_deposits
+      - min_interval_seconds
+      - items
     ConnectorHealthPolicy:
       type: object
       additionalProperties: false

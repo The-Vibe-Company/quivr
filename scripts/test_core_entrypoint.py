@@ -1,4 +1,4 @@
-"""The Railway core entrypoint passes credential_key only when it is configured."""
+"""The Railway core entrypoint passes credential_key only when configured and grants connector permissions only on opt-in."""
 import importlib.util
 import pathlib
 import unittest
@@ -25,6 +25,15 @@ class CoreEntrypointTest(unittest.TestCase):
             config = core_entrypoint.build_config(env)
             self.assertNotIn('credential_key', config)
             self.assertEqual(config['cursor_key'], 'placeholder-cursor-key')
+
+    def test_connector_permissions_are_opt_in(self):
+        base = core_entrypoint.build_config(ENV)['keys']['placeholder-api-key']['actions']
+        self.assertFalse({'connectors:read', 'connectors:write', 'changes:read'} & set(base))
+        for value in ('', '0', 'true'):
+            actions = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_CONNECTORS': value})['keys']['placeholder-api-key']['actions']
+            self.assertEqual(actions, base, value)
+        enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_CONNECTORS': '1'})['keys']['placeholder-api-key']['actions']
+        self.assertEqual(set(enabled) - set(base), {'connectors:read', 'connectors:write', 'changes:read'})
 
     def test_required_variables_still_fail_fast(self):
         env = dict(ENV)

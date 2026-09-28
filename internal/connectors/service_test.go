@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
@@ -54,6 +55,17 @@ func (s *replayStore) ReplaceCredential(_ context.Context, org, id string, d Cre
 	s.calls++
 	s.deposited = append(s.deposited, d)
 	return s.ReadConnector(context.Background(), org, id)
+}
+
+func (s *replayStore) ChangeSchedule(_ context.Context, org, id string, interval time.Duration) (Instance, error) {
+	for key, n := range s.created {
+		if n.Organization == org && n.ID == id {
+			n.Interval = interval
+			s.created[key] = n
+			return n.Instance, nil
+		}
+	}
+	return Instance{}, corpus.ErrNotFound
 }
 
 var writer = corpus.Scope{Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}}

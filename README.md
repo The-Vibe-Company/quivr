@@ -136,6 +136,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   posts are withdrawn, and health shows daily reads ([guide](docs/connectors/x.md)).
   The deployment `credential_key` is optional. Without it, credential deposits are
   refused with `503 credentials_unavailable`, and everything else works.
+  `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
+  Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval, and
+  validation errors name the offending field as a JSON Pointer.
+- **Connectors page in the web app** (`quivr-search`, **Connecteurs** tab): list,
+  create, change the interval, rotate credentials and disable Connector Instances,
+  with health following the change feed. Forms are generated from the kind schemas,
+  so new kinds need no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
 - **Retrieval measurement** with a frozen workload (`make measure`).
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,

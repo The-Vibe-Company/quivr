@@ -97,14 +97,14 @@ type rssSeen struct {
 func (RSS) Kind() string                   { return "rss" }
 func (RSS) DefaultInterval() time.Duration { return 5 * time.Minute }
 func (RSS) ConfigSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["url"],"properties":{
-"url":{"type":"string","maxLength":2048,"pattern":"^[hH][tT][tT][pP][sS]?://[^/?#@\\s]+([/?#][^\\s]*)?$"},
-"honor_ttl":{"type":"boolean"}}}`)
+	return []byte(`{"title":"RSS or Atom feed","description":"Collects the entries of an RSS 2.0, RSS 1.0, Atom or JSON Feed document.","type":"object","additionalProperties":false,"required":["url"],"properties":{
+"url":{"type":"string","maxLength":2048,"pattern":"^[hH][tT][tT][pP][sS]?://[^/?#@\\s]+([/?#][^\\s]*)?$","title":"Feed URL","description":"http or https address of the feed, without embedded credentials.","examples":["https://example.org/feed.xml"]},
+"honor_ttl":{"type":"boolean","title":"Honor the feed's TTL","description":"Poll no more often than the feed's ttl element asks."}}}`)
 }
 func (RSS) CredentialSchema() []byte {
-	return []byte(`{"oneOf":[
-{"type":"object","additionalProperties":false,"required":["username","password"],"properties":{"username":{"type":"string","minLength":1},"password":{"type":"string","minLength":1}}},
-{"type":"object","additionalProperties":false,"required":["token"],"properties":{"token":{"type":"string","minLength":1}}}]}`)
+	return []byte(`{"title":"Feed credential","description":"Only for feeds that require authentication.","oneOf":[
+{"title":"Username and password","type":"object","additionalProperties":false,"required":["username","password"],"properties":{"username":{"type":"string","minLength":1,"title":"Username"},"password":{"type":"string","minLength":1,"title":"Password","writeOnly":true}}},
+{"title":"Bearer token","type":"object","additionalProperties":false,"required":["token"],"properties":{"token":{"type":"string","minLength":1,"title":"Token","writeOnly":true}}}]}`)
 }
 
 var (

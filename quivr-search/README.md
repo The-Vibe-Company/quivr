@@ -14,6 +14,14 @@ Open http://127.0.0.1:5183. The command builds the frontend, starts isolated rea
 
 Click **Ajouter du texte**, paste a note, submit, follow search availability, then open the source or search for it. Hybrid search is the default; lexical and semantic modes are selectable. Inline text is limited to 256 KiB; whitespace and Unicode are preserved. Drafts and retry identity survive reloads within the same browser tab. Ambiguous network failures reuse the same ingestion identity.
 
+### Connectors
+
+The **Connecteurs** tab lists, creates and monitors Connector Instances of the demo
+corpus (see [From the web interface](../docs/connectors/README.md#from-the-web-interface)).
+`make demo` enables the test `fixture` kind. Its token field accepts any value, except
+values starting with `fixture-revoked`, which produce an access error. The demo uses
+its own key and Organization, so texts added before this change are not shown.
+
 ## Frontend development and checks
 
 With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`.
@@ -32,7 +40,7 @@ make verify-demo
 | Variable | Meaning |
 | --- | --- |
 | `QUIVR_API_URL` | Private core URL, no trailing route |
-| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions |
+| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Connecteurs tab |
 | `QUIVR_DEMO_CORPUS_ID` | Optional existing demo corpus; otherwise created idempotently |
 | `DEMO_PASSWORD` | Shared demo password, required on public binds |
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |

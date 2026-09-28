@@ -181,17 +181,17 @@ func TestXListConfigAndCredentialAreValidated(t *testing.T) {
 	registry, _ := NewRegistry(XList{})
 	ok := []string{`{"list_id":"1234567890123456789"}`, `{"list_id":"1","max_reads_per_day":1000,"recheck_window_seconds":3600,"recheck_interval_seconds":60}`}
 	for _, c := range ok {
-		if err := registry.validate("x_list", json.RawMessage(c), json.RawMessage(`{"bearer_token":"t","consumer_secret":"s"}`)); err != nil {
+		if err := registry.validate("x_list", json.RawMessage(c), json.RawMessage(`{"bearer_token":"t","consumer_secret":"s"}`), "/credential/secret"); err != nil {
 			t.Fatalf("%s: %v", c, err)
 		}
 	}
 	bad := []string{`{}`, `{"list_id":"abc"}`, `{"list_id":"12345678901234567890"}`, `{"list_id":"1","extra":1}`, `{"list_id":"1","recheck_window_seconds":60}`, `{"list_id":"1","recheck_window_seconds":700000}`, `{"list_id":"1","recheck_interval_seconds":10}`}
 	for _, c := range bad {
-		if err := registry.validate("x_list", json.RawMessage(c), nil); !errors.Is(err, ErrInvalidConfig) {
+		if err := registry.validate("x_list", json.RawMessage(c), nil, "/credential/secret"); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("%s accepted: %v", c, err)
 		}
 	}
-	if err := registry.validate("x_list", json.RawMessage(`{"list_id":"1"}`), json.RawMessage(`{"token":"t"}`)); !errors.Is(err, ErrInvalidCredential) {
+	if err := registry.validate("x_list", json.RawMessage(`{"list_id":"1"}`), json.RawMessage(`{"token":"t"}`), "/credential/secret"); !errors.Is(err, ErrInvalidCredential) {
 		t.Fatalf("credential: %v", err)
 	}
 	check := XList{}

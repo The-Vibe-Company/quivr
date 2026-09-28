@@ -86,8 +86,23 @@ func (m *memoryConnectors) DisableConnector(ctx context.Context, org, id string)
 func (m *memoryConnectors) ReplaceCredential(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
 	return m.ReadConnector(ctx, org, id)
 }
+func (m *memoryConnectors) ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (connectors.Instance, error) {
+	in, err := m.ReadConnector(ctx, org, id)
+	if err != nil {
+		return in, err
+	}
+	if !in.Enabled {
+		return connectors.Instance{}, connectors.ErrDisabled
+	}
+	in.Interval = interval
+	m.items[id] = in
+	return in, nil
+}
 
-const connectorKey = "connector-key-0123456789abcdef0123456"
+const (
+	connectorKey = "connector-key-0123456789abcdef0123456"
+	contentKey   = "content-only-key-0123456789abcdef01234"
+)
 
 func connectorAPI(t *testing.T) http.Handler {
 	t.Helper()
@@ -109,6 +124,7 @@ func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors
 	keys := map[string]corpus.Scope{
 		connectorKey: {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
 		readerKey:    {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
+		contentKey:   {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 	}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
 		httpapi.WithConnectors(connectors.Service{Store: store, Registry: registry, Sealer: sealer}))
@@ -252,5 +268,127 @@ func TestKeylessDeploymentRefusesCredentialDepositsWith503(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &rotated)
 	if rec.Code != 503 || rotated["code"] != "credentials_unavailable" {
 		t.Fatalf("rotation: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func putJSON(t *testing.T, handler http.Handler, path, key string, body any) (int, map[string]any) {
+	t.Helper()
+	payload, _ := json.Marshal(body)
+	req := httptest.NewRequest("PUT", path, bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
+func TestConnectorKindsPublishSchemasAndCredentialDepositAvailability(t *testing.T) {
+	status, body := readJSON(t, connectorAPI(t), "/v0/connector-kinds", readerKey)
+	if status != 200 {
+		t.Fatalf("kinds: %d %v", status, body)
+	}
+	conforms(t, "ConnectorKindCatalog", body)
+	if body["credential_deposits"] != "available" || body["min_interval_seconds"].(float64) != 30 {
+		t.Fatalf("catalog %v", body)
+	}
+	items := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("enabled kinds only: %v", items)
+	}
+	fixture, x := items[0].(map[string]any), items[1].(map[string]any)
+	if fixture["kind"] != "fixture" || fixture["credential"] != "optional" || fixture["default_interval_seconds"].(float64) != 300 || fixture["title"] != "Test fixture" {
+		t.Fatalf("fixture %v", fixture)
+	}
+	if x["kind"] != "x_list" || x["credential"] != "required" || x["credential_schema"].(map[string]any)["properties"].(map[string]any)["bearer_token"].(map[string]any)["writeOnly"] != true {
+		t.Fatalf("x_list %v", x)
+	}
+	if fixture["config_schema"].(map[string]any)["required"].([]any)[0] != "script" {
+		t.Fatalf("config schema %v", fixture["config_schema"])
+	}
+	keyless, _ := connectors.NewKeylessSealer("cursor-key-0123456789abcdef0123456789")
+	if _, body := readJSON(t, connectorAPISealed(t, &memoryConnectors{items: map[string]connectors.Instance{}}, keyless), "/v0/connector-kinds", readerKey); body["credential_deposits"] != "unavailable" {
+		t.Fatalf("keyless catalog %v", body)
+	}
+	if status, body := readJSON(t, connectorAPI(t), "/v0/connector-kinds", contentKey); status != 403 || body["code"] != "forbidden" {
+		t.Fatalf("without connectors:read: %d %v", status, body)
+	}
+	if status, _ := postJSON(t, connectorAPI(t), "/v0/connector-kinds", connectorKey, map[string]any{}); status != 405 {
+		t.Fatalf("POST kinds: %d", status)
+	}
+}
+
+func TestConnectorScheduleChangesAreValidatedAndAuthorized(t *testing.T) {
+	handler := connectorAPI(t)
+	_, created := postJSON(t, handler, "/v0/connectors", connectorKey, map[string]any{"idempotency_key": "s1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}})
+	path := "/v0/connectors/" + created["connector_id"].(string) + "/schedule"
+	status, body := putJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 120})
+	if status != 200 || body["schedule"].(map[string]any)["interval_seconds"].(float64) != 120 {
+		t.Fatalf("change: %d %v", status, body)
+	}
+	conforms(t, "Connector", body)
+	for _, c := range []struct {
+		name   string
+		path   string
+		key    string
+		body   any
+		status int
+		code   string
+		field  string
+	}{
+		{"below the floor", path, connectorKey, map[string]any{"interval_seconds": 29}, 422, "invalid_interval", "/interval_seconds"},
+		{"above a day", path, connectorKey, map[string]any{"interval_seconds": 86401}, 422, "invalid_interval", "/interval_seconds"},
+		{"zero", path, connectorKey, map[string]any{"interval_seconds": 0}, 422, "invalid_interval", "/interval_seconds"},
+		{"wraps as a Duration", path, connectorKey, map[string]any{"interval_seconds": int64(1)<<55 + 64}, 422, "invalid_interval", "/interval_seconds"},
+		{"not an integer", path, connectorKey, map[string]any{"interval_seconds": "60"}, 422, "invalid_schema", "/interval_seconds"},
+		{"unexpected member", path, connectorKey, map[string]any{"interval_seconds": 60, "every": 1}, 422, "invalid_schema", "/every"},
+		{"read-only key", path, readerKey, map[string]any{"interval_seconds": 60}, 403, "forbidden", ""},
+		{"unknown instance", "/v0/connectors/connector_missing/schedule", connectorKey, map[string]any{"interval_seconds": 60}, 404, "not_found", ""},
+	} {
+		status, body := putJSON(t, handler, c.path, c.key, c.body)
+		field, _ := body["field"].(string)
+		if status != c.status || body["code"] != c.code || field != c.field {
+			t.Errorf("%s: %d %v", c.name, status, body)
+		}
+	}
+	if status, _ := postJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 60}); status != 405 {
+		t.Fatalf("POST schedule: %d", status)
+	}
+	postJSON(t, handler, "/v0/connectors/"+created["connector_id"].(string)+"/disable", connectorKey, map[string]any{"idempotency_key": "d"})
+	if status, body := putJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 60}); status != 409 || body["code"] != "connector_disabled" {
+		t.Fatalf("disabled: %d %v", status, body)
+	}
+}
+
+func TestConnectorValidationErrorsPointAtTheOffendingField(t *testing.T) {
+	handler := connectorAPI(t)
+	valid := func() map[string]any {
+		return map[string]any{"idempotency_key": "f1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}}
+	}
+	for _, c := range []struct {
+		name  string
+		edit  func(map[string]any)
+		code  string
+		field string
+	}{
+		{"config member type", func(b map[string]any) { b["config"] = map[string]any{"script": "x"} }, "invalid_config", "/config/script"},
+		{"missing config member", func(b map[string]any) { b["config"] = map[string]any{} }, "invalid_config", "/config/script"},
+		{"secret member", func(b map[string]any) { b["credential"] = map[string]any{"secret": map[string]any{"token": ""}} }, "invalid_credential", "/credential/secret/token"},
+		{"interval below the floor", func(b map[string]any) { b["schedule"] = map[string]any{"interval_seconds": 29} }, "invalid_interval", "/schedule/interval_seconds"},
+		{"unknown kind", func(b map[string]any) { b["kind"] = "ftp" }, "invalid_schema", "/kind"},
+	} {
+		b := valid()
+		c.edit(b)
+		status, body := postJSON(t, handler, "/v0/connectors", connectorKey, b)
+		if status != 422 || body["code"] != c.code || body["field"] != c.field {
+			t.Errorf("%s: %d %v", c.name, status, body)
+		}
+		conforms(t, "Error", body)
+	}
+	_, created := postJSON(t, handler, "/v0/connectors", connectorKey, valid())
+	status, body := putJSON(t, handler, "/v0/connectors/"+created["connector_id"].(string)+"/credential", connectorKey, map[string]any{"idempotency_key": "r", "secret": map[string]any{"token": ""}})
+	if status != 422 || body["code"] != "invalid_credential" || body["field"] != "/secret/token" {
+		t.Fatalf("rotation: %d %v", status, body)
 	}
 }

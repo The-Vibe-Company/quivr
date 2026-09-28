@@ -108,6 +108,45 @@ func (e ConnectorKind) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorKindCatalogCredentialDeposits.
+const (
+	ConnectorKindCatalogCredentialDepositsAvailable   ConnectorKindCatalogCredentialDeposits = "available"
+	ConnectorKindCatalogCredentialDepositsUnavailable ConnectorKindCatalogCredentialDeposits = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorKindCatalogCredentialDeposits enum.
+func (e ConnectorKindCatalogCredentialDeposits) Valid() bool {
+	switch e {
+	case ConnectorKindCatalogCredentialDepositsAvailable:
+		return true
+	case ConnectorKindCatalogCredentialDepositsUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorKindDescriptionCredential.
+const (
+	None     ConnectorKindDescriptionCredential = "none"
+	Optional ConnectorKindDescriptionCredential = "optional"
+	Required ConnectorKindDescriptionCredential = "required"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorKindDescriptionCredential enum.
+func (e ConnectorKindDescriptionCredential) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Optional:
+		return true
+	case Required:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -371,16 +410,16 @@ func (e ReceiptState) Valid() bool {
 
 // Defines values for ResolvedRelationStatus.
 const (
-	Available   ResolvedRelationStatus = "available"
-	Unavailable ResolvedRelationStatus = "unavailable"
+	ResolvedRelationStatusAvailable   ResolvedRelationStatus = "available"
+	ResolvedRelationStatusUnavailable ResolvedRelationStatus = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the ResolvedRelationStatus enum.
 func (e ResolvedRelationStatus) Valid() bool {
 	switch e {
-	case Available:
+	case ResolvedRelationStatusAvailable:
 		return true
-	case Unavailable:
+	case ResolvedRelationStatusUnavailable:
 		return true
 	default:
 		return false
@@ -712,6 +751,44 @@ type ConnectorHealthPolicy struct {
 // ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
 type ConnectorKind string
 
+// ConnectorKindCatalog defines model for ConnectorKindCatalog.
+type ConnectorKindCatalog struct {
+	// CredentialDeposits unavailable on a deployment without a credential key, where credential deposits and rotations are refused with 503 credentials_unavailable.
+	CredentialDeposits ConnectorKindCatalogCredentialDeposits `json:"credential_deposits"`
+	Items              []ConnectorKindDescription             `json:"items"`
+
+	// MinIntervalSeconds Shortest polling interval this deployment accepts.
+	MinIntervalSeconds int `json:"min_interval_seconds"`
+}
+
+// ConnectorKindCatalogCredentialDeposits unavailable on a deployment without a credential key, where credential deposits and rotations are refused with 503 credentials_unavailable.
+type ConnectorKindCatalogCredentialDeposits string
+
+// ConnectorKindDescription defines model for ConnectorKindDescription.
+type ConnectorKindDescription struct {
+	// ConfigSchema JSON Schema (2020-12) validating config. Annotations (title, description, examples) are informational.
+	ConfigSchema map[string]interface{} `json:"config_schema"`
+
+	// Credential Whether an instance of this kind takes, may take or needs a Deposited Credential.
+	Credential ConnectorKindDescriptionCredential `json:"credential"`
+
+	// CredentialSchema JSON Schema validating credential.secret. Members annotated writeOnly are secrets. Absent when the kind takes no credential.
+	CredentialSchema       *map[string]interface{} `json:"credential_schema,omitempty"`
+	DefaultIntervalSeconds int                     `json:"default_interval_seconds"`
+
+	// Description Short explanation, from the config schema's description annotation.
+	Description *string `json:"description,omitempty"`
+
+	// Kind Kind identifier accepted by createConnector for this deployment. A plain string so kinds added by future providers need no contract change here.
+	Kind string `json:"kind"`
+
+	// Title Display name, from the config schema's title annotation (the kind when absent).
+	Title string `json:"title"`
+}
+
+// ConnectorKindDescriptionCredential Whether an instance of this kind takes, may take or needs a Deposited Credential.
+type ConnectorKindDescriptionCredential string
+
 // ConnectorPage defines model for ConnectorPage.
 type ConnectorPage struct {
 	Items          []Connector `json:"items"`
@@ -831,7 +908,9 @@ type DeliveryAttemptPage struct {
 
 // Error defines model for Error.
 type Error struct {
-	Code      string  `json:"code"`
+	Code string `json:"code"`
+
+	// Field JSON Pointer (RFC 6901) to the request member that caused a 422, when known (for example /config/url or /credential/secret/token on connector commands).
 	Field     *string `json:"field,omitempty"`
 	Message   string  `json:"message"`
 	ResyncUrl *string `json:"resync_url,omitempty"`
@@ -1098,6 +1177,12 @@ type SavedQueryVersion struct {
 	VersionId    string               `json:"version_id"`
 }
 
+// ScheduleChange defines model for ScheduleChange.
+type ScheduleChange struct {
+	// IntervalSeconds Seconds between runs. Bounds are the deployment floor and 86400; values outside them are 422 invalid_interval with field /interval_seconds.
+	IntervalSeconds int `json:"interval_seconds"`
+}
+
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
 type SearchExcerpt struct {
 	CoordinateSystem SearchExcerptCoordinateSystem `json:"coordinate_system"`
@@ -1325,6 +1410,9 @@ type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
 
 // DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
 type DisableConnectorJSONRequestBody = ActionRequest
+
+// ChangeConnectorScheduleJSONRequestBody defines body for ChangeConnectorSchedule for application/json ContentType.
+type ChangeConnectorScheduleJSONRequestBody = ScheduleChange
 
 // CreateCorpusJSONRequestBody defines body for CreateCorpus for application/json ContentType.
 type CreateCorpusJSONRequestBody = CorpusRequest
@@ -1576,6 +1664,9 @@ type ServerInterface interface {
 	// (GET /v0/changes/stream)
 	StreamChanges(w http.ResponseWriter, r *http.Request, params StreamChangesParams)
 
+	// (GET /v0/connector-kinds)
+	ListConnectorKinds(w http.ResponseWriter, r *http.Request)
+
 	// (GET /v0/connectors)
 	ListConnectors(w http.ResponseWriter, r *http.Request, params ListConnectorsParams)
 
@@ -1590,6 +1681,9 @@ type ServerInterface interface {
 
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (PUT /v0/connectors/{connector_id}/schedule)
+	ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request, connectorId string)
 
 	// (GET /v0/corpora)
 	ListCorpora(w http.ResponseWriter, r *http.Request, params ListCorporaParams)
@@ -1843,6 +1937,20 @@ func (siw *ServerInterfaceWrapper) StreamChanges(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListConnectorKinds operation middleware
+func (siw *ServerInterfaceWrapper) ListConnectorKinds(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnectorKinds(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListConnectors operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectors(w http.ResponseWriter, r *http.Request) {
 
@@ -1985,6 +2093,32 @@ func (siw *ServerInterfaceWrapper) DisableConnector(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DisableConnector(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeConnectorSchedule operation middleware
+func (siw *ServerInterfaceWrapper) ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeConnectorSchedule(w, r, connectorId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2976,6 +3110,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}", wrapper.GetConnector)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/disable", wrapper.DisableConnector)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/credential", wrapper.ReplaceConnectorCredential)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/schedule", wrapper.ChangeConnectorSchedule)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
@@ -3117,6 +3253,44 @@ type StreamChangesdefaultJSONResponse struct {
 }
 
 func (response StreamChangesdefaultJSONResponse) VisitStreamChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorKindsRequestObject struct {
+}
+
+type ListConnectorKindsResponseObject interface {
+	VisitListConnectorKindsResponse(w http.ResponseWriter) error
+}
+
+type ListConnectorKinds200JSONResponse ConnectorKindCatalog
+
+func (response ListConnectorKinds200JSONResponse) VisitListConnectorKindsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorKindsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConnectorKindsdefaultJSONResponse) VisitListConnectorKindsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -3314,6 +3488,46 @@ type DisableConnectordefaultJSONResponse struct {
 }
 
 func (response DisableConnectordefaultJSONResponse) VisitDisableConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeConnectorScheduleRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Body        *ChangeConnectorScheduleJSONRequestBody
+}
+
+type ChangeConnectorScheduleResponseObject interface {
+	VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error
+}
+
+type ChangeConnectorSchedule200JSONResponse Connector
+
+func (response ChangeConnectorSchedule200JSONResponse) VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeConnectorScheduledefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ChangeConnectorScheduledefaultJSONResponse) VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4526,6 +4740,9 @@ type StrictServerInterface interface {
 	// (GET /v0/changes/stream)
 	StreamChanges(ctx context.Context, request StreamChangesRequestObject) (StreamChangesResponseObject, error)
 
+	// (GET /v0/connector-kinds)
+	ListConnectorKinds(ctx context.Context, request ListConnectorKindsRequestObject) (ListConnectorKindsResponseObject, error)
+
 	// (GET /v0/connectors)
 	ListConnectors(ctx context.Context, request ListConnectorsRequestObject) (ListConnectorsResponseObject, error)
 
@@ -4540,6 +4757,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(ctx context.Context, request DisableConnectorRequestObject) (DisableConnectorResponseObject, error)
+
+	// (PUT /v0/connectors/{connector_id}/schedule)
+	ChangeConnectorSchedule(ctx context.Context, request ChangeConnectorScheduleRequestObject) (ChangeConnectorScheduleResponseObject, error)
 
 	// (GET /v0/corpora)
 	ListCorpora(ctx context.Context, request ListCorporaRequestObject) (ListCorporaResponseObject, error)
@@ -4749,6 +4969,30 @@ func (sh *strictHandler) StreamChanges(w http.ResponseWriter, r *http.Request, p
 	}
 }
 
+// ListConnectorKinds operation middleware
+func (sh *strictHandler) ListConnectorKinds(w http.ResponseWriter, r *http.Request) {
+	var request ListConnectorKindsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnectorKinds(ctx, request.(ListConnectorKindsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnectorKinds")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectorKindsResponseObject); ok {
+		if err := validResponse.VisitListConnectorKindsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListConnectors operation middleware
 func (sh *strictHandler) ListConnectors(w http.ResponseWriter, r *http.Request, params ListConnectorsParams) {
 	var request ListConnectorsRequestObject
@@ -4891,6 +5135,39 @@ func (sh *strictHandler) DisableConnector(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DisableConnectorResponseObject); ok {
 		if err := validResponse.VisitDisableConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangeConnectorSchedule operation middleware
+func (sh *strictHandler) ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request ChangeConnectorScheduleRequestObject
+
+	request.ConnectorId = connectorId
+
+	var body ChangeConnectorScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangeConnectorSchedule(ctx, request.(ChangeConnectorScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangeConnectorSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangeConnectorScheduleResponseObject); ok {
+		if err := validResponse.VisitChangeConnectorScheduleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

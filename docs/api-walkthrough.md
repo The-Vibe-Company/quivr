@@ -227,6 +227,32 @@ and a post deleted or made protected on X within the recheck window is withdrawn
 `GET /v0/connectors/{id}` shows `health.usage` (estimated billed reads per UTC day)
 and `health.diagnostics` (recheck coverage). See the [X guide](connectors/x.md).
 
+Clients discover what they can configure with `GET /v0/connector-kinds`
+(`connectors:read`). It lists the kinds enabled on this deployment, each with its
+`config_schema` and `credential_schema` (JSON Schema, with `title`, `description`,
+`examples` and `writeOnly` annotations), whether it takes a credential (`none`,
+`optional`, `required`) and its default interval. `credential_deposits` says whether
+this deployment accepts credentials at all, and `min_interval_seconds` is its
+interval floor.
+
+```http
+PUT /v0/connectors/{connector_id}/schedule
+Authorization: Bearer <key with connectors:write>
+Content-Type: application/json
+
+{"interval_seconds":600}
+```
+
+Setting the current value changes nothing. A new value commits
+`connector.schedule_changed`. A shorter interval brings the next run forward; a
+longer one applies after the run already scheduled. A disabled instance is
+`409 connector_disabled`.
+
+A `422` on connector commands carries `field`, a JSON Pointer to the rejected
+member of your request, for example `{"code":"invalid_config","field":"/config/url"}`
+or `/credential/secret/token`. For a choice between credential formats it points at
+`/credential/secret`.
+
 ## Verification
 
 `make verify` regenerates and compares transports, checks the examples in all three

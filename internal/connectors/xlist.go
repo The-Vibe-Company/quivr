@@ -156,16 +156,21 @@ func idAfter(a, b string) bool {
 func (XList) Kind() string                   { return "x_list" }
 func (XList) DefaultInterval() time.Duration { return 2 * time.Minute }
 func (XList) ConfigSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["list_id"],"properties":{
-"list_id":{"type":"string","pattern":"^[0-9]{1,19}$"},
-"backfill_since":{"type":"string","minLength":1},
-"max_reads_per_day":{"type":"integer","minimum":100,"maximum":100000000},
-"recheck_window_seconds":{"type":"integer","minimum":3600,"maximum":604800},
-"recheck_interval_seconds":{"type":"integer","minimum":60,"maximum":86400}}}`)
+	return []byte(`{"title":"X list","description":"Polls the posts of an X list and withdraws posts deleted at the source.","type":"object","additionalProperties":false,"required":["list_id"],"properties":{
+"list_id":{"type":"string","pattern":"^[0-9]{1,19}$","title":"List ID","description":"Numeric identifier of the list.","examples":["1234567890123456789"]},
+"backfill_since":{"type":"string","minLength":1,"title":"Backfill since","description":"RFC 3339 timestamp, at most 7 days before creation.","examples":["2026-01-01T00:00:00Z"]},
+"max_reads_per_day":{"type":"integer","minimum":100,"maximum":100000000,"title":"Maximum reads per day","description":"Daily cap on billed post reads."},
+"recheck_window_seconds":{"type":"integer","minimum":3600,"maximum":604800,"title":"Deletion recheck window (seconds)"},
+"recheck_interval_seconds":{"type":"integer","minimum":60,"maximum":86400,"title":"Deletion recheck interval (seconds)"}}}`)
 }
 func (XList) CredentialSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["bearer_token"],"properties":{
-"bearer_token":{"type":"string","minLength":1},"consumer_secret":{"type":"string","minLength":1}}}`)
+	return []byte(`{"title":"X API credential","type":"object","additionalProperties":false,"required":["bearer_token"],"properties":{
+"bearer_token":{"type":"string","minLength":1,"title":"Bearer token","writeOnly":true},"consumer_secret":{"type":"string","minLength":1,"title":"Consumer secret","writeOnly":true}}}`)
+}
+
+// CredentialRequired: X refuses unauthenticated list reads.
+func (XList) CredentialRequired() bool {
+	return true
 }
 
 // CheckConfig bounds backfill_since to the 7 days before creation.

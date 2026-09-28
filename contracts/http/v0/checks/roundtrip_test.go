@@ -64,6 +64,10 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &ConnectorCreate{}
 			case "Connector":
 				target = &Connector{}
+			case "ConnectorKindCatalog":
+				target = &ConnectorKindCatalog{}
+			case "ScheduleChange":
+				target = &ScheduleChange{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

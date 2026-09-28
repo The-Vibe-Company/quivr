@@ -44,6 +44,17 @@ and retried after it returns `409 idempotency_conflict` instead of replaying. Ke
 value stable afterwards: changing or removing it also makes stored credentials
 unreadable (`access_error` / `credential_unreadable`) until they are deposited again. `provision.py` generates this value by default.
 
+## Connectors in the web app (optional)
+
+The web app has a **Connecteurs** view (THE-679). By default the demo key cannot use
+it, so the view shows "Les connecteurs ne sont pas activés sur ce déploiement". To
+enable it, set `QUIVR_DEMO_CONNECTORS=1` on api and worker, then redeploy them. The
+demo key then also gets `connectors:read`, `connectors:write` and `changes:read`
+(live health). Without `QUIVR_CREDENTIAL_KEY` only credential-free kinds, such as
+public RSS, can be created, and the view says so. Unset the variable and redeploy to
+turn it off again. Instances created meanwhile keep polling; disable them first from
+the view if they should stop.
+
 ## Provision and deploy
 
 Authenticate `railway login`, then create/link a dedicated project in the intended

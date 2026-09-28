@@ -36,14 +36,14 @@ type fixtureCheckpoint struct {
 func (Fixture) Kind() string                   { return "fixture" }
 func (Fixture) DefaultInterval() time.Duration { return 5 * time.Minute }
 func (Fixture) ConfigSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["script"],"properties":{
-"requires_credential":{"type":"boolean"},
-"script":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["items"],"properties":{
+	return []byte(`{"title":"Test fixture","description":"Deterministic test connector for local and CI environments. Each poll collects the next step of the script.","type":"object","additionalProperties":false,"required":["script"],"properties":{
+"requires_credential":{"type":"boolean","title":"Requires a credential","description":"Refuse polls without a valid token."},
+"script":{"type":"array","maxItems":100,"title":"Script","description":"One entry per poll, each listing the items it returns.","examples":[[{"items":[{"record_key":"item-1","text":"First example item"}]}]],"items":{"type":"object","additionalProperties":false,"required":["items"],"properties":{
 "items":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["record_key"],"properties":{
 "record_key":{"type":"string","minLength":1},"text":{"type":"string"},"revision":{"type":"string"},"withdraw":{"type":"boolean"}}}}}}}}}`)
 }
 func (Fixture) CredentialSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["token"],"properties":{"token":{"type":"string","minLength":1}}}`)
+	return []byte(`{"type":"object","additionalProperties":false,"required":["token"],"properties":{"token":{"type":"string","minLength":1,"title":"Token","description":"Tokens starting with fixture-revoked are refused.","writeOnly":true}}}`)
 }
 
 func (Fixture) Fetch(_ context.Context, r FetchRequest) (Page, error) {

@@ -5,11 +5,13 @@ export function Dialog({
   onClose,
   children,
   wide = false,
+  closeLabel,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  closeLabel?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -55,7 +57,10 @@ export function Dialog({
           type="button"
           className="icon-button"
           onClick={onClose}
-          aria-label={`Fermer ${title === "Ajouter du texte" ? "l’ajout de texte" : "le document"}`}
+          aria-label={
+            closeLabel ||
+            `Fermer ${title === "Ajouter du texte" ? "l’ajout de texte" : "le document"}`
+          }
         >
           <X size={19} aria-hidden="true" />
         </button>

@@ -3,6 +3,8 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"time"
@@ -245,6 +247,43 @@ func (s ConnectorStore) DisableConnector(ctx context.Context, org, id string) (c
 	if in, err = reevaluate(ctx, tx, org, id); err != nil {
 		return in, err
 	}
+	return in, tx.Commit(ctx)
+}
+
+// ChangeSchedule sets the polling interval of an enabled instance. An
+// unchanged value commits nothing. A shorter interval pulls the next run in; a
+// longer one applies after the run already scheduled.
+func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (connectors.Instance, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return connectors.Instance{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return connectors.Instance{}, err
+	}
+	in, err := readConnector(ctx, tx, org, id, true)
+	if err != nil {
+		return in, err
+	}
+	if !in.Enabled {
+		return connectors.Instance{}, connectors.ErrDisabled
+	}
+	if in.Interval == interval {
+		return in, nil
+	}
+	seconds := int64(interval / time.Second)
+	if _, err = tx.Exec(ctx, "UPDATE connector_instances SET interval_seconds=$3,next_run_at=LEAST(next_run_at,now()+make_interval(secs => $4)) WHERE organization=$1 AND id=$2", org, id, seconds, float64(seconds)); err != nil {
+		return in, err
+	}
+	var nonce [16]byte
+	if _, err = rand.Read(nonce[:]); err != nil {
+		return in, err
+	}
+	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: in.CorpusID, Kind: "connector.schedule_changed", Resource: "connector", ResourceID: id, MutationID: content.StableID("schedule", id, hex.EncodeToString(nonce[:]))}); err != nil {
+		return in, err
+	}
+	in.Interval = interval
 	return in, tx.Commit(ctx)
 }
 

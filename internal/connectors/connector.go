@@ -199,17 +199,23 @@ func (r *Registry) Lookup(kind string) (Connector, bool) {
 	return e.connector, ok
 }
 
-func (r *Registry) validate(kind string, config, secret json.RawMessage) error {
+// validate checks config and secret against the kind's schemas. Failures
+// carry the JSON Pointer of the offending member: config under /config, the
+// secret under secretAt (its location in the calling request).
+func (r *Registry) validate(kind string, config, secret json.RawMessage, secretAt string) error {
 	e, ok := r.kinds[kind]
 	if !ok {
 		return ErrUnsupportedKind
 	}
 	if err := validateJSON(e.config, config); err != nil {
-		return ErrInvalidConfig
+		return WithField(ErrInvalidConfig, "/config"+location(err))
 	}
 	if secret != nil {
-		if e.credential == nil || validateJSON(e.credential, secret) != nil {
-			return ErrInvalidCredential
+		if e.credential == nil {
+			return WithField(ErrInvalidCredential, secretAt)
+		}
+		if err := validateJSON(e.credential, secret); err != nil {
+			return WithField(ErrInvalidCredential, secretAt+location(err))
 		}
 	}
 	return nil

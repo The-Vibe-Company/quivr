@@ -106,6 +106,41 @@ async function authorizeRecord(id) {
     throw fail(404, "Document introuvable.");
   return record;
 }
+// Connector routes are fenced to the demo corpus: an instance of any other
+// corpus is reported missing before a read or a mutation is relayed. Secrets
+// in request bodies are relayed once and never logged or kept.
+async function connectorRoute(req, path, url, corpus) {
+  if (path === "/v0/connector-kinds" && req.method === "GET")
+    return upstream(path);
+  if (path === "/v0/connectors" && req.method === "GET") {
+    const query = new URLSearchParams({ corpus_id: corpus });
+    for (const name of ["page_cursor", "limit"]) {
+      const value = url.searchParams.get(name);
+      if (value) query.set(name, value);
+    }
+    return upstream(`${path}?${query}`);
+  }
+  if (path === "/v0/connectors" && req.method === "POST") {
+    const body = await jsonBody(req);
+    if (body.corpus_id !== corpus) throw fail(403, "Corpus non autorisé.");
+    if (body.source_namespace === "web-demo")
+      throw fail(422, "Cet espace de noms est réservé aux textes ajoutés.");
+    return upstream(path, "POST", body);
+  }
+  const match = path.match(
+    /^\/v0\/connectors\/([\w-]+)(?:\/(disable|credential|schedule))?$/,
+  );
+  const method = { disable: "POST", credential: "PUT", schedule: "PUT" }[
+    match?.[2]
+  ];
+  if (!match || req.method !== (method || "GET")) return undefined;
+  const body = method ? await jsonBody(req) : undefined;
+  const current = await upstream(`/v0/connectors/${match[1]}`);
+  if (current.status >= 500) return current;
+  if (current.status !== 200 || current.data.corpus_id !== corpus)
+    throw fail(404, "Connecteur introuvable.");
+  return method ? upstream(path, method, body) : current;
+}
 const server = http.createServer(async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
@@ -116,13 +151,18 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
     const path = url.pathname;
-    if (
-      req.method === "POST" &&
-      req.headers.origin &&
-      req.headers.origin !==
-        `${secure ? "https" : "http"}://${req.headers.host}`
-    )
-      throw fail(403, "Origine non autorisée.");
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      // Mutations must come from this origin. Browsers send Origin on every
+      // non-GET fetch; Sec-Fetch-Site covers the rare client that omits it.
+      // Only the login may come from a non-browser client (tests, scripts).
+      const origin = req.headers.origin;
+      const expected = `${secure ? "https" : "http"}://${req.headers.host}`;
+      const sameOrigin = origin
+        ? origin === expected
+        : req.headers["sec-fetch-site"] === "same-origin" ||
+          (path === "/demo/login" && !req.headers["sec-fetch-site"]);
+      if (!sameOrigin) throw fail(403, "Origine non autorisée.");
+    }
     if (path === "/healthz" && req.method === "GET") {
       res.writeHead(204);
       res.end();
@@ -169,6 +209,13 @@ const server = http.createServer(async (req, res) => {
         )
           throw fail(403, "Corpus non autorisé.");
         response = await upstream(path, "POST", body);
+      } else if (path.startsWith("/v0/connector")) {
+        response = await connectorRoute(req, path, url, id);
+      } else if (path === "/v0/changes" && req.method === "GET") {
+        const query = new URLSearchParams({ corpus_id: id, limit: "100" });
+        const cursor = url.searchParams.get("cursor");
+        if (cursor) query.set("cursor", cursor);
+        response = await upstream(`${path}?${query}`);
       } else if (req.method === "GET") {
         const record = path.match(
           /^\/v0\/records\/([\w-]+)(?:\/versions\/([\w-]+))?$/,

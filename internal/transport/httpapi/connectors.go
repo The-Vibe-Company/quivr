@@ -36,7 +36,7 @@ func connectorFailure(w http.ResponseWriter, err error) {
 		e.Retryable = false
 		send(w, 503, e)
 	case errors.Is(err, connectors.ErrUnsupportedKind), errors.Is(err, connectors.ErrInvalidConfig), errors.Is(err, connectors.ErrInvalidCredential), errors.Is(err, connectors.ErrInvalidInterval), errors.Is(err, connectors.ErrInvalid):
-		failure(w, 422, publicCode(err, "invalid_input"))
+		invalid(w, publicCode(err, "invalid_input"), connectors.Field(err))
 	default:
 		failure(w, 503, "connectors_unavailable")
 	}
@@ -90,11 +90,24 @@ func decodeInto(w http.ResponseWriter, r *http.Request, schema interface{ Valida
 	if !ok {
 		return false
 	}
-	if schema.Validate(raw) != nil || json.Unmarshal(payload, v) != nil {
+	if err := schema.Validate(raw); err != nil {
+		invalid(w, "invalid_schema", connectors.SchemaPointer(err))
+		return false
+	}
+	if json.Unmarshal(payload, v) != nil {
 		failure(w, 422, "invalid_schema")
 		return false
 	}
 	return true
+}
+
+// invalid writes a 422 locating the offending request member when known.
+func invalid(w http.ResponseWriter, code, field string) {
+	e := apiError(422, code)
+	if field != "" {
+		e.Field = &field
+	}
+	send(w, 422, e)
 }
 
 func rawJSON(v *map[string]any) json.RawMessage {
@@ -106,6 +119,10 @@ func rawJSON(v *map[string]any) json.RawMessage {
 }
 
 func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+	if r.URL.Path == "/v0/connector-kinds" {
+		a.connectorKinds(w, r, scope)
+		return true
+	}
 	if r.URL.Path != "/v0/connectors" && !strings.HasPrefix(r.URL.Path, "/v0/connectors/") {
 		return false
 	}
@@ -124,6 +141,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 	case len(path) == 2 && path[1] != "" && r.Method == "GET":
 	case len(path) == 3 && path[1] != "" && path[2] == "disable" && r.Method == "POST":
 	case len(path) == 3 && path[1] != "" && path[2] == "credential" && r.Method == "PUT":
+	case len(path) == 3 && path[1] != "" && path[2] == "schedule" && r.Method == "PUT":
 	case len(path) <= 3:
 		failure(w, 405, "method_not_allowed")
 		return true
@@ -178,6 +196,17 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			return true
 		}
 		send(w, 200, connectorToTransport(inst))
+	case path[2] == "schedule":
+		var body transport.ScheduleChange
+		if !decodeInto(w, r, a.scheduleSchema, &body) {
+			return true
+		}
+		inst, err := a.Connectors.ChangeSchedule(ctx, scope, path[1], body.IntervalSeconds)
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 200, connectorToTransport(inst))
 	default:
 		var body transport.CredentialReplace
 		if !decodeInto(w, r, a.credentialSchema, &body) {
@@ -191,6 +220,50 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		send(w, 200, connectorToTransport(inst))
 	}
 	return true
+}
+
+func (a *API) connectorKinds(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
+	if a.Connectors.Store == nil {
+		failure(w, 404, "not_found")
+		return
+	}
+	if r.Method != "GET" {
+		failure(w, 405, "method_not_allowed")
+		return
+	}
+	if len(r.URL.Query()) > 0 {
+		failure(w, 422, "invalid_query")
+		return
+	}
+	catalog, err := a.Connectors.Kinds(s)
+	if err != nil {
+		connectorFailure(w, err)
+		return
+	}
+	out := transport.ConnectorKindCatalog{CredentialDeposits: "unavailable", MinIntervalSeconds: int(catalog.MinInterval / time.Second), Items: []transport.ConnectorKindDescription{}}
+	if catalog.CredentialDeposits {
+		out.CredentialDeposits = "available"
+	}
+	for _, k := range catalog.Kinds {
+		d := transport.ConnectorKindDescription{Kind: k.Kind, Title: k.Title, Credential: transport.ConnectorKindDescriptionCredential(k.Credential), DefaultIntervalSeconds: int(k.DefaultInterval / time.Second)}
+		if k.Description != "" {
+			d.Description = &k.Description
+		}
+		if json.Unmarshal(k.ConfigSchema, &d.ConfigSchema) != nil {
+			failure(w, 503, "connectors_unavailable")
+			return
+		}
+		if k.CredentialSchema != nil {
+			var schema map[string]any
+			if json.Unmarshal(k.CredentialSchema, &schema) != nil {
+				failure(w, 503, "connectors_unavailable")
+				return
+			}
+			d.CredentialSchema = &schema
+		}
+		out.Items = append(out.Items, d)
+	}
+	send(w, 200, out)
 }
 
 func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Scope) {

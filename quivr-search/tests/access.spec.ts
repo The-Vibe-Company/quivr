@@ -16,10 +16,13 @@ test("la façade protège la session et borne les routes au corpus de démo", as
   expect(login.headers()["set-cookie"]).toContain("HttpOnly");
   expect(login.headers()["set-cookie"]).toContain("SameSite=Strict");
   const session = await (await request.get("/demo/session")).json();
+  // Same-origin, so the corpus fence (not the origin check) must refuse these.
+  const origin = { Origin: new URL(test.info().project.use.baseURL!).origin };
   expect(session.corpus_id).toBeTruthy();
   expect(
     (
       await request.post("/v0/search", {
+        headers: origin,
         data: { query: "texte", corpus_ids: ["another-corpus"] },
       })
     ).status(),
@@ -27,6 +30,7 @@ test("la façade protège la session et borne les routes au corpus de démo", as
   expect(
     (
       await request.post("/v0/records", {
+        headers: origin,
         data: {
           source: { corpus_id: "another-corpus", namespace: "web-demo" },
         },

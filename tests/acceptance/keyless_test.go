@@ -15,6 +15,9 @@ func TestKeylessCoreServesIngestionSearchAndPublicRSS(t *testing.T) {
 		t.Skip("make verify restarts the core without credential_key for this test")
 	}
 	corpusID, cursor := connectorCorpus(t, token, "keyless")
+	if catalog := request(t, "GET", "/v0/connector-kinds", token, nil, 200); catalog["credential_deposits"] != "unavailable" {
+		t.Fatalf("keyless catalog must announce unavailable deposits: %v", catalog)
+	}
 
 	// Ingestion and search work without a credential key.
 	text := "Keyless deployment dispatch"

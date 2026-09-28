@@ -57,16 +57,16 @@ func TestRegistryValidatesKindSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"token":"fixture-test-token"}`)); err != nil {
+	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"token":"fixture-test-token"}`), "/credential/secret"); err != nil {
 		t.Fatal(err)
 	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":"nope"}`), nil); !errors.Is(err, ErrInvalidConfig) {
+	if err = r.validate("fixture", json.RawMessage(`{"script":"nope"}`), nil, "/credential/secret"); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("config: %v", err)
 	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"password":1}`)); !errors.Is(err, ErrInvalidCredential) {
+	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"password":1}`), "/credential/secret"); !errors.Is(err, ErrInvalidCredential) {
 		t.Fatalf("credential: %v", err)
 	}
-	if err = r.validate("rss", json.RawMessage(`{}`), nil); !errors.Is(err, ErrUnsupportedKind) {
+	if err = r.validate("rss", json.RawMessage(`{}`), nil, "/credential/secret"); !errors.Is(err, ErrUnsupportedKind) {
 		t.Fatalf("kind: %v", err)
 	}
 }

@@ -39,7 +39,7 @@ def main():
         demo_password = secrets.token_hex(24) if verify else os.environ.get('DEMO_PASSWORD', '')
         env = {**os.environ, 'HOST': '127.0.0.1', 'PORT': str(demo_port),
                'QUIVR_API_URL': f"http://127.0.0.1:{stack.state['api_port']}",
-               'QUIVR_API_KEY': stack.state['admin'], 'DEMO_PASSWORD': demo_password,
+               'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
                'DEMO_SECURE_COOKIE': 'false'}
         base = f'http://127.0.0.1:{demo_port}'
         with (stack.directory / 'demo-server.log').open('w') as log:

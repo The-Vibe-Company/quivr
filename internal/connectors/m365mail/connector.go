@@ -75,23 +75,26 @@ func (*Connector) Kind() string                   { return Kind }
 func (*Connector) DefaultInterval() time.Duration { return time.Minute }
 
 func (*Connector) ConfigSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["tenant_id","mailbox"],"properties":{
-"tenant_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$"},
-"mailbox":{"type":"string","minLength":1,"maxLength":320,"pattern":"^[^/\\\\?#\\s]+$"},
-"folder":{"type":"string","minLength":1,"maxLength":512,"pattern":"^[^/\\\\?#\\s]+$"},
-"backfill_since":{"type":"string","minLength":20,"maxLength":40}}}`)
+	return []byte(`{"title":"Microsoft 365 mailbox","description":"Collects the messages and attachments of a mailbox folder through Microsoft Graph.","type":"object","additionalProperties":false,"required":["tenant_id","mailbox"],"properties":{
+"tenant_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$","title":"Tenant ID","description":"Directory (tenant) ID or verified domain.","examples":["example.onmicrosoft.com"]},
+"mailbox":{"type":"string","minLength":1,"maxLength":320,"pattern":"^[^/\\\\?#\\s]+$","title":"Mailbox","description":"User principal name or ID of the mailbox.","examples":["shared-inbox@example.org"]},
+"folder":{"type":"string","minLength":1,"maxLength":512,"pattern":"^[^/\\\\?#\\s]+$","title":"Folder","description":"Well-known folder name or folder ID. Defaults to the inbox.","examples":["inbox"]},
+"backfill_since":{"type":"string","minLength":20,"maxLength":40,"title":"Backfill since","description":"RFC 3339 timestamp of the oldest message to collect.","examples":["2026-01-01T00:00:00Z"]}}}`)
 }
 
 func (*Connector) CredentialSchema() []byte {
-	return []byte(`{"type":"object","additionalProperties":false,"required":["client_id"],"properties":{
-"client_id":{"type":"string","minLength":1,"maxLength":128},
-"client_secret":{"type":"string","minLength":1,"maxLength":1024},
-"certificate_pem":{"type":"string","minLength":1,"maxLength":16384},
-"private_key_pem":{"type":"string","minLength":1,"maxLength":16384}},
+	return []byte(`{"title":"Application credential","description":"App registration with Mail.Read application permission: a client secret, or a certificate and its private key.","type":"object","additionalProperties":false,"required":["client_id"],"properties":{
+"client_id":{"type":"string","minLength":1,"maxLength":128,"title":"Client ID"},
+"client_secret":{"type":"string","minLength":1,"maxLength":1024,"title":"Client secret","writeOnly":true},
+"certificate_pem":{"type":"string","minLength":1,"maxLength":16384,"title":"Certificate (PEM)"},
+"private_key_pem":{"type":"string","minLength":1,"maxLength":16384,"title":"Private key (PEM)","writeOnly":true}},
 "oneOf":[
- {"required":["client_secret"],"not":{"anyOf":[{"required":["certificate_pem"]},{"required":["private_key_pem"]}]}},
- {"required":["certificate_pem","private_key_pem"],"not":{"required":["client_secret"]}}]}`)
+ {"title":"Client secret","required":["client_secret"],"not":{"anyOf":[{"required":["certificate_pem"]},{"required":["private_key_pem"]}]}},
+ {"title":"Certificate","required":["certificate_pem","private_key_pem"],"not":{"required":["client_secret"]}}]}`)
 }
+
+// CredentialRequired: Graph refuses unauthenticated mailbox reads.
+func (*Connector) CredentialRequired() bool { return true }
 
 type config struct {
 	TenantID      string     `json:"tenant_id"`

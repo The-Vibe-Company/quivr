@@ -9,6 +9,10 @@ import sys
 def build_config(env):
     """Build the core configuration from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
+    actions = ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query']
+    # Opt-in: lets the web app list, create and watch Connector Instances.
+    if env.get('QUIVR_DEMO_CONNECTORS') == '1':
+        actions += ['connectors:read', 'connectors:write', 'changes:read']
     config = {
         'database_url': env['DATABASE_URL'],
         'cursor_key': env['QUIVR_CURSOR_KEY'],
@@ -23,7 +27,7 @@ def build_config(env):
         's3': {'endpoint': env['S3_ENDPOINT'], 'access_key': env['S3_ACCESS_KEY'],
                'secret_key': env['S3_SECRET_KEY'], 'bucket': 'quivr-content'},
         'keys': {key: {'organization': 'quivr-demo',
-                       'actions': ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query'],
+                       'actions': actions,
                        'corpora': ['*']}},
     }
     # Optional: without it the core starts and refuses only credential deposits.

@@ -4,6 +4,8 @@ export class APIError extends Error {
     public status: number,
     message: string,
     public retryable: boolean,
+    public code = "",
+    public field = "",
   ) {
     super(message);
   }
@@ -12,9 +14,10 @@ export async function request<T>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
+  method: "GET" | "POST" | "PUT" = body === undefined ? "GET" : "POST",
 ): Promise<T> {
   const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: signal
@@ -36,6 +39,8 @@ export async function request<T>(
         ? "Cette recherche dépasse les limites disponibles. Essayez une requête plus courte."
         : data.message || "La demande a échoué.",
       data.retryable === true,
+      typeof data.code === "string" ? data.code : "",
+      typeof data.field === "string" ? data.field : "",
     );
   return data as T;
 }

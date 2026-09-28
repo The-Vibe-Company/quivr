@@ -442,7 +442,7 @@ func TestRSSSchemasValidateConfigAndCredential(t *testing.T) {
 		if secret != "" {
 			s = json.RawMessage(secret)
 		}
-		return registry.validate("rss", json.RawMessage(config), s)
+		return registry.validate("rss", json.RawMessage(config), s, "/credential/secret")
 	}
 	for _, c := range []string{`{"url":"https://news.example.org/rss"}`, `{"url":"http://news.example.org/rss","honor_ttl":false}`} {
 		if err := ok(c, ""); err != nil {

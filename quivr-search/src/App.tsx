@@ -13,13 +13,16 @@ import { ModeSwitch, MODES } from "./components/ModeSwitch";
 import { ResultItem } from "./components/ResultItem";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { AddText } from "./components/AddText";
+import { ConnectorsView } from "./components/connectors/ConnectorsView";
 import { APIError, login, search, session, tokenize } from "./lib/search";
 import type { Mode, SearchResponse } from "./types";
 
 type Auth = "loading" | "login" | "ready" | "error";
+type View = "search" | "connectors";
 function urlState() {
   const p = new URLSearchParams(location.search);
   return {
+    view: (p.get("view") === "connectors" ? "connectors" : "search") as View,
     query: p.get("q") || "",
     mode: (["hybrid", "lexical", "semantic"].includes(p.get("mode") || "")
       ? p.get("mode")
@@ -48,6 +51,7 @@ export default function App() {
   const [attempt, setAttempt] = useState(0);
   const [doc, setDoc] = useState(initial.doc);
   const [adding, setAdding] = useState(false);
+  const [view, setView] = useState<View>(initial.view);
   const inputRef = useRef<HTMLInputElement>(null);
   const terms = tokenize(query);
   const connect = useCallback(async () => {
@@ -101,6 +105,7 @@ export default function App() {
   }, [query, mode, corpus, auth, attempt]);
   useEffect(() => {
     const p = new URLSearchParams();
+    if (view === "connectors") p.set("view", "connectors");
     if (query) p.set("q", query);
     if (mode !== "hybrid") p.set("mode", mode);
     if (doc) {
@@ -112,8 +117,13 @@ export default function App() {
       "",
       p.size ? "?" + p.toString() : location.pathname,
     );
-    document.title = query ? `${query} — Quivr Search` : "Quivr Search";
-  }, [query, mode, doc]);
+    document.title =
+      view === "connectors"
+        ? "Connecteurs — Quivr Search"
+        : query
+          ? `${query} — Quivr Search`
+          : "Quivr Search";
+  }, [query, mode, doc, view]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       document.documentElement.dataset.input = "keyboard";
@@ -121,7 +131,7 @@ export default function App() {
         event.target instanceof HTMLElement &&
         (["INPUT", "TEXTAREA"].includes(event.target.tagName) ||
           event.target.isContentEditable);
-      if (adding || doc) return;
+      if (adding || doc || view === "connectors") return;
       if (
         (event.key === "/" && !typing) ||
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
@@ -152,7 +162,7 @@ export default function App() {
       window.removeEventListener("keydown", listener);
       window.removeEventListener("pointerdown", pointer);
     };
-  }, [adding, doc]);
+  }, [adding, doc, view]);
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const change = () => {
@@ -173,10 +183,12 @@ export default function App() {
   }
   const onAdded = useCallback(() => setAttempt((value) => value + 1), []);
   const home = () => {
+    setView("search");
     setQuery("");
     setInput("");
     setDoc(null);
   };
+  const onUnauthorized = useCallback(() => setAuth("login"), []);
   if (auth !== "ready")
     return (
       <div className="auth-page">
@@ -250,7 +262,12 @@ export default function App() {
       </div>
     );
   return (
-    <div className="app" data-view={query ? "results" : "home"}>
+    <div
+      className="app"
+      data-view={
+        view === "connectors" ? "connectors" : query ? "results" : "home"
+      }
+    >
       <header className="topbar">
         <a
           className="brand brand-compact"
@@ -262,6 +279,29 @@ export default function App() {
         >
           <Brand />
         </a>
+        <nav className="view-tabs" aria-label="Sections">
+          <a
+            href="/"
+            aria-current={view === "search" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              setView("search");
+            }}
+          >
+            Recherche
+          </a>
+          <a
+            href="/?view=connectors"
+            aria-current={view === "connectors" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              setDoc(null);
+              setView("connectors");
+            }}
+          >
+            Connecteurs
+          </a>
+        </nav>
         <div className="topbar-spacer" />
         <span className="workspace-label">
           <span className="status-dot" />
@@ -275,131 +315,139 @@ export default function App() {
           Ajouter du texte
         </button>
       </header>
-      <main className={query ? "results-page" : "home"}>
-        <div className={query ? "query-area" : "home-inner"}>
-          {!query && (
-            <>
-              <div className="eyebrow">
-                <Sparkle size={15} aria-hidden="true" /> Vos textes. Vos idées.
-              </div>
-              <h1>Retrouvez ce qui compte.</h1>
-              <p className="hero-description">
-                Un mot précis ou une idée à explorer.
-                <br />
-                La bonne information est dans vos textes.
-              </p>
-            </>
-          )}
-          <SearchBar
-            value={input}
-            onChange={setInput}
-            onSubmit={runSearch}
-            inputRef={inputRef}
-            busy={status === "loading"}
-          />
-          <div className="search-options">
-            <ModeSwitch mode={mode} onChange={setMode} />
-            <span className="mode-hint">
-              {MODES.find((item) => item.value === mode)?.hint}
-            </span>
-          </div>
-          {!query && (
-            <section className="start-panel">
-              <div className="start-icon">
-                <FileText size={24} aria-hidden="true" />
-              </div>
-              <div>
-                <h2>Commencez avec un texte.</h2>
-                <p>
-                  Une note, un article, un compte rendu.
+      {view === "connectors" ? (
+        <ConnectorsView corpus={corpus} onUnauthorized={onUnauthorized} />
+      ) : (
+        <main className={query ? "results-page" : "home"}>
+          <div className={query ? "query-area" : "home-inner"}>
+            {!query && (
+              <>
+                <div className="eyebrow">
+                  <Sparkle size={15} aria-hidden="true" /> Vos textes. Vos
+                  idées.
+                </div>
+                <h1>Retrouvez ce qui compte.</h1>
+                <p className="hero-description">
+                  Un mot précis ou une idée à explorer.
                   <br />
-                  Collez-le et lancez votre première recherche.
+                  La bonne information est dans vos textes.
                 </p>
-                <button className="text-button" onClick={() => setAdding(true)}>
-                  Ajouter un texte <ArrowRight size={16} aria-hidden="true" />
-                </button>
-              </div>
-            </section>
-          )}
-        </div>
-        {query && (
-          <section
-            className="search-results"
-            aria-label="Résultats de recherche"
-            aria-busy={status === "loading"}
-          >
-            <div className="results-head">
-              <p role="status">
-                {status === "loading"
-                  ? "Recherche en cours…"
-                  : status === "ready"
-                    ? `${response?.items.length || 0} passage${response?.items.length === 1 ? "" : "s"} affiché${response?.items.length === 1 ? "" : "s"}`
-                    : "Recherche"}
-              </p>
-              <span>Les 10 premiers passages au maximum</span>
-            </div>
-            {status === "loading" && (
-              <div className="results-skeleton" aria-hidden="true">
-                {[0, 1, 2].map((i) => (
-                  <div key={i}>
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                ))}
-              </div>
+              </>
             )}
-            {status === "error" && (
-              <div className="notice" role="alert">
-                <h2>La recherche n’a pas abouti.</h2>
-                <p>{searchError}</p>
-                <button
-                  className="button"
-                  onClick={() => setAttempt((value) => value + 1)}
-                >
-                  Réessayer
-                </button>
-                {mode !== "lexical" && (
+            <SearchBar
+              value={input}
+              onChange={setInput}
+              onSubmit={runSearch}
+              inputRef={inputRef}
+              busy={status === "loading"}
+            />
+            <div className="search-options">
+              <ModeSwitch mode={mode} onChange={setMode} />
+              <span className="mode-hint">
+                {MODES.find((item) => item.value === mode)?.hint}
+              </span>
+            </div>
+            {!query && (
+              <section className="start-panel">
+                <div className="start-icon">
+                  <FileText size={24} aria-hidden="true" />
+                </div>
+                <div>
+                  <h2>Commencez avec un texte.</h2>
+                  <p>
+                    Une note, un article, un compte rendu.
+                    <br />
+                    Collez-le et lancez votre première recherche.
+                  </p>
                   <button
                     className="text-button"
-                    onClick={() => setMode("lexical")}
+                    onClick={() => setAdding(true)}
                   >
-                    Passer aux mots-clés
+                    Ajouter un texte <ArrowRight size={16} aria-hidden="true" />
                   </button>
-                )}
-              </div>
+                </div>
+              </section>
             )}
-            {status === "ready" && response?.items.length === 0 && (
-              <div className="empty">
-                <MagnifyingGlass size={30} aria-hidden="true" />
-                <h2>Aucun passage trouvé.</h2>
-                <p>
-                  Essayez une autre formulation ou ajoutez un texte à votre
-                  espace.
+          </div>
+          {query && (
+            <section
+              className="search-results"
+              aria-label="Résultats de recherche"
+              aria-busy={status === "loading"}
+            >
+              <div className="results-head">
+                <p role="status">
+                  {status === "loading"
+                    ? "Recherche en cours…"
+                    : status === "ready"
+                      ? `${response?.items.length || 0} passage${response?.items.length === 1 ? "" : "s"} affiché${response?.items.length === 1 ? "" : "s"}`
+                      : "Recherche"}
                 </p>
-                <button className="button" onClick={() => setAdding(true)}>
-                  <Plus size={17} aria-hidden="true" />
-                  Ajouter du texte
-                </button>
+                <span>Les 10 premiers passages au maximum</span>
               </div>
-            )}
-            {status === "ready" &&
-              response?.items.map((result) => (
-                <ResultItem
-                  key={result.segment_id}
-                  result={result}
-                  terms={terms}
-                  onOpen={() =>
-                    setDoc({
-                      record: result.record_id,
-                      version: result.version_id,
-                    })
-                  }
-                />
-              ))}
-          </section>
-        )}
-      </main>
+              {status === "loading" && (
+                <div className="results-skeleton" aria-hidden="true">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i}>
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {status === "error" && (
+                <div className="notice" role="alert">
+                  <h2>La recherche n’a pas abouti.</h2>
+                  <p>{searchError}</p>
+                  <button
+                    className="button"
+                    onClick={() => setAttempt((value) => value + 1)}
+                  >
+                    Réessayer
+                  </button>
+                  {mode !== "lexical" && (
+                    <button
+                      className="text-button"
+                      onClick={() => setMode("lexical")}
+                    >
+                      Passer aux mots-clés
+                    </button>
+                  )}
+                </div>
+              )}
+              {status === "ready" && response?.items.length === 0 && (
+                <div className="empty">
+                  <MagnifyingGlass size={30} aria-hidden="true" />
+                  <h2>Aucun passage trouvé.</h2>
+                  <p>
+                    Essayez une autre formulation ou ajoutez un texte à votre
+                    espace.
+                  </p>
+                  <button className="button" onClick={() => setAdding(true)}>
+                    <Plus size={17} aria-hidden="true" />
+                    Ajouter du texte
+                  </button>
+                </div>
+              )}
+              {status === "ready" &&
+                response?.items.map((result) => (
+                  <ResultItem
+                    key={result.segment_id}
+                    result={result}
+                    terms={terms}
+                    onOpen={() =>
+                      setDoc({
+                        record: result.record_id,
+                        version: result.version_id,
+                      })
+                    }
+                  />
+                ))}
+            </section>
+          )}
+        </main>
+      )}
       <footer className="page-footer">
         <span>Quivr · Démo de recherche</span>
         <span>

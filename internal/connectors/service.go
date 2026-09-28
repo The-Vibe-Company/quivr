@@ -101,6 +101,9 @@ type Store interface {
 	ListConnectors(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]Instance, error)
 	DisableConnector(ctx context.Context, org, id string) (Instance, error)
 	ReplaceCredential(ctx context.Context, org, id string, deposit CredentialDeposit) (Instance, error)
+	// ChangeSchedule sets the interval of an enabled instance (ErrDisabled
+	// otherwise), committing connector.schedule_changed only on a change.
+	ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (Instance, error)
 }
 
 // Service authorizes and validates Connector Instance commands.
@@ -142,8 +145,10 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if !scope.Contains(in.CorpusID) {
 		return Instance{}, corpus.ErrNotFound
 	}
-	if !validText(in.Key) || !validText(in.Namespace) || !validText(in.CorpusID) {
-		return Instance{}, ErrInvalid
+	for _, f := range []struct{ value, at string }{{in.Key, "/idempotency_key"}, {in.Namespace, "/source_namespace"}, {in.CorpusID, "/corpus_id"}} {
+		if !validText(f.value) {
+			return Instance{}, WithField(ErrInvalid, f.at)
+		}
 	}
 	if in.Secret != nil && !s.Sealer.CanSeal() {
 		return Instance{}, ErrCredentialsUnavailable
@@ -152,18 +157,18 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if !ok {
 		return Instance{}, ErrUnsupportedKind
 	}
-	if err := s.Registry.validate(in.Kind, in.Config, in.Secret); err != nil {
+	if err := s.Registry.validate(in.Kind, in.Config, in.Secret, "/credential/secret"); err != nil {
 		return Instance{}, err
 	}
 	if cc, ok := connector.(ConfigChecker); ok && cc.CheckConfig(in.Config, time.Now()) != nil {
-		return Instance{}, ErrInvalidConfig
+		return Instance{}, WithField(ErrInvalidConfig, "/config")
 	}
 	interval := connector.DefaultInterval()
 	if in.IntervalSeconds != nil {
 		interval = time.Duration(*in.IntervalSeconds) * time.Second
 	}
-	if interval < s.minInterval() || interval > 24*time.Hour {
-		return Instance{}, ErrInvalidInterval
+	if !s.validInterval(interval) {
+		return Instance{}, WithField(ErrInvalidInterval, "/schedule/interval_seconds")
 	}
 	silent, warning := DefaultSilentAfter, DefaultCredentialWarning
 	if in.SilentAfterSeconds != nil {
@@ -173,7 +178,7 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 		warning = time.Duration(*in.CredentialWarningSeconds) * time.Second
 	}
 	if silent <= 0 || warning < 0 {
-		return Instance{}, ErrInvalid
+		return Instance{}, WithField(ErrInvalid, "/health_policy")
 	}
 	canonical, err := json.Marshal(in)
 	if err != nil {
@@ -247,17 +252,17 @@ func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id s
 		return Instance{}, err
 	}
 	if !validText(in.Key) {
-		return Instance{}, ErrInvalid
+		return Instance{}, WithField(ErrInvalid, "/idempotency_key")
 	}
 	// A disabled instance is refused by the store after replay detection, so a
 	// retried rotation that already succeeded still replays.
 	if in.Secret == nil {
-		return Instance{}, ErrInvalidCredential
+		return Instance{}, WithField(ErrInvalidCredential, "/secret")
 	}
 	if !s.Sealer.CanSeal() {
 		return Instance{}, ErrCredentialsUnavailable
 	}
-	if err = s.Registry.validate(inst.Kind, inst.Config, in.Secret); err != nil {
+	if err = s.Registry.validate(inst.Kind, inst.Config, in.Secret, "/secret"); err != nil {
 		return Instance{}, err
 	}
 	canonical, err := json.Marshal(in)
@@ -274,6 +279,35 @@ func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id s
 	}
 	sealed.ExpiresAt = in.ExpiresAt
 	return s.Store.ReplaceCredential(ctx, scope.Organization, id, CredentialDeposit{RequestKey: in.Key, RequestDigest: digest, Sealed: sealed})
+}
+
+// Kinds describes the enabled kinds and whether credentials can be deposited.
+func (s Service) Kinds(scope corpus.Scope) (Catalog, error) {
+	if !scope.Allows("connectors:read") {
+		return Catalog{}, corpus.ErrForbidden
+	}
+	return Catalog{Kinds: s.Registry.Describe(), CredentialDeposits: s.Sealer.CanSeal(), MinInterval: s.minInterval()}, nil
+}
+
+// ChangeSchedule sets the polling interval. Setting the current value is a
+// no-op, so repeating the request is harmless.
+func (s Service) ChangeSchedule(ctx context.Context, scope corpus.Scope, id string, seconds int) (Instance, error) {
+	if !scope.Allows("connectors:write") {
+		return Instance{}, corpus.ErrForbidden
+	}
+	if _, err := s.authorized(ctx, scope, id); err != nil {
+		return Instance{}, err
+	}
+	// Bound before converting: a huge value would wrap into a valid Duration.
+	interval := time.Duration(seconds) * time.Second
+	if seconds < 1 || seconds > 86400 || !s.validInterval(interval) {
+		return Instance{}, WithField(ErrInvalidInterval, "/interval_seconds")
+	}
+	return s.Store.ChangeSchedule(ctx, scope.Organization, id, interval)
+}
+
+func (s Service) validInterval(d time.Duration) bool {
+	return d >= s.minInterval() && d <= 24*time.Hour
 }
 
 func (s Service) minInterval() time.Duration {

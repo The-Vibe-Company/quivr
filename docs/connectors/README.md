@@ -64,12 +64,28 @@ POST /v0/connectors
   the old one first and reuse its namespace, so existing Records keep their
   identity.
 - **Validation.** `config` and `credential.secret` are checked against the
-  kind's JSON Schema (`422 invalid_config` / `422 invalid_credential`).
+  kind's JSON Schema (`422 invalid_config` / `422 invalid_credential`). The error's
+  `field` is a JSON Pointer to the rejected member, such as `/config/url`.
+- **Discovery.** `GET /v0/connector-kinds` lists the kinds this deployment enables,
+  with their config and credential schemas, default intervals, and whether it accepts
+  credential deposits at all (`credential_deposits`).
 - **Idempotency.** Retrying with the same `idempotency_key` and body returns the
   same instance. A different body under the same key is `409 idempotency_conflict`.
 - **First run.** Collection starts right after creation. Later runs follow
   `interval_seconds`, which defaults per kind. At most one run per instance is
   in flight.
+
+## Change the interval
+
+```http
+PUT /v0/connectors/{connector_id}/schedule
+{ "interval_seconds": 600 }
+```
+
+Repeating the same value is harmless. A change commits `connector.schedule_changed`.
+A shorter interval brings the next run forward; a longer one applies after the run
+already scheduled. The interval must be between the deployment floor and 24 hours
+(`422 invalid_interval`). A disabled instance is `409 connector_disabled`.
 
 ## Deposit and rotate credentials
 
@@ -110,7 +126,8 @@ POST /v0/connectors
 - **Freshness.** `evaluated_at` shows when health was last committed. If it
   stops advancing, check the worker.
 - **Alerting.** Subscribe to `connector.health_changed`, `connector.created`,
-  `connector.disabled` and `connector.credential_replaced` through
+  `connector.disabled`, `connector.credential_replaced` and
+  `connector.schedule_changed` through
   `GET /v0/changes?corpus_id=…` (or the SSE stream) rather than polling
   instances.
 
@@ -120,6 +137,44 @@ POST /v0/connectors
 scheduling immediately. Repeating it is harmless. Disabled instances cannot be
 re-enabled; create a new instance on the same Source Namespace instead. Records
 already collected are unaffected.
+
+## From the web interface
+
+The reference web app (`quivr-search/`) has a **Connecteurs** tab for the Corpus it
+serves. There you can:
+
+- **List** instances with their kind, source, interval, health badge, last success,
+  last new item, last error and credential version and expiry. Disabled instances are
+  listed separately.
+- **Create** an instance. First pick a kind, then fill a form generated from that
+  kind's schemas (`GET /v0/connector-kinds`). A kind added to the core, including a
+  future plugin-provided one, appears with its form and needs no UI change. Settings
+  the form cannot render as fields, such as nested lists, get a JSON text box.
+- **Open** an instance to see its health and configuration, change its interval,
+  deposit or replace its credential, or disable it (after a confirmation).
+
+Health follows the change feed: the page polls `connector.*` events every 5 seconds
+and rereads the instances they name, so it updates without a reload. Rejected values
+are shown next to the field the API's `field` pointer names.
+
+Secrets typed in the form are sent once, in the submit request, then erased from the
+page. They are never shown again: only the credential's version, deposit date and
+expiry are. The browser never holds the API key. Every call goes through the web
+app's server (`server.mjs`), which keeps the key, holds the session and only accepts
+changes coming from the web app's own origin. It also confines connectors to the
+Corpus it serves.
+
+What the page offers depends on the deployment:
+
+- If the web app's key lacks `connectors:read`, the page says connectors are not
+  enabled on this deployment. For live health, the key also needs `changes:read`;
+  otherwise the page refreshes the list every 15 seconds.
+- If the deployment has no `credential_key`, the page says credential deposits are
+  disabled. Kinds that require a credential cannot be picked, and the others are
+  created without one.
+
+The hosted demo turns connectors on with `QUIVR_DEMO_CONNECTORS=1` (see
+`deploy/railway/README.md`).
 
 ## Behaviour to expect
 
