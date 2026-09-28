@@ -1,0 +1,27 @@
+docs/api-walkthrough.md
+  s_ec117ba6cf48fd::t_5582b25de2f699 1-186
+  s_ec117ba6cf48fd::t_1d482e49bc8e34 187-190,193-201
+  s_ec117ba6cf48fd::t_10e33de25fdd78 191-192
+deploy/railway/README.md
+  s_ec117ba6cf48fd::t_ba320933fc4a40 1,3-13,119
+README.md
+  s_ec117ba6cf48fd::t_f42aa84e9ac6e8 3-41,46-52,54-55,57,60,62-65,68-69,71-97,99-101,103,105-116,118,120-124,126-127,129,131,133-144,147-148,150-154,157,159-165,167,169
+  s_ec117ba6cf48fd::t_f2d57a3d3bc585 44
+  s_ec117ba6cf48fd::t_2dcc00ceec7f5c 53,59,149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff5d5195618a9eecbcf9c9d16e8a406420d4694f",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
