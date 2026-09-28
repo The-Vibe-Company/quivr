@@ -3,7 +3,8 @@
 The worker is held stopped so the rebuild stays queued: cancellation is then
 terminal at once, the dispatched workflow cannot activate it after the worker
 returns, and a rerun of the canceled Operation progresses under a new linked
-identity. Running-state cancellation (cancel_requested -> canceled) and the
+identity. The same holds for retrieval configuration Operations, whose
+configuration becomes effective only with their activated generation. Running-state cancellation (cancel_requested -> canceled) and the
 completion/cancel race are proven deterministically in adapter and Step tests.
 """
 import json, time, urllib.request, urllib.error, uuid
@@ -57,4 +58,25 @@ def verify(stack):
     # The worker processed the dispatch backlog, yet the canceled Operation never ran or activated.
     final=call('GET',location)
     assert final['state']=='canceled' and 'result' not in final and not final['errors'],final
-    (stack.directory/'operation-control.json').write_text(json.dumps({'queued_cancel_before_activation':'passed','non_terminal_rerun_rejected':'passed','terminal_cancel_idempotent':'passed','rerun_of_canceled_activated':'passed','canceled_generation_never_served':'passed'}))
+
+    # Retrieval configuration: a newer accepted configuration supersedes an older
+    # pending one, a canceled configuration never becomes effective and the prior
+    # configuration stays queryable, and a rerun activates the configuration.
+    def effective():return call('GET','/v0/corpora/'+cid)['effective_retrieval']
+    prior_config=effective();served=generation(cid,version)
+    mapping=lambda pointer:{'fields':[{'name':'title','source_pointer':pointer,'type':'string','roles':['search']}]}
+    stack.stop_worker()
+    older,older_location=call('PUT','/v0/corpora/'+cid+'/retrieval',{'idempotency_key':'config-old-'+run,'retrieval':mapping('/provenance/producer')},202,headers=True)
+    newer,newer_location=call('PUT','/v0/corpora/'+cid+'/retrieval',{'idempotency_key':'config-new-'+run,'retrieval':mapping('/provenance/producer_version')},202,headers=True)
+    assert older['kind']=='retrieval_configuration' and newer['state']=='queued',(older,newer)
+    assert call('GET',older_location)['state']=='canceled',call('GET',older_location)
+    assert call('POST',newer_location+'/cancel',{'idempotency_key':'config-cancel-'+run},202)['state']=='canceled'
+    assert effective()==prior_config,effective()
+    stack.start_worker()
+    config_rerun,config_rerun_location=call('POST',newer_location+'/rerun',{'idempotency_key':'config-rerun-'+run},202,headers=True)
+    config_done=wait('configuration rerun terminal',lambda:(lambda o:o if o['state'] in ('succeeded','failed','canceled') else None)(call('GET',config_rerun_location)))
+    assert config_done['state']=='succeeded' and config_rerun['previous_operation_id']==newer['operation_id'],config_done
+    assert call('GET',older_location)['state']=='canceled' and call('GET',newer_location)['state']=='canceled'
+    assert effective()['fields'][0]['source_pointer']=='/provenance/producer_version',effective()
+    assert wait('configured generation served',lambda:generation(cid,version)==config_done['result']['projection_generation_id']) and served!=config_done['result']['projection_generation_id']
+    (stack.directory/'operation-control.json').write_text(json.dumps({'queued_cancel_before_activation':'passed','non_terminal_rerun_rejected':'passed','terminal_cancel_idempotent':'passed','rerun_of_canceled_activated':'passed','canceled_generation_never_served':'passed','newer_configuration_supersedes_pending':'passed','canceled_configuration_never_effective':'passed','configuration_rerun_activated':'passed'}))

@@ -80,6 +80,13 @@ func compiledExtensionSchemas() (map[string]map[string]*jsonschema.Schema, error
 	return extensionSchemas, extensionErr
 }
 
+// DeclaredExtension reports whether the deployment declares the namespace, so
+// retrieval mappings may address its source data.
+func DeclaredExtension(namespace string) bool {
+	_, ok := declaredExtensionSchemas[namespace]
+	return ok
+}
+
 func (BuiltinExtensions) Validate(_ context.Context, exts Extensions) error {
 	if len(exts) == 0 {
 		return nil

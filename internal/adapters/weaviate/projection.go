@@ -93,9 +93,10 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
 	}
-	for _, p := range seg.Segments {
+	texts, _ := content.ProjectionText(v, seg, g.Fields)
+	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
-		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": p.Text, "title": p.Title}
+		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": texts[i].Body, "title": texts[i].Title}
 		object := map[string]any{"class": g.Collection, "id": id, "properties": properties}
 		var result []struct {
 			Result struct {

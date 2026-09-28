@@ -470,9 +470,13 @@ paths:
   /v0/corpora/{corpus_id}/retrieval:
     put:
       operationId: configureRetrieval
-      description: Resolve mapping and schedule a new immutable Projection Generation. Existing active
-        config remains in effect until validated cutover. Does not require a separate per-Corpus physical
-        collection.
+      description: Resolve mapping and schedule a new immutable Projection Generation through a
+        retrieval_configuration Operation (202 with Location). Existing active config remains in effect,
+        and is what getCorpus returns, until validated cutover; the Operation reports the pending
+        config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation
+        pinned to an older config than the effective one fails with retrieval_configuration_superseded
+        instead of reverting it. Same key and canonical request replay the Operation; a changed request
+        is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
       responses:
         '202':
           description: Successful response
@@ -1805,13 +1809,15 @@ components:
       - errors
       description: Administrative execution only. Retries keep identity. Intentional terminal rerun has
         a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal
-        state and racing completion may win. projection_rebuild Operations require corpus_id; succeeded
-        rebuilds require result naming the activated logical generation. This result shape covers the
-        initial rebuild command only.
+        state and racing completion may win. projection_rebuild and retrieval_configuration Operations
+        require corpus_id; when succeeded they require result naming the activated logical generation.
+        This result shape covers those two command kinds only.
       if:
         properties:
           kind:
-            const: projection_rebuild
+            enum:
+            - projection_rebuild
+            - retrieval_configuration
         required:
         - kind
       then:
@@ -1857,9 +1863,13 @@ components:
       - source_pointer
       - type
       - roles
-      description: Proposed v0 logical field mapping. source_pointer is a JSON Pointer into the canonical
-        source representation. Core validates role/type compatibility. This is not a search-engine field
-        name.
+      description: v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$,
+        never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical
+        source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a
+        deployment-declared namespace; other roots are rejected as invalid_mapping. Core validates
+        role/type compatibility (search requires string or string_array). A search field named title
+        replaces the projected title; other search fields add text once per Record Version. Filter roles
+        are validated and preserved; no public filter API consumes them in v0.
     RetrievalConfig:
       type: object
       additionalProperties: false
@@ -1873,8 +1883,9 @@ components:
             $ref: '#/components/schemas/FieldMapping'
       required: []
       description: Pin a plugin-provided profile when resolving config. Explicit fields override default
-        fields by logical name; unmapped source data remains preserved. Effective resolved fields are
-        returned.
+        fields by logical name; unmapped source data remains preserved. getCorpus returns the effective
+        resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example
+        extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
     ConnectorKind:
       type: string
       enum:

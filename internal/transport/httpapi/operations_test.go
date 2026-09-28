@@ -18,9 +18,10 @@ import (
 )
 
 type memoryOperations struct {
-	byKey map[string]operations.Operation
-	byID  map[string]operations.Operation
-	fail  error
+	byKey    map[string]operations.Operation
+	byID     map[string]operations.Operation
+	fail     error
+	resolved string
 }
 
 func (m *memoryOperations) AcceptRebuild(_ context.Context, org, corpusID, key string, canonical []byte) (operations.Operation, error) {
@@ -88,9 +89,10 @@ func operationServer(t *testing.T, store *memoryOperations) *httptest.Server {
 	t.Helper()
 	keys := map[string]corpus.Scope{
 		rebuilder:     {Organization: "org_a", Actions: []string{"projections:rebuild", "operations:read", "operations:write"}, Corpora: []string{"*"}},
-		rebuildScoped: {Organization: "org_a", Actions: []string{"projections:rebuild", "operations:read", "operations:write"}, Corpora: []string{"corpus_b"}},
+		rebuildScoped: {Organization: "org_a", Actions: []string{"projections:rebuild", "operations:read", "operations:write", "corpora:write"}, Corpora: []string{"corpus_b"}},
 		controller:    {Organization: "org_a", Actions: []string{"operations:write"}, Corpora: []string{"*"}},
-		noRebuild:     {Organization: "org_a", Actions: []string{"corpora:read"}, Corpora: []string{"*"}},
+		noRebuild:     {Organization: "org_a", Actions: []string{"corpora:read", "corpora:write"}, Corpora: []string{"*"}},
+		configurer:    {Organization: "org_a", Actions: []string{"corpora:write", "operations:write", "operations:read"}, Corpora: []string{"*"}},
 	}
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithOperations(operations.Service{Store: store}))
 	if err != nil {

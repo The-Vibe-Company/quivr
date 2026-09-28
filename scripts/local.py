@@ -27,7 +27,7 @@ class Stack:
             self.save()
         for key,value in [('short_api_port',port()),('short_probe_port',port())]:
             self.state.setdefault(key,value)
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -56,7 +56,9 @@ class Stack:
             s['reader']:scope('org_a',['corpora:read'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
-            s['denied']:scope('org_a',['content:read'],['*'])},
+            s['denied']:scope('org_a',['content:read'],['*']),
+            # Corpus writer without operations:write: cannot change retrieval configuration.
+            s['configurer']:scope('org_a',['corpora:read','corpora:write'],['*'])},
             # One deployment-configured webhook destination per Organization. These are obvious
             # local test values; real deployments reference the signing secret through secret_env.
             destinations={'local-receiver-org-a':dict(organization='org_a',url='http://127.0.0.1:9/local-receiver-org-a',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-a!').decode()),
@@ -129,7 +131,7 @@ class Stack:
         self.migrate();self.migrate();self.start_processes()
     def tests(self,pattern):
         s=self.state
-        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}"}
+        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -254,7 +256,7 @@ def main():
                 verify_operation_control(stack)
                 # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them last so they cannot skew
                 # order-sensitive acceptance or timed outage scenarios.
-                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild')
+                stack.start_short_retention_api();stack.tests('TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration')
                 # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
                 stack.tests('TestMonitoring')
                 # Connector acquisition keeps polling on its schedule; run it after every

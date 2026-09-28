@@ -13,6 +13,12 @@ type controlStore struct {
 	ops       map[string]operations.Operation
 	canceled  []string
 	canonical string
+	resolved  string
+}
+
+func (s *controlStore) AcceptRetrievalConfiguration(_ context.Context, org, corpusID, _ string, canonical, resolved []byte) (operations.Operation, error) {
+	s.canonical, s.resolved = string(canonical), string(resolved)
+	return operations.Operation{ID: "config", Organization: org, Kind: operations.KindRetrievalConfiguration, CorpusID: corpusID, State: operations.StateQueued}, nil
 }
 
 func (s *controlStore) AcceptRebuild(context.Context, string, string, string, []byte) (operations.Operation, error) {
@@ -76,5 +82,50 @@ func TestCancelAndRerunRevalidateScopeAndPermission(t *testing.T) {
 	op, err := service.Rerun(ctx, operator, "op_a", "again")
 	if err != nil || op.PreviousID != "op_a" || store.canonical != `{"idempotency_key":"again","source_operation_id":"op_a"}` {
 		t.Fatalf("rerun %+v %v canonical %s", op, err, store.canonical)
+	}
+}
+
+// A configuration change needs both corpora:write and operations:write on an
+// in-scope Corpus; its canonical request is the resolved configuration.
+func TestConfigureRetrievalAuthorizesAndCanonicalizes(t *testing.T) {
+	store := &controlStore{}
+	service := operations.Service{Store: store}
+	ctx := context.Background()
+	cfg := corpus.Retrieval{Fields: []corpus.Field{{Name: "title", SourcePointer: "/provenance/title", Type: "string", Roles: []string{"search"}}}}
+	for _, tc := range []struct {
+		name  string
+		scope corpus.Scope
+		want  error
+	}{
+		{"missing operations:write", corpus.Scope{Organization: "org", Actions: []string{"corpora:write"}, Corpora: []string{"*"}}, corpus.ErrForbidden},
+		{"missing corpora:write", corpus.Scope{Organization: "org", Actions: []string{"operations:write"}, Corpora: []string{"*"}}, corpus.ErrForbidden},
+		{"Corpus outside scope", corpus.Scope{Organization: "org", Actions: []string{"corpora:write", "operations:write"}, Corpora: []string{"corpus_b"}}, corpus.ErrNotFound},
+	} {
+		if _, err := service.ConfigureRetrieval(ctx, tc.scope, "corpus_a", "k", cfg); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if store.canonical != "" {
+		t.Fatal("rejected configuration reached the store")
+	}
+	owner := corpus.Scope{Organization: "org", Actions: []string{"corpora:write", "operations:write"}, Corpora: []string{"corpus_a"}}
+	op, err := service.ConfigureRetrieval(ctx, owner, "corpus_a", "k", cfg)
+	if err != nil || op.Kind != operations.KindRetrievalConfiguration || op.CorpusID != "corpus_a" {
+		t.Fatalf("configure %+v %v", op, err)
+	}
+	want := `{"fields":[{"name":"title","source_pointer":"/provenance/title","type":"string","roles":["search"]}]}`
+	if store.resolved != want || store.canonical != `{"idempotency_key":"k","retrieval":`+want+`}` {
+		t.Fatalf("canonical %s resolved %s", store.canonical, store.resolved)
+	}
+	// Configuration Operations are controllable: rerun needs corpora:write.
+	store.ops = map[string]operations.Operation{"config": {ID: "config", Organization: "org", Kind: operations.KindRetrievalConfiguration, CorpusID: "corpus_a", State: operations.StateFailed}}
+	if _, err = service.Rerun(ctx, corpus.Scope{Organization: "org", Actions: []string{"operations:write", "projections:rebuild"}, Corpora: []string{"*"}}, "config", "r"); !errors.Is(err, corpus.ErrForbidden) {
+		t.Fatalf("rerun without corpora:write: %v", err)
+	}
+	if op, err = service.Rerun(ctx, owner, "config", "r"); err != nil || op.PreviousID != "config" {
+		t.Fatalf("rerun %+v %v", op, err)
+	}
+	if op, err = service.Cancel(ctx, owner, "config", "c"); err != nil || op.ID != "config" {
+		t.Fatalf("cancel %+v %v", op, err)
 	}
 }

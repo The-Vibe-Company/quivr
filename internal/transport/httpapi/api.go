@@ -43,6 +43,7 @@ type API struct {
 	Monitoring     monitoring.Service
 	Operations     operations.Service
 	actionSchema   *jsonschema.Schema
+	configSchema   *jsonschema.Schema
 	searchSchema   *jsonschema.Schema
 	ingestSchema   *jsonschema.Schema
 	uploadSchema   *jsonschema.Schema
@@ -91,6 +92,10 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
+	configSchema, err := compiler.Compile("https://quivr.invalid/openapi#/components/schemas/ConfigUpdate")
+	if err != nil {
+		return nil, err
+	}
 	var monitored monitoringSchemas
 	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SubscriptionCreate": &monitored.subscription, "ActionRequest": &monitored.action} {
 		if *target, err = compiler.Compile("https://quivr.invalid/openapi#/components/schemas/" + name); err != nil {
@@ -105,7 +110,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: content.DeclaredExtension}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}

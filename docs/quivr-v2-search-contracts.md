@@ -65,7 +65,8 @@ bounded counters and errors. A succeeded rebuild requires
 `result.projection_generation_id`, an opaque logical ID. Progress is optional;
 server retry attempts are not new Operations or public workflow IDs. Operation
 creation/state changes enter the shared public journal. The result shape covers
-this initial rebuild command; future commands define their result types explicitly.
+the rebuild and retrieval configuration commands; future commands define their
+result types explicitly.
 
 An infrastructure outage can leave work running/retrying. It must not erase an
 accepted Operation or invent successful activation. If a worker dies after
@@ -110,9 +111,10 @@ evaluation schema migrations are separate from rebuilding search projections.
 
 `POST /v0/operations/{operation_id}/cancel` and `/rerun` accept the existing
 `ActionRequest`, require `operations:write` and the Operation's Corpus in the
-key's scope (otherwise 404), and return HTTP 202 with an Operation. Only
-`projection_rebuild` Operations are controllable so far; a kind whose worker
-does not honor cancellation is rejected with 422 `unsupported_operation_kind`.
+key's scope (otherwise 404), and return HTTP 202 with an Operation.
+`projection_rebuild` and `retrieval_configuration` Operations are controllable;
+a kind whose worker does not honor cancellation is rejected with 422
+`unsupported_operation_kind`.
 
 Cancellation:
 
@@ -144,7 +146,8 @@ Rerun:
 - Only a terminal (`succeeded`, `failed`, `canceled`) Operation can be rerun;
   otherwise 409 `operation_not_terminal`.
 - The caller's current permissions are revalidated: `operations:write` plus the
-  originating command's permission (`projections:rebuild`), and Corpus scope.
+  originating command's permission (`projections:rebuild` for a rebuild,
+  `corpora:write` for a retrieval configuration), and Corpus scope.
 - The rerun is a new Operation with a new ID, a new target generation and
   `previous_operation_id` naming the source, committed with its dispatch intent
   and `operation.updated` before HTTP 202 and a `Location` for the new
@@ -157,6 +160,76 @@ Rerun:
 
 State changes (`queued`, `running`, `cancel_requested`, `canceled`,
 `succeeded`, `failed`) each append one `operation.updated` to the shared journal.
+
+## Retrieval configuration (THE-660)
+
+`PUT /v0/corpora/{corpus_id}/retrieval` (`ConfigUpdate`) changes the logical
+source-field mappings of one Corpus. It requires both `corpora:write` and
+`operations:write` (otherwise 403) and the Corpus in the key's scope (otherwise
+404). Invalid input is 422 without an Operation: `invalid_mapping` for a name
+that is not logical (`^[a-z][a-z0-9_]{0,63}$`, so engine names such as
+`generationId` or `title^2` are rejected), a pointer outside `/manifest`,
+`/provenance` or `/extensions/{declared namespace}`, a search role on a
+non-text type, or duplicate names and roles; `unsupported_profile` for an
+uninstalled `plugin_profile`. Corpus creation applies the same validation.
+
+- The configuration is resolved first: a pinned profile's default fields, then
+  explicit fields overriding them by logical name. The only built-in profile,
+  `example.editorial`, is an illustrative profile paired with the example
+  extension namespace so resolution and overrides can be exercised without a
+  plugin platform. It is not a product default and nothing selects it
+  implicitly.
+- Acceptance commits, before HTTP 202 and `Location`, a `retrieval_configuration`
+  Operation whose new target generation pins the resolved configuration and
+  the Corpus's next configuration version. Idempotency is Organization + Corpus
+  + route + key over the resolved request.
+- The same rebuild worker as `projection_rebuild` builds the target from
+  canonical text and stored vectors, without inference, and activates it by
+  the same atomic route switch.
+- The effective configuration returned by `GET /v0/corpora/{corpus_id}` is the
+  one pinned by the Corpus's routed generation. It therefore changes exactly at
+  validated cutover. Failure, cancellation or an unfinished build leave the
+  prior configuration effective and queryable. Recovery after activation
+  recognizes the same target, so configuration and generation can never
+  diverge. v0 does not expose a pending configuration's content: the
+  configuration Operation reports its progress and outcome, and the Corpus read
+  reports the configuration it actually serves. A client that needs the
+  requested fields keeps its own request.
+- The latest accepted configuration wins. Accepting one cancels older pending
+  configuration Operations of the Corpus (queued at once, running by request).
+  A plain rebuild or a rerun pinned to an older configuration than the one the
+  Corpus serves fails with `retrieval_configuration_superseded` instead of
+  reverting it. A plain rebuild pins the effective configuration. A rerun of a
+  configuration Operation re-targets that Operation's configuration.
+
+Effect on the projection:
+
+- A search field named `title` replaces the projected title (weight 2 in the
+  pinned lexical/hybrid profile).
+- Every other search field adds its text once per Record Version, after the
+  canonical text of the first (title-bearing) segment. Placing it once keeps a
+  long Record from multiplying the mapped terms' frequency by its segment count.
+- `string_array` values are joined. A missing or mistyped value contributes
+  nothing and never fails the build.
+- Corpora without search mappings produce exactly the unmapped projection, so
+  the ranking defaults are unchanged.
+- **Provenance consequence.** Excerpts, offsets and segment provenance stay
+  canonical. A lexical hit, or the lexical branch of a hybrid hit, can therefore
+  match on mapped text that its excerpt does not contain: the title for any
+  segment of the Version, other mapped fields for the first segment. Clients
+  must not assume that the excerpt contains the query terms.
+- Stored vectors are not recomputed, so semantic retrieval ignores mapped
+  fields.
+- Filter roles are validated, typed, versioned and returned in the effective
+  configuration. They are not materialized in the engine, and v0 exposes no
+  public filter parameter.
+- Unmapped source data stays readable through the Version read.
+
+Upgrade note (migration `015_retrieval_configs.sql`): creation configurations
+stored before this slice were never applied to any projection. The migration
+therefore resets them to the configuration those Corpora actually serve, and
+`effective_retrieval.fields` reads empty afterwards. Owners reapply mappings
+through `PUT /v0/corpora/{corpus_id}/retrieval`.
 
 ## Verification boundary
 

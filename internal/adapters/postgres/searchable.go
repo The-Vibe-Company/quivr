@@ -19,7 +19,12 @@ func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, space
 // Generation returns the logical generation PostgreSQL routes the Corpus to.
 func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
-	err := s.Pool.QueryRow(ctx, `SELECT id,collection,profile_version,space_id FROM projection_generations WHERE id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID)
+	var cfg []byte
+	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &cfg)
+	if err != nil {
+		return g, err
+	}
+	g.Fields, err = retrievalFields(cfg)
 	return g, err
 }
 func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {

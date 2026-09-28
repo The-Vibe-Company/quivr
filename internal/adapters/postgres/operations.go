@@ -40,6 +40,19 @@ func scanOperation(row pgx.Row) (operations.Operation, error) {
 }
 
 func (s ContentStore) AcceptRebuild(ctx context.Context, org, corpusID, key string, canonical []byte) (operations.Operation, error) {
+	return s.acceptCommand(ctx, org, operations.KindProjectionRebuild, corpusID, key, canonical, nil)
+}
+
+// AcceptRetrievalConfiguration pins the next configuration version of the
+// Corpus on a new target generation. The latest accepted configuration wins:
+// older pending configuration Operations are canceled in the same commit.
+func (s ContentStore) AcceptRetrievalConfiguration(ctx context.Context, org, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
+	return s.acceptCommand(ctx, org, operations.KindRetrievalConfiguration, corpusID, key, canonical, resolved)
+}
+
+// acceptCommand commits an originating Operation command, or returns the one
+// already accepted for Organization + kind + Corpus + key + canonical request.
+func (s ContentStore) acceptCommand(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -57,7 +70,7 @@ func (s ContentStore) AcceptRebuild(ctx context.Context, org, corpusID, key stri
 	}
 	var id string
 	var previous []byte
-	err = tx.QueryRow(ctx, `SELECT id,canonical_request FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, operations.KindProjectionRebuild, corpusID, key).Scan(&id, &previous)
+	err = tx.QueryRow(ctx, `SELECT id,canonical_request FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, kind, corpusID, key).Scan(&id, &previous)
 	if err == nil {
 		if !bytes.Equal(previous, canonical) {
 			return operations.Operation{}, operations.ErrConflict
@@ -71,32 +84,89 @@ func (s ContentStore) AcceptRebuild(ctx context.Context, org, corpusID, key stri
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return operations.Operation{}, err
 	}
-	id = content.StableID("operation", org, operations.KindProjectionRebuild, corpusID, key)
-	op, err := insertOperation(ctx, tx, org, id, operations.KindProjectionRebuild, corpusID, key, canonical, "")
+	var target *pin
+	if kind == operations.KindRetrievalConfiguration {
+		target = &pin{Retrieval: resolved}
+		if err = tx.QueryRow(ctx, `SELECT COALESCE(max(retrieval_version),1)+1 FROM projection_generations WHERE organization=$1 AND corpus_id=$2`, org, corpusID).Scan(&target.Version); err != nil {
+			return operations.Operation{}, err
+		}
+		if err = supersedeConfigurations(ctx, tx, org, corpusID); err != nil {
+			return operations.Operation{}, err
+		}
+	}
+	id = content.StableID("operation", org, kind, corpusID, key)
+	op, err := insertOperation(ctx, tx, org, id, kind, corpusID, key, canonical, "", target)
 	if err != nil {
 		return op, err
 	}
 	return op, tx.Commit(ctx)
 }
 
+// supersedeConfigurations cancels the Corpus's pending configuration
+// Operations: queued ones immediately, running ones by request.
+func supersedeConfigurations(ctx context.Context, tx pgx.Tx, org, corpusID string) error {
+	rows, err := tx.Query(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND corpus_id=$2 AND kind=$3 AND state IN ('queued','running') ORDER BY id FOR UPDATE`, org, corpusID, operations.KindRetrievalConfiguration)
+	if err != nil {
+		return err
+	}
+	pending := []operations.Operation{}
+	for rows.Next() {
+		op, err := scanOperation(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, op)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, op := range pending {
+		next := operations.StateCancelRequested
+		if op.State == operations.StateQueued {
+			next = operations.StateCanceled
+		}
+		if err = transition(ctx, tx, op, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pin is the retrieval configuration a new target generation is built with.
+type pin struct {
+	Retrieval []byte
+	Version   int
+}
+
 // insertOperation commits a queued Operation with its own new logical target
-// generation, dispatch intent and journal event.
-func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, key string, canonical []byte, previous string) (operations.Operation, error) {
-	if kind != operations.KindProjectionRebuild {
+// generation, dispatch intent and journal event. A nil pin builds the target
+// with the Corpus's currently effective retrieval configuration.
+func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, key string, canonical []byte, previous string, target *pin) (operations.Operation, error) {
+	if kind != operations.KindProjectionRebuild && kind != operations.KindRetrievalConfiguration {
 		// Other kinds must define their own target before they become controllable.
 		return operations.Operation{}, operations.ErrUnsupportedKind
 	}
-	target := content.StableID("generation", org, id)
+	generation := content.StableID("generation", org, id)
+	var retrieval []byte
+	var version *int
+	if target != nil {
+		retrieval, version = target.Retrieval, &target.Version
+	}
 	// The target is a new logical generation in the default generation's shared
 	// physical collection and pinned profile/vector space.
-	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id) SELECT $1,collection,profile_version,false,space_id,$2,$3 FROM projection_generations WHERE active`, target, org, corpusID)
+	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,retrieval,retrieval_version)
+SELECT $1,d.collection,d.profile_version,false,d.space_id,$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version)
+FROM projection_generations d, projection_generations r, corpora c
+WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL("$2", "$3"), generation, org, corpusID, retrieval, version)
 	if err != nil {
 		return operations.Operation{}, err
 	}
 	if tag.RowsAffected() != 1 {
 		return operations.Operation{}, errors.New("default projection generation missing")
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,previous_operation_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))`, org, id, kind, corpusID, key, canonical, target, previous); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,previous_operation_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))`, org, id, kind, corpusID, key, canonical, generation, previous); err != nil {
 		return operations.Operation{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
@@ -203,7 +273,16 @@ func (s ContentStore) AcceptRerun(ctx context.Context, org, sourceID, key string
 	if !operations.Terminal(source.State) {
 		return operations.Operation{}, operations.ErrNotTerminal
 	}
-	op, err := insertOperation(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.Kind, source.CorpusID, key, canonical, sourceID)
+	// A configuration rerun re-targets its source's configuration; a rebuild
+	// rerun rebuilds with whatever configuration is effective now.
+	var target *pin
+	if source.Kind == operations.KindRetrievalConfiguration {
+		target = &pin{}
+		if err = tx.QueryRow(ctx, `SELECT retrieval,retrieval_version FROM projection_generations WHERE id=$1`, source.TargetGenerationID).Scan(&target.Retrieval, &target.Version); err != nil {
+			return operations.Operation{}, err
+		}
+	}
+	op, err := insertOperation(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.Kind, source.CorpusID, key, canonical, sourceID, target)
 	if err != nil {
 		return op, err
 	}

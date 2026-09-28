@@ -115,9 +115,11 @@ func TestValidation(t *testing.T) {
 	for _, v := range []any{nil, []any{}, map[string]any{"name": ""}, map[string]any{"name": "A", "idempotency_key": "bad", "organization": "org_b"}} {
 		request(t, "POST", "/v0/corpora", admin, v, 422)
 	}
-	for _, pointer := range []string{"/metadata/~2bad", "/metadata/trailing~", "/metadata/~0tilde/~1slash"} {
+	// Pointers address the canonical source view (manifest, declared
+	// extensions, provenance); other roots are undeclared raw mappings.
+	for _, pointer := range []string{"/provenance/~2bad", "/provenance/trailing~", "/metadata/~0tilde/~1slash", "/provenance/~0tilde/~1slash"} {
 		status := 422
-		if pointer == "/metadata/~0tilde/~1slash" {
+		if pointer == "/provenance/~0tilde/~1slash" {
 			status = 201
 		}
 		request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Mapping", "idempotency_key": pointer, "retrieval": map[string]any{"fields": []any{map[string]any{"name": "headline", "source_pointer": pointer, "type": "string", "roles": []string{"search"}}}}}, status)

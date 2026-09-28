@@ -52,7 +52,11 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 		op.State = operations.StateRunning
 	}
 	g := &out.Generation
-	if err = tx.QueryRow(ctx, `SELECT id,collection,profile_version,space_id FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID); err != nil {
+	var cfg []byte
+	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &cfg); err != nil {
+		return out, err
+	}
+	if g.Fields, err = retrievalFields(cfg); err != nil {
 		return out, err
 	}
 	out.Operation = op
@@ -187,6 +191,21 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	if op.State != operations.StateRunning {
 		return false, operations.ErrNotRunning
 	}
+	// A generation pinned to an older retrieval configuration than the one the
+	// Corpus serves would revert it; it fails instead of activating.
+	var superseded bool
+	if err = tx.QueryRow(ctx, `SELECT t.retrieval_version<r.retrieval_version FROM projection_generations t, projection_generations r WHERE t.id=$1 AND r.id=$2`, op.TargetGenerationID, routed).Scan(&superseded); err != nil {
+		return false, err
+	}
+	if superseded {
+		if err = failOperation(ctx, tx, op, operations.Error{Code: operations.ErrSuperseded.Error(), Message: "a newer retrieval configuration is already effective"}); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return false, operations.ErrNotRunning
+	}
 	var gap bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+`)`, org, op.CorpusID, op.TargetGenerationID).Scan(&gap); err != nil {
 		return false, err
@@ -226,14 +245,18 @@ func (s ContentStore) FailRebuild(ctx context.Context, org, id string, failure o
 	if op.State != operations.StateQueued && op.State != operations.StateRunning {
 		return tx.Commit(ctx)
 	}
-	errs, _ := json.Marshal([]operations.Error{failure})
-	if _, err = tx.Exec(ctx, `UPDATE operations SET state='failed',errors=$3,updated_at=now() WHERE organization=$1 AND id=$2`, org, id, errs); err != nil {
-		return err
-	}
-	if err = operationEvent(ctx, tx, org, op.CorpusID, id, operations.StateFailed); err != nil {
+	if err = failOperation(ctx, tx, op, failure); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func failOperation(ctx context.Context, tx pgx.Tx, op operations.Operation, failure operations.Error) error {
+	errs, _ := json.Marshal([]operations.Error{failure})
+	if _, err := tx.Exec(ctx, `UPDATE operations SET state='failed',errors=$3,updated_at=now() WHERE organization=$1 AND id=$2`, op.Organization, op.ID, errs); err != nil {
+		return err
+	}
+	return operationEvent(ctx, tx, op.Organization, op.CorpusID, op.ID, operations.StateFailed)
 }
 
 var _ retrieval.RebuildStore = ContentStore{}

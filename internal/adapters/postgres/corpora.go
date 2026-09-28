@@ -21,7 +21,7 @@ func (s Store) Create(ctx context.Context, org string, input corpus.CreateInput)
 	if err != nil {
 		return corpus.Corpus{}, false, err
 	}
-	retrieval, err := json.Marshal(input.Retrieval)
+	retrieval, err := json.Marshal(input.Resolved)
 	if err != nil {
 		return corpus.Corpus{}, false, err
 	}
@@ -38,10 +38,25 @@ func (s Store) Create(ctx context.Context, org string, input corpus.CreateInput)
 	err = json.Unmarshal(config, &c.Retrieval)
 	return c, !bytes.Equal(canonical, stored), err
 }
+
+// effectiveRetrievalSQL is Corpus c's effective retrieval configuration: the
+// pin of its routed generation, or its creation configuration when that
+// generation pins none. It changes only when routing switches.
+var effectiveRetrievalSQL = `COALESCE((SELECT g.retrieval FROM projection_generations g WHERE g.id=` + routedGenerationSQL("c.organization", "c.id") + `),c.retrieval)`
+
+// retrievalFields decodes the fields of a stored retrieval configuration.
+func retrievalFields(data []byte) ([]corpus.Field, error) {
+	var cfg corpus.Retrieval
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return cfg.Fields, nil
+}
+
 func (s Store) Read(ctx context.Context, org, id string) (corpus.Corpus, error) {
 	c := corpus.Corpus{}
 	var data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT id,name,retrieval FROM corpora WHERE organization=$1 AND id=$2", org, id).Scan(&c.ID, &c.Name, &data)
+	err := s.Pool.QueryRow(ctx, `SELECT c.id,c.name,`+effectiveRetrievalSQL+` FROM corpora c WHERE c.organization=$1 AND c.id=$2`, org, id).Scan(&c.ID, &c.Name, &data)
 	if err == nil {
 		err = json.Unmarshal(data, &c.Retrieval)
 	}
@@ -51,7 +66,7 @@ func (s Store) Read(ctx context.Context, org, id string) (corpus.Corpus, error) 
 	return c, err
 }
 func (s Store) List(ctx context.Context, scope corpus.Scope, after string, limit int) ([]corpus.Corpus, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,name,retrieval FROM corpora WHERE organization=$1 AND id>$2 AND ($3 OR id=ANY($4)) ORDER BY id LIMIT $5`, scope.Organization, after, scope.AllCorpora(), scope.Corpora, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT c.id,c.name,`+effectiveRetrievalSQL+` FROM corpora c WHERE c.organization=$1 AND c.id>$2 AND ($3 OR c.id=ANY($4)) ORDER BY c.id LIMIT $5`, scope.Organization, after, scope.AllCorpora(), scope.Corpora, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -61,6 +61,10 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		return true
 	}
 	rest, ok := strings.CutPrefix(r.URL.Path, "/v0/corpora/")
+	if configured, isConfig := strings.CutSuffix(rest, "/retrieval"); ok && isConfig && configured != "" && !strings.Contains(configured, "/") {
+		a.configureRetrieval(w, r, scope, configured)
+		return true
+	}
 	corpusID, ok2 := strings.CutSuffix(rest, "/rebuilds")
 	if !ok || !ok2 || corpusID == "" || strings.Contains(corpusID, "/") {
 		return false
@@ -141,6 +145,51 @@ func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corp
 		if action == "rerun" {
 			w.Header().Set("Location", "/v0/operations/"+op.ID)
 		}
+		send(w, 202, operationToTransport(op))
+	}
+}
+
+// configureRetrieval validates a Corpus retrieval configuration and accepts the
+// Operation that builds and activates its replacement generation. The Corpus
+// keeps serving its prior effective configuration until validated cutover.
+func (a *API) configureRetrieval(w http.ResponseWriter, r *http.Request, scope corpus.Scope, corpusID string) {
+	if r.Method != "PUT" {
+		failure(w, 405, "method_not_allowed")
+		return
+	}
+	if !scope.Allows("corpora:write") || !scope.Allows("operations:write") {
+		failure(w, 403, "forbidden")
+		return
+	}
+	if !scope.Contains(corpusID) {
+		failure(w, 404, "not_found")
+		return
+	}
+	raw, ok := decodeRequest(w, r, a.configSchema)
+	if !ok {
+		return
+	}
+	data := raw.(map[string]any)
+	key, _ := data["idempotency_key"].(string)
+	requested, _ := data["retrieval"].(map[string]any)
+	cfg, err := a.Service.Resolve(requested)
+	if err != nil {
+		failure(w, 422, err.Error())
+		return
+	}
+	op, err := a.Operations.ConfigureRetrieval(r.Context(), scope, corpusID, key, cfg)
+	switch {
+	case errors.Is(err, corpus.ErrForbidden):
+		failure(w, 403, "forbidden")
+	case errors.Is(err, corpus.ErrNotFound):
+		failure(w, 404, "not_found")
+	case errors.Is(err, operations.ErrConflict):
+		failure(w, 409, "idempotency_conflict")
+	case err != nil:
+		failure(w, 503, "storage_unavailable")
+	default:
+		// The Operation, its pinned configuration and dispatch intent are committed.
+		w.Header().Set("Location", "/v0/operations/"+op.ID)
 		send(w, 202, operationToTransport(op))
 	}
 }

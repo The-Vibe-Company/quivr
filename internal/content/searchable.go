@@ -39,7 +39,13 @@ type Segmentation struct {
 	Segments              []Segment
 	Provenance            json.RawMessage
 }
-type Generation struct{ ID, Collection, ProfileVersion, SpaceID string }
+
+// Generation is a logical Projection Generation. Fields are the retrieval
+// mappings it pins; its projected text is built from them.
+type Generation struct {
+	ID, Collection, ProfileVersion, SpaceID string
+	Fields                                  []corpus.Field
+}
 type Candidate struct{ SegmentID, GenerationID string }
 type Hydrated struct {
 	RecordID, VersionID, SegmentationID string

@@ -118,6 +118,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   pending Delivery record. Matching uses a deterministic built-in evaluator for now.
 - **Projection rebuilds** from durable artifacts as recoverable Operations, with cancel
   and rerun.
+- **Typed retrieval mappings** per Corpus (`PUT /v0/corpora/{id}/retrieval`): logical
+  fields pointing into source data take effect only when their rebuilt generation is
+  validated and activated.
 - **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
   deposited credentials and health, through the same ingestion path as pushed content.
 - **Retrieval measurement** with a frozen workload (`make measure`).
@@ -125,7 +128,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 ## What comes next
 
 - Signed webhook delivery with retried attempts, and plugin-owned match criteria.
-- Typed field mappings.
+- Filtering on typed field mappings (filter roles are validated and stored today).
 - Concrete pull connector kinds: RSS, Microsoft 365, X.
 - The plugin platform: out-of-process plugin workers, packaging and SDKs.
 

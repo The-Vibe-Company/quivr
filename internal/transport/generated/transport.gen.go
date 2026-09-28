@@ -628,7 +628,7 @@ type ChangePage struct {
 type ConfigUpdate struct {
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. Effective resolved fields are returned.
+	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 	Retrieval RetrievalConfig `json:"retrieval"`
 }
 
@@ -720,7 +720,7 @@ type ConnectorSchedule struct {
 type Corpus struct {
 	CorpusId string `json:"corpus_id"`
 
-	// EffectiveRetrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. Effective resolved fields are returned.
+	// EffectiveRetrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 	EffectiveRetrieval RetrievalConfig `json:"effective_retrieval"`
 	Name               string          `json:"name"`
 }
@@ -736,7 +736,7 @@ type CorpusRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	Name           string `json:"name"`
 
-	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. Effective resolved fields are returned.
+	// Retrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
 }
 
@@ -830,7 +830,7 @@ type Extensions map[string]struct {
 	SchemaVersion string                 `json:"schema_version"`
 }
 
-// FieldMapping Proposed v0 logical field mapping. source_pointer is a JSON Pointer into the canonical source representation. Core validates role/type compatibility. This is not a search-engine field name.
+// FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a deployment-declared namespace; other roots are rejected as invalid_mapping. Core validates role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are validated and preserved; no public filter API consumes them in v0.
 type FieldMapping struct {
 	Name          string              `json:"name"`
 	Roles         []FieldMappingRoles `json:"roles"`
@@ -915,7 +915,7 @@ type MonitoringReferences struct {
 	SubscriptionVersionId string  `json:"subscription_version_id"`
 }
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild Operations require corpus_id; succeeded rebuilds require result naming the activated logical generation. This result shape covers the initial rebuild command only.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild and retrieval_configuration Operations require corpus_id; when succeeded they require result naming the activated logical generation. This result shape covers those two command kinds only.
 type Operation struct {
 	CorpusId            *string        `json:"corpus_id,omitempty"`
 	Counters            map[string]int `json:"counters"`
@@ -1037,7 +1037,7 @@ type ResourceReference struct {
 	Kind     string  `json:"kind"`
 }
 
-// RetrievalConfig Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. Effective resolved fields are returned.
+// RetrievalConfig Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
 type RetrievalConfig struct {
 	Fields        *[]FieldMapping `json:"fields,omitempty"`
 	PluginProfile *string         `json:"plugin_profile,omitempty"`

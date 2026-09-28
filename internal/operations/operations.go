@@ -15,6 +15,11 @@ import (
 // content and durable artifacts.
 const KindProjectionRebuild = "projection_rebuild"
 
+// KindRetrievalConfiguration builds a replacement generation that pins a new
+// Corpus retrieval configuration; the configuration becomes effective only
+// when that generation is validated and routed.
+const KindRetrievalConfiguration = "retrieval_configuration"
+
 // Operation states follow the public contract.
 const (
 	StateQueued    = "queued"
@@ -45,12 +50,15 @@ var (
 	// ErrUnsupportedKind rejects control of an Operation kind without a
 	// registered command permission and cancellation-aware worker.
 	ErrUnsupportedKind = errors.New("unsupported_operation_kind")
+	// ErrSuperseded fails a generation whose pinned retrieval configuration is
+	// older than the one the Corpus already serves, so it can never revert it.
+	ErrSuperseded = errors.New("retrieval_configuration_superseded")
 )
 
 // commandPermissions names, per controllable Operation kind, the permission of
 // the command that created it. Rerun revalidates it. Register a kind only once
 // its worker honors cancel_requested and the store can create its rerun target.
-var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild"}
+var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write"}
 
 // Error is a bounded, terminal diagnostic recorded on the Operation.
 type Error struct {
@@ -89,6 +97,11 @@ type Store interface {
 	// its own target, dispatch intent and journal event, or returns the rerun
 	// already accepted for the same source + key + canonical request.
 	AcceptRerun(ctx context.Context, org, sourceID, key string, canonical []byte) (Operation, error)
+	// AcceptRetrievalConfiguration commits the next configuration version of
+	// the Corpus as a queued Operation whose target generation pins resolved,
+	// supersedes older pending configuration Operations, or returns the
+	// existing Operation for the same Organization + Corpus + key + request.
+	AcceptRetrievalConfiguration(ctx context.Context, org, corpusID, key string, canonical, resolved []byte) (Operation, error)
 }
 
 type Service struct{ Store Store }
@@ -108,6 +121,33 @@ func (s Service) RequestRebuild(ctx context.Context, scope corpus.Scope, corpusI
 		return Operation{}, err
 	}
 	return s.Store.AcceptRebuild(ctx, scope.Organization, corpusID, key, canonical)
+}
+
+// ConfigureRetrieval authorizes and durably accepts a resolved retrieval
+// configuration change. The Corpus keeps serving its prior configuration until
+// the replacement generation is validated and routed.
+func (s Service) ConfigureRetrieval(ctx context.Context, scope corpus.Scope, corpusID, key string, cfg corpus.Retrieval) (Operation, error) {
+	if !scope.Allows("corpora:write") || !scope.Allows("operations:write") {
+		return Operation{}, corpus.ErrForbidden
+	}
+	if corpusID == "" || !scope.Contains(corpusID) {
+		return Operation{}, corpus.ErrNotFound
+	}
+	if cfg.Fields == nil {
+		cfg.Fields = []corpus.Field{}
+	}
+	resolved, err := json.Marshal(cfg)
+	if err != nil {
+		return Operation{}, err
+	}
+	canonical, err := json.Marshal(struct {
+		Key       string          `json:"idempotency_key"`
+		Retrieval json.RawMessage `json:"retrieval"`
+	}{key, resolved})
+	if err != nil {
+		return Operation{}, err
+	}
+	return s.Store.AcceptRetrievalConfiguration(ctx, scope.Organization, corpusID, key, canonical, resolved)
 }
 
 // Read conceals Operations whose Corpus lies outside the caller's scope.
