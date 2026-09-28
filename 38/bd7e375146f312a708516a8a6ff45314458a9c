@@ -1,0 +1,74 @@
+docs/quivr-v2-local-harness.md
+  s_ec117ba6cf48fd::t_f444567498542a 322-355
+internal/telemetry/telemetry_test.go
+  s_ec117ba6cf48fd::t_6abedfb95667b8 1-81
+internal/processing/processing.go
+  s_ec117ba6cf48fd::t_203245b27b81a2 7-8,34-55,72,75,85,89-92
+internal/monitoring/metrics.go
+  s_ec117ba6cf48fd::t_11ecd1930d0780 6,8,11-12,33-50,75-77
+  s_ec117ba6cf48fd::t_c0a574d281ca34 78
+internal/processing/enrichment.go
+  s_ec117ba6cf48fd::t_203245b27b81a2 6-7,32,39,46
+internal/telemetry/telemetry.go
+  s_ec117ba6cf48fd::t_c1a2685dba46c1 1-10,12-19,21,26-27,31-32,35-37,40-45,47-50,57-117,119-129,132,139-141,144-156,158-159,161-163,165-171,173-187
+  s_ec117ba6cf48fd::t_df508ac9cc4795 11,20,22-25,28-30,33-34,38-39,46,51-56,118,130-131,133-138,142-143,157,160,164,172
+internal/monitoring/delivery.go
+  s_ec117ba6cf48fd::t_11ecd1930d0780 208,210,229-230
+internal/transport/httpapi/telemetry.go
+  s_ec117ba6cf48fd::t_2648e3af75c7da 1-8
+internal/app/metrics_test.go
+  s_ec117ba6cf48fd::t_cf4f038991ad72 1-55
+internal/transport/httpapi/api.go
+  s_ec117ba6cf48fd::t_a698e21d8934bd 61-62
+  s_ec117ba6cf48fd::t_8ade63424307e2 32
+internal/adapters/postgres/telemetry.go
+  s_ec117ba6cf48fd::t_520728cecb8628 1-23
+scripts/failure_drill.py
+  s_ec117ba6cf48fd::t_94b2ec54ec1ba5 1-100
+README.md
+  s_ec117ba6cf48fd::t_f30de8dcbcb1cf 145-152
+internal/app/run.go
+  s_ec117ba6cf48fd::t_d458eb1ec2f03e 278,280-284,286-289
+  s_ec117ba6cf48fd::t_9979e0f323f8d6 294
+  s_ec117ba6cf48fd::t_79f7df252dc00f 23
+docs/quivr-v2-remaining-limits.md
+  s_ec117ba6cf48fd::t_808d183886cce0 73-76
+internal/app/metrics.go
+  s_ec117ba6cf48fd::t_925878a7b4d52e 1-46
+scripts/local.py
+  s_ec117ba6cf48fd::t_2f070f96efae59 318-320,323-325,328
+  s_ec117ba6cf48fd::t_fbf8f5b4706a9b 268-272
+internal/transport/httpapi/content.go
+  s_ec117ba6cf48fd::t_3337fa1d9056ad 104-105
+  s_ec117ba6cf48fd::t_0934bef6ade5b9 181-182
+  s_ec117ba6cf48fd::t_46f3b0b8d5b410 10
+  s_ec117ba6cf48fd::t_274476a5818b2f 149
+docs/evidence/the-662-spec1-closure.md
+  s_ec117ba6cf48fd::t_6d494bd74f0dd1 58
+internal/monitoring/metrics_test.go
+  s_ec117ba6cf48fd::t_3b7a6f349558e3 20-21,24
+  s_ec117ba6cf48fd::t_1f61c52fddbb2d 40-43
+internal/transport/httpapi/uploads.go
+  s_ec117ba6cf48fd::t_ea3433c142d6d6 12
+  s_ec117ba6cf48fd::t_8ade63424307e2 115
+migrations/20260928T1838Z_receipt_accepted_at.sql
+  s_ec117ba6cf48fd::t_8cbb56c24377c6 1-8
+scripts/test_local.py
+  s_ec117ba6cf48fd::t_13a36dc3012f85 126-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38bd7e375146f312a708516a8a6ff45314458a9c",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
