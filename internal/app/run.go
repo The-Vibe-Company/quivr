@@ -111,7 +111,9 @@ func Run(command string) error {
 	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
-	encoder := tokenizer.Encoder{Config: cfg.Tokenizer}
+	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
+	encoder := &tokenizer.Server{Config: cfg.Tokenizer}
+	defer encoder.Close()
 	windows := processing.TokenWindows{Tokenizer: encoder}
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
@@ -186,6 +188,12 @@ func Run(command string) error {
 	if err != nil {
 		return errors.New("database/schema unavailable; run migrate")
 	}
+	// Load the tokenizer before serving so the first search does not pay for it.
+	warm, cancel := context.WithTimeout(ctx, 15*time.Second)
+	if _, err = encoder.Encode(warm, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
+		slog.Warn("tokenizer warm-up failed; it will be retried on use")
+	}
+	cancel()
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	probes.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {

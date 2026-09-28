@@ -123,6 +123,9 @@ class ResourceSampler(threading.Thread):
             values = output('ps', '-o', 'rss=,pcpu=', '-p', str(pid)).split()
             if len(values) == 2:
                 self.peak('quivr-' + name, float(values[1]), int(values[0]) / 1024)
+            # Tokenizer helpers run as child processes (THE-675); sum their RSS at each sample.
+            children = output('ps', '-o', 'rss=', '--ppid', str(pid)).split()
+            self.peak('quivr-' + name + '-children', 0.0, sum(int(v) for v in children) / 1024)
 
 
 class Distractors(threading.Thread):
@@ -295,7 +298,7 @@ def measure(stack, workload, rows, report):
     finally:
         sampler.stop.set()
         sampler.join()
-        report['resources'] = {'sampling_interval_seconds': 2, 'samples': sampler.samples, 'peaks': sampler.peaks, 'sampling_errors': sampler.errors[:5], 'note': 'containers: docker stats instantaneous CPU and memory; quivr-api/worker: ps RSS and lifetime-average CPU'}
+        report['resources'] = {'sampling_interval_seconds': 2, 'samples': sampler.samples, 'peaks': sampler.peaks, 'sampling_errors': sampler.errors[:5], 'note': 'containers: docker stats instantaneous CPU and memory; quivr-api/worker: ps RSS and lifetime-average CPU; -children: summed RSS of their child processes (tokenizer), CPU not sampled'}
 
     sem, hyb = quality['semantic'], quality['hybrid']
     primary = {mode: latency['sequential'][mode]['target_met'] for mode in cfg['modes']}

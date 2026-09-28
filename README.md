@@ -284,5 +284,7 @@ shared password configuration and `make verify-demo` browser checks.
 against an isolated real stack and writes `measurement.json`/`measurement.md` under
 `.scratch/quivr-measure-*`: lexical, semantic and hybrid MRR/Recall, p50/p95 per load
 condition against the p95 < 1 s target, cold/warm phase timings, resource peaks and pins.
-It is not part of `make verify`; the non-required `Retrieval baseline` workflow runs it in CI.
-The latest recorded result is in [docs/evidence](docs/evidence/the-661-retrieval-baseline.md).
+It is not part of `make verify`; the non-required `Retrieval baseline` workflow runs it in CI
+on manual dispatch only (`gh workflow run measure.yml --ref <branch>`).
+The baseline is in [docs/evidence](docs/evidence/the-661-retrieval-baseline.md); the latest
+recorded result, after removing the per-query tokenizer start, is in [THE-675](docs/evidence/the-675-query-floor.md).

@@ -213,7 +213,7 @@ modes over the 24-query CC0 fixture, three load conditions, cold preparation and
 start recorded separately from warm start and model readiness, resource peaks and
 exact pins. Harness or dependency errors fail it; a missed p95 target or relevance
 deficit is a reported finding. It stays outside `verify` and runs in CI through
-the non-required `Retrieval baseline` workflow.
+the non-required `Retrieval baseline` workflow, on manual dispatch only.
 
 ## Plugin substitution and handoff
 

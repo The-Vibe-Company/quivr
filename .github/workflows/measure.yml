@@ -2,26 +2,10 @@ name: Retrieval baseline
 # Explicit performance/quality measurement (THE-661). Non-required: a missed
 # latency target or relevance deficit is a reported finding; only harness or
 # dependency errors fail this job.
+# Dispatch-only (THE-675): the job takes ~40 minutes, so ordinary PRs never start
+# it. Run it from the Actions tab or `gh workflow run measure.yml --ref <branch>`.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - scripts/measure.py
-      - scripts/measure_metrics.py
-      - scripts/local.py
-      - scripts/prepare_embeddings.py
-      - scripts/prepare_tokenizer.py
-      - tests/measurement/**
-      - internal/adapters/weaviate/**
-      - internal/retrieval/**
-      - internal/processing/**
-      - internal/adapters/tokenizer/**
-      - internal/adapters/tei/**
-      - internal/transport/httpapi/**
-      - cmd/quivr/**
-      - deploy/compose/compose.yaml
-      - third_party/**
-      - .github/workflows/measure.yml
 permissions:
   contents: read
 concurrency:
