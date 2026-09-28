@@ -1,0 +1,22 @@
+docs/api-walkthrough.md
+  s_ec117ba6cf48fd::t_d1ddb073f6c812 189-194
+  s_ec117ba6cf48fd::t_5cc749e4b89c97 187-188,195-201
+README.md
+  s_ec117ba6cf48fd::t_1d3bc3a998a223 126-127,134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf1f324232b688c7126c4a67904ea5bea3d7bb62",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
