@@ -1,0 +1,31 @@
+contracts/http/v0/README.md
+  s_54b80c92daa9cb::t_7749c0e9a0ca65 10-20
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_af2f5dbeb79cf5 1-156
+docs/quivr-v2-module-boundaries.md
+  s_54b80c92daa9cb::t_7749c0e9a0ca65 226
+CONTEXT.md
+  s_54b80c92daa9cb::t_5822381402542b 252-279
+docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md
+  s_54b80c92daa9cb::t_8542991c2d7442 1-15
+docs/adr/0002-record-version-identity-from-submitted-input.md
+  s_54b80c92daa9cb::t_8542991c2d7442 1-14
+README.md
+  s_54b80c92daa9cb::t_7749c0e9a0ca65 127-129,136-137,148-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d87a3b9d3f8c0e4dfa70c50b1de72791fec5a048",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
