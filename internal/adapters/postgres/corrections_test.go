@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TestCorrectionAndWithdrawalNotices proves the THE-657 commit boundaries
@@ -25,106 +26,22 @@ import (
 func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	pool := adapterPool(t, ctx)
-	run := fmt.Sprint(time.Now().UnixNano())
-	org := "adapter-corrections-" + run
-	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read", "monitoring:read", "monitoring:write"}, Corpora: []string{"*"}}
-	a, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "a", Name: "A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `UPDATE evaluation_intents SET state='done',outcome='test_cleanup' WHERE organization=$1 AND state='pending'`, org)
-		_, _ = pool.Exec(bg, `UPDATE delivery_outbox SET available_at='infinity' WHERE organization=$1`, org)
-	})
-	// publish accepts, publishes and promotes one Version of recordKey.
-	publish := func(recordKey, requestKey, text string) (string, string) {
-		t.Helper()
-		cmd := content.Command{Key: requestKey, Source: content.Source{CorpusID: a.ID, Namespace: "corrections", RecordKey: recordKey}, Content: content.Text{Kind: "text", Text: text}}
-		r, err := contents.Accept(ctx, scope, cmd)
-		if err != nil {
-			t.Fatal(err)
-		}
-		work, _, err := store.Work(ctx, org, r.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/" + requestKey, SHA256: "text-" + run + requestKey, Size: 10}, content.Blob{Key: "fixture/m-" + requestKey, SHA256: "manifest-" + run + requestKey, Size: 2})); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = pool.Exec(ctx, `UPDATE ingestion_outbox SET dispatched=true WHERE organization=$1`, org); err != nil {
-			t.Fatal(err)
-		}
-		v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
-		seg := wholeBodySegmentation(org, v)
-		if err = contents.SaveSegmentation(ctx, org, v, seg); err != nil {
-			t.Fatal(err)
-		}
-		generation, err := store.Generation(ctx, org, a.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = contents.Promote(ctx, org, seg, generation); err != nil {
-			t.Fatal(err)
-		}
-		return work.RecordID, work.VersionID
-	}
-	count := func(query string, args ...any) int {
-		t.Helper()
-		var n int
-		if err := pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-	service := monitoring.Service{Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: store}
-	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := newCorrectionFixture(t, ctx, "adapter-corrections-")
+	pool, org, scope, store, contents, service := f.pool, f.org, f.scope, f.store, f.contents, f.service
+	publish, count, noticeOf, commit := f.publish, f.count, f.noticeOf, f.commit
+	var err error
 	// s0: positive correction; s1: negative correction; s2: disabled after
 	// the withdrawal is dispatched; s3: disabled before it is dispatched.
 	subs := make([]monitoring.Subscription, 4)
 	for i := range subs {
-		if subs[i], err = service.CreateSubscription(ctx, scope, monitoring.SubscriptionInput{Key: fmt.Sprint("s", i), Name: fmt.Sprint("S", i), SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID,
-			Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"}); err != nil {
-			t.Fatal(err)
-		}
+		subs[i] = f.subscribe(fmt.Sprint("s", i))
 	}
 	evaluation := postgres.EvaluationStore{ContentStore: store, Page: 2} // three withdrawal candidates span two pages
 	intent := func(i int, recordID, versionID string) monitoring.Intent {
-		return monitoring.Intent{Kind: monitoring.IntentEvaluation, Organization: org, SubscriptionID: subs[i].ID, SubscriptionVersionID: subs[i].Current.VersionID, Sequence: 1, CorpusID: a.ID, RecordID: recordID, VersionID: versionID}
+		return f.intent(subs[i], recordID, versionID)
 	}
-	evidence := monitoring.MatchEvidence{Evaluator: subs[0].Current.Evaluator, Explanation: "fixture", PartKeys: []string{"body"}}
-	commit := func(want string, f func() (string, error)) {
-		t.Helper()
-		if got, err := f(); err != nil || got != want {
-			t.Fatalf("commit: want %s, got %s %v", want, got, err)
-		}
-	}
-	matchOf := func(i int, versionID string) string {
-		return content.StableID("match", org, subs[i].Current.VersionID, versionID)
-	}
-	// noticeOf reads the Delivery and its stored notice for one Match and kind.
-	noticeOf := func(matchID, kind string) (monitoring.Delivery, monitoring.Notice) {
-		t.Helper()
-		var id string
-		if err := pool.QueryRow(ctx, `SELECT id FROM deliveries WHERE organization=$1 AND match_id=$2 AND event_kind=$3`, org, matchID, kind).Scan(&id); err != nil {
-			t.Fatalf("no %s Delivery for %s: %v", kind, matchID, err)
-		}
-		d, err := store.Delivery(ctx, org, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var n monitoring.Notice
-		if err = json.Unmarshal(d.Event, &n); err != nil || n.Type != kind {
-			t.Fatalf("notice %s %v", d.Event, err)
-		}
-		return d, n
-	}
+	evidence := f.evidence(subs[0])
+	matchOf := func(i int, versionID string) string { return f.matchOf(subs[i], versionID) }
 
 	// A first Version is alerted to every Subscription.
 	record, v1 := publish("r", "r-1", "Dépêche r v1")
@@ -166,7 +83,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	if correctedNotice.EventID == invalidation.EventID {
 		t.Fatal("notice identities collide")
 	}
-	w, err := store.ReadChanges(ctx, org, a.ID, 0, 1000, time.Hour)
+	w, err := store.ReadChanges(ctx, org, f.corpusID, 0, 1000, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +166,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	if _, err = service.DisableSubscription(ctx, scope, "disable-s3", subs[3].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = contents.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-r", Source: content.Source{CorpusID: a.ID, Namespace: "corrections", RecordKey: "r"}}); err != nil {
+	if _, err = contents.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-r", Source: content.Source{CorpusID: f.corpusID, Namespace: "corrections", RecordKey: "r"}}); err != nil {
 		t.Fatal(err)
 	}
 	// Suppression is immediate: nothing positive commits for the Record any more.
@@ -332,11 +249,231 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 		t.Fatalf("admission after withdrawal %v", admitted)
 	}
 	// A repeated withdrawal emits no second record.withdrawn and no new intent.
-	if _, err = contents.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-r-again", Source: content.Source{CorpusID: a.ID, Namespace: "corrections", RecordKey: "r"}}); err != nil {
+	if _, err = contents.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-r-again", Source: content.Source{CorpusID: f.corpusID, Namespace: "corrections", RecordKey: "r"}}); err != nil {
 		t.Fatal(err)
 	}
 	drain()
 	if len(withdrawals()) != 3 {
 		t.Fatal("repeated withdrawal dispatched new work")
 	}
+}
+
+// TestNoLongerMatchesSupersededByLaterCorrection proves THE-694 against the
+// real journal: an undelivered match.no_longer_matches is superseded once a
+// match.corrected with a later journal position exists for the same
+// Subscription and Record, never by an earlier one. An attempt admitted
+// before that correction finishes; afterwards the work is parked without a
+// new attempt and leaves the backlog, and the correction is admitted.
+func TestNoLongerMatchesSupersededByLaterCorrection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	f := newCorrectionFixture(t, ctx, "adapter-rematch-")
+	sub := f.subscribe("s")
+	evaluation := postgres.EvaluationStore{ContentStore: f.store}
+	ds := postgres.DeliveryStore{ContentStore: f.store, Organization: f.org}
+	configured := func(string, string) bool { return true }
+	evidence := f.evidence(sub)
+	match := func(record, version string) {
+		t.Helper()
+		f.commit(monitoring.OutcomeMatched, func() (string, error) { return evaluation.CommitMatch(ctx, f.intent(sub, record, version), evidence) })
+	}
+	parkAllBut := func(deliveryID string) {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `UPDATE delivery_outbox SET available_at=CASE WHEN delivery_id=$2 THEN now() ELSE 'infinity' END WHERE organization=$1`, f.org, deliveryID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := func(deliveryID string) monitoring.DeliveryWork {
+		t.Helper()
+		parkAllBut(deliveryID)
+		w, err := ds.ClaimDelivery(ctx, time.Minute)
+		if err != nil || w.DeliveryID != deliveryID {
+			t.Fatalf("claim %s: %+v %v", deliveryID, w, err)
+		}
+		return w
+	}
+
+	// v1 alerts, v2 corrects positively, v3 no longer matches.
+	record, v1 := f.publish("r", "r-1", "Dépêche r v1")
+	match(record, v1)
+	_, v2 := f.publish("r", "r-2", "Dépêche r v2")
+	match(record, v2)
+	_, v3 := f.publish("r", "r-3", "Dépêche r v3")
+	f.commit(monitoring.OutcomeNoLongerMatches, func() (string, error) { return evaluation.CommitNoMatch(ctx, f.intent(sub, record, v3)) })
+	stale, _ := f.noticeOf(f.matchOf(sub, v2), monitoring.NoticeNoLongerMatches)
+	// The earlier match.corrected does not supersede it; it supersedes the
+	// earlier positives as before.
+	if !stale.Admission.Allowed {
+		t.Fatalf("match.no_longer_matches superseded by an earlier correction: %+v", stale.Admission)
+	}
+	for _, n := range []struct{ version, kind string }{{v1, monitoring.NoticeCreated}, {v2, monitoring.NoticeCorrected}} {
+		if d, _ := f.noticeOf(f.matchOf(sub, n.version), n.kind); d.Admission.Reason != "superseded" {
+			t.Fatalf("%s not superseded: %+v", n.kind, d.Admission)
+		}
+	}
+
+	// Its first attempt is admitted, then v4 matches again while it is in flight.
+	inFlight, refused, err := ds.Admit(ctx, claim(stale.ID), time.Hour, configured)
+	if err != nil || refused != "" {
+		t.Fatalf("first attempt refused %q %v", refused, err)
+	}
+	_, v4 := f.publish("r", "r-4", "Dépêche r v4")
+	match(record, v4)
+	rematch, rematchNotice := f.noticeOf(f.matchOf(sub, v4), monitoring.NoticeCorrected)
+	if rematchNotice.References.PreviousMatchID != f.matchOf(sub, v2) || !rematch.Admission.Allowed {
+		t.Fatalf("match.corrected after no_longer_matches %+v %+v", rematchNotice.References, rematch.Admission)
+	}
+	// The in-flight attempt finishes and records its outcome.
+	if err = ds.Record(ctx, inFlight, monitoring.AttemptOutcome{Outcome: monitoring.AttemptRetryableError, HTTPStatus: 503}, monitoring.Retry{Window: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	stale, _ = f.noticeOf(f.matchOf(sub, v2), monitoring.NoticeNoLongerMatches)
+	if stale.State != "pending" || stale.AttemptCount != 1 || stale.Admission.Allowed || stale.Admission.Reason != "superseded" {
+		t.Fatalf("stale match.no_longer_matches: state %s, %d attempts, admission %+v", stale.State, stale.AttemptCount, stale.Admission)
+	}
+	// Its retry is refused without an attempt and parked out of the backlog.
+	if _, refused, err = ds.Admit(ctx, claim(stale.ID), time.Hour, configured); err != nil || refused != "superseded" {
+		t.Fatalf("retry admitted: %q %v", refused, err)
+	}
+	if n := f.count(`SELECT count(*) FROM delivery_attempts WHERE organization=$1 AND delivery_id=$2`, f.org, stale.ID); n != 1 {
+		t.Fatalf("superseded notice attempted again: %d attempts", n)
+	}
+	if n := f.count(`SELECT count(*) FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2 AND available_at<'infinity'`, f.org, stale.ID); n != 0 {
+		t.Fatal("superseded work still scheduled")
+	}
+	// The later correction itself is delivered.
+	if _, refused, err = ds.Admit(ctx, claim(rematch.ID), time.Hour, configured); err != nil || refused != "" {
+		t.Fatalf("match.corrected refused %q %v", refused, err)
+	}
+}
+
+// correctionFixture is one Organization with a Corpus and a Saved Query over
+// it, plus the helpers the correction adapter tests share.
+type correctionFixture struct {
+	t        *testing.T
+	ctx      context.Context
+	pool     *pgxpool.Pool
+	run, org string
+	corpusID string
+	scope    corpus.Scope
+	store    postgres.ContentStore
+	contents content.Service
+	service  monitoring.Service
+	query    monitoring.SavedQuery
+}
+
+func newCorrectionFixture(t *testing.T, ctx context.Context, prefix string) *correctionFixture {
+	t.Helper()
+	pool := adapterPool(t, ctx)
+	f := &correctionFixture{t: t, ctx: ctx, pool: pool, run: fmt.Sprint(time.Now().UnixNano()), store: postgres.ContentStore{Pool: pool}}
+	f.org = prefix + f.run
+	f.scope = corpus.Scope{Organization: f.org, Actions: []string{"corpora:write", "content:write", "content:read", "monitoring:read", "monitoring:write"}, Corpora: []string{"*"}}
+	a, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, f.scope, corpus.CreateInput{Key: "a", Name: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.corpusID = a.ID
+	f.contents = content.Service{Repository: f.store, Baseline: f.store}
+	org := f.org
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `UPDATE evaluation_intents SET state='done',outcome='test_cleanup' WHERE organization=$1 AND state='pending'`, org)
+		_, _ = pool.Exec(bg, `UPDATE delivery_outbox SET available_at='infinity' WHERE organization=$1`, org)
+	})
+	f.service = monitoring.Service{Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: f.store}
+	if f.query, err = f.service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// subscribe creates an enabled fixture-evaluator Subscription on "dest".
+func (f *correctionFixture) subscribe(key string) monitoring.Subscription {
+	f.t.Helper()
+	s, err := f.service.CreateSubscription(f.ctx, f.scope, monitoring.SubscriptionInput{Key: key, Name: key, SavedQueryID: f.query.ID, SavedQueryVersionID: f.query.Current.VersionID,
+		Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return s
+}
+
+// publish accepts, publishes and promotes one Version of recordKey.
+func (f *correctionFixture) publish(recordKey, requestKey, text string) (string, string) {
+	t, ctx, org, store := f.t, f.ctx, f.org, f.store
+	t.Helper()
+	cmd := content.Command{Key: requestKey, Source: content.Source{CorpusID: f.corpusID, Namespace: "corrections", RecordKey: recordKey}, Content: content.Text{Kind: "text", Text: text}}
+	r, err := f.contents.Accept(ctx, f.scope, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _, err := store.Work(ctx, org, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/" + requestKey, SHA256: "text-" + f.run + requestKey, Size: 10}, content.Blob{Key: "fixture/m-" + requestKey, SHA256: "manifest-" + f.run + requestKey, Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(ctx, `UPDATE ingestion_outbox SET dispatched=true WHERE organization=$1`, org); err != nil {
+		t.Fatal(err)
+	}
+	v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
+	seg := wholeBodySegmentation(org, v)
+	if err = f.contents.SaveSegmentation(ctx, org, v, seg); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := store.Generation(ctx, org, f.corpusID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.contents.Promote(ctx, org, seg, generation); err != nil {
+		t.Fatal(err)
+	}
+	return work.RecordID, work.VersionID
+}
+
+func (f *correctionFixture) count(query string, args ...any) int {
+	f.t.Helper()
+	var n int
+	if err := f.pool.QueryRow(f.ctx, query, args...).Scan(&n); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
+}
+
+func (f *correctionFixture) intent(s monitoring.Subscription, recordID, versionID string) monitoring.Intent {
+	return monitoring.Intent{Kind: monitoring.IntentEvaluation, Organization: f.org, SubscriptionID: s.ID, SubscriptionVersionID: s.Current.VersionID, Sequence: 1, CorpusID: f.corpusID, RecordID: recordID, VersionID: versionID}
+}
+
+func (f *correctionFixture) evidence(s monitoring.Subscription) monitoring.MatchEvidence {
+	return monitoring.MatchEvidence{Evaluator: s.Current.Evaluator, Explanation: "fixture", PartKeys: []string{"body"}}
+}
+
+func (f *correctionFixture) commit(want string, do func() (string, error)) {
+	f.t.Helper()
+	if got, err := do(); err != nil || got != want {
+		f.t.Fatalf("commit: want %s, got %s %v", want, got, err)
+	}
+}
+
+func (f *correctionFixture) matchOf(s monitoring.Subscription, versionID string) string {
+	return content.StableID("match", f.org, s.Current.VersionID, versionID)
+}
+
+// noticeOf reads the Delivery and its stored notice for one Match and kind.
+func (f *correctionFixture) noticeOf(matchID, kind string) (monitoring.Delivery, monitoring.Notice) {
+	f.t.Helper()
+	var id string
+	if err := f.pool.QueryRow(f.ctx, `SELECT id FROM deliveries WHERE organization=$1 AND match_id=$2 AND event_kind=$3`, f.org, matchID, kind).Scan(&id); err != nil {
+		f.t.Fatalf("no %s Delivery for %s: %v", kind, matchID, err)
+	}
+	d, err := f.store.Delivery(f.ctx, f.org, id)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var n monitoring.Notice
+	if err = json.Unmarshal(d.Event, &n); err != nil || n.Type != kind {
+		f.t.Fatalf("notice %s %v", d.Event, err)
+	}
+	return d, n
 }

@@ -56,21 +56,30 @@ const (
 // AdmissionReason is the canonical admission rule shared by the delivery
 // worker and Delivery reads, after the destination check. It returns "" when
 // the notice may be attempted. A withdrawn Record refuses every ordinary
-// notice, while match.withdrawn has its own eligibility. superseded reports
-// that a later match.corrected or match.no_longer_matches exists for the same
-// Subscription and Record; it refuses only match.created and match.corrected,
-// so a stale positive never lands after its correction. match.no_longer_matches
-// and match.withdrawn are never superseded.
-func AdmissionReason(kind string, enabled, withdrawn, superseded bool) string {
+// notice, while match.withdrawn has its own eligibility. later reports the
+// correction notices committed after this one for the same Subscription and
+// Record. Any of them supersedes match.created and match.corrected, so a stale
+// positive never lands after its correction; a later match.corrected
+// supersedes match.no_longer_matches, so a stale invalidation never lands
+// after the Record matches again. match.withdrawn is never superseded.
+func AdmissionReason(kind string, enabled, withdrawn bool, later Later) string {
 	switch {
 	case !enabled:
 		return "subscription_disabled"
 	case withdrawn && kind != NoticeWithdrawn:
 		return "record_withdrawn"
-	case superseded && (kind == NoticeCreated || kind == NoticeCorrected):
+	case (kind == NoticeCreated || kind == NoticeCorrected) && (later.Corrected || later.NoLongerMatches),
+		kind == NoticeNoLongerMatches && later.Corrected:
 		return "superseded"
 	}
 	return ""
+}
+
+// Later reports which correction notices exist after a notice for the same
+// Subscription and Record, ordered by journal position.
+type Later struct {
+	Corrected       bool // a later match.corrected
+	NoLongerMatches bool // a later match.no_longer_matches
 }
 
 // Admission is the current derived admission view of a Delivery.

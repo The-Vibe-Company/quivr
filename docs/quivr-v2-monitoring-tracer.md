@@ -399,22 +399,23 @@ Current authorization is checked again before exposing explanations or content.
   `match.no_longer_matches` (`record_withdrawn`); `match.withdrawn` has its
   own eligibility and is admitted. The worker and `GET /v0/deliveries/{id}`
   share this rule.
-- **Superseded:** a `match.created` or `match.corrected` notice is
-  superseded once a later `match.corrected` or `match.no_longer_matches`
-  notice exists for the same Subscription and Record; `match.no_longer_matches`
-  and `match.withdrawn` are never superseded. Deliveries are unordered, so
-  sending a stale positive after its correction would re-assert a match the
-  consumer was just told had changed; the later notice names the earlier Match,
-  which stays readable. A superseded Delivery is refused like other refusals:
-  no attempt, it stays `pending` with admission `superseded` and its work is
+- **Superseded:** a notice is superseded by a correction notice for the same
+  Subscription and Record committed after it, by `monitoring_notices.position`
+  (the journal position of the notice's event, assigned under the
+  Organization journal lock), not by change events subject to retention. A
+  `match.created` or `match.corrected` is superseded by a later
+  `match.corrected` or `match.no_longer_matches`; a `match.no_longer_matches`
+  by a later `match.corrected` (THE-694), so a stale invalidation still
+  retrying never lands after the Record matches again; `match.withdrawn` is
+  never superseded. Deliveries are unordered, so sending a stale notice after
+  its correction would contradict what the consumer was just told; the later
+  notice names the earlier Match, which stays readable. The SQL reports which
+  later kinds exist and `monitoring.AdmissionReason` alone decides which kinds
+  they supersede. A superseded Delivery is refused like other refusals: no
+  attempt, it stays `pending` with admission `superseded` and its work is
   parked. Parked work never becomes claimable again, so it stays `pending`
   rather than `exhausted`, like a disabled Subscription's. An attempt already
-  admitted finishes, and a delivered notice is unaffected. Notice order uses
-  `monitoring_notices.position`, the journal position of the notice's event,
-  not change events subject to retention. Residual case, outside this
-  slice's scope (no successive-corrections policy): a `match.no_longer_matches`
-  still retrying when a later correction matches again can arrive after that
-  `match.corrected`.
+  admitted finishes, and a delivered notice is unaffected.
 - **Negative decisions stay cheap:** a `no_match` for a Record without a Match
   on another Version completes without the journal lock, as before; only a
   possible invalidation takes it. This is safe because a Match on another

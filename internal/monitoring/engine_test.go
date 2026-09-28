@@ -160,30 +160,44 @@ func TestEngineWithdrawalIntents(t *testing.T) {
 }
 
 // TestAdmissionReason pins which notice kinds each refusal applies to:
-// match.withdrawn has its own eligibility, and only match.created and
-// match.corrected are superseded by a later correction notice.
+// match.withdrawn has its own eligibility and is never superseded; a positive
+// notice is superseded by any later correction notice, and
+// match.no_longer_matches only by a later match.corrected.
 func TestAdmissionReason(t *testing.T) {
+	none := monitoring.Later{}
+	all := monitoring.Later{Corrected: true, NoLongerMatches: true}
 	kinds := []string{monitoring.NoticeCreated, monitoring.NoticeCorrected, monitoring.NoticeNoLongerMatches, monitoring.NoticeWithdrawn}
 	for _, kind := range kinds {
-		if got := monitoring.AdmissionReason(kind, true, false, false); got != "" {
+		if got := monitoring.AdmissionReason(kind, true, false, none); got != "" {
 			t.Fatal(kind, got)
 		}
-		if got := monitoring.AdmissionReason(kind, false, true, true); got != "subscription_disabled" {
+		if got := monitoring.AdmissionReason(kind, false, true, all); got != "subscription_disabled" {
 			t.Fatal(kind, got)
 		}
 		want := "record_withdrawn"
 		if kind == monitoring.NoticeWithdrawn {
 			want = ""
 		}
-		if got := monitoring.AdmissionReason(kind, true, true, false); got != want {
+		if got := monitoring.AdmissionReason(kind, true, true, none); got != want {
 			t.Fatal(kind, got)
 		}
-		want = ""
-		if kind == monitoring.NoticeCreated || kind == monitoring.NoticeCorrected {
-			want = "superseded"
+	}
+	superseded := func(yes bool) string {
+		if yes {
+			return "superseded"
 		}
-		if got := monitoring.AdmissionReason(kind, true, false, true); got != want {
-			t.Fatal(kind, got)
+		return ""
+	}
+	for _, kind := range kinds {
+		positive := kind == monitoring.NoticeCreated || kind == monitoring.NoticeCorrected
+		for later, want := range map[monitoring.Later]string{
+			{Corrected: true}:       superseded(positive || kind == monitoring.NoticeNoLongerMatches),
+			{NoLongerMatches: true}: superseded(positive),
+			all:                     superseded(kind != monitoring.NoticeWithdrawn),
+		} {
+			if got := monitoring.AdmissionReason(kind, true, false, later); got != want {
+				t.Fatalf("%s after %+v: %q, want %q", kind, later, got, want)
+			}
 		}
 	}
 }

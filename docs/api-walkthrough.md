@@ -197,9 +197,10 @@ Operations are supported.
     the Record is withdrawn. Subscriptions disabled at that point get none.
 
   A `match.created` or `match.corrected` not yet delivered when a later correction
-  notice exists for the same Subscription and Record is not sent any more: its
-  Delivery stays `pending` with admission `superseded`. The earlier Match stays
-  readable through `GET /v0/matches/{match_id}`.
+  notice exists for the same Subscription and Record is not sent any more, nor is a
+  `match.no_longer_matches` once a later `match.corrected` shows the Record matches
+  again: its Delivery stays `pending` with admission `superseded`. The earlier Match
+  stays readable through `GET /v0/matches/{match_id}`.
 
 ## Connectors
 

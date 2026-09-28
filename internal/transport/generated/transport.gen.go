@@ -782,7 +782,7 @@ type CredentialReplace struct {
 
 // Delivery defines model for Delivery.
 type Delivery struct {
-	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record; match.no_longer_matches and match.withdrawn are never superseded.
+	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
 	Admission     DeliveryAdmission `json:"admission"`
 	AttemptCount  int               `json:"attempt_count"`
 	DeliveryId    string            `json:"delivery_id"`
@@ -801,7 +801,7 @@ type Delivery struct {
 // DeliveryState defines model for Delivery.State.
 type DeliveryState string
 
-// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record; match.no_longer_matches and match.withdrawn are never superseded.
+// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
 type DeliveryAdmission struct {
 	Allowed bool                     `json:"allowed"`
 	Reason  *DeliveryAdmissionReason `json:"reason,omitempty"`

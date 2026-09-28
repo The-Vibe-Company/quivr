@@ -20,8 +20,8 @@ const (
 // to the capture receiver, and one alerted Record.
 type noticeScenario struct {
 	corpus, cursor, record, recordKey string
-	subscriptions                    []string
-	created                          map[string]map[string]any // match.created feed event by Subscription
+	subscriptions                     []string
+	created                           map[string]map[string]any // match.created feed event by Subscription
 }
 
 // newNoticeScenario creates one Subscription per fixture decision map on the
@@ -294,4 +294,72 @@ func TestMonitoringSupersededNotice(t *testing.T) {
 	}
 	// Nothing is lost: the undelivered Match stays readable by id.
 	request(t, "GET", "/v0/matches/"+refsOf(created)["match_id"].(string), admin, nil, 200)
+}
+
+// TestMonitoringSupersededNoLongerMatches proves THE-694: a
+// match.no_longer_matches still waiting for its retry when a later correction
+// matches again is never delivered. The receiver asks for a 40 s Retry-After
+// on it, so its first attempt has finished and its retry is not yet eligible
+// when the match.corrected commits; the setup fails otherwise. Its only
+// attempt therefore precedes the correction, and none is admitted after it.
+func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	receiver := startReceiver(t)
+	s := newNoticeScenario(t, "rematch", "Dépêche "+markerCorrectionMatch, map[string]any{markerCorrectionCalm: "no_match", "default": "match"})
+	sub := s.subscriptions[0]
+	receiver.scriptType(sub, "match.no_longer_matches", reply{status: 503, retryAfter: "40"})
+	deliveredAsPolled(t, receiver, s.created[sub])
+
+	// v2 no longer matches; its notice fails once and waits for its retry.
+	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-2", s.recordKey, "Dépêche "+markerCorrectionCalm))
+	invalidation := s.awaitNotices(t, map[string]int{"match.no_longer_matches": 1})["match.no_longer_matches"][0]
+	stale := refsOf(invalidation)["delivery_id"].(string)
+	failed := awaitDelivery(t, admin, stale, func(d map[string]any) bool {
+		return d["state"] == "pending" && d["attempt_count"] == float64(1) && d["next_attempt_at"] != nil
+	})
+	next, err := time.Parse(time.RFC3339Nano, failed["next_attempt_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Until(next) < 15*time.Second {
+		t.Fatal("invalid setup: retry eligibility too close to commit the correction before it", failed)
+	}
+
+	// v3 matches again: a match.corrected linked to the invalidated Match.
+	// Its text differs from v1, which would otherwise dedupe to that Version.
+	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-3", s.recordKey, "Dépêche corrigée "+markerCorrectionMatch))
+	corrected := s.awaitNotices(t, map[string]int{"match.corrected": 1})["match.corrected"][0]
+	if refsOf(corrected)["previous_match_id"] != refsOf(invalidation)["match_id"] {
+		t.Fatal("match.corrected must link the invalidated Match", corrected)
+	}
+	committed, err := time.Parse(time.RFC3339Nano, corrected["occurred_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// occurred_at is the transaction's start; a second covers its commit.
+	if !committed.Add(time.Second).Before(next) {
+		t.Fatal("invalid setup: the correction committed after the retry became eligible; suppression is not proven", committed, next)
+	}
+	deliveredAsPolled(t, receiver, corrected)
+	superseded := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200)
+	if superseded["state"] != "pending" || superseded["next_attempt_at"] != nil ||
+		!reflect.DeepEqual(superseded["admission"], map[string]any{"allowed": false, "reason": "superseded"}) {
+		t.Fatal("superseded match.no_longer_matches", superseded)
+	}
+
+	// Observe beyond its former eligibility plus the worker's longest idle
+	// backoff and retry wait: no attempt was admitted after the correction.
+	time.Sleep(time.Until(next) + 6*time.Second)
+	after := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200)
+	if after["state"] != "pending" || after["attempt_count"] != float64(1) || len(receiver.capturesOf(invalidation["event_id"].(string))) != 1 {
+		t.Fatal("stale match.no_longer_matches attempted after the correction", after)
+	}
+	if got := attemptOutcomes(t, stale); !reflect.DeepEqual(got, []string{"retryable_error"}) {
+		t.Fatal("attempt history of the superseded notice", got)
+	}
+	// Nothing is lost: the invalidated Match stays readable.
+	request(t, "GET", "/v0/matches/"+refsOf(invalidation)["match_id"].(string), admin, nil, 200)
 }
