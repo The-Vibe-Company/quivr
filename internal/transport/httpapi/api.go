@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
+	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -35,6 +36,7 @@ type API struct {
 	Content        content.Service
 	Retrieval      retrieval.Service
 	Uploads        uploads.Service
+	Changes        changes.Service
 	searchSchema   *jsonschema.Schema
 	ingestSchema   *jsonschema.Schema
 	uploadSchema   *jsonschema.Schema
@@ -46,7 +48,7 @@ type API struct {
 	schema         *jsonschema.Schema
 }
 
-func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte) (http.Handler, error) {
+func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(contract.OpenAPI, &doc); err != nil {
 		return nil, err
@@ -80,6 +82,9 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 		return nil, err
 	}
 	a := &API{Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, Service: corpus.Service{Store: store}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	for _, option := range options {
+		option(a)
+	}
 	return http.HandlerFunc(a.serve), nil
 }
 
@@ -123,9 +128,17 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		failure(w, 401, "invalid_api_key")
 		return
 	}
+	if r.URL.Path == "/v0/changes/stream" && r.Method == "GET" {
+		a.streamChanges(w, r, scope)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if r.Method == "GET" && r.URL.Path == "/v0/changes" {
+		a.pollChanges(w, r, scope)
+		return
+	}
 	if r.Method == "POST" && r.URL.Path == "/v0/search" {
 		a.search(w, r, scope)
 		return
@@ -281,6 +294,9 @@ type responseWriter struct {
 	http.ResponseWriter
 	status int
 }
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *responseWriter) WriteHeader(status int) {
 	w.status = status

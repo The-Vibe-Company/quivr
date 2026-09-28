@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
@@ -40,6 +41,7 @@ type Config struct {
 	Listen          string                  `json:"listen"`
 	ProbeListen     string                  `json:"probe_listen"`
 	CursorKey       string                  `json:"cursor_key"`
+	ChangeRetention string                  `json:"change_retention"`
 	Keys            map[string]corpus.Scope `json:"keys"`
 }
 
@@ -64,6 +66,12 @@ func Run(command string) error {
 	for token, s := range cfg.Keys {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return errors.New("invalid scoped credential configuration")
+		}
+	}
+	retention := changes.DefaultRetention
+	if cfg.ChangeRetention != "" {
+		if retention, err = time.ParseDuration(cfg.ChangeRetention); err != nil || retention <= 0 {
+			return errors.New("change_retention must be a positive duration")
 		}
 	}
 	if cfg.Listen == "" {
@@ -171,7 +179,7 @@ func Run(command string) error {
 	})
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey))
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}

@@ -25,6 +25,8 @@ class Stack:
         else:
             self.state={'password':secrets.token_hex(24),'cursor_key':secrets.token_hex(32), 'admin':secrets.token_hex(32),'other':secrets.token_hex(32),'reader':secrets.token_hex(32),'scoped':secrets.token_hex(32),'denied':secrets.token_hex(32),'pids':[], 'api_port':port(),'probe_port':port(),'worker_probe_port':port()}
             self.save()
+        for key,value in [('short_api_port',port()),('short_probe_port',port())]:
+            self.state.setdefault(key,value)
         for key in ['s3_access','s3_secret','writer']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
@@ -46,14 +48,16 @@ class Stack:
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write'],[s.get('scoped_id','corpus_not_granted')]),
+            s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*'])})
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
+        # A second API over the same database with a short change retention proves public cursor expiry.
+        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
         worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps(cfg));worker.chmod(0o600)
     def migrate(self):
         self.config()
@@ -73,6 +77,18 @@ class Stack:
                 except OSError:pass
                 if time.monotonic()>deadline:raise RuntimeError('readiness timeout; inspect scoped logs')
                 time.sleep(.1)
+    def start_short_retention_api(self):
+        with (self.directory/'short-api-startup.log').open('w') as log:
+            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
+        self.state['pids'].append(p.pid);self.save()
+        deadline=time.monotonic()+20
+        while True:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{self.state['short_probe_port']}/readyz",timeout=1) as r:
+                    if r.status==204:break
+            except OSError:pass
+            if time.monotonic()>deadline:raise RuntimeError('short-retention API readiness timeout')
+            time.sleep(.1)
     def stop_processes(self):
         for pid in self.state['pids']:
             try:
@@ -91,7 +107,7 @@ class Stack:
         self.migrate();self.migrate();self.start_processes()
     def tests(self,pattern):
         s=self.state
-        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer']}}
+        env={**os.environ,'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -210,6 +226,9 @@ def main():
                 stack.ingestion_outages()
                 from embedding_outage import verify as verify_embedding_outage
                 verify_embedding_outage(stack)
+                # Change-feed tests add Corpora and ingestion load; run them last so they cannot skew
+                # order-sensitive acceptance or timed outage scenarios.
+                stack.start_short_retention_api();stack.tests('TestChange')
                 run([os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
         elif args.command=='migrate':stack.migrate()

@@ -123,7 +123,10 @@ predicate. Isolate tests by Organization/Corpus or fresh stack. Poll named publi
 conditions with a deadline and retain the last response on timeout; do not assert
 random server IDs, precise wall-clock durations or private workflow histories.
 Retrieve shared journal events using a captured cursor, deduplicate by event ID
-and verify SSE/polling resume against the same committed mutations.
+and verify SSE/polling resume against the same committed mutations. `make verify`
+starts a second API over the same database with `change_retention: 2s` so
+pre-stream cursor expiry (HTTP 410) is proven publicly; in-stream `stream_error`
+is covered by transport tests.
 
 ## Webhook fixture and bounded recovery scenarios
 
