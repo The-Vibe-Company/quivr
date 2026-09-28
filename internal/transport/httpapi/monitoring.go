@@ -33,7 +33,7 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, monitoring.ErrUnsupportedProfile), errors.Is(err, monitoring.ErrUnsupportedEvaluator),
 		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
 		errors.Is(err, monitoring.ErrTooLarge):
-		failure(w, 422, err.Error())
+		failure(w, 422, publicCode(err, "invalid_input"))
 	default:
 		failure(w, 503, "storage_unavailable")
 	}

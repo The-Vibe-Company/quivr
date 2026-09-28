@@ -13,13 +13,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
-	ErrConflict       = errors.New("idempotency_conflict")
-	ErrUnsupported    = errors.New("unsupported_content")
-	ErrInvalid        = errors.New("invalid_input")
-	ErrUnverifiedBlob = errors.New("unverified_blob")
+	ErrConflict       = publicerr.New("idempotency_conflict")
+	ErrUnsupported    = publicerr.New("unsupported_content")
+	ErrInvalid        = publicerr.New("invalid_input")
+	ErrUnverifiedBlob = publicerr.New("unverified_blob")
 	// ErrArtifactMissing and ErrArtifactCorrupt report durable object-storage
 	// integrity failures, distinct from transient unavailability.
 	ErrArtifactMissing = errors.New("durable_artifact_missing")
@@ -357,10 +358,11 @@ func (s Service) validateManifest(ctx context.Context, org string, m *Manifest) 
 	})
 }
 
-// ManifestViolation is a structural Manifest rejection. Error reports only the
-// stable public code (ErrInvalid or ErrUnsupported) so API responses never echo
-// submitted keys; Detail carries the actionable explanation for tooling such as
-// the Plugin Contract Runner.
+// ManifestViolation is a structural Manifest rejection. Its public code
+// resolves through Kind (ErrInvalid or ErrUnsupported) with publicerr.Code, and
+// Error reports only that code so logs never echo submitted keys; Detail
+// carries the actionable explanation for tooling such as the Plugin Contract
+// Runner.
 type ManifestViolation struct {
 	Kind   error
 	Detail string

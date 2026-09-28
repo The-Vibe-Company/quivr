@@ -5,23 +5,23 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
-	ErrConflict          = errors.New("idempotency_conflict")
-	ErrNamespaceInUse    = errors.New("source_namespace_in_use")
-	ErrUnsupportedKind   = errors.New("unsupported_connector_kind")
-	ErrInvalidConfig     = errors.New("invalid_config")
-	ErrInvalidCredential = errors.New("invalid_credential")
-	ErrInvalidInterval   = errors.New("invalid_interval")
-	ErrInvalid           = errors.New("invalid_input")
-	ErrDisabled          = errors.New("connector_disabled")
+	ErrConflict          = publicerr.New("idempotency_conflict")
+	ErrNamespaceInUse    = publicerr.New("source_namespace_in_use")
+	ErrUnsupportedKind   = publicerr.New("unsupported_connector_kind")
+	ErrInvalidConfig     = publicerr.New("invalid_config")
+	ErrInvalidCredential = publicerr.New("invalid_credential")
+	ErrInvalidInterval   = publicerr.New("invalid_interval")
+	ErrInvalid           = publicerr.New("invalid_input")
+	ErrDisabled          = publicerr.New("connector_disabled")
 )
 
 // DefaultMinInterval is the product floor for polling intervals.

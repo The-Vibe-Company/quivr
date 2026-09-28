@@ -174,7 +174,7 @@ func (a *API) configureRetrieval(w http.ResponseWriter, r *http.Request, scope c
 	requested, _ := data["retrieval"].(map[string]any)
 	cfg, err := a.Service.Resolve(requested)
 	if err != nil {
-		failure(w, 422, err.Error())
+		failure(w, 422, publicCode(err, "invalid_mapping"))
 		return
 	}
 	op, err := a.Operations.ConfigureRetrieval(r.Context(), scope, corpusID, key, cfg)

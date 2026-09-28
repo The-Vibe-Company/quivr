@@ -27,6 +27,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
@@ -132,6 +133,18 @@ func apiError(status int, code string) transport.Error {
 }
 func failure(w http.ResponseWriter, status int, code string) {
 	send(w, status, apiError(status, code))
+}
+
+// publicCode returns the stable public code carried by err, never its text,
+// so detail a domain adds to an error cannot change the API contract.
+// fallback applies only to an error that carries no code. Domains wrap at most
+// one coded sentinel per error, so the code matches the sentinel the caller
+// selected the status from.
+func publicCode(err error, fallback string) string {
+	if code, ok := publicerr.Code(err); ok {
+		return code
+	}
+	return fallback
 }
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -249,7 +262,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	}
 	c, conflict, err := a.Service.Create(r.Context(), s, corpus.CreateInput{Key: input.IdempotencyKey, Name: input.Name, Retrieval: data["retrieval"].(map[string]any)})
 	if errors.Is(err, corpus.ErrInvalidMapping) || errors.Is(err, corpus.ErrUnsupportedProfile) {
-		failure(w, 422, err.Error())
+		failure(w, 422, publicCode(err, "invalid_mapping"))
 	} else if errors.Is(err, corpus.ErrForbidden) {
 		failure(w, 403, "forbidden")
 	} else if err != nil {

@@ -26,7 +26,7 @@ func contentFailure(err error) (int, string) {
 	case errors.Is(err, content.ErrUnverifiedBlob):
 		return 422, "unverified_blob"
 	case errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported):
-		return 422, err.Error()
+		return 422, publicCode(err, "invalid_input")
 	default:
 		return 503, "content_unavailable"
 	}

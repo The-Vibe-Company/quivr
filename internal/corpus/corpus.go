@@ -3,15 +3,16 @@ package corpus
 
 import (
 	"context"
-	"errors"
 	"strings"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
-	ErrForbidden          = errors.New("forbidden")
-	ErrNotFound           = errors.New("not_found")
-	ErrInvalidMapping     = errors.New("invalid_mapping")
-	ErrUnsupportedProfile = errors.New("unsupported_profile")
+	ErrForbidden          = publicerr.New("forbidden")
+	ErrNotFound           = publicerr.New("not_found")
+	ErrInvalidMapping     = publicerr.New("invalid_mapping")
+	ErrUnsupportedProfile = publicerr.New("unsupported_profile")
 )
 
 type Corpus struct {

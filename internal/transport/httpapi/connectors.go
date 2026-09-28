@@ -28,9 +28,9 @@ func connectorFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, corpus.ErrNotFound):
 		failure(w, 404, "not_found")
 	case errors.Is(err, connectors.ErrConflict), errors.Is(err, connectors.ErrNamespaceInUse), errors.Is(err, connectors.ErrDisabled):
-		failure(w, 409, err.Error())
+		failure(w, 409, publicCode(err, "idempotency_conflict"))
 	case errors.Is(err, connectors.ErrUnsupportedKind), errors.Is(err, connectors.ErrInvalidConfig), errors.Is(err, connectors.ErrInvalidCredential), errors.Is(err, connectors.ErrInvalidInterval), errors.Is(err, connectors.ErrInvalid):
-		failure(w, 422, err.Error())
+		failure(w, 422, publicCode(err, "invalid_input"))
 	default:
 		failure(w, 503, "connectors_unavailable")
 	}

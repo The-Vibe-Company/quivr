@@ -10,17 +10,18 @@ import (
 	"errors"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
-	ErrForbidden            = errors.New("forbidden")
-	ErrNotFound             = errors.New("not_found")
-	ErrConflict             = errors.New("idempotency_conflict")
-	ErrUnsupportedProfile   = errors.New("unsupported_profile")
-	ErrUnsupportedEvaluator = errors.New("unsupported_evaluator")
-	ErrUnknownDestination   = errors.New("unknown_destination")
-	ErrUnknownSavedQuery    = errors.New("unknown_saved_query")
-	ErrTooLarge             = errors.New("definition_too_large")
+	ErrForbidden            = publicerr.New("forbidden")
+	ErrNotFound             = publicerr.New("not_found")
+	ErrConflict             = publicerr.New("idempotency_conflict")
+	ErrUnsupportedProfile   = publicerr.New("unsupported_profile")
+	ErrUnsupportedEvaluator = publicerr.New("unsupported_evaluator")
+	ErrUnknownDestination   = publicerr.New("unknown_destination")
+	ErrUnknownSavedQuery    = publicerr.New("unknown_saved_query")
+	ErrTooLarge             = publicerr.New("definition_too_large")
 )
 
 // The deterministic fixture evaluator is the only installed evaluator. It is
