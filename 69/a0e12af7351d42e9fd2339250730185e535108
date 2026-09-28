@@ -1,0 +1,25 @@
+internal/adapters/weaviate/projection.go
+  s_ec117ba6cf48fd::t_8d9b47c534a0ed 309-321,324-327,330-333,335-337,339-345,347-372
+  s_ec117ba6cf48fd::t_e2fcdc95b9d7e5 307-308
+internal/adapters/weaviate/purge_test.go
+  s_ec117ba6cf48fd::t_e4e8672797ce01 1-181
+internal/retrieval/purge.go
+  s_ec117ba6cf48fd::t_e46de729d5ee98 47-49,136-138,142-148
+  s_ec117ba6cf48fd::t_5c412a18b7f94e 1-46,50-135,139-141,149-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "69a0e12af7351d42e9fd2339250730185e535108",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
