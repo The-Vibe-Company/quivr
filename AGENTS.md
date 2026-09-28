@@ -20,6 +20,8 @@ Program progress is shown at https://quivr-v2-dashboard.vercel.app (private: Ver
 - **Dependencies use native Linear blocked-by relations**, between sub-issues and between specs. Text in a description is not read.
 - **Status is the Linear workflow state**: move a ticket to In Progress when work starts and to Done only when its PR is merged. Use Canceled or Duplicate, never deletion, for dropped work.
 - **Link the pull request** on the ticket (GitHub attachment or PR URL) so it appears in the in-flight view.
+- **Assign the ticket and work on a branch named after it** (`feature/the-<number>-…`, as Linear suggests) so the control tower can match branches, PRs and CI to the ticket.
+- **Start every Linear comment you post with a status line**: `Agent status: <phase> — <one-line summary>`, where `<phase>` is one of `planning`, `awaiting-approval`, `implementing`, `shipping`, `ci-fixing`, `blocked`, `handed-back`, `merged`. The rest of the comment keeps the iteration record required above. Post one when you change phase or become blocked.
 
 Dashboard code, data derivation, snapshot refresh and redeploy instructions live in the separate `quivr-v2-dashboard` repository's `AGENTS.md`. Never put Linear or GitHub tokens in either repository.
 
