@@ -64,7 +64,7 @@
     "warm_model_ready: first successful semantic search on the warm stack"
   ],
   "limits": [
-    "24 short single-segment documents; no Agency-scale, multi-architecture or production relevance claim",
+    "24 short single-segment documents; no large-scale, multi-architecture or production relevance claim",
     "one run on shared hardware; no stability claim across runs",
     "relevance weights and fixture are not tuned here; hybrid relevance belongs to THE-641"
   ]

@@ -1,4 +1,4 @@
-# Pi : extensions, Chord et enseignements pour l’ingestion Agency
+# Pi : extensions, Chord et enseignements pour l’ingestion de Quivr V2
 
 _Recherche effectuée le 3 septembre 2026. Sources primaires examinées au commit Pi `e44d75c20a51142abc056c243b13c1d7bb4be687` (`@earendil-works/pi-coding-agent` 0.84.4)._
 
@@ -10,7 +10,7 @@ Pi ne confirme pas l’idée de quatre classes rigides comme `SourcePlugin`, `Pr
 
 Le dépôt contient aussi une architecture plus récente et plus intéressante pour Quivr V2 : **Chord**, un runtime autonome de composition par plugins, actuellement utilisé dans le nouveau chemin client/serveur **expérimental** de Pi. Chord conserve un type unique `Facet`, mais fait émerger les rôles par les services typés que la facet fournit, consomme ou observe. Il valide le graphe complet de dépendances avant activation, démarre les fournisseurs avant les consommateurs et détruit les ressources dans l’ordre inverse ([README de Chord](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/chord/README.md#L1-L39), [modèle et assemblage](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/chord/PLANNING.md#L101-L162)).
 
-La réponse directe à Q20 est donc : **non, ajouter un plugin ne devrait pas arrêter tout le système d’ingestion**. Pi stable attend que sa session locale soit au repos, puis remplace brièvement tout son runtime d’extensions. Mais Chord fait mieux pour une application serveur : il prépare une génération candidate pendant que l’ancienne sert encore, la valide, puis bascule les services. Pour Agency, une alerte branchée sur un événement durable ne nécessite même pas de couper l’ingestion : on ajoute un consommateur avec son propre curseur. Seul un changement structurel du chemin synchrone peut demander une courte mise en quiescence, limitée aux workers ou partitions concernés.
+La réponse directe à Q20 est donc : **non, ajouter un plugin ne devrait pas arrêter tout le système d’ingestion**. Pi stable attend que sa session locale soit au repos, puis remplace brièvement tout son runtime d’extensions. Mais Chord fait mieux pour une application serveur : il prépare une génération candidate pendant que l’ancienne sert encore, la valide, puis bascule les services. Pour une veille d’actualité, une alerte branchée sur un événement durable ne nécessite même pas de couper l’ingestion : on ajoute un consommateur avec son propre curseur. Seul un changement structurel du chemin synchrone peut demander une courte mise en quiescence, limitée aux workers ou partitions concernés.
 
 ## Deux systèmes distincts dans le dépôt Pi
 
@@ -33,7 +33,7 @@ Il n’existe pas de sous-types `ToolExtension`, `PolicyExtension` ou `Subscribe
 
 L’interface réelle et ses overloads sont visibles dans [les types `ExtensionAPI`](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/coding-agent/src/core/extensions/types.ts#L1241-L1505). La documentation décrit explicitement les outils, interceptions, commandes, UI, persistance et intégrations externes comme des **capacités d’une extension**, pas comme des catégories d’extensions ([capacités documentées](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/coding-agent/docs/extensions.md#L3-L29)).
 
-Cette décision est transférable : il est plus souple d’avoir un manifeste `Plugin` unique et des **contributions typées** que de forcer chaque package dans une seule catégorie. Un plugin Agency peut raisonnablement fournir à la fois un parseur NewsML-G2, une métrique et une commande de diagnostic. Ce sont ses contributions — et surtout leur sémantique bloquante ou non bloquante — qui doivent être catégorisées.
+Cette décision est transférable : il est plus souple d’avoir un manifeste `Plugin` unique et des **contributions typées** que de forcer chaque package dans une seule catégorie. Un plugin vertical peut raisonnablement fournir à la fois un parseur NewsML-G2, une métrique et une commande de diagnostic. Ce sont ses contributions — et surtout leur sémantique bloquante ou non bloquante — qui doivent être catégorisées.
 
 ### 2. Chord et le chemin expérimental de Pi
 
@@ -97,7 +97,7 @@ L’état en mémoire peut vivre dans la closure d’une extension. Pour survivr
 
 Chord sépare l’état d’invocation et l’état partagé. Son `Context` propage l’annulation et des valeurs locales typées ; l’identité, les permissions et la télémétrie restent des responsabilités de l’application. Son état répliqué publie des snapshots/deltas et repasse en état non prêt lors d’une déconnexion ou d’un remplacement avant réhydratation ([Context et frontière JSON](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/chord/PLANNING.md#L77-L99), [replicated state](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/chord/README.md#L34-L54)).
 
-Pour Agency, un plugin ne devrait pas recevoir directement une connexion Postgres, S3, Kafka ou des secrets globaux. Il devrait consommer des services étroits et versionnés, et recevoir par invocation un contexte comportant identité technique, tenant, droits, trace, deadline et annulation.
+Pour Quivr, un plugin ne devrait pas recevoir directement une connexion Postgres, S3, Kafka ou des secrets globaux. Il devrait consommer des services étroits et versionnés, et recevoir par invocation un contexte comportant identité technique, tenant, droits, trace, deadline et annulation.
 
 ## Chargement, rechargement et ajout d’un plugin
 
@@ -163,7 +163,7 @@ Pi stable avertit que les extensions ont tous les droits du processus et peuvent
 
 Chord réduit les imports externes à une liste déclarée par le bundle et vérifie l’intégrité du code, mais `node:vm` sert ici à créer des générations déchargeables, pas une frontière de sécurité. Les built-ins Node déclarés peuvent être chargés par le host ([bundle loader](https://github.com/badlogic/pi-mono/blob/e44d75c20a51142abc056c243b13c1d7bb4be687/packages/chord/src/node/bundle-loader.ts#L133-L202)).
 
-Pour Agency, deux niveaux sont nécessaires :
+Pour Quivr, deux niveaux sont nécessaires :
 
 - plugins Quivr approuvés, éventuellement in-process pour les parseurs purs et rapides ;
 - plugins tiers ou avec effets externes dans un worker/conteneur isolé, sans accès direct aux secrets ni aux stores internes.
@@ -178,7 +178,7 @@ Une forme conceptuelle possible :
 
 ```ts
 definePlugin({
-  id: "Agency.breaking-alerts",
+  id: "news.breaking-alerts",
   setup(ctx) {
     const signals = ctx.use(DurableSignalEvents);
     const delivery = ctx.use(NotificationDelivery);

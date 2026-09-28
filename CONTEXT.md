@@ -1,6 +1,6 @@
 # Quivr Ingestion and Retrieval
 
-This context defines the domain-neutral language of the Quivr ingestion and retrieval engine. Vertical concepts such as an Agency dispatch or monitoring signal belong to plugins rather than the engine vocabulary.
+This context defines the domain-neutral language of the Quivr ingestion and retrieval engine. Vertical concepts such as a news-agency dispatch or monitoring signal belong to plugins rather than the engine vocabulary.
 
 ## Content model
 

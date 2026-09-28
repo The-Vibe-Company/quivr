@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev verify down reset migrate test contracts generate demo demo-reset verify-demo measure
+.PHONY: dev verify down reset migrate test contracts generate demo demo-reset verify-demo measure denylist
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -9,7 +9,7 @@ demo-reset:
 	GO=$(GO) python3 scripts/demo.py reset
 verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
-verify: contracts test
+verify: denylist contracts test
 	GO=$(GO) python3 scripts/local.py verify
 	GO=$(GO) python3 scripts/demo.py verify
 test:
@@ -23,3 +23,6 @@ generate:
 	GO=$(GO) bash scripts/contracts.sh generate
 contracts:
 	GO=$(GO) bash scripts/contracts.sh check
+# Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
+denylist:
+	python3 scripts/denylist.py

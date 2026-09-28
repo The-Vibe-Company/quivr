@@ -175,7 +175,7 @@ indépendamment l’ingestion inline et la réhydratation canonique. Résultat o
 | Hybride | 0,7969 | 0,9583 |
 
 Le déficit hybride connu reste suivi dans THE-641. Ces petits jugements synthétiques
-ne mesurent pas la pertinence Agency ni un objectif de latence en production.
+ne mesurent pas la pertinence sur un corpus réel ni un objectif de latence en production.
 
 `make down` conserve les volumes de développement ; `make reset` les supprime
 explicitement. `make migrate` applique les migrations versionnées à cette pile.
@@ -246,9 +246,9 @@ Lors d’une mise à jour, une nouvelle génération reçoit les nouveaux travau
 
 Le cœur Go possède l'API, le domaine, les transactions et les workers Temporal. Python et TypeScript restent les langages prioritaires des SDK et plugins externes. Ces choix forment la stack de départ, pas des dépendances exposées aux produits clients : les briques internes pourront évoluer sans casser leurs intégrations.
 
-## Premier terrain : Agency Customer
+## Premier terrain : la veille d’actualité
 
-Agency Customer est le premier cas d’usage. Il confronte Quivr à l’ingestion continue de millions d’articles, à la multimodalité, aux corrections et à la rétention, tandis que les formats et règles propres à l’Agency restent dans des plugins privés.
+Le premier cas d’usage est la veille d’une organisation d’information. Il confronte Quivr à l’ingestion continue de millions d’articles, à la multimodalité, aux corrections et à la rétention, tandis que les formats et règles propres à chaque organisation restent dans ses plugins.
 
 ## Où en est le projet ?
 
@@ -266,10 +266,9 @@ L’optimisation extrême du scale viendra ensuite, guidée par la mesure plutô
 - [Scope détaillé du backend MVP](./docs/quivr-v2-backend-mvp-scope.md)
 - [Modèle de données canonique et cycles de vie](./docs/quivr-v2-canonical-data-model.md)
 - [Vocabulaire et modèle de domaine](./CONTEXT.md)
-- [Historique de la réflexion d’architecture](./docs/conversations/2026-09-03-quivr-v2-architecture-discovery.md)
 - [Recherches et comparatifs techniques](./research/)
 
-Les dossiers [`Agency-doc/`](./Agency-doc/) et [`multimodal-rag/`](./multimodal-rag/) restent des références de cadrage et d’exploration, pas l’architecture cible.
+Le dossier [`multimodal-rag/`](./multimodal-rag/) reste une référence d’exploration, pas l’architecture cible.
 
 ## Web demo
 

@@ -52,7 +52,7 @@ Pour reprise, PostgreSQL fournit base backups, archivage WAL et restauration à 
 | Licence | Apache 2.0 ([licence](https://github.com/apache/kafka/blob/trunk/LICENSE)). | Community sous BSL 1.1, donc _source available_ et non OSS au sens strict ; interdiction de fournir un service de streaming/queue, conversion d'une version en Apache 2.0 après quatre ans ([texte BSL](https://github.com/redpanda-data/redpanda/blob/dev/licenses/bsl.md), [modèle de licence](https://docs.redpanda.com/current/get-started/licensing/overview/)). | Apache 2.0 ([projet officiel](https://pulsar.apache.org/)). |
 | Exploitation | Intermédiaire. KRaft retire ZooKeeper, mais la documentation recommande des rôles broker/controller séparés pour un environnement critique et au moins trois controllers pour tolérer une panne ([KRaft](https://kafka.apache.org/42/operations/kraft/)). | La promesse d'un binaire sans JVM ni ZooKeeper et la compatibilité Kafka réduisent le nombre de composants ; c'est l'avantage opérationnel principal documenté par le projet ([dépôt officiel](https://github.com/redpanda-data/redpanda)). | La plus complexe des trois : brokers, BookKeeper et metadata store sont des couches distinctes ([architecture](https://pulsar.apache.org/docs/next/concepts-architecture-overview/)). Cette séparation est aussi ce qui permet de scaler compute et stockage indépendamment. |
 | Partitionnement et scale | Ordre par partition et réplication par topic-partition. Ajouter des brokers ne déplace pas les données automatiquement ; l'opérateur doit initier et surveiller les réassignations ([concepts](https://kafka.apache.org/documentation/), [extension d'un cluster](https://kafka.apache.org/42/operations/basic-kafka-operations/)). | Partitionnement et API Kafka, avec un runtime plus intégré. Ne pas déduire un avantage de débit sans benchmark Quivr. | Brokers stateless avec équilibrage par bundles et BookKeeper scalable séparément. Les subscriptions `Shared` font file sans ordre ; `Key_Shared` préserve l'affinité de clé ([load balancing](https://pulsar.apache.org/docs/4.2.x/administration-load-balance/), [subscriptions](https://pulsar.apache.org/docs/next/concepts-messaging/)). |
-| Multi-tenancy / isolation | ACL par ressource et quotas par principal/client, mais pas de hiérarchie métier native tenant/namespace ([ACL](https://kafka.apache.org/42/security/authorization-and-acls/), [multi-tenancy et quotas](https://kafka.apache.org/42/operations/multi-tenancy/)). Suffisant pour une instance Agency dédiée. | Compatibilité Kafka pour ACLs/quotas de base ; plusieurs contrôles avancés, dont certaines fonctions RBAC/DR/tiering, sont liés à l'édition entreprise. | Tenant puis namespace sont des primitives de capacité, auth, quotas, TTL et isolation ; c'est le meilleur modèle natif pour un grand cluster réellement mutualisé ([multi-tenancy](https://pulsar.apache.org/docs/4.0.x/concepts-multi-tenancy/)). |
+| Multi-tenancy / isolation | ACL par ressource et quotas par principal/client, mais pas de hiérarchie métier native tenant/namespace ([ACL](https://kafka.apache.org/42/security/authorization-and-acls/), [multi-tenancy et quotas](https://kafka.apache.org/42/operations/multi-tenancy/)). Suffisant pour une instance dédiée à une organisation. | Compatibilité Kafka pour ACLs/quotas de base ; plusieurs contrôles avancés, dont certaines fonctions RBAC/DR/tiering, sont liés à l'édition entreprise. | Tenant puis namespace sont des primitives de capacité, auth, quotas, TTL et isolation ; c'est le meilleur modèle natif pour un grand cluster réellement mutualisé ([multi-tenancy](https://pulsar.apache.org/docs/4.0.x/concepts-multi-tenancy/)). |
 | Replay, queue et ordre | Excellent journal à offsets ; ordre seulement dans une partition. Les consumers reprennent depuis leurs offsets ([distribution](https://kafka.apache.org/42/implementation/distribution/)). Les retries, délais et DLQ restent des conventions applicatives. | Même écosystème client Kafka, mais les extensions serveur spécifiques recréent du lock-in. | Subscriptions nommées, ack individuel, redelivery et plusieurs modes queue/pub-sub intégrés ; `Key_Shared` est pertinent pour ordonner par record. |
 | Tiered storage | API de remote storage dans Kafka, mais aucune implémentation `RemoteStorageManager` S3/HDFS n'est livrée par Apache Kafka ; les compacted topics ne sont pas supportés dans le tiering documenté ([tiered storage](https://kafka.apache.org/42/operations/tiered-storage/)). | Tiered Storage, topic recovery et whole-cluster restore exigent une licence entreprise ; la migration entre fournisseurs ou buckets n'est pas supportée ([tiering](https://docs.redpanda.com/current/manage/tiered-storage/), [licences](https://docs.redpanda.com/25.3/get-started/licensing/overview/)). | Tiering natif : segments BookKeeper scellés offloadés vers S3/GCS/Azure ou stockage S3-compatible, lisibles ensuite de façon transparente ([tiered storage](https://pulsar.apache.org/docs/4.1.x/tiered-storage-overview/)). |
 | Portabilité / lock-in | Très portable, protocole et écosystème larges ; le lock-in porte surtout sur les schémas d'événements et les services managés non standard. | Faible lock-in client si on reste au sous-ensemble Kafka, mais risque licence/fonctions entreprise côté serveur. | Apache et multi-cloud, mais APIs, modèle tenant/namespace, BookKeeper et outils sont spécifiques à Pulsar ; migrer le broker devient un vrai projet. |
@@ -63,12 +63,12 @@ Pour reprise, PostgreSQL fournit base backups, archivage WAL et restauration à 
 
 - sa licence correspond à un backend redistribuable réellement OSS ;
 - Quivr a besoin d'un journal de quelques jours/semaines, pas d'une archive historique dans le broker ;
-- l'instance Agency est dédiée, donc l'absence de tenant/namespace natif est peu coûteuse ;
+- une instance dédiée à une organisation est le cas visé, donc l'absence de tenant/namespace natif est peu coûteuse ;
 - ses limites de scale sont connues et testables, et les événements restent portables.
 
 Redpanda peut rester un backend compatible optionnel pour un déploiement qui accepte sa licence, mais il ne doit pas définir la distribution OSS de référence. Son tiering payant retire précisément un argument important pour les archives longues.
 
-Pulsar devient rationnel seulement si Quivr opère ultérieurement un **grand cluster partagé** avec isolation par tenant/namespace, très nombreux topics, backlogs longs directement relisibles, scaling indépendant du stockage ou geo-réplication native. Il n'est pas justifié pour éviter quelques opérations Kafka dans une installation Agency dédiée.
+Pulsar devient rationnel seulement si Quivr opère ultérieurement un **grand cluster partagé** avec isolation par tenant/namespace, très nombreux topics, backlogs longs directement relisibles, scaling indépendant du stockage ou geo-réplication native. Il n'est pas justifié pour éviter quelques opérations Kafka dans une installation dédiée.
 
 ## Recherche intégrée : OpenSearch ou Vespa
 
@@ -85,7 +85,7 @@ Pulsar devient rationnel seulement si Quivr opère ultérieurement un **grand cl
 
 ### Verdict recherche
 
-**OpenSearch est le choix initial.** Il couvre le lexical, les vecteurs, les filtres de droits et les aggregations dans une projection unique, possède une procédure de snapshot/restore OSS claire et un chemin d'archive read-only. Pour 30 requêtes concurrentes et des dizaines de millions de contenus textuels, rien dans les exigences connues ne justifie encore la migration vers un moteur plus spécialisé.
+**OpenSearch est le choix initial.** Il couvre le lexical, les vecteurs, les filtres de droits et les aggregations dans une projection unique, possède une procédure de snapshot/restore OSS claire et un chemin d'archive read-only. Pour quelques dizaines de requêtes concurrentes et des dizaines de millions de contenus textuels, rien dans les exigences connues ne justifie encore la migration vers un moteur plus spécialisé.
 
 **Vespa est la trajectoire si le retrieval devient le produit différenciant** : plusieurs candidate retrievers, ranking multi-phases, signaux éditoriaux et modèles personnalisés exécutés à fort débit, avec mises à jour continues. Son avantage n'est pas « plus rapide » en général — aucune source primaire comparable ne le démontre pour Quivr — mais une architecture nativement conçue pour exprimer et servir un ranking sophistiqué à grande échelle.
 
@@ -179,7 +179,7 @@ API Retrieval
 
 **Composants :** PostgreSQL, Kafka KRaft, OpenSearch, stockage S3-compatible. Aucun Redis, Qdrant, Milvus, Iceberg ou second moteur de recherche n'est requis par cette décision.
 
-**Déploiement :** le Docker Compose OSS peut simplifier chaque composant pour le développement. La production Agency doit utiliser HA adaptée : PostgreSQL primaire + standby/PITR, Kafka répliqué, OpenSearch multi-nœuds avec replicas/snapshots et object store durable. Le Compose n'est pas une topologie de production.
+**Déploiement :** le Docker Compose OSS peut simplifier chaque composant pour le développement. Une production doit utiliser une HA adaptée : PostgreSQL primaire + standby/PITR, Kafka répliqué, OpenSearch multi-nœuds avec replicas/snapshots et object store durable. Le Compose n'est pas une topologie de production.
 
 **Priorités :** séparer les topics/consumer groups `realtime`, `correction-delete`, `enrichment`, `backfill` et `gc` afin qu'un backfill ne consomme pas le budget temps réel. Kafka ne fournit pas une priorité globale ; Quivr l'obtient par lanes, quotas de consumers et pools de workers distincts.
 
@@ -209,7 +209,7 @@ Pulsar peut remplacer Kafka dans cette trajectoire uniquement si les exigences d
 
 Bascule à étudier si, sur le corpus et les requêtes représentatifs :
 
-1. OpenSearch ne respecte pas `p95 < 1 s` à 30 requêtes concurrentes pendant le pic d'ingestion, après une itération bornée de tuning et un test horizontal 1x -> 4x ;
+1. OpenSearch ne respecte pas `p95 < 1 s` à quelques dizaines de requêtes concurrentes pendant le pic d'ingestion, après une itération bornée de tuning et un test horizontal 1x -> 4x ;
 2. le gain de capacité de 1x à 4x reste inférieur à l'objectif de 80 % proportionnel à cause de shard/ranking bottlenecks ;
 3. les besoins de plusieurs candidate retrievers, filtres stricts, features éditoriales et ranking multi-phases poussent une part importante du retrieval dans un service applicatif externe ;
 4. la dette d'updates/deletes Lucene empêche de tenir la fraîcheur malgré une stratégie d'index temporel correcte ;
@@ -251,7 +251,7 @@ Tant que les backfills sont rares et que PostgreSQL sait énumérer les blobs, u
 ## Tests de décision avant production
 
 1. **Corpus représentatif, pas synthétique uniquement** : tailles de dépêches, PDF, images, vidéos, langues, droits, corrections et suppressions.
-2. **Charge combinée** : pic d'ingestion 2x, enrichissements lents et 30 requêtes concurrentes. Mesurer publication -> searchable, p50/p95/p99, consumer lag et taux d'erreur.
+2. **Charge combinée** : pic d'ingestion 2x, enrichissements lents et quelques dizaines de requêtes concurrentes. Mesurer publication -> searchable, p50/p95/p99, consumer lag et taux d'erreur.
 3. **Hybrid relevance avec filtres** : BM25 seul, vectoriel seul, fusion ; mesurer rappel/precision sur un jeu jugé, puis répéter avec filtres organisation/corpus/droits très sélectifs.
 4. **Mutation** : rafales de nouvelles versions et tombstones ; mesurer fraîcheur, segments supprimés, compaction/merge et espace disque.
 5. **Scale 1x -> 4x** : même workload et mêmes SLO, en séparant capacité d'ingestion, capacité corpus et débit de requêtes.

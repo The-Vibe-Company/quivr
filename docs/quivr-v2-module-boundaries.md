@@ -72,7 +72,7 @@ in-memory calls solely to imitate transport.
 The public repository contains the core, public contracts, Python/TypeScript
 SDKs, and public reference plugins. Published packages have independent versions.
 Related contract, SDK, and compatibility-test changes can be reviewed together.
-Agency-specific private plugins remain in a separate repository.
+Customer-specific private plugins remain in separate repositories.
 
 This defines where future SDK/plugin work belongs; it does not add the full
 plugin platform or both SDK implementations to the first text slice.

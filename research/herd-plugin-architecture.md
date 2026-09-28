@@ -1,4 +1,4 @@
-# Herdr : modèle de plugins et enseignements pour l’ingestion Agency
+# Herdr : modèle de plugins et enseignements pour l’ingestion de Quivr V2
 
 _Recherche effectuée le 3 septembre 2026. Analyse du dépôt officiel Herdr au commit [`548d4c02d0a6ee199d8e65fb5fcc521fa70187d4`](https://github.com/GroepOnline/herdr/tree/548d4c02d0a6ee199d8e65fb5fcc521fa70187d4). Toutes les affirmations techniques ci-dessous reposent sur la documentation ou le code source officiels._
 
@@ -13,7 +13,7 @@ Pour Quivr V2, cela suggère de remplacer la taxonomie rigide proposée jusque-l
 1. un **package plugin** unique, décrit par un manifeste ;
 2. des **capacités et handlers typés** fournis par ce package, chacun avec ses propres garanties.
 
-En revanche, Herdr ne doit pas être copié sur la durabilité : ses hooks d’événements sont des commandes opportunistes, sans file durable, offset, retry, DLQ ni replay. C’est acceptable pour une UI terminal ; cela ne l’est pas pour des alertes éditoriales et une ingestion Agency.
+En revanche, Herdr ne doit pas être copié sur la durabilité : ses hooks d’événements sont des commandes opportunistes, sans file durable, offset, retry, DLQ ni replay. C’est acceptable pour une UI terminal ; cela ne l’est pas pour des alertes éditoriales et une ingestion d’actualité continue.
 
 ## Identification : les projets homonymes
 
@@ -92,7 +92,7 @@ Herdr donne un contre-exemple utile à la proposition de quatre interfaces mutue
 Pour Quivr V2, une transposition plus fidèle et plus flexible serait :
 
 ```yaml
-id: Agency.editorial-alerts
+id: news.editorial-alerts
 version: 1.2.0
 requires:
   core_api: ">=1.0 <2"
@@ -144,7 +144,7 @@ Une pause reste possible, mais son rayon doit être minimal : pause du consumer 
 
 ## Ce qu’il faut reprendre et ce qu’il faut renforcer
 
-| Mécanisme Herdr | À reprendre pour Quivr V2 | À renforcer pour l’Agency |
+| Mécanisme Herdr | À reprendre pour Quivr V2 | À renforcer pour une veille d’actualité |
 |---|---|---|
 | Un package manifesté avec plusieurs entrypoints | Séparer unité d’installation et types de contributions. | Ajouter schémas I/O, garanties de livraison, permissions, budgets, ressources et compatibilité des capacités. |
 | Commandes hors processus et langage libre | Garder un protocole neutre ; permettre workers/conteneurs de langages différents. | Isolation réelle par identité de workload, réseau, secrets, CPU/mémoire et accès au contenu. |

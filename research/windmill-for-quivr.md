@@ -14,7 +14,7 @@ La situation est même plus restrictive que le simple mot « AGPL » ne le laiss
 
 Sources : [licence racine du dépôt](https://github.com/windmill-labs/windmill/blob/main/LICENSE), [licence AGPL du backend](https://github.com/windmill-labs/windmill/blob/main/backend/LICENSE), [licence Apache-2.0 du client Python](https://github.com/windmill-labs/windmill/blob/main/python-client/LICENSE).
 
-Windmill ne peut donc être ni le runtime embarqué de la distribution OSS Quivr, ni une dépendance nécessaire pour atteindre les performances Agency. Il pourrait seulement rester :
+Windmill ne peut donc être ni le runtime embarqué de la distribution OSS Quivr, ni une dépendance nécessaire pour atteindre les performances visées. Il pourrait seulement rester :
 
 1. une intégration optionnelle opérée séparément par un utilisateur qui en accepte la licence ;
 2. une source d'inspiration pour la DevX ;
@@ -33,7 +33,7 @@ Cette topologie a une excellente DevX locale : Docker Compose démarre essentiel
 - tous les workers standards ouvrent une connexion directe à PostgreSQL ;
 - queue, checkpoints, logs et control plane se disputent la même base.
 
-Les « Agent Workers », qui évitent l'accès direct à la base et passent par une API HTTP/JWT, sont une fonction Cloud/Enterprise. C'est précisément la forme la plus adaptée à des plugins Agency externes ou peu fiables, mais elle n'est pas disponible dans la brique permissive requise par Quivr. [Documentation Agent Workers](https://www.windmill.dev/docs/core_concepts/agent_workers).
+Les « Agent Workers », qui évitent l'accès direct à la base et passent par une API HTTP/JWT, sont une fonction Cloud/Enterprise. C'est précisément la forme la plus adaptée à des plugins clients externes ou peu fiables, mais elle n'est pas disponible dans la brique permissive requise par Quivr. [Documentation Agent Workers](https://www.windmill.dev/docs/core_concepts/agent_workers).
 
 ### Flows, workflows as code et durabilité
 
@@ -99,7 +99,7 @@ La UI affiche les runs, graphes de flows, inputs, résultats et logs live. C'est
 
 L'export OTLP inclut des compteurs de push/pull de queue, backlog par tag, occupation et durée des workers, pools DB et santé, mais la documentation le marque explicitement Enterprise. Sources : [matrice de prix](https://www.windmill.dev/pricing), [OpenTelemetry](https://www.windmill.dev/docs/misc/guides/otel), [audit logs](https://www.windmill.dev/docs/core_concepts/audit_logs).
 
-Pour une plateforme Agency devant démontrer ses SLO, l'observabilité n'est pas cosmétique. Une solution où métriques de queue, audit long terme et traces sont payantes ne peut pas constituer le chemin OSS complet attendu, même si l'API et l'UI de base restent utilisables.
+Pour une plateforme devant démontrer ses SLO, l'observabilité n'est pas cosmétique. Une solution où métriques de queue, audit long terme et traces sont payantes ne peut pas constituer le chemin OSS complet attendu, même si l'API et l'UI de base restent utilisables.
 
 ### Langages et isolation du code
 

@@ -15,7 +15,7 @@ Quivr V2 is currently a single-context repository:
 
 - `CONTEXT.md` is the canonical glossary for the domain-neutral Quivr engine.
 - `docs/adr/` contains repository-wide architecture decisions when they are created.
-- Agency Customer terms and other vertical-specific concepts belong in plugins or their own repositories, not in the core glossary.
+- Customer and vertical-specific concepts belong in plugins or their own repositories, not in the core glossary.
 
 ## Before exploring or implementing
 

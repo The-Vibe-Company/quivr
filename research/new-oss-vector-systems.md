@@ -11,7 +11,7 @@ Je recommande de ne pas choisir une « base vectorielle » comme source de véri
 Pour le premier bake-off, les deux vrais finalistes sont :
 
 1. **Weaviate** comme hypothèse par défaut : c’est aujourd’hui le compromis le plus cohérent entre BM25 natif, dense, hybride, filtres pré-ANN, plusieurs vecteurs par objet, SDK Python/TypeScript et déploiement local raisonnable.
-2. **Qdrant** comme alternative DevX/vector-first : son modèle de payload, son ANN filtré et ses requêtes hybrides sont excellents. Il ne gagne que si le sparse search produit par Quivr satisfait réellement la pertinence éditoriale Agency sans ajouter un second moteur lexical.
+2. **Qdrant** comme alternative DevX/vector-first : son modèle de payload, son ANN filtré et ses requêtes hybrides sont excellents. Il ne gagne que si le sparse search produit par Quivr satisfait réellement la pertinence éditoriale attendue sans ajouter un second moteur lexical.
 
 **Milvus 3** est le candidat scale-first à conserver comme contrôle : son architecture désagrégée et object-storage-native peut devenir décisive quand le corpus, les coûts de SSD/RAM ou les besoins d’élasticité dépassent ce que les deux premiers tiennent proprement. Son coût d’exploitation est toutefois sensiblement plus élevé.
 
@@ -56,7 +56,7 @@ Le stockage froid s’applique ainsi à la vérité canonique : originaux et dé
 | Milvus | Apache-2.0 | BM25 function + dense/sparse fusion | Oui pour le filtering standard | Plusieurs champs vectoriels | Désagrégé, object storage, nombreux services | Moyenne → complexe | Contrôle scale-first |
 | OpenSearch | Apache-2.0 | BM25 + k-NN + RRF | Efficient filtering selon moteur | Oui, dont nested | Très mature | Moyenne → lourde | Baseline mature |
 | VectorChord | AGPL-3.0 ou ELv2 | Via PostgreSQL/FTS/extensions | Prefilter opt-in, restrictions | MaxSim natif | HA PostgreSQL ; pas de sharding natif transparent | Très bonne → moyenne | Challenger avec réserves |
-| pgvector | PostgreSQL License | PostgreSQL FTS + vector | Filtre souvent après scan ANN | Types dense/sparse, schéma libre | Réplicas ; sharding externe | Excellente → complexe à 100 M | Pas le défaut Agency |
+| pgvector | PostgreSQL License | PostgreSQL FTS + vector | Filtre souvent après scan ANN | Types dense/sparse, schéma libre | Réplicas ; sharding externe | Excellente → complexe à 100 M | Pas le défaut |
 | Chroma Distributed | Apache-2.0 | Vector/full-text selon surfaces | À prouver à cette échelle | API flexible | Architecture object-store/SPANN encore jeune | Excellente local, K8s distribué immature | Wildcard expérimental |
 | ClickHouse | Apache-2.0 | Full-text + vector | Pré/post-filtrage, limites actuelles | Colonnes multiples | Excellent stockage distribué | Moyenne | Secondaire analytique |
 | Vald | Apache-2.0 | Dense ANN seulement | Non : filtres gRPC autour des candidats | Un espace par cluster | K8s natif | Mauvaise en local | Éliminé |
@@ -80,7 +80,7 @@ Sa force pour Quivr est l’intégration des briques qui obligeraient autrement 
 
 Ses limites doivent être testées et non masquées : le coût HNSW se multiplie avec les espaces vectoriels ; l’ajout ultérieur d’un named vector ne backfill pas automatiquement les anciens objets ; les index récents comme HFresh ne doivent pas être mis sur le chemin critique sans bake-off. Le [tenant offloading](https://docs.weaviate.io/deploy/configuration/tenant-offloading) déplace un shard tenant entier vers S3 et le rend indisponible jusqu’à son rechargement ; ce n’est donc pas une solution transparente pour chaque article de plus de deux ans. Les [backups](https://docs.weaviate.io/deploy/configuration/backups) sont disponibles vers S3-compatible, GCS, Azure ou filesystem, mais les interactions backup/offloading font partie du test de restauration.
 
-**Disqualifiant** : échec du zéro-fuite ACL, coût RAM/SSD non soutenable avec deux ou trois vecteurs par chunk, ou nDCG lexical insuffisant sur les champs/langues Agency.
+**Disqualifiant** : échec du zéro-fuite ACL, coût RAM/SSD non soutenable avec deux ou trois vecteurs par chunk, ou nDCG lexical insuffisant sur les champs/langues du corpus.
 
 ### 2. Qdrant — excellente DX, à condition que le sparse suffise
 
@@ -162,7 +162,7 @@ Meilisearch reste une référence de DX et de recherche lexicale, mais son dép�
 
 ### Infinity
 
-[Infinity](https://github.com/infiniflow/infinity) est un projet Apache-2.0 récent, encore en 0.x, qui réunit full-text, dense, sparse, tensor/multivector et hybride dans un binaire simple. Son [mode cluster](https://infiniflow.org/docs/set_up_cluster) repose actuellement sur un leader writer, quelques followers/learners et MinIO partagé. C’est une excellente piste de veille et un wildcard de laboratoire, mais pas encore une fondation raisonnable pour Agency : jeunesse, single-writer et absence d’un SDK TypeScript de premier rang doivent être levées.
+[Infinity](https://github.com/infiniflow/infinity) est un projet Apache-2.0 récent, encore en 0.x, qui réunit full-text, dense, sparse, tensor/multivector et hybride dans un binaire simple. Son [mode cluster](https://infiniflow.org/docs/set_up_cluster) repose actuellement sur un leader writer, quelques followers/learners et MinIO partagé. C’est une excellente piste de veille et un wildcard de laboratoire, mais pas encore une fondation raisonnable pour Quivr : jeunesse, single-writer et absence d’un SDK TypeScript de premier rang doivent être levées.
 
 ### LanceDB et ParadeDB
 
@@ -203,7 +203,7 @@ VectorChord peut remplacer le moteur de l’architecture A dans un POC « Postgr
 
 ### Dataset et charge
 
-Construire un corpus synthétique à partir de distributions Agency réelles, anonymisées si nécessaire :
+Construire un corpus synthétique à partir de distributions réelles d’un corpus d’actualité, anonymisées si nécessaire :
 
 - paliers 10 M puis 100 M de chunks ; ne pas extrapoler uniquement depuis 1 M ;
 - au moins deux vecteurs denses par chunk (texte 768/1024 dimensions et image 512/768), un signal lexical/sparse et les métadonnées réelles ;

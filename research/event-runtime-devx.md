@@ -4,7 +4,7 @@ _Recherche au 3 septembre 2026. Sources officielles uniquement._
 
 ## Conclusion courte
 
-Le volume historique de l'Agency — des millions de contenus — ne suffit pas à justifier Kafka. Le dimensionnement du bus dépend du **débit d'événements**, du nombre de consommateurs indépendants, de la durée du journal et du besoin de retraiter ce journal, pas du nombre total de `Record` conservés dans S3/PostgreSQL.
+Le volume historique d'un grand corpus d'actualité — des millions de contenus — ne suffit pas à justifier Kafka. Le dimensionnement du bus dépend du **débit d'événements**, du nombre de consommateurs indépendants, de la durée du journal et du besoin de retraiter ce journal, pas du nombre total de `Record` conservés dans S3/PostgreSQL.
 
 Pour Quivr, la meilleure base est probablement **Temporal-first, sans broker obligatoire** : PostgreSQL/S3 restent les sources de vérité, un outbox PostgreSQL déclenche des workflows Temporal idempotents, et Temporal fournit priorités, retries, reprise, visibilité et drainage des générations. C'est le meilleur ratio sophistication/DevX tant que le pipeline est principalement une orchestration de traitements par record.
 

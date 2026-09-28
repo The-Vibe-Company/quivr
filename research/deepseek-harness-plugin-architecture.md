@@ -1,4 +1,4 @@
-# DeepSeek Harness et Cordis : idées transférables à l’ingestion Agency
+# DeepSeek Harness et Cordis : idées transférables à l’ingestion de Quivr V2
 
 _Recherche effectuée le 3 septembre 2026. Analyse du dépôt DeepSeek Harness au commit `76fda729799fe9b3848dbe2c211d4b231032b81e`._
 
@@ -148,7 +148,7 @@ Cette section ne propose pas encore l’architecture finale. Elle formule les co
 | Modes d’événements explicites | Distinguer une observation asynchrone, une transformation ordonnée, une validation bloquante et un veto de politique. | Quels hooks ont le droit de ralentir ou bloquer une dépêche ? |
 | Effets réversibles | Enlever un plugin doit retirer subscriptions, timers, routes, métriques, consommateurs et connexions sans redémarrer les autres composants. | Le rechargement à chaud est-il nécessaire en production ou seulement en développement ? |
 | Faits durables vs événements live | Les transitions métier importantes de l’ingestion peuvent être rejouables, tandis que les hooks de politique sur le chemin critique restent éphémères. | Quel événement marque l’engagement durable : brut conservé, signal normalisé ou contenu recherchable ? |
-| Profiles / bundles / overlays | Composer un profil Agency avec parseurs, enrichissements, règles et retrievers sélectionnés, sans forker le noyau générique. | Quelle part de la configuration appartient au déploiement, à l’organisation ou à une source ? |
+| Profiles / bundles / overlays | Composer un profil vertical avec parseurs, enrichissements, règles et retrievers sélectionnés, sans forker le noyau générique. | Quelle part de la configuration appartient au déploiement, à l’organisation ou à une source ? |
 | Isolation de contexte | Restreindre la vue et les capacités disponibles selon le plugin ou le profil. | L’isolation logique suffit-elle pour du code approuvé ? Quel niveau physique pour du code tiers ? |
 | Service broker | Plusieurs fournisseurs d’une même capacité peuvent coexister derrière un broker ; le papier étend ce motif au load balancing, au rolling update et aux appels interprocessus asynchrones. | Les fournisseurs doivent-ils être choisis par contenu, tenant, coût, santé ou version ? ([papier Cordis, §6.2](https://arxiv.org/pdf/2608.25512)) |
 
@@ -199,11 +199,11 @@ Le papier identifie la dérive d’interface et les collisions de clés entre pl
 
 Pour Quivr V2, nommer un événement ne suffit donc pas : son schéma, sa version, ses garanties de compatibilité et son comportement en cas de champ inconnu devront faire partie de l’API plugin.
 
-### 5. Le papier ne prouve pas les performances au scale Agency
+### 5. Le papier ne prouve pas les performances au scale d’un grand corpus d’actualité
 
 La validation empirique décrite porte sur Koishi, un écosystème de plugins TypeScript. Les auteurs la présentent comme une preuve d’existence et d’adoption, pas comme une comparaison contrôlée ; la mesure du surcoût de l’abstraction et de la productivité reste un travail futur ([papier Cordis, étude de cas et menaces à la validité](https://arxiv.org/pdf/2608.25512)).
 
-Il n’y a donc pas de preuve dans ces sources que Cordis supporte tel quel un débit Agency, des médias lourds ou des traitements distribués.
+Il n’y a donc pas de preuve dans ces sources que Cordis supporte tel quel le débit d’un grand fil d’actualité, des médias lourds ou des traitements distribués.
 
 ### 6. Le hot reload ne migre pas automatiquement l’état interne
 
@@ -211,7 +211,7 @@ Cordis démonte les effets de l’ancienne instance puis remonte la nouvelle. L�
 
 ## Questions de conception ouvertes pour le prochain round
 
-1. « Quelqu’un » signifie-t-il une équipe Quivr, une équipe Agency, un intégrateur approuvé ou n’importe quel développeur tiers ? Le modèle de confiance change radicalement l’isolation.
+1. « Quelqu’un » signifie-t-il une équipe Quivr, l’équipe d’un client, un intégrateur approuvé ou n’importe quel développeur tiers ? Le modèle de confiance change radicalement l’isolation.
 2. Un plugin d’alerte peut-il rater une alerte pendant son indisponibilité, ou doit-il reprendre depuis un journal durable ?
 3. L’alerte s’évalue-t-elle sur le contenu brut, le signal normalisé, le contenu enrichi, le regroupement événementiel ou plusieurs étapes ?
 4. Un plugin peut-il bloquer la publication dans le dispositif de veille ? Si oui, lesquels et avec quel comportement après timeout ?

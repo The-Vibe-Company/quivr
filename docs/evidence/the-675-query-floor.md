@@ -99,3 +99,4 @@ The harness now sums the RSS of the child processes of api and worker, which are
 - A small fixture of 24 single-segment documents.
 - No claim about large-scale corpora, other architectures, or stability across runs.
 - Hybrid relevance still belongs to THE-641.
+- **Wording change after the runs (THE-676).** One `limits` caveat string in `workload-v1.json` was reworded to stay customer-neutral, matching the wording already used in these reports. This is wording only, with no protocol change. The workload SHA-256 moved from `95fc3c96d6a8ef8ae56b1eee9838b7966e8de0063b71e3dc91f76ec3d7b2304f` (recorded in both report pins) to `f4d617b9884183838e0045f7634beedc581a7a4556141cb07dc72a12a5d7526a`.

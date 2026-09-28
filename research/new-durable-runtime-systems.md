@@ -89,7 +89,7 @@ Quivr PostgreSQL transaction
              ▼
        Hatchet event
         ├─ core materialize workflow       priorité temps réel
-        ├─ plugin Agency-classifier@2 task    abonnement from-now
+        ├─ plugin news-classifier@2 task    abonnement from-now
         ├─ plugin generic-alert@4 task     abonnement from-now
         └─ search projection task
 
@@ -100,7 +100,7 @@ Hatchet                  = exécution et replay opérationnels
 
 L'outbox Quivr reste nécessaire : créer un record dans le catalogue puis appeler Hatchet sont deux écritures distinctes. L'admission n'est acquittée que lorsque le record, la référence du blob et l'outbox sont durables. Un dispatcher idempotent publie ensuite dans Hatchet.
 
-Un plugin peut fournir plusieurs tâches et workflows. Quivr génère des noms stables mais versionnés, par exemple `plugin.Agency-classifier.v2.classify`. La génération courante reçoit les nouveaux événements ; la précédente reste déployée jusqu'au drain. Hatchet indique explicitement qu'il ne possède pas l'équivalent du patching Temporal pour une rupture dans une durable task : il recommande une nouvelle définition et le drain de l'ancienne. Cela correspond à la décision Quivr « le travail en vol finit sur l'ancienne génération » ([versioning Hatchet](https://docs.hatchet.run/v1/from-temporal-to-hatchet#step-11-versioning-and-determinism)).
+Un plugin peut fournir plusieurs tâches et workflows. Quivr génère des noms stables mais versionnés, par exemple `plugin.news-classifier.v2.classify`. La génération courante reçoit les nouveaux événements ; la précédente reste déployée jusqu'au drain. Hatchet indique explicitement qu'il ne possède pas l'équivalent du patching Temporal pour une rupture dans une durable task : il recommande une nouvelle définition et le drain de l'ancienne. Cela correspond à la décision Quivr « le travail en vol finit sur l'ancienne génération » ([versioning Hatchet](https://docs.hatchet.run/v1/from-temporal-to-hatchet#step-11-versioning-and-determinism)).
 
 ### Ce que Hatchet ne remplace pas
 
@@ -113,7 +113,7 @@ Hatchet ne remplace pas :
 - un event lake conservé plusieurs années ;
 - Kafka Streams/Flink et l'écosystème Kafka Connect si ces besoins apparaissent.
 
-Son event log est un historique opérationnel de tâches et d'événements, pas l'archive Agency. Un plugin installé avec un replay de deux ans doit provoquer un backfill paginé depuis le catalogue/S3 ; il ne doit pas supposer que PostgreSQL Hatchet retient deux ans d'événements.
+Son event log est un historique opérationnel de tâches et d'événements, pas l'archive des contenus. Un plugin installé avec un replay de deux ans doit provoquer un backfill paginé depuis le catalogue/S3 ; il ne doit pas supposer que PostgreSQL Hatchet retient deux ans d'événements.
 
 Hatchet n'a pas non plus de DLQ explicite. Les runs ayant épuisé leurs retries restent persistés et rejouables dans le dashboard/API, ce que la documentation présente comme un équivalent opérationnel, mais pas comme une file DLQ ([bulk retries et note DLQ](https://docs.hatchet.run/v1/error-handling/bulk-retries-and-cancellations)). Le SDK Quivr doit donc définir un état terminal, une vue d'incident et éventuellement une tâche de remédiation, sans prétendre qu'une DLQ native existe.
 
@@ -174,7 +174,7 @@ Elle ne doit être choisie que si au moins un besoin mesuré le justifie :
 
 - débit soutenu ou fan-out dépassant les résultats du bake-off Hatchet/NATS ;
 - rétention/relecture d'un grand volume d'événements indépendante du catalogue ;
-- Kafka Connect ou CDC déjà central dans l'environnement Agency ;
+- Kafka Connect ou CDC déjà central dans l'environnement du client ;
 - traitement streaming stateful par Kafka Streams/Flink ;
 - équipe opérant déjà Kafka avec une compétence et une plateforme établies.
 
@@ -251,7 +251,7 @@ Retenir **Hatchet seul** si :
 
 Retenir **Temporal + NATS JetStream** si Hatchet échoue sur débit/HA/versioning, ou si l'indépendance des abonnés et le replay par curseur deviennent des exigences fortes.
 
-Ne retenir **Temporal + Kafka** que si NATS échoue à son tour sur un besoin quantifié ou si Kafka est déjà un standard opéré chez Agency. La décision doit venir d'un seuil mesuré, pas du prestige de la stack.
+Ne retenir **Temporal + Kafka** que si NATS échoue à son tour sur un besoin quantifié ou si Kafka est déjà un standard opéré chez le client. La décision doit venir d'un seuil mesuré, pas du prestige de la stack.
 
 ## Recommandation de conception indépendante du choix
 

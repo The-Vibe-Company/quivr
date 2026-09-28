@@ -97,5 +97,6 @@ So one run does not fix lexical and hybrid scores to the fourth decimal. The var
 ## Attempts and limits
 
 - **Attempt 1** ([run 36400294008](https://github.com/The-Vibe-Company/quivr-v2/actions/runs/36400294008)) hit the 30-minute job timeout during the ingesting condition, so it wrote no report. The frozen protocol needs about 37 minutes at the observed latency. The job timeout was raised to 90 minutes and the protocol was left unchanged.
-- **Scope of the numbers.** This is one run on shared hardware with 2 CPUs, a small 24-document fixture, and single-segment documents. It supports no claim at Agency scale, across architectures, about production relevance, or about stability across runs.
+- **Scope of the numbers.** This is one run on shared hardware with 2 CPUs, a small 24-document fixture, and single-segment documents. It supports no claim at large scale, across architectures, about production relevance, or about stability across runs.
+- **Wording change after the run (THE-676).** One `limits` caveat string in `workload-v1.json` and in this report was reworded to stay customer-neutral. This is wording only, with no protocol change. The workload SHA-256 moved from `95fc3c96d6a8ef8ae56b1eee9838b7966e8de0063b71e3dc91f76ec3d7b2304f` (recorded in the report pins) to `f4d617b9884183838e0045f7634beedc581a7a4556141cb07dc72a12a5d7526a`.
 - **Hand-off.** Relevance work belongs to THE-641. The per-query tokenizer cost is a candidate follow-up and was not changed here.

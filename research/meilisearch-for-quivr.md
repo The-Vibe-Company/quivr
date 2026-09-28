@@ -13,7 +13,7 @@ La bonne position architecturale serait donc :
 - Meilisearch comme **projection de recherche**, jamais comme source de vérité;
 - une interface `SearchBackend` stable dans Quivr afin de ne pas exposer le dialecte Meilisearch aux plugins;
 - Meilisearch Community comme excellent profil local, petite/moyenne production ou installation verticale;
-- Meilisearch Enterprise/Cloud comme candidat Agency **à benchmarker et contractualiser**, pas comme choix déjà validé;
+- Meilisearch Enterprise/Cloud comme candidat pour un grand déploiement **à benchmarker et contractualiser**, pas comme choix déjà validé;
 - une autre implémentation distribuée possible derrière la même interface si la licence, le write HA ou les essais de charge éliminent Meilisearch.
 
 Autrement dit, il ne faut ni écarter Meilisearch à cause de son ancien modèle mono-nœud, ni construire Quivr de façon à dépendre de ses capacités payantes récentes.
@@ -34,7 +34,7 @@ Sources : [licence racine](https://github.com/meilisearch/meilisearch/blob/main/
 
 ### Conséquence pour Quivr OSS
 
-Quivr peut librement distribuer ou recommander la Community Edition. Mais si le profil de production « standard » exige le cluster Meilisearch coordonné, l'installation complète n'est plus composée uniquement de briques open source exploitables librement en production. Ce n'est pas forcément rédhibitoire pour Agency, mais c'est une décision produit et commerciale explicite.
+Quivr peut librement distribuer ou recommander la Community Edition. Mais si le profil de production « standard » exige le cluster Meilisearch coordonné, l'installation complète n'est plus composée uniquement de briques open source exploitables librement en production. Ce n'est pas forcément rédhibitoire pour un déploiement client, mais c'est une décision produit et commerciale explicite.
 
 ## 2. Expérience développeur et exploitation
 
@@ -99,7 +99,7 @@ Les repères officiels raisonnables sont :
 - Meilisearch publie une démonstration de recherche multimodale sur 100 millions d'images;
 - son retour officiel sur le sharding cite un client de plus de 100 millions de documents, pour lequel un nœud ne tenait plus les objectifs et plusieurs shards ont été déterminés par tests de charge.
 
-Ces chiffres sont des preuves de possibilité, pas un dimensionnement Agency. Aucun de ces exemples publics ne documente simultanément taille moyenne des documents, nombre de vecteurs, ACL, débit d'update, topologie, coût et SLO.
+Ces chiffres sont des preuves de possibilité, pas un dimensionnement pour notre cas. Aucun de ces exemples publics ne documente simultanément taille moyenne des documents, nombre de vecteurs, ACL, débit d'update, topologie, coût et SLO.
 
 Sources : [internes du ranking et domaine de taille](https://www.meilisearch.com/docs/resources/internals/ranking), [importer officiel](https://github.com/meilisearch/meilisearch-importer), [démonstration Flickr 100 M](https://www.meilisearch.com/docs/resources/demos/flickr), [retour officiel sur un cluster >100 M](https://www.meilisearch.com/blog/sharding-replication).
 
@@ -118,9 +118,9 @@ Limites importantes au 3 septembre 2026 :
 
 Sources : [vue d'ensemble sharding/réplication](https://www.meilisearch.com/docs/resources/self_hosting/sharding/overview), [configuration de la réplication](https://www.meilisearch.com/docs/resources/self_hosting/sharding/configure_replication), [publication officielle et limite write HA](https://www.meilisearch.com/blog/sharding-replication), [roadmap](https://www.meilisearch.com/roadmap).
 
-### Application aux volumes Agency
+### Application à un grand corpus d'actualité
 
-Le corpus communiqué — environ 31 M de dépêches, 90 M de photos et 1,5 M de vidéos — ne correspond pas à 122,5 M « documents Meilisearch » :
+Un corpus de dizaines de millions de contenus texte, photo et vidéo ne correspond pas au même nombre de « documents Meilisearch » :
 
 - une dépêche longue devient plusieurs chunks;
 - une photo peut produire une projection metadata/texte, une ou plusieurs représentations vectorielles et des relations;
@@ -161,7 +161,7 @@ Sources : [sémantique vs hybride](https://www.meilisearch.com/docs/capabilities
 
 L'image-to-image et text-to-image existe via des embedders REST et des fragments, mais la documentation marque encore l'API multimodale correspondante comme **expérimentale**. Les images ne sont pas stockées ni décodées comme actifs média par Meilisearch : un document JSON référence une URL ou fournit les données nécessaires à un service d'embedding. Les vidéos sont représentées par thumbnails, transcriptions ou embeddings pré-calculés; Meilisearch n'est ni un pipeline vidéo ni un object store.
 
-La démonstration officielle sur 100 M images est encourageante pour Agency, mais ne valide ni les 90 M photos avec droits/ACL et updates, ni les segments de 1,5 M vidéos, ni la combinaison avec des dizaines de millions de chunks textuels. Ces scénarios doivent être benchmarkés avec les embeddings réellement retenus.
+La démonstration officielle sur 100 M images est encourageante, mais ne valide ni une grande photothèque avec droits/ACL et updates, ni les segments d'un grand fonds vidéo, ni la combinaison avec des dizaines de millions de chunks textuels. Ces scénarios doivent être benchmarkés avec les embeddings réellement retenus.
 
 Sources : [recherche d'image multimodale expérimentale](https://www.meilisearch.com/docs/capabilities/hybrid_search/how_to/image_search_with_multimodal), [combinaison texte/image](https://www.meilisearch.com/docs/capabilities/multi_search/how_to/combine_text_and_image_search), [démo 100 M images](https://www.meilisearch.com/docs/resources/demos/flickr).
 
@@ -175,7 +175,7 @@ Points d'attention :
 - les règles d'un tenant token ne contiennent qu'un filtre par index; la décision d'autorisation et la génération sûre du filtre restent chez Quivr;
 - les API keys ont des scopes d'action et d'index, mais pas un modèle RBAC métier complet;
 - la séparation de champs sensibles doit être imposée par la projection et `displayedAttributes`; le filtre de tenant n'est pas une politique de field-level redaction;
-- Quivr ne doit donc pas exposer directement Meilisearch au démonstrateur Agency : son API doit appliquer les droits, puis transmettre un filtre non contournable ou utiliser un tenant token à durée courte.
+- Quivr ne doit donc pas exposer directement Meilisearch au démonstrateur d’un client : son API doit appliquer les droits, puis transmettre un filtre non contournable ou utiliser un tenant token à durée courte.
 
 La documentation propose aussi un RBAC basé sur des foreign filters et un index d'accès. C'est utile, mais plus récent et ne dispense pas Quivr de maintenir les droits dans sa source de vérité; Meilisearch n'assure pas l'intégrité référentielle de ces relations.
 
@@ -253,7 +253,7 @@ Il faut conserver la preuve de DX et les patterns `primary key stable + userProv
 | Ranking arbitraire/plugin | Non | Dynamic rules/personalisation selon offre, mais pas moteur de script générique | Limite pour retrieval avancé |
 | Sharding coordonné | Non | Oui, EE | Verrou licence/édition |
 | Réplication/HA lecture | Non native | Oui, EE | Verrou licence/édition |
-| HA écriture | Non | Pas encore; leader unique | Risque Agency important |
+| HA écriture | Non | Pas encore; leader unique | Risque important en production |
 | Hot/warm/cold natif | Non | Non documenté comme ILM | À gérer par Quivr |
 | Sauvegarde | Snapshots/dumps | Cloud automatisé / EE selon offre | Correct si projection reconstruisible |
 | Rebuild sans coupure | Index swap atomique | Idem | Quivr doit gérer dual-write/replay |
@@ -267,19 +267,19 @@ Il faut conserver la preuve de DX et les patterns `primary key stable + userProv
 1. **Ne pas figer OpenSearch par défaut.** Meilisearch est suffisamment sérieux pour être candidat principal à la projection de recherche.
 2. **Ne pas figer Meilisearch comme invariant du moteur.** Les contrats publics Quivr doivent parler de recherche hybride, filtres, facets, pagination/cursors et ranking, pas d'index UID, `semanticRatio` ou tenant token Meilisearch.
 3. **Adopter Meilisearch Community dans le profil local** pour préserver une DX excellente, sous réserve qu'un backend encore plus compact ne soit pas retenu après prototype.
-4. **Traiter Agency comme un choix séparé** : Meilisearch EE/Cloud peut être pertinent, mais seulement après benchmark et clarification commerciale sur licence, on-prem, SLA, support, sauvegarde et roadmap write HA.
+4. **Traiter le déploiement client comme un choix séparé** : Meilisearch EE/Cloud peut être pertinent, mais seulement après benchmark et clarification commerciale sur licence, on-prem, SLA, support, sauvegarde et roadmap write HA.
 5. **Garder les données canoniques hors de Meilisearch** afin de pouvoir reconstruire, migrer, tierer et changer de backend sans perdre le corpus.
 
-### Gate de validation Agency proposé
+### Gate de validation proposé
 
-Avant de choisir Meilisearch pour Agency, exécuter un benchmark reproductible avec au moins :
+Avant de choisir Meilisearch pour un grand déploiement, exécuter un benchmark reproductible avec au moins :
 
 - distribution réelle des tailles de chunks et métadonnées;
 - projection chaude représentative, puis extrapolation archive;
 - plusieurs langues et filtres d'autorisation à forte cardinalité;
 - un et plusieurs vectors par document avec les dimensions retenues;
 - ingestion continue, corrections et suppressions pendant les recherches;
-- 30 recherches concurrentes, 300 utilisateurs simulés et pointes 2×;
+- quelques dizaines de recherches concurrentes, quelques centaines d’utilisateurs simulés et pointes 2×;
 - p95 de recherche simple inférieur à 1 s;
 - 95 % du contenu minimalement searchable en moins de 5 min, cible interne texte de 60 s;
 - perte du leader, perte d'un remote, reprise, upgrade, snapshot/restore et rebuild complet;
@@ -288,4 +288,4 @@ Avant de choisir Meilisearch pour Agency, exécuter un benchmark reproductible a
 
 ### Verdict
 
-**Meilisearch est un excellent choix de DX et un candidat crédible de production, mais pas encore un choix Agency validé.** Le point bloquant n'est plus la recherche hybride : elle est riche. Le vrai point de décision est de savoir si Quivr accepte que son profil distribué/HA repose sur une édition commerciale récente avec leader d'écriture unique, ou s'il veut une trajectoire distribuée entièrement open source dès le départ.
+**Meilisearch est un excellent choix de DX et un candidat crédible de production, mais pas encore un choix validé pour un grand déploiement.** Le point bloquant n'est plus la recherche hybride : elle est riche. Le vrai point de décision est de savoir si Quivr accepte que son profil distribué/HA repose sur une édition commerciale récente avec leader d'écriture unique, ou s'il veut une trajectoire distribuée entièrement open source dès le départ.

@@ -1,16 +1,16 @@
 # Recherche moderne et DX pour Quivr
 
-_Recherche effectuée le 3 septembre 2026 à partir des documentations, dépôts et licences officiels. Les verdicts sont des inférences architecturales pour Quivr/Agency, pas des résultats de benchmark. Cette note réexamine explicitement la proposition « OpenSearch par défaut » : elle ne doit pas être considérée comme validée._
+_Recherche effectuée le 3 septembre 2026 à partir des documentations, dépôts et licences officiels. Les verdicts sont des inférences architecturales pour Quivr, pas des résultats de benchmark. Cette note réexamine explicitement la proposition « OpenSearch par défaut » : elle ne doit pas être considérée comme validée._
 
 ## Conclusion courte
 
-Il n'existe pas un moteur qui réunisse aujourd'hui les quatre propriétés recherchées : **une seule dépendance locale**, **excellente recherche texte**, **hybride vectoriel filtré**, et **scale horizontal/HA crédible jusqu'au corpus Agency**.
+Il n'existe pas un moteur qui réunisse aujourd'hui les quatre propriétés recherchées : **une seule dépendance locale**, **excellente recherche texte**, **hybride vectoriel filtré**, et **scale horizontal/HA crédible jusqu'à un grand corpus d'actualité**.
 
 La trajectoire la plus saine est donc :
 
 1. **PostgreSQL-first pour le MVP**, avec `tsvector`/GIN, `pgvector`, SQL et RLS, limité au corpus de veille récent ;
 2. une **frontière `SearchProjection`** dès le premier jour, alimentée par l'outbox et reconstruisible depuis les données canoniques ;
-3. un benchmark représentatif **Weaviate vs Vespa** avant le choix de production Agency ;
+3. un benchmark représentatif **Weaviate vs Vespa** avant le choix de production ;
 4. **Weaviate** comme candidat « meilleur compromis DX/scale », et **Vespa** comme candidat « meilleur moteur de retrieval/ranking à long terme » ;
 5. ne pas intégrer Typesense, ParadeDB, Quickwit ou LanceDB comme backend officiel avant qu'ils ne répondent à leurs disqualifiants respectifs.
 
@@ -65,7 +65,7 @@ Le lexical minimal devient disponible avant les embeddings. La recherche hybride
 
 **Sweet spot :** démarrer la veille « from now », quelques millions de parts recherchables, un seul modèle d'embedding, une équipe qui veut livrer vite et mesurer.
 
-**Disqualifiant :** prétendre, sans benchmark, que le même nœud PostgreSQL portera les dizaines de millions de dépêches, les dérivés de 90 M de photos, plusieurs vecteurs par part et des backfills concurrents tout en respectant le p95. PostgreSQL-first est crédible seulement si la projection est explicitement remplaçable.
+**Disqualifiant :** prétendre, sans benchmark, que le même nœud PostgreSQL portera les dizaines de millions de dépêches, les dérivés d'une grande photothèque, plusieurs vecteurs par part et des backfills concurrents tout en respectant le p95. PostgreSQL-first est crédible seulement si la projection est explicitement remplaçable.
 
 ## 2. Typesense : la meilleure sensation développeur, une limite de scale structurelle
 
@@ -75,7 +75,7 @@ Les identifiants explicites permettent upsert/delete. Les aliases autorisent un 
 
 Ses scoped search keys peuvent embarquer un `filter_by` cryptographiquement non surchargeable, ce qui est élégant pour un ACL simple. Quivr devrait néanmoins continuer à proxyfier les recherches et imposer ses propres filtres : une liste d'utilisateurs/groupes dans chaque document peut devenir lourde et difficile à invalider à grande échelle.
 
-### Disqualifiant Agency
+### Disqualifiant pour un grand corpus
 
 Typesense n'est pas shardé entre les nœuds d'un cluster : **chaque nœud conserve une réplique exacte du dataset entier**. Le clustering augmente la disponibilité et le débit de lecture, pas la capacité corpus ([organisation des collections](https://typesense.org/docs/guide/organizing-collections.html), [HA](https://typesense.org/docs/guide/high-availability.html)). Les index sont en mémoire ; la documentation estime le texte indexé à environ 2–3× sa taille et un vecteur à 7 octets par dimension et par document ([dimensionnement](https://typesense.org/docs/guide/system-requirements.html)).
 
@@ -85,7 +85,7 @@ Cela peut être excellent pour un index de veille borné, mais chaque nœud HA d
 
 **Verdict :** magnifique option de produit ou démonstrateur, mais pas le backend canonique « ultra scalable » de Quivr tant que la capacité dataset reste verticale. Le proposer comme mode local en plus d'un autre moteur créerait du travail d'adapter pour un bénéfice limité par rapport au mode PostgreSQL.
 
-## 3. ParadeDB / pg_search : l'idée la plus séduisante, mais pas le socle OSS Agency aujourd'hui
+## 3. ParadeDB / pg_search : l'idée la plus séduisante, mais pas le socle OSS aujourd'hui
 
 ParadeDB place un index Tantivy directement dans PostgreSQL. Les écritures d'index participent à la transaction et au WAL ; les requêtes restent en SQL, acceptent JOIN, filtres, agrégations et recherche texte/vectorielle. Depuis la version 0.25, l'index supporte nativement le vectoriel et le combine avec le texte ([introduction officielle](https://www.paradedb.com/docs/welcome/introduction), [texte et vecteurs](https://www.paradedb.com/docs/documentation/full-text/overview)). C'est exactement la promesse DX recherchée : pas d'ETL, pas de cohérence éventuelle entre PostgreSQL et un search engine.
 
@@ -137,7 +137,7 @@ Il n'y a pas, dans les sources examinées, un équivalent simple au searchable s
 
 **Sweet spot :** corpus massif, mises à jour continues, ranking sophistiqué qui est lui-même le produit, équipe capable d'industrialiser une application package et son exploitation.
 
-**Verdict :** meilleur choix technique long terme si les tests montrent que le retrieval Agency exige plusieurs étages de ranking et que Weaviate pousse trop de logique dans Quivr. Ce n'est pas le meilleur moteur pour obtenir une DX top _sans travail_. Il peut le devenir si Quivr génère et valide l'application package depuis un `SearchBlueprint` plus simple, mais ce générateur est un vrai produit à budgéter.
+**Verdict :** meilleur choix technique long terme si les tests montrent que le retrieval éditorial exige plusieurs étages de ranking et que Weaviate pousse trop de logique dans Quivr. Ce n'est pas le meilleur moteur pour obtenir une DX top _sans travail_. Il peut le devenir si Quivr génère et valide l'application package depuis un `SearchBlueprint` plus simple, mais ce générateur est un vrai produit à budgéter.
 
 ## 6. Quickwit : excellent moteur d'archive temporelle, mauvais moteur principal Quivr
 
@@ -157,11 +157,11 @@ Cependant, la référence Python qualifie encore la création d'index FTS de **h
 
 **Sweet spot :** local/embedded, expérimentation, index par utilisateur ou batch analytique sur object storage.
 
-**Verdict :** non pour le service partagé Agency. Son format peut devenir intéressant pour des datasets ML dérivés, mais pas comme API de recherche centrale actuelle.
+**Verdict :** non pour le service de recherche partagé. Son format peut devenir intéressant pour des datasets ML dérivés, mais pas comme API de recherche centrale actuelle.
 
 ## Comparaison par disqualifiant
 
-| Candidat | Sweet spot | Disqualifiant actuel pour le socle Quivr/Agency |
+| Candidat | Sweet spot | Disqualifiant actuel pour le socle Quivr |
 |---|---|---|
 | PostgreSQL + pgvector | Zéro service supplémentaire, transactions, ACL/RLS, MVP | Ranking texte limité, ANN filtré délicat, scale corpus non natif |
 | Typesense | DX produit exceptionnelle, typo/facettes, corpus chaud borné | Chaque nœud contient tout le corpus et les index RAM |
@@ -224,7 +224,7 @@ La source de vérité n'est jamais migrée : seul un index reconstruisible chang
 
 ## Benchmark décisionnel Weaviate vs Vespa
 
-Le benchmark doit utiliser un corpus synthétique de taille réaliste et un échantillon Agency autorisé, avec : texte français/anglais/arabe, noms propres, corrections, mêmes photos dans plusieurs records, ACL de cardinalités variées, deux vecteurs par part et backfill concurrent.
+Le benchmark doit utiliser un corpus synthétique de taille réaliste et un échantillon réel autorisé par son propriétaire, avec : texte multilingue, noms propres, corrections, mêmes photos dans plusieurs records, ACL de cardinalités variées, deux vecteurs par part et backfill concurrent.
 
 Mesurer au minimum :
 

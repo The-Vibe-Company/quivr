@@ -222,7 +222,7 @@ run locally. Later, select a remote adapter and add its process through a Compos
 override; keep the public acceptance inputs, assertions and runner unchanged.
 The Plugin Contract Runner separately checks plugin input/result schemas and
 timeouts. Do not build a plugin registry or force local calls over HTTP for the
-harness. Private Agency fixtures are not prerequisites for the public CC0 journey.
+harness. Private customer fixtures are not prerequisites for the public CC0 journey.
 
 THE-550 must implement the commands, run the integrated journey and record actual
 results against the table above, including failed attempts and missing behavior.

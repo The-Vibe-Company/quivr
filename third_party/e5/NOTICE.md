@@ -46,6 +46,6 @@ remains separate from this local evaluation implementation.
 
 The FR/EN fixture in `internal/adapters/weaviate/testdata/relevance-v1.json` was
 originally written for the accepted research and released under CC0-1.0. It
-contains no Agency or other third-party article text. Its dedicated collection isolates
+contains no customer or other third-party article text. Its dedicated collection isolates
 BM25 statistics from other test documents. Results are reported by mode;
 THE-641 tracks the known hybrid deficit. Structured ingestion remains THE-648.
