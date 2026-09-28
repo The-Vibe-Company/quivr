@@ -46,6 +46,7 @@ internal/connectors/health.go
   s_ec117ba6cf48fd::t_3f39602e4e372d 29-30
 internal/app/run.go
   s_ec117ba6cf48fd::t_c76720650ca907 59-66,97-102
+  s_ec117ba6cf48fd::t_ec38ab80001ed7 203
 tests/acceptance/connectors_x_test.go
   s_ec117ba6cf48fd::t_64affcf6057d34 43-44
   s_ec117ba6cf48fd::t_b049677bf98a03 1-42,45-154,166-212
@@ -60,6 +61,7 @@ internal/transport/httpapi/connectors_test.go
   s_ec117ba6cf48fd::t_069eb17b540fc9 6
 scripts/local.py
   s_ec117ba6cf48fd::t_6913f8c7765f72 28,50,264-266,270-271
+  s_ec117ba6cf48fd::t_ec38ab80001ed7 134
 docs/quivr-v2-ingestion-contracts.md
   s_ec117ba6cf48fd::t_4ab91ba0bdb099 345-346,393-402
 internal/content/extensions.go
