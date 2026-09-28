@@ -1,6 +1,7 @@
 # Repository instructions
 
 - Pull request titles must follow Commitizen conventions, for example `feat(ingestion): accept record versions`.
+- **This is a generic, open-source repository.** Never add customer-specific content: customer or project names, their sources, mailboxes, accounts, volumes, configurations, meeting notes or quotes from private tickets. That applies to code, tests, fixtures, docs, comments, commit messages and pull-request text. Write features and docs for any organization, with neutral examples, and document how to configure them instead of configuring them for someone. Customer context stays in Linear and in the customer's own deployment. Before handing back, `git diff origin/main | grep -i -E "<customer names>"` must be empty.
 - **Several agents may work in parallel, and Linear is their shared database.** Who works on what, and where each agent is, lives only in Linear (assignee, `Agent phase` and `Agent runtime` labels, `Agent claim` and `Agent status` comments). The canonical protocol is the Linear document [Registre de la flotte d'agents — protocole](https://linear.app/thevibecompany/document/registre-de-la-flotte-dagents-protocole-fffbdd359a1d) in the Quivr V2 project; `docs/agents/fleet-workflow.md` mirrors it. Read one of them before taking a ticket. Unless you were explicitly designated coordinator, you are a worker: claim one ticket, get your plan approved, ship a green pull request, and **never merge**. Only the coordinator merges.
 
 ## Agent skills
