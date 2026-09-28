@@ -1,0 +1,28 @@
+internal/transport/generated/transport.gen.go
+  s_ec117ba6cf48fd::t_59d9cd695185e6 580,588,604,883
+docs/quivr-v2-search-contracts.md
+  s_ec117ba6cf48fd::t_59d9cd695185e6 68-69,194-197
+  s_ec117ba6cf48fd::t_a4bc79ae8fb060 228-233
+tests/acceptance/retrieval_config_test.go
+  s_ec117ba6cf48fd::t_59d9cd695185e6 93-98
+migrations/015_retrieval_configs.sql
+  s_ec117ba6cf48fd::t_59d9cd695185e6 6,11-15
+contracts/http/v0/openapi.yaml
+  s_ec117ba6cf48fd::t_59d9cd695185e6 475-476,1719-1720
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55347d58c1294928a531d77b06da91c4fffe7ee0",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
