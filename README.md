@@ -134,14 +134,18 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits. The engine does not invoke plugins yet.
+- **Python Plugin SDK** (`sdks/python/`) with `quivr plugin init`, which scaffolds a
+  Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
+  discovery digest and replays a fixture through the engine's Manifest validation,
+  without a Quivr stack ([SDK guide](sdks/python/README.md)).
 
 ## What comes next
 
 - Correction and withdrawal notices, and plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The plugin platform: a Python SDK, the Contract Runner, and out-of-process
-  normalizers invoked by the engine (starting with PDF to text).
+- The rest of the plugin platform: the Contract Runner (`quivr plugin test`) and
+  out-of-process normalizers invoked by the engine (starting with PDF to text).
 
 The contract already describes some of these routes; the ones not implemented yet are
 listed here, not in "What works today".
@@ -153,6 +157,7 @@ listed here, not in "What works today".
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
 | [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
+| [Python Plugin SDK](sdks/python/README.md) | Writing, testing and running a Python normalizer |
 | [Architecture decisions](docs/adr/) | Hard-to-reverse decisions and why |
 | [Domain language](CONTEXT.md) | Corpus, Record, Version, Manifest, Receipt… |
 | [Architecture overview](docs/quivr-v2-architecture-overview.md) | Target architecture and plugin model |

@@ -12,3 +12,4 @@
 plans/
 
 __pycache__/
+*.egg-info/

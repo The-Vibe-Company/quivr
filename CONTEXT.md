@@ -278,6 +278,10 @@ _Avoid_: Plugin registration, media type support
 One uniquely identified call of a contribution for a specific input; retries of the same logical call share an idempotency key and must converge on the same output.
 _Avoid_: Plugin request, job
 
+**Invocation Fixture**:
+A language-neutral local test input for a contribution: an input file, its media type and optional configuration, which tools turn into a plugin invocation through a local file reference.
+_Avoid_: Test case, sample request
+
 **Plugin Contract Runner**:
 The tool that checks a plugin against the plugin protocol and normative fixtures using the engine's own validation, so passing it means the engine accepts the plugin.
 _Avoid_: SDK test suite, integration test

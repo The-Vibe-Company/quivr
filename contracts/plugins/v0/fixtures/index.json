@@ -289,6 +289,20 @@
       "valid": false,
       "schema_valid": false,
       "description": "retryable is mandatory."
+    },
+    {
+      "file": "invocations/markdown.json",
+      "schema": "plugin-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Invocation fixture with a local input file, configuration and source identity."
+    },
+    {
+      "file": "invocations/missing-media-type.json",
+      "schema": "plugin-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "An invocation fixture must declare the input media type."
     }
   ]
 }

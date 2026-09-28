@@ -1,0 +1,26 @@
+# Quivr plugin manifest (Plugin API 0.1). Check it with: quivr plugin inspect .
+# Reference: contracts/plugins/v0/README.md in the Quivr repository.
+id: __PLUGIN_ID__
+version: 0.1.0
+description: Splits Markdown documents into a title Part and one Part per section.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+    timeout_ms: 10000
+    retry:
+      max_attempts: 3
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      max_sections:
+        type: integer
+        minimum: 1
+        maximum: 255
+        description: Sections beyond this number are merged into the last one.
+run:
+  command: [python3, -m, __PLUGIN_MODULE__]

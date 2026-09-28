@@ -70,6 +70,12 @@ func validateAgainst(file string, instance any) ([]Issue, error) {
 	if !errors.As(err, &verr) {
 		return nil, err
 	}
+	return leafIssues(verr, CodeSchema, ""), nil
+}
+
+// leafIssues returns one issue per failing leaf of a validation error, with
+// paths prefixed by prefix.
+func leafIssues(verr *jsonschema.ValidationError, code, prefix string) []Issue {
 	var issues []Issue
 	seen := map[Issue]bool{}
 	var walk func(*jsonschema.ValidationError)
@@ -82,14 +88,48 @@ func validateAgainst(file string, instance any) ([]Issue, error) {
 		}
 		path := pointer(e.InstanceLocation)
 		message := strings.TrimPrefix(e.Error(), fmt.Sprintf("at '%s': ", path))
-		issue := Issue{Code: CodeSchema, Path: path, Message: message}
+		issue := Issue{Code: code, Path: prefix + path, Message: message}
 		if !seen[issue] {
 			seen[issue] = true
 			issues = append(issues, issue)
 		}
 	}
 	walk(verr)
-	return issues, nil
+	return issues
+}
+
+// ValidateConfiguration validates plugin configuration (a JSON object) against
+// the manifest configuration schema, as the engine does before an invocation.
+// A manifest without a configuration schema accepts any object. Issue paths
+// start with /configuration.
+func ValidateConfiguration(m *Manifest, config []byte) []Issue {
+	instance, err := decodeInstance(config)
+	if err != nil {
+		return []Issue{{Code: CodeInvalidConfiguration, Path: "/configuration", Message: "not JSON: " + err.Error()}}
+	}
+	if _, ok := instance.(map[string]any); !ok {
+		return []Issue{{Code: CodeInvalidConfiguration, Path: "/configuration", Message: "configuration must be a JSON object"}}
+	}
+	if m == nil || m.Configuration == nil {
+		return nil
+	}
+	schemaValue, err := decodeInstance(m.Configuration.Schema)
+	if err != nil {
+		return []Issue{{Code: CodeInvalidConfigSchema, Path: "/configuration/schema", Message: err.Error()}}
+	}
+	schema, err := compileUserSchema(schemaValue)
+	if err != nil {
+		return []Issue{{Code: CodeInvalidConfigSchema, Path: "/configuration/schema", Message: err.Error()}}
+	}
+	err = schema.Validate(instance)
+	var verr *jsonschema.ValidationError
+	if errors.As(err, &verr) {
+		return leafIssues(verr, CodeInvalidConfiguration, "/configuration")
+	}
+	if err != nil {
+		return []Issue{{Code: CodeInvalidConfiguration, Path: "/configuration", Message: err.Error()}}
+	}
+	return nil
 }
 
 // ValidateDocument validates raw JSON against one Plugin Protocol v0 schema
@@ -140,14 +180,13 @@ func (denyLoader) Load(url string) (any, error) {
 
 // compileUserSchema checks that a plugin-declared value is a valid JSON Schema
 // 2020-12 document without resolving external references.
-func compileUserSchema(value any) error {
+func compileUserSchema(value any) (*jsonschema.Schema, error) {
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.UseLoader(denyLoader{})
 	const url = "https://quivr.invalid/plugin/declared-schema.json"
 	if err := compiler.AddResource(url, value); err != nil {
-		return err
+		return nil, err
 	}
-	_, err := compiler.Compile(url)
-	return err
+	return compiler.Compile(url)
 }

@@ -222,12 +222,13 @@ internal/adapters/postgres/       atomic operations, shared guards and event hel
 internal/adapters/s3/
 internal/adapters/weaviate/
 internal/adapters/pluginhttp/     introduced when the external-plugin slice needs it
+internal/plugins/                 plugin manifest validation, `quivr plugin` CLI, local dev host, init template
 contracts/http/v0/openapi.yaml    authoritative HTTP contract
 contracts/shared/                shared JSON Schemas (Manifest) used by HTTP and plugin contracts
 contracts/plugins/               authoritative plugin JSON Schemas, added as needed
 contracts/internal/              durable workflow/event payload schemas as needed
 migrations/                      ordered PostgreSQL migrations: legacy 0xx_, then <UTC YYYYMMDDTHHMMZ>_<slug>.sql
-sdks/python/                     added with the SDK slice
+sdks/python/                     Python Plugin SDK (quivr_plugin), installed from the repository
 sdks/typescript/                 added with the SDK slice
 plugins/                         public reference plugins as their slices arrive
 tests/acceptance/                 public HTTP black-box scenarios

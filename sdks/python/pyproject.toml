@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quivr-plugin-sdk"
+version = "0.1.0"
+description = "Write Quivr Plugin Protocol v0 plugins in Python: typed models, HTTP server adapter, errors, configuration validation and fixture helpers."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+# Runtime dependencies stay small and permissively licensed (both MIT).
+dependencies = [
+    "PyYAML>=6.0",
+    "jsonschema>=4.18",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+quivr_plugin = ["py.typed", "schemas/**/*.json"]

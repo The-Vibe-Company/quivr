@@ -3,11 +3,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -22,11 +26,11 @@ const (
 
 type command struct {
 	usage string
-	run   func(args []string, stdout, stderr io.Writer) int
+	run   func(ctx context.Context, args []string, stdout, stderr io.Writer) int
 }
 
-// commands is the `quivr plugin` subcommand table; later slices add init, dev
-// and test here.
+// commands is the `quivr plugin` subcommand table; the Contract Runner adds
+// test here.
 var commands map[string]command
 
 const inspectUsage = "quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yaml>"
@@ -34,6 +38,8 @@ const inspectUsage = "quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yam
 func init() {
 	commands = map[string]command{
 		"inspect": {usage: inspectUsage, run: inspect},
+		"init":    {usage: initUsage, run: initCommand},
+		"dev":     {usage: devUsage, run: dev},
 	}
 }
 
@@ -50,8 +56,16 @@ func usage(stderr io.Writer) int {
 	return ExitUsage
 }
 
-// Run executes `quivr plugin <args>` and returns the process exit code.
+// Run executes `quivr plugin <args>` and returns the process exit code. An
+// interrupt or SIGTERM cancels long-running commands such as dev.
 func Run(args []string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return RunContext(ctx, args, stdout, stderr)
+}
+
+// RunContext is Run with an explicit context; cancelling it stops dev.
+func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return usage(stderr)
 	}
@@ -60,10 +74,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown plugin command %q\n", args[0])
 		return usage(stderr)
 	}
-	return cmd.run(args[1:], stdout, stderr)
+	return cmd.run(ctx, args[1:], stdout, stderr)
 }
 
-func inspect(args []string, stdout, stderr io.Writer) int {
+func inspect(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	asJSON := false
 	var targets []string
 	for _, arg := range args {

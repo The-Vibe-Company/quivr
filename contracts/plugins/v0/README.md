@@ -15,6 +15,7 @@ and the glossary in [CONTEXT.md](../../../CONTEXT.md).
 | `normalizer-request.schema.json` | `POST /v0/contributions/normalizer` request |
 | `normalizer-response.schema.json` | `POST /v0/contributions/normalizer` 200 response |
 | `error.schema.json` | Body of every non-2xx response |
+| `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
 
 The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
 are **not** defined here. They come from
@@ -149,6 +150,41 @@ Go tests (`go test ./internal/plugins/...`) run all fixtures through the
 engine's validation. `checks/validate.py`, run by `make contracts`, checks the
 schema outcomes with an independent JSON Schema implementation.
 
+## Local development
+
+These conventions are part of the v0 tooling contract. They bind SDKs in every
+language and the Contract Runner, but not the engine.
+
+**Run convention.** `quivr plugin dev` starts the manifest's `run.command`
+(argv, no shell) in the plugin directory, in its own process group, with:
+
+| Variable | Value |
+| --- | --- |
+| `QUIVR_PLUGIN_HOST` | Interface to bind, `127.0.0.1` |
+| `QUIVR_PLUGIN_PORT` | Port assigned for the session |
+| `QUIVR_PLUGIN_MANIFEST` | Absolute path of the inspected `quivr-plugin.yaml` |
+
+The plugin must serve the routes above on that address. `dev` stops it with
+SIGTERM, then SIGKILL after five seconds.
+
+**Invocation fixtures** (`plugin-fixture.schema.json`) name an input file,
+relative to the fixture, with its media type and optional `configuration`,
+`source`, `extensions` and `provenance`. A tool turns one into a normalizer
+request:
+
+- `input.reference` is `{"kind": "file", "url": <absolute file:// URL>}`, and
+  `size_bytes` and `sha256` are computed from the file;
+- the ids are development values derived from the first 16 hex digits of the
+  input SHA-256: `dev-invocation-…`, `dev-record-…`, `dev-version-…`,
+  `dev-blob-…`, plus `organization_id` `dev-organization`;
+- `idempotency_key` is `dev:<input sha256>`;
+- `source` defaults to `{"corpus_id": "dev-corpus", "namespace": "dev",
+  "record_key": <input.path>}`, and `corpus_id` follows `source.corpus_id`;
+- `configuration` defaults to `{}` and is validated against the manifest
+  configuration schema.
+
+`fixtures/invocations/markdown.json` is a normative example.
+
 ## Try it
 
 ```bash
@@ -157,3 +193,27 @@ go run ./cmd/quivr plugin inspect --json contracts/plugins/v0/fixtures/manifests
 ```
 
 Exit codes: `0` valid, `1` invalid or incompatible, `2` usage error.
+
+Scaffold and run a Python normalizer with the SDK in [`sdks/python`](../../../sdks/python/README.md):
+
+```bash
+quivr plugin init demo && cd demo
+python3 -m venv .venv && . .venv/bin/activate && pip install -e <quivr-v2 checkout>/sdks/python
+quivr plugin dev --fixture fixtures/sample.json
+```
+
+`quivr plugin dev [--fixture <file>] [--watch] [--port <n>] [--startup-timeout <duration>] [<plugin-dir>]`
+runs these steps:
+
+1. inspects the manifest;
+2. starts `run.command`, waits for `GET /v0/health` and checks that
+   `GET /v0/discovery` matches the manifest: digest, id, version, Plugin API
+   range and Contributions;
+3. with `--fixture`, sends the fixture's request, validates the answer with the
+   engine's Manifest rules and the declared `max_response_bytes`, and prints
+   the response on stdout.
+
+It exits `0` when every check passes and `1` otherwise. Without `--fixture`,
+or with `--watch`, it keeps running and restarts the plugin when a file in the
+plugin directory changes; hidden directories, `__pycache__`, virtual
+environments and build outputs are ignored.

@@ -1,0 +1,23 @@
+# Test plugin used by the SDK unit tests.
+id: sdk-test
+version: 0.3.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown, text/plain]
+    limits:
+      max_response_bytes: 2048
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      mode:
+        enum: [ok, retry, terminal, crash, invalid, large, dict]
+      repeat:
+        type: integer
+        minimum: 1
+run:
+  command: [python3, -m, sdk_test]

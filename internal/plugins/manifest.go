@@ -56,6 +56,7 @@ const (
 	CodeInvalidExtensionSchema = "invalid_extension_schema"
 	CodeDuplicateSecret        = "duplicate_secret"
 	CodeInvalidManifest        = "invalid_manifest"
+	CodeInvalidConfiguration   = "invalid_configuration"
 )
 
 // Issue is one actionable validation failure. Path is a JSON Pointer into the
@@ -308,7 +309,7 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 			}
 			versions, _ := exts[namespace].(map[string]any)
 			for _, version := range sortedKeys(versions) {
-				if err := compileUserSchema(versions[version]); err != nil {
+				if _, err := compileUserSchema(versions[version]); err != nil {
 					issues = append(issues, Issue{Code: CodeInvalidExtensionSchema, Path: path + "/" + pointerToken(version),
 						Message: fmt.Sprintf("schema version %q of %q is not a valid JSON Schema: %v", version, namespace, err)})
 				}
@@ -317,7 +318,7 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 	}
 	if config, ok := root["configuration"].(map[string]any); ok {
 		if schema, present := config["schema"]; present {
-			if err := compileUserSchema(schema); err != nil {
+			if _, err := compileUserSchema(schema); err != nil {
 				issues = append(issues, Issue{Code: CodeInvalidConfigSchema, Path: "/configuration/schema",
 					Message: fmt.Sprintf("configuration schema is not a valid JSON Schema: %v", err)})
 			}

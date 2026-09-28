@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.1",
+  "description": "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "compatibility",
+    "contributions"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/PluginId"
+    },
+    "version": {
+      "$ref": "#/$defs/Version"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine",
+        "plugin_api"
+      ],
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/Range"
+        },
+        "plugin_api": {
+          "$ref": "#/$defs/Range"
+        }
+      }
+    },
+    "contributions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normalizer"
+      ],
+      "description": "Keyed by Contribution name. Plugin API 0.1 accepts only normalizer; the other names are reserved and rejected.",
+      "properties": {
+        "normalizer": {
+          "$ref": "#/$defs/Normalizer"
+        },
+        "connector": false,
+        "enricher": false,
+        "validator": false,
+        "projector": false,
+        "retriever": false,
+        "subscription": false
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 for the plugin configuration the installer supplies."
+        }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "required": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 32,
+      "description": "Extension namespaces the plugin owns, each mapping schema versions to JSON Schema 2020-12. Every namespace must equal the plugin id or start with the plugin id followed by a dot.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+        },
+        "additionalProperties": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "description": "Language-neutral local development command (argv, no shell).",
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "PluginId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+      "maxLength": 64
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "maxLength": 128,
+      "description": "SemVer 2.0.0"
+    },
+    "Range": {
+      "type": "string",
+      "pattern": "^\\s*(?:>=|<=|>|<|=)?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:\\s+(?:>=|<=|>|<|=)?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*))*\\s*$",
+      "maxLength": 128,
+      "description": "Whitespace-separated comparators that must all hold; operators >=, >, <=, <, = (none means =); versions are MAJOR.MINOR.PATCH."
+    },
+    "Normalizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "media_types"
+      ],
+      "properties": {
+        "media_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+            "maxLength": 255
+          },
+          "description": "Exact Blob media types (no wildcards or parameters) this normalizer accepts; startup configuration routes them."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_attempts"
+          ],
+          "properties": {
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
+          },
+          "description": "Retry intent for plugin-declared retryable errors; the engine may cap it."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            },
+            "max_parts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256,
+              "default": 256
+            }
+          }
+        }
+      }
+    }
+  }
+}

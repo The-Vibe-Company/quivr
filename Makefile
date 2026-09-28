@@ -16,6 +16,7 @@ test:
 	$(GO) vet ./...
 	$(GO) test ./...
 	python3 -m unittest discover -s scripts -p 'test_*.py'
+	GO=$(GO) bash scripts/plugin_sdk.sh
 # Explicit retrieval measurement (THE-661); not part of verify.
 measure:
 	GO=$(GO) python3 scripts/measure.py
