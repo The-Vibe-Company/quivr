@@ -1,0 +1,27 @@
+docs/quivr-v2-ingestion-contracts.md
+  s_a8b5b23f109e47::t_8b8a96328fe337 179-187
+contracts/http/v0/openapi.yaml
+  s_a8b5b23f109e47::t_8b8a96328fe337 87-90
+tests/acceptance/ingestion_batch_test.go
+  s_a8b5b23f109e47::t_8dfe838c15961e 210-213,241,247-262,264-266,268-280,282-285,289,324
+README.md
+  s_a8b5b23f109e47::t_8b8a96328fe337 51-52
+internal/adapters/postgres/batch_test.go
+  s_a8b5b23f109e47::t_1a93fcd119f327 1-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "654cdbb7fd0825c7479db430aec20a0624939506",
+  "prompts": {},
+  "sessions": {
+    "s_a8b5b23f109e47": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0bbbf7a-82ab-4b44-875a-186251d7d5bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
