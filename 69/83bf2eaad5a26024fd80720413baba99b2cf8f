@@ -1,0 +1,45 @@
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_c9e19ebc3b2dab 924-964,1003,1076-1085
+  s_54b80c92daa9cb::t_eed59db86454fb 1400-1401
+  s_54b80c92daa9cb::t_5a76ce39ad830e 1402
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_e0312030c8af3f 68-74,86,294
+  s_54b80c92daa9cb::t_c02ac7b6362bbd 67
+sdks/python/src/quivr_plugin/schemas/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_e0312030c8af3f 249-269
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_162a0d8022110d 317
+internal/adapters/postgres/normalization_failures_test.go
+  s_54b80c92daa9cb::t_e4481c92b484aa 102
+  s_54b80c92daa9cb::t_90a425e1fb69d0 1-6,8-60,62-82,84-87,90-101,103-119,122-299,301-349
+  s_54b80c92daa9cb::t_776d39bf8235aa 7,61,83,88-89,120-121,300
+internal/transport/httpapi/content_mapping.go
+  s_54b80c92daa9cb::t_de3e4d891e177a 291-308
+  s_54b80c92daa9cb::t_eed59db86454fb 234-237
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_c9e19ebc3b2dab 1480-1483
+  s_54b80c92daa9cb::t_eed59db86454fb 1673
+  s_54b80c92daa9cb::t_3e4be26a98728c 1366-1421,1665-1672
+contracts/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_3e4be26a98728c 249-269
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_d87d59c364bc44 416-520
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_ce1a92065a15e5 32-35,108,111-113,142-144,187-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6983bf2eaad5a26024fd80720413baba99b2cf8f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
