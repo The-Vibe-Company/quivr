@@ -1,0 +1,21 @@
+docs/agents/domain.md
+  s_54b80c92daa9cb::t_9b38ae6d464687 19
+AGENTS.md
+  s_54b80c92daa9cb::t_b740110a73b543 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "261527e67804d604169fe5914ace02d1d5d59665",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
