@@ -1,5 +1,6 @@
 scripts/test_core_entrypoint.py
   s_54b80c92daa9cb::t_d9f768415be941 56
+  s_54b80c92daa9cb::t_c9ee2cd2fc5340 79,125-126
 scripts/connector_plugin.py
   s_54b80c92daa9cb::t_96d2962f9085d6 41,46-49
 plugins/m365-mail/golden_test.go
@@ -134,6 +135,7 @@ internal/plugins/runner/attachments.go
   s_54b80c92daa9cb::t_28f4dacbf6f0fe 1-162
 .github/workflows/verify.yml
   s_54b80c92daa9cb::t_491312c545cc32 72-74,89-92
+  s_54b80c92daa9cb::t_deea72d7c96995 86-88
 internal/adapters/postgres/connectors_test.go
   s_54b80c92daa9cb::t_9d0d9ae2c16856 259,263,265-266,269
 contracts/plugins/v0/fixtures/index.json
@@ -151,6 +153,7 @@ internal/app/run.go
   s_54b80c92daa9cb::t_c80c27811ce594 149-151
   s_54b80c92daa9cb::t_08bf0dd35e499a 246
   s_54b80c92daa9cb::t_e28c24ac30a850 67-69
+  s_54b80c92daa9cb::t_55bc980a804dd5 185
 internal/uploads/uploads.go
   s_54b80c92daa9cb::t_6287049ad842e9 88
   s_54b80c92daa9cb::t_add32a47195da3 134-155
@@ -214,6 +217,10 @@ sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-request.schem
   s_5c87e69cfad0a2::t_01c795b7aca9ef 1-129
 sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-response.schema.json
   s_5c87e69cfad0a2::t_069adacacc247e 1-15
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_0066f4919426c0 2152-2154
+scripts/local.py
+  s_54b80c92daa9cb::t_c9ee2cd2fc5340 95
 ---
 {
   "schema_version": "authorship/3.0.0",
