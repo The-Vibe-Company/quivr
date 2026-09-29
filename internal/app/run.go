@@ -209,7 +209,7 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: extensions, Normalizations: store}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: extensions, Normalizations: store, Supersession: store}
 	if pin != nil {
 		contents.Routes = pin
 	}

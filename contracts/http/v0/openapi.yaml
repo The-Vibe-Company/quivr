@@ -1363,6 +1363,62 @@ components:
       - code
       - message
       - retryable
+    Diagnostic:
+      type: object
+      additionalProperties: false
+      description: |-
+        A structured processing diagnostic. plugin, contribution and invocation_id name the external
+        invocation a normalization diagnostic concerns. Codes of external normalization:
+
+        - normalizer_failed: the normalizer answered a terminal error. The Version is quarantined.
+        - normalizer_invalid_output: the output broke the Plugin Protocol or the Manifest rules (schema,
+          malformed or duplicate Part, a Blob Part that is not the input Blob or has another checksum,
+          an undeclared extension namespace, too many Parts, a response over the size bound). Nothing
+          from it is published; the Version is quarantined.
+        - normalizer_timeout: the invocations kept exceeding the timeout until the retry budget (the
+          manifest's retry.max_attempts, capped by the engine at 5) was spent. The Version is quarantined.
+        - normalizer_retries_exhausted: the normalizer kept answering retryable errors until the retry
+          budget was spent. The Version is quarantined.
+        - input_unverified: the input Blob was no longer the verified accepted input. The Version is
+          quarantined.
+        - normalizer_unrouted: the media type's route was removed after acceptance and the built-in text
+          path cannot read it (a text/* Blob takes the built-in text path instead). The Version is
+          quarantined.
+        - normalization_superseded: a newer revision of the Record was accepted before this Version was
+          normalized, so the normalizer was not invoked. The Version is quarantined and never current.
+        - normalizer_conflict: a later invocation with the same idempotency key returned a different
+          output. The first recorded output is kept and published; nothing is overwritten.
+
+        On an optional route every quarantining code above that comes from the normalizer is instead
+        listed on a searchable Version published through the built-in text path. A plugin that is
+        unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
+        pinned manifest) is retried with backoff and never produces a diagnostic here; the Receipt shows
+        plugin_unavailable while it retries. Quarantined Versions keep their input reference and reason;
+        reprocessing them is not available yet.
+      properties:
+        code:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+        retryable:
+          type: boolean
+          description: Whether the same input may succeed if processed again.
+        plugin:
+          type: string
+          minLength: 1
+          description: Plugin id of the invocation.
+        contribution:
+          type: string
+          minLength: 1
+        invocation_id:
+          type: string
+          minLength: 1
+      required:
+      - code
+      - message
+      - retryable
     Extensions:
       $ref: ../../shared/v0/manifest.schema.json#/$defs/Extensions
     TextContent:
@@ -1421,10 +1477,12 @@ components:
         route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a
         Blob whose media type the installation routes to an external normalizer; that normalizer runs after
         acceptance and its output is the published Manifest, while the Version identity still derives from
-        the submitted Blob. Other media types are rejected with unverified_blob. provenance.normalization
-        is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written
-        only by its normalizer output, published on the Version; a submission writing one, top-level or
-        on a Part, is rejected with 422 extension_namespace_owned.
+        the submitted Blob. When the normalizer fails, the Version is quarantined with a Diagnostic on the
+        Version read (or, on an optional text/* route, published through the built-in text path with
+        provenance.normalization.fallback). Other media types are rejected with unverified_blob.
+        provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the
+        pinned plugin are written only by its normalizer output, published on the Version; a submission
+        writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
     WithdrawalCommand:
       type: object
       additionalProperties: false
@@ -1606,6 +1664,15 @@ components:
             $ref: '#/components/schemas/ResolvedRelation'
         processing:
           $ref: '#/components/schemas/ProcessingSummary'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Diagnostic'
+          maxItems: 20
+          description: Why the Version needs attention. A quarantined Version lists its reason first. A
+            Version published through an optional route's fallback lists the normalizer failure it fell
+            back from, and a recorded normalizer_conflict is listed on the Version whose output was kept.
+            Omitted when there is nothing to report.
       required:
       - record_id
       - version_id

@@ -119,9 +119,10 @@ func TestClientsCannotWriteNormalizationProvenance(t *testing.T) {
 
 type workRepository struct {
 	stubRepository
-	work      content.Work
-	published []content.Work
-	progress  []string
+	work         content.Work
+	published    []content.Work
+	publications []content.Publication
+	progress     []string
 }
 
 func (r *workRepository) Work(context.Context, string, string) (content.Work, bool, error) {
@@ -131,8 +132,9 @@ func (r *workRepository) Progress(_ context.Context, _, _, state, code string) e
 	r.progress = append(r.progress, state+":"+code)
 	return nil
 }
-func (r *workRepository) Publish(_ context.Context, w content.Work, _ content.Publication) error {
+func (r *workRepository) Publish(_ context.Context, w content.Work, p content.Publication) error {
 	r.published = append(r.published, w)
+	r.publications = append(r.publications, p)
 	return nil
 }
 
@@ -226,12 +228,119 @@ func TestMaterializePublishesNormalizerExtensions(t *testing.T) {
 func TestMaterializeWaitsForNormalization(t *testing.T) {
 	command := routedCommand("text/markdown")
 	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
-	service := content.Service{Repository: repo, Blobs: memoryBlobs{}, Normalizations: normalizations{}}
+	service := content.Service{Repository: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err == nil {
 		t.Fatal("published without a normalized Manifest")
 	}
 	if len(repo.published) != 0 {
 		t.Fatal("published")
+	}
+}
+
+type supersession struct{ withdrawn, superseded bool }
+
+func (s supersession) Superseded(context.Context, string, string, string) (bool, bool, error) {
+	return s.withdrawn, s.superseded, nil
+}
+
+func routedWork() *workRepository {
+	command := routedCommand("text/markdown")
+	command.Content.BlobSHA256 = content.Hash(markdownBytes)
+	command.Provenance = map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}
+	return &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", RecordID: "record_1", VersionID: "version_1", Command: command}}
+}
+
+// A failed normalization publishes the submitted input Manifest quarantined
+// with the recorded reason; nothing from the plugin is published.
+func TestMaterializeQuarantinesAFailedNormalization(t *testing.T) {
+	repo := routedWork()
+	failed := content.Normalized{Outcome: content.OutcomeFailed, InputBlobID: "blob_md",
+		Provenance: content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_9", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes)},
+		Failure:    &content.NormalizationFailure{Code: "normalizer_invalid_output", Message: "duplicate Part key"}}
+	service := content.Service{Repository: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": failed}}
+	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.publications) != 1 {
+		t.Fatalf("published %d", len(repo.publications))
+	}
+	q := repo.publications[0].Quarantine
+	want := content.Diagnostic{Code: "normalizer_invalid_output", Message: "duplicate Part key", Plugin: "acme.markdown", Contribution: "normalizer", InvocationID: "inv_9"}
+	if q == nil || *q != want {
+		t.Fatalf("quarantine %+v", q)
+	}
+	if len(repo.publications[0].Parts) != 0 {
+		t.Fatalf("plugin output published: %+v", repo.publications[0].Parts)
+	}
+	if _, ok := repo.published[0].Command.Provenance["normalization"]; ok {
+		t.Fatal("a failed invocation is published as normalization provenance")
+	}
+}
+
+func TestMaterializePublishesAFallbackWithItsProvenance(t *testing.T) {
+	repo := routedWork()
+	blobs := memoryBlobs{}
+	raw, _ := json.Marshal(content.ManifestFor(content.Command{Content: content.Text{Kind: "text", Text: string(markdownBytes)}}))
+	stored, _ := blobs.Put(context.Background(), "org_a", raw)
+	fallback := content.Normalized{Outcome: content.OutcomeFallback, Manifest: stored,
+		Provenance: content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_2", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes), Fallback: &content.NormalizationFallback{Code: "normalizer_failed", Message: "cannot read"}},
+		Failure:    &content.NormalizationFailure{Code: "normalizer_failed", Message: "cannot read"}}
+	service := content.Service{Repository: repo, Blobs: blobs, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": fallback}}
+	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
+		t.Fatal(err)
+	}
+	p := repo.publications[0]
+	if p.Quarantine != nil || len(p.Parts) != 1 || p.Parts[0].Role != "body" {
+		t.Fatalf("fallback publication %+v", p)
+	}
+	n := repo.published[0].Command.Provenance["normalization"].(map[string]any)
+	if f, _ := n["fallback"].(map[string]any); f["code"] != "normalizer_failed" || n["invocation_id"] != "inv_2" {
+		t.Fatalf("fallback provenance %+v", n)
+	}
+}
+
+func TestMaterializeWithoutAnOutcome(t *testing.T) {
+	for name, tc := range map[string]struct {
+		supersession supersession
+		routes       routes
+		mediaType    string
+		quarantine   string
+		builtin      bool
+		conflict     bool
+	}{
+		"withdrawn":           {supersession: supersession{withdrawn: true}, routes: routes{"text/markdown": true}, mediaType: "text/markdown", conflict: true},
+		"superseded":          {supersession: supersession{superseded: true}, routes: routes{"text/markdown": true}, mediaType: "text/markdown", quarantine: "normalization_superseded"},
+		"route removed, text": {routes: routes{}, mediaType: "text/markdown", builtin: true},
+		"route removed, pdf":  {routes: routes{}, mediaType: "application/pdf", quarantine: "normalizer_unrouted"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := routedWork()
+			repo.work.Command.Content.MediaType = tc.mediaType
+			source := markdownBlob()
+			source.MediaType = tc.mediaType
+			service := content.Service{Repository: repo, Blobs: stubBlobs{data: markdownBytes}, BlobSource: stubSource{verified: source}, Routes: tc.routes, Normalizations: normalizations{}, Supersession: tc.supersession}
+			if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
+				t.Fatal(err)
+			}
+			if len(repo.publications) != 1 {
+				t.Fatalf("published %d", len(repo.publications))
+			}
+			p := repo.publications[0]
+			switch {
+			case tc.conflict:
+				if p.Manifest != (content.Blob{}) || p.Quarantine != nil {
+					t.Fatalf("withdrawn publication %+v", p)
+				}
+			case tc.quarantine != "":
+				if p.Quarantine == nil || p.Quarantine.Code != tc.quarantine || p.Quarantine.Message == "" || len(p.Parts) != 0 {
+					t.Fatalf("publication %+v", p)
+				}
+			case tc.builtin:
+				if p.Quarantine != nil || len(p.Parts) != 1 || p.Parts[0].Role != "body" {
+					t.Fatalf("publication %+v", p)
+				}
+			}
+		})
 	}
 }
 

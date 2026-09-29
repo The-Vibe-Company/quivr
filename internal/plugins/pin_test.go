@@ -17,7 +17,7 @@ compatibility:
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:
-    media_types: [text/markdown, text/x-rst]
+    media_types: [text/markdown, text/x-rst, application/pdf]
     timeout_ms: 5000
 configuration:
   schema:
@@ -89,11 +89,13 @@ func TestLoadPinRefusesInvalidPins(t *testing.T) {
 		"unknown config":   {pinConfig(good, func(c *plugins.PinConfig) { c.Configuration = json.RawMessage(`{"other": 1}`) }), plugins.CodeInvalidConfiguration},
 		"endpoint":         {pinConfig(good, func(c *plugins.PinConfig) { c.Endpoint = "unix:///tmp/plugin" }), plugins.CodeInvalidPin},
 		"no routes":        {pinConfig(good, func(c *plugins.PinConfig) { c.Routes = nil }), plugins.CodeInvalidPin},
-		"undeclared route": {pinConfig(good, func(c *plugins.PinConfig) { c.Routes = []plugins.RouteConfig{{MediaType: "application/pdf"}} }), plugins.CodeRouteConflict},
+		"undeclared route": {pinConfig(good, func(c *plugins.PinConfig) { c.Routes = []plugins.RouteConfig{{MediaType: "image/png"}} }), plugins.CodeRouteConflict},
 		"duplicate route": {pinConfig(good, func(c *plugins.PinConfig) {
 			c.Routes = append(c.Routes, plugins.RouteConfig{MediaType: "text/markdown"})
 		}), plugins.CodeRouteConflict},
-		"optional route":     {pinConfig(good, func(c *plugins.PinConfig) { c.Routes[0].Mode = "optional" }), plugins.CodeInvalidPin},
+		"optional non-text route": {pinConfig(good, func(c *plugins.PinConfig) {
+			c.Routes = []plugins.RouteConfig{{MediaType: "application/pdf", Mode: "optional"}}
+		}), plugins.CodeInvalidPin},
 		"unknown route mode": {pinConfig(good, func(c *plugins.PinConfig) { c.Routes[0].Mode = "sometimes" }), plugins.CodeInvalidPin},
 		"foreign namespace":  {pinConfig(foreign, nil), plugins.CodeForeignNamespace},
 		"built-in namespace": {pinConfig(clash, nil), plugins.CodeNamespaceConflict},
@@ -107,6 +109,22 @@ func TestLoadPinRefusesInvalidPins(t *testing.T) {
 				t.Fatalf("error %q does not name %s", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadPinAcceptsOptionalTextRoutes(t *testing.T) {
+	path := writePinManifest(t, pinManifest)
+	pin, err := plugins.LoadPin(pinConfig(path, func(c *plugins.PinConfig) {
+		c.Routes = []plugins.RouteConfig{{MediaType: "text/markdown", Mode: "optional"}, {MediaType: "application/pdf"}}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route, _ := pin.Route("text/markdown"); route.Mode != plugins.RouteOptional {
+		t.Fatalf("route %+v", route)
+	}
+	if route, _ := pin.Route("application/pdf"); route.Mode != plugins.RouteRequired {
+		t.Fatalf("route %+v", route)
 	}
 }
 

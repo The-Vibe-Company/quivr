@@ -19,8 +19,9 @@ const (
 	CodeNamespaceConflict = "namespace_conflict"
 )
 
-// Route modes. Plugin Platform v0 activates required routes only; optional
-// routes (falling back to the built-in text path) arrive with failure handling.
+// Route modes. A required route quarantines a Version whose normalization
+// fails; an optional route falls back to the built-in text path, so it is
+// allowed only for media types that path handles (text/*).
 const (
 	RouteRequired = "required"
 	RouteOptional = "optional"
@@ -39,7 +40,7 @@ type PinConfig struct {
 // RouteConfig maps one accepted Blob media type to the pinned normalizer.
 type RouteConfig struct {
 	MediaType string `json:"media_type"`
-	// Mode is "required" (the default).
+	// Mode is "required" (the default) or "optional" (text/* only).
 	Mode string `json:"mode,omitempty"`
 }
 
@@ -117,9 +118,11 @@ func LoadPin(c PinConfig) (*Pin, error) {
 		switch r.Mode {
 		case RouteRequired:
 		case RouteOptional:
-			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: "optional routes are not active in Plugin Platform v0 yet; use mode \"required\""})
+			if !BuiltinTextMediaType(r.MediaType) {
+				issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: fmt.Sprintf("media type %q cannot be optional: the built-in text path it would fall back to handles text/* only; use mode \"required\"", r.MediaType)})
+			}
 		default:
-			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: fmt.Sprintf("unknown route mode %q; use \"required\"", r.Mode)})
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: fmt.Sprintf("unknown route mode %q; use \"required\" or \"optional\"", r.Mode)})
 		}
 		if !declared[r.MediaType] {
 			issues = append(issues, Issue{Code: CodeRouteConflict, Path: path + "/media_type", Message: fmt.Sprintf("media type %q is not declared by the normalizer of %s (declared: %v)", r.MediaType, m.ID, keysOf(declared))})
@@ -161,6 +164,12 @@ func ExtensionRegistry(p *Pin) (*content.ExtensionRegistry, error) {
 		return nil, &PinError{Path: p.Path, Issues: []Issue{{Code: CodeNamespaceConflict, Path: "/extensions", Message: err.Error()}}}
 	}
 	return registry, nil
+}
+
+// BuiltinTextMediaType reports whether the built-in text path can take a Blob
+// of this media type.
+func BuiltinTextMediaType(mediaType string) bool {
+	return strings.HasPrefix(strings.ToLower(mediaType), "text/")
 }
 
 func keysOf(m map[string]bool) []string {

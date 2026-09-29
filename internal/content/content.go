@@ -140,10 +140,17 @@ type Availability struct {
 	Current    bool   `json:"is_current"`
 	Searchable bool   `json:"searchable"`
 }
+
+// Diagnostic explains why processing needs attention. Plugin, Contribution
+// and InvocationID name the external invocation a normalization diagnostic
+// concerns.
 type Diagnostic struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+	Retryable    bool   `json:"retryable"`
+	Plugin       string `json:"plugin,omitempty"`
+	Contribution string `json:"contribution,omitempty"`
+	InvocationID string `json:"invocation_id,omitempty"`
 }
 type Receipt struct {
 	ID           string        `json:"receipt_id"`
@@ -176,6 +183,9 @@ type Version struct {
 	Availability Availability       `json:"availability"`
 	Relations    []ResolvedRelation `json:"relations"`
 	Processing   Processing         `json:"processing"`
+	// Diagnostics explain a quarantine, a normalizer fallback or a recorded
+	// normalizer conflict.
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 // ResolvedRelation is a separate live view of one source Relation. Unavailable
@@ -207,6 +217,9 @@ type Publication struct {
 	Normalized Blob
 	Manifest   Blob
 	Parts      []PartBlob
+	// Quarantine, when set, publishes the Version quarantined with this
+	// reason in the same transaction, announced by record.quarantined.
+	Quarantine *Diagnostic
 }
 
 type StoredVersion struct {
@@ -216,6 +229,7 @@ type StoredVersion struct {
 	Extensions             Extensions
 	Availability           Availability
 	Processing             Processing
+	Diagnostics            []Diagnostic
 }
 type Work struct {
 	Organization, ReceiptID, RecordID, VersionID, Digest, Slot string
@@ -257,6 +271,9 @@ type Service struct {
 	// routes none. Normalizations holds their durable validated output.
 	Routes         NormalizerRoutes
 	Normalizations NormalizationStore
+	// Supersession lets a routed Version skip normalization once its Record
+	// was withdrawn or desires another revision; nil never skips.
+	Supersession Supersession
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
@@ -612,7 +629,11 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if err != nil {
 		return Version{}, err
 	}
-	return Version{RecordID: recordID, ID: id, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing}, nil
+	diagnostics := stored.Diagnostics
+	if diagnostics == nil {
+		diagnostics = []Diagnostic{}
+	}
+	return Version{RecordID: recordID, ID: id, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
 }
 
 // resolveRelations expands source Relations independently of the immutable
@@ -739,8 +760,19 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	manifest := ManifestFor(work.Command)
+	var quarantine *Diagnostic
 	if work.Command.Content.Kind == "blob" {
-		if manifest, err = s.normalizedManifest(ctx, &work); err != nil {
+		manifest, quarantine, err = s.routedManifest(ctx, &work)
+		if errors.Is(err, errWithdrawn) {
+			// A withdrawn Record never publishes: publication resolves the
+			// receipt as a conflict without reading any object.
+			if err = s.Repository.Publish(ctx, work, Publication{}); err != nil {
+				_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
+				return errors.New("canonical transaction unavailable")
+			}
+			return nil
+		}
+		if err != nil {
 			code := "blob_verification_unavailable"
 			if errors.Is(err, ErrNormalizationPending) {
 				code = "normalization_pending"
@@ -763,7 +795,7 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
 		return errors.New("canonical manifest publication unavailable")
 	}
-	publication := Publication{Normalized: normalized, Manifest: manifestBlob}
+	publication := Publication{Normalized: normalized, Manifest: manifestBlob, Quarantine: quarantine}
 	for _, part := range manifest.Parts {
 		if part.Content.Kind != "text" {
 			continue
@@ -793,6 +825,13 @@ type NormalizerRoutes interface {
 	Routed(mediaType string) bool
 }
 
+// Supersession reports, before any external normalization, whether a Record
+// was withdrawn or whether a Version can no longer become current because the
+// Record desires another accepted revision.
+type Supersession interface {
+	Superseded(ctx context.Context, org, recordID, versionID string) (withdrawn, superseded bool, err error)
+}
+
 // Normalization is the bounded provenance of one external normalization,
 // published as the Version's provenance.normalization. producer and
 // producer_version keep naming the acquirer.
@@ -804,55 +843,179 @@ type Normalization struct {
 	InvocationID   string `json:"invocation_id"`
 	IdempotencyKey string `json:"idempotency_key"`
 	InputSHA256    string `json:"input_sha256"`
+	// Fallback is set when an optional route's plugin failed and the built-in
+	// text path produced the published Manifest; InvocationID then names the
+	// failed invocation.
+	Fallback *NormalizationFallback `json:"fallback,omitempty"`
 }
 
-// Normalized is the durable, validated normalizer output of one Record
-// Version: its Manifest object, its provenance and the extensions it produced
-// in the plugin's own namespaces, published on the Version beside the
-// submitted ones.
+// NormalizationFallback is the failure an optional route fell back from.
+type NormalizationFallback struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// Normalization outcomes.
+const (
+	// OutcomeNormalized publishes the plugin's validated Manifest.
+	OutcomeNormalized = "normalized"
+	// OutcomeFallback publishes the built-in text path's Manifest after
+	// an optional route failed.
+	OutcomeFallback = "fallback"
+	// OutcomeFailed publishes nothing from the plugin: the Version is
+	// published quarantined with its submitted input Manifest.
+	OutcomeFailed = "failed"
+)
+
+// NormalizationFailure is the structured reason of a failed or fallen-back
+// normalization.
+type NormalizationFailure struct {
+	Code      string
+	Message   string
+	Retryable bool
+}
+
+// NormalizationConflict records a divergent output for the recorded
+// idempotency key. It never replaces the recorded Manifest.
+type NormalizationConflict struct {
+	InvocationID   string
+	ManifestSHA256 string
+}
+
+// Normalized is the durable outcome of one Record Version's external
+// normalization: its Manifest object (none when failed), its provenance, the
+// extensions it produced, and the failure or conflict it records.
 type Normalized struct {
-	Manifest   Blob
-	Provenance Normalization
+	// Outcome is one of the Outcome* values; empty means normalized.
+	Outcome     string
+	Manifest    Blob
+	Provenance  Normalization
+	InputBlobID string
+	// Extensions are the top-level extensions the plugin produced in its own
+	// declared namespaces, published beside the submitted ones.
 	Extensions Extensions
+	Failure    *NormalizationFailure
+	Conflict   *NormalizationConflict
 }
 
-// NormalizationStore reads the durable normalizer output of a Record Version.
+// Failed reports whether nothing from the plugin may be published.
+func (n Normalized) Failed() bool { return n.Outcome == OutcomeFailed }
+
+// Diagnostics are the public diagnostics a normalization outcome contributes
+// to its Version: the failure it quarantined or fell back from, and a recorded
+// conflict.
+func (n Normalized) Diagnostics() []Diagnostic {
+	var out []Diagnostic
+	p := n.Provenance
+	if n.Failure != nil {
+		out = append(out, Diagnostic{Code: n.Failure.Code, Message: n.Failure.Message, Retryable: n.Failure.Retryable, Plugin: p.PluginID, Contribution: p.Contribution, InvocationID: p.InvocationID})
+	}
+	if n.Conflict != nil {
+		out = append(out, Diagnostic{Code: CodeNormalizerConflict, Message: "A later invocation with the same idempotency key returned a different output; the recorded output was kept.", Plugin: p.PluginID, Contribution: p.Contribution, InvocationID: n.Conflict.InvocationID})
+	}
+	return out
+}
+
+// Codes of normalization outcomes that do not come from a plugin answer.
+const (
+	CodeNormalizerConflict      = "normalizer_conflict"
+	CodeNormalizerUnrouted      = "normalizer_unrouted"
+	CodeNormalizationSuperseded = "normalization_superseded"
+)
+
+// NormalizationStore reads the durable normalization outcome of a Record Version.
 type NormalizationStore interface {
 	Normalized(ctx context.Context, org, versionID string) (Normalized, bool, error)
 }
 
-// ErrNormalizationPending means a routed Version has no durable normalizer
-// output yet; publication retries after normalization.
+// ErrNormalizationPending means a routed Version has no durable normalization
+// outcome yet; publication retries after normalization.
 var ErrNormalizationPending = errors.New("normalization_pending")
 
-// normalizedManifest loads the durable normalizer Manifest of a routed Blob
-// Version and records its provenance on the Work (never on the stored Command).
-func (s Service) normalizedManifest(ctx context.Context, work *Work) (Manifest, error) {
+var errWithdrawn = errors.New("record withdrawn")
+
+// BuiltinManifest is the built-in text path's Manifest for a text Blob: one
+// body Part holding the verified bytes, exactly as an unrouted text Blob is
+// accepted. It fails with ErrUnverifiedBlob, ErrUnsupported or ErrInvalid when
+// the built-in path cannot take the Blob.
+func (s Service) BuiltinManifest(ctx context.Context, org string, ref Text) (Manifest, error) {
+	data, err := s.resolveBlob(ctx, org, ref)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return ManifestFor(Command{Content: Text{Kind: "text", Text: string(data)}}), nil
+}
+
+// BuiltinRefusal reports whether err is the built-in text path refusing a
+// Blob's bytes, as opposed to an outage.
+func BuiltinRefusal(err error) bool {
+	return errors.Is(err, ErrUnverifiedBlob) || errors.Is(err, ErrUnsupported) || errors.Is(err, ErrInvalid)
+}
+
+// routedManifest decides what a routed Blob Version publishes, from its
+// durable normalization outcome, and records normalization provenance on the
+// Work (never on the stored Command). Without an outcome, a withdrawn Record
+// resolves as a conflict, a superseded Version and a Blob whose route was
+// removed (and that the built-in text path cannot take) are quarantined, and a
+// removed route over a text Blob takes the built-in text path; otherwise the
+// Version waits for normalization.
+func (s Service) routedManifest(ctx context.Context, work *Work) (Manifest, *Diagnostic, error) {
+	c := work.Command
 	if s.Normalizations == nil {
-		return Manifest{}, ErrNormalizationPending
+		return Manifest{}, nil, ErrNormalizationPending
 	}
 	n, found, err := s.Normalizations.Normalized(ctx, work.Organization, work.VersionID)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, err
 	}
-	if !found {
-		return Manifest{}, ErrNormalizationPending
+	if found {
+		if n.Failed() {
+			diagnostics := n.Diagnostics()
+			return ManifestFor(c), &diagnostics[0], nil
+		}
+		return s.normalizedManifest(ctx, work, n)
 	}
+	if s.Supersession != nil {
+		withdrawn, superseded, err := s.Supersession.Superseded(ctx, work.Organization, work.RecordID, work.VersionID)
+		if err != nil {
+			return Manifest{}, nil, err
+		}
+		if withdrawn {
+			return Manifest{}, nil, errWithdrawn
+		}
+		if superseded {
+			return ManifestFor(c), &Diagnostic{Code: CodeNormalizationSuperseded, Message: "A newer revision of the Record was accepted before this Version was normalized; the normalizer was not invoked."}, nil
+		}
+	}
+	if s.Routes != nil && s.Routes.Routed(c.Content.MediaType) {
+		return Manifest{}, nil, ErrNormalizationPending
+	}
+	// The route was removed after acceptance.
+	m, err := s.BuiltinManifest(ctx, work.Organization, c.Content)
+	if BuiltinRefusal(err) {
+		return ManifestFor(c), &Diagnostic{Code: CodeNormalizerUnrouted, Message: fmt.Sprintf("No normalizer route handles %q any more and the built-in text path cannot read this Blob.", c.Content.MediaType)}, nil
+	}
+	return m, nil, err
+}
+
+// normalizedManifest loads the recorded normalized or fallback Manifest and
+// records its provenance on the Work.
+func (s Service) normalizedManifest(ctx context.Context, work *Work, n Normalized) (Manifest, *Diagnostic, error) {
 	data, err := s.Blobs.Read(ctx, n.Manifest)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, err
 	}
 	var m Manifest
 	if err = json.Unmarshal(data, &m); err != nil {
-		return Manifest{}, fmt.Errorf("normalized manifest: %w", ErrArtifactCorrupt)
+		return Manifest{}, nil, fmt.Errorf("normalized manifest: %w", ErrArtifactCorrupt)
 	}
 	raw, err := json.Marshal(n.Provenance)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, err
 	}
 	var normalization map[string]any
 	if err = json.Unmarshal(raw, &normalization); err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, err
 	}
 	provenance := make(map[string]any, len(work.Command.Provenance)+1)
 	for k, v := range work.Command.Provenance {
@@ -872,5 +1035,5 @@ func (s Service) normalizedManifest(ctx context.Context, work *Work) (Manifest, 
 		}
 		work.Command.Extensions = extensions
 	}
-	return m, nil
+	return m, nil, nil
 }

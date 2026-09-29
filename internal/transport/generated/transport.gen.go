@@ -921,6 +921,47 @@ type DeliveryAttemptPage struct {
 	NextPageCursor *string           `json:"next_page_cursor,omitempty"`
 }
 
+// Diagnostic A structured processing diagnostic. plugin, contribution and invocation_id name the external
+// invocation a normalization diagnostic concerns. Codes of external normalization:
+//
+//   - normalizer_failed: the normalizer answered a terminal error. The Version is quarantined.
+//   - normalizer_invalid_output: the output broke the Plugin Protocol or the Manifest rules (schema,
+//     malformed or duplicate Part, a Blob Part that is not the input Blob or has another checksum,
+//     an undeclared extension namespace, too many Parts, a response over the size bound). Nothing
+//     from it is published; the Version is quarantined.
+//   - normalizer_timeout: the invocations kept exceeding the timeout until the retry budget (the
+//     manifest's retry.max_attempts, capped by the engine at 5) was spent. The Version is quarantined.
+//   - normalizer_retries_exhausted: the normalizer kept answering retryable errors until the retry
+//     budget was spent. The Version is quarantined.
+//   - input_unverified: the input Blob was no longer the verified accepted input. The Version is
+//     quarantined.
+//   - normalizer_unrouted: the media type's route was removed after acceptance and the built-in text
+//     path cannot read it (a text/* Blob takes the built-in text path instead). The Version is
+//     quarantined.
+//   - normalization_superseded: a newer revision of the Record was accepted before this Version was
+//     normalized, so the normalizer was not invoked. The Version is quarantined and never current.
+//   - normalizer_conflict: a later invocation with the same idempotency key returned a different
+//     output. The first recorded output is kept and published; nothing is overwritten.
+//
+// On an optional route every quarantining code above that comes from the normalizer is instead
+// listed on a searchable Version published through the built-in text path. A plugin that is
+// unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
+// pinned manifest) is retried with backoff and never produces a diagnostic here; the Receipt shows
+// plugin_unavailable while it retries. Quarantined Versions keep their input reference and reason;
+// reprocessing them is not available yet.
+type Diagnostic struct {
+	Code         string  `json:"code"`
+	Contribution *string `json:"contribution,omitempty"`
+	InvocationId *string `json:"invocation_id,omitempty"`
+	Message      string  `json:"message"`
+
+	// Plugin Plugin id of the invocation.
+	Plugin *string `json:"plugin,omitempty"`
+
+	// Retryable Whether the same input may succeed if processed again.
+	Retryable bool `json:"retryable"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Code string `json:"code"`
@@ -959,7 +1000,7 @@ type FieldMappingRoles string
 // FieldMappingType defines model for FieldMapping.Type.
 type FieldMappingType string
 
-// IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written only by its normalizer output, published on the Version; a submission writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
+// IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. When the normalizer fails, the Version is quarantined with a Diagnostic on the Version read (or, on an optional text/* route, published through the built-in text path with provenance.normalization.fallback). Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input. Extension namespaces owned by the pinned plugin are written only by its normalizer output, published on the Version; a submission writing one, top-level or on a Part, is rejected with 422 extension_namespace_owned.
 type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
 
@@ -1032,10 +1073,16 @@ type MonitoringReferences struct {
 
 // NormalizationProvenance Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.
 type NormalizationProvenance struct {
-	Contribution   NormalizationProvenanceContribution `json:"contribution"`
-	IdempotencyKey string                              `json:"idempotency_key"`
-	InputSha256    string                              `json:"input_sha256"`
-	InvocationId   string                              `json:"invocation_id"`
+	Contribution NormalizationProvenanceContribution `json:"contribution"`
+
+	// Fallback Present when the route is optional and the normalizer failed: the published Manifest comes from the built-in text path, and invocation_id names the failed invocation.
+	Fallback *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"fallback,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+	InputSha256    string `json:"input_sha256"`
+	InvocationId   string `json:"invocation_id"`
 
 	// PluginApi Plugin API version the engine invoked.
 	PluginApi     string `json:"plugin_api"`
@@ -1349,6 +1396,9 @@ type UploadRequest struct {
 // Version defines model for Version.
 type Version struct {
 	Availability Availability `json:"availability"`
+
+	// Diagnostics Why the Version needs attention. A quarantined Version lists its reason first. A Version published through an optional route's fallback lists the normalizer failure it fell back from, and a recorded normalizer_conflict is listed on the Version whose output was kept. Omitted when there is nothing to report.
+	Diagnostics *[]Diagnostic `json:"diagnostics,omitempty"`
 
 	// Extensions Keys are plugin namespaces. Data is validated against the installed schema version; source data is not a computed Annotation.
 	Extensions *Extensions `json:"extensions,omitempty"`

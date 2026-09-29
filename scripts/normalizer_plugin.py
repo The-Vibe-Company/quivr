@@ -152,3 +152,72 @@ def verify(stack):
     for port in [s['probe_port'], s['worker_probe_port']]:
         assert probe(port, '/healthz') == 204 and probe(port, '/readyz') == 204, port
     (stack.directory / 'normalizer-startup.json').write_text(json.dumps({'startup_refusals': 'passed', 'unreachable_plugin_healthy': 'passed'}))
+
+
+def outage(stack):
+    """With the plugin stopped, routed work waits while the platform stays healthy; it completes once the plugin is back."""
+    s = stack.state
+    env = {'QUIVR_TEST_NORMALIZER_OUTAGE': '1', 'QUIVR_TEST_API_PROBE_URL': f"http://127.0.0.1:{s['probe_port']}"}
+    stop(stack)
+    stack.tests('TestNormalizerOutageKeepsThePlatformHealthy', env)
+    start(stack)
+    stack.tests('TestNormalizerOutageRecovers', env)
+
+
+# The controllable test plugin (internal/plugins/devhost/fakeplugin) answers each
+# request with the failure its Record Key names. A budget of two attempts keeps the
+# timeout and retryable scenarios short while still retrying once.
+FAULTY_MANIFEST = '''id: quivr-test.faulty
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/x-fault, text/x-fault-optional]
+    timeout_ms: 1000
+    retry:
+      max_attempts: 2
+'''
+
+
+def failures(stack):
+    """Pin the controllable test plugin, observe every failure class publicly, then restore the stack's pin."""
+    directory = stack.directory / 'faulty-plugin'
+    directory.mkdir(exist_ok=True)
+    binary = directory / 'quivr-fake-plugin'
+    subprocess.run([os.environ.get('GO', 'go'), 'test', '-c', '-o', str(binary), './tests/plugin-contract'], cwd=ROOT, check=True)
+    manifest_path = directory / 'quivr-plugin.yaml'
+    manifest_path.write_text(FAULTY_MANIFEST)
+    port = stack_port()
+    env = {**os.environ, 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_FAKE_PLUGIN_MODE': 'by-record-key',
+           'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_path)}
+    with (stack.directory / 'faulty-plugin.log').open('a') as log:
+        plugin = subprocess.Popen([str(binary), '-test.run=^$'], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)
+    configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
+    try:
+        deadline = time.monotonic() + 30
+        while probe(port, '/v0/health') != 200:
+            if plugin.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError('faulty plugin not healthy; inspect ' + str(stack.directory / 'faulty-plugin.log'))
+            time.sleep(.1)
+        for name, text in configs.items():
+            cfg = json.loads(text)
+            cfg['plugin'] = {'manifest': str(manifest_path), 'endpoint': f'http://127.0.0.1:{port}',
+                             'routes': [{'media_type': 'text/x-fault', 'mode': 'required'}, {'media_type': 'text/x-fault-optional', 'mode': 'optional'}]}
+            path = stack.directory / name
+            path.write_text(json.dumps(cfg))
+            path.chmod(0o600)
+        stack.stop_processes()
+        stack.start_processes()
+        stack.tests('TestNormalizerFailures', {'QUIVR_TEST_FAULTY_NORMALIZER': '1'})
+    finally:
+        for name, text in configs.items():
+            (stack.directory / name).write_text(text)
+        try:
+            os.killpg(plugin.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        stack.stop_processes()
+        stack.start_processes()
+        stack.start_short_retention_api()

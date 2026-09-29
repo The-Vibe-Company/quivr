@@ -403,6 +403,10 @@ def verify(stack,steps):
     steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings')
     steps.run('normalizer_startup',normalizer_plugin.verify,stack)
     steps.run('normalizer_rebuild_without_plugin',stack.tests,'TestNormalizerRebuildWithoutPlugin')
+    # With the plugin down, routed work waits and the platform stays healthy; then a controllable
+    # test plugin is pinned to observe every failure class and the optional-route fallback.
+    steps.run('normalizer_outage',normalizer_plugin.outage,stack)
+    steps.run('normalizer_failures',normalizer_plugin.failures,stack)
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
     steps.run('connectors',connectors,stack)

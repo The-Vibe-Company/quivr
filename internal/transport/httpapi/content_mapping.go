@@ -231,6 +231,10 @@ func recordToTransport(r content.Record) transport.Record {
 }
 func versionToTransport(v content.Version) (transport.Version, error) {
 	out := transport.Version{RecordId: v.RecordID, VersionId: v.ID, Availability: availabilityToTransport(v.Availability), Processing: processingToTransport(v.Processing), Relations: []transport.ResolvedRelation{}, Manifest: transport.ManifestContent{Kind: transport.ManifestContentKind(v.Manifest.Kind), Parts: []transport.Part{}}}
+	if len(v.Diagnostics) > 0 {
+		diagnostics := diagnosticsToTransport(v.Diagnostics)
+		out.Diagnostics = &diagnostics
+	}
 	for _, p := range v.Manifest.Parts {
 		part, err := partToTransport(p)
 		if err != nil {
@@ -284,5 +288,22 @@ func versionToTransport(v content.Version) (transport.Version, error) {
 
 func normalizationToTransport(n map[string]any) *transport.NormalizationProvenance {
 	text := func(key string) string { value, _ := n[key].(string); return value }
-	return &transport.NormalizationProvenance{PluginId: text("plugin_id"), PluginVersion: text("plugin_version"), PluginApi: text("plugin_api"), Contribution: transport.NormalizationProvenanceContribution(text("contribution")), InvocationId: text("invocation_id"), IdempotencyKey: text("idempotency_key"), InputSha256: text("input_sha256")}
+	out := &transport.NormalizationProvenance{PluginId: text("plugin_id"), PluginVersion: text("plugin_version"), PluginApi: text("plugin_api"), Contribution: transport.NormalizationProvenanceContribution(text("contribution")), InvocationId: text("invocation_id"), IdempotencyKey: text("idempotency_key"), InputSha256: text("input_sha256")}
+	if f, ok := n["fallback"].(map[string]any); ok {
+		code, _ := f["code"].(string)
+		message, _ := f["message"].(string)
+		out.Fallback = &struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}{Code: code, Message: message}
+	}
+	return out
+}
+
+func diagnosticsToTransport(diagnostics []content.Diagnostic) []transport.Diagnostic {
+	out := []transport.Diagnostic{}
+	for _, d := range diagnostics {
+		out = append(out, transport.Diagnostic{Code: d.Code, Message: d.Message, Retryable: d.Retryable, Plugin: optionalString(d.Plugin), Contribution: optionalString(d.Contribution), InvocationId: optionalString(d.InvocationID)})
+	}
+	return out
 }

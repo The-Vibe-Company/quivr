@@ -414,6 +414,111 @@
     }
   },
   {
+    "name": "quarantined_version",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_2",
+      "version_id": "version_3",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_markdown",
+              "media_type": "text/markdown"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_markdown"
+        ]
+      },
+      "availability": {
+        "state": "quarantined",
+        "is_current": false,
+        "searchable": false
+      },
+      "processing": {
+        "state": "blocked",
+        "phase": "baseline"
+      },
+      "relations": [],
+      "diagnostics": [
+        {
+          "code": "normalizer_invalid_output",
+          "message": "invalid normalizer output: duplicate Part key",
+          "retryable": false,
+          "plugin": "example.markdown",
+          "contribution": "normalizer",
+          "invocation_id": "inv_1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "fallback_version",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_3",
+      "version_id": "version_4",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "# Title\n\nBody"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_markdown_2"
+        ],
+        "normalization": {
+          "plugin_id": "example.markdown",
+          "plugin_version": "1.0.0",
+          "plugin_api": "0.1.0",
+          "contribution": "normalizer",
+          "invocation_id": "inv_2",
+          "idempotency_key": "nk_1",
+          "input_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "fallback": {
+            "code": "normalizer_failed",
+            "message": "The normalizer refused the input with unreadable: cannot read"
+          }
+        }
+      },
+      "availability": {
+        "state": "retrieval_ready",
+        "is_current": true,
+        "searchable": true
+      },
+      "processing": {
+        "state": "idle"
+      },
+      "relations": [],
+      "diagnostics": [
+        {
+          "code": "normalizer_failed",
+          "message": "The normalizer refused the input with unreadable: cannot read",
+          "retryable": false,
+          "plugin": "example.markdown",
+          "contribution": "normalizer",
+          "invocation_id": "inv_2"
+        }
+      ]
+    }
+  },
+  {
     "name": "administrative_operation",
     "schema": "Operation",
     "value": {

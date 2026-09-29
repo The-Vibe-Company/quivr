@@ -255,6 +255,17 @@ func (s ContentStore) Receipt(ctx context.Context, org, id string) (content.Rece
 		r.Availability = &a
 		r.Processing = p
 		code = statusCode
+		if a.State == "quarantined" {
+			diagnostics, err := s.versionDiagnostics(ctx, org, r.VersionID, true, code)
+			if err != nil {
+				return r, err
+			}
+			if len(diagnostics) > 0 {
+				d := diagnostics[0]
+				r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: d.Code, Message: d.Message, Retryable: false})
+				return r, nil
+			}
+		}
 	}
 	if code != "" {
 		r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: code, Message: "Processing requires attention or retry", Retryable: r.Processing.State == "retrying"})
@@ -294,10 +305,41 @@ func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (co
 	if err == nil {
 		err = json.Unmarshal(extensions, &v.Extensions)
 	}
+	var code string
 	if err == nil {
-		v.Availability, v.Processing, _, err = s.VersionStatus(ctx, org, id)
+		v.Availability, v.Processing, code, err = s.VersionStatus(ctx, org, id)
+	}
+	if err == nil {
+		v.Diagnostics, err = s.versionDiagnostics(ctx, org, id, v.Availability.State == "quarantined", code)
 	}
 	return v, notFound(err)
+}
+
+// versionDiagnostics explains a Version: its structured quarantine reason
+// (or, for quarantines that predate it, its code), then the failure a
+// normalizer fallback records and a recorded normalizer conflict.
+func (s ContentStore) versionDiagnostics(ctx context.Context, org, id string, quarantined bool, code string) ([]content.Diagnostic, error) {
+	out := []content.Diagnostic{}
+	if quarantined {
+		var raw []byte
+		if err := s.Pool.QueryRow(ctx, `SELECT quarantine FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&raw); err != nil {
+			return nil, err
+		}
+		d := content.Diagnostic{Code: code, Message: "Processing could not complete safely; the Version is withheld from search."}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &d); err != nil {
+				return nil, err
+			}
+		}
+		if d.Code != "" {
+			out = append(out, d)
+		}
+	}
+	n, found, err := s.Normalized(ctx, org, id)
+	if err != nil || !found || n.Failed() {
+		return out, err
+	}
+	return append(out, n.Diagnostics()...), nil
 }
 func (s ContentStore) Work(ctx context.Context, org, id string) (content.Work, bool, error) {
 	w := content.Work{Organization: org, ReceiptID: id}
@@ -376,7 +418,17 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON)
+			// A quarantined publication is held in the same transaction: no
+			// worker can observe it as materialized and process it.
+			var quarantine []byte
+			processing, code := "queued", ""
+			if q := publication.Quarantine; q != nil {
+				if quarantine, err = json.Marshal(q); err != nil {
+					return err
+				}
+				processing, code = "blocked", q.Code
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
 			if err != nil {
 				return err
 			}
@@ -387,6 +439,11 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 			}
 			if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID}); err != nil {
 				return err
+			}
+			if q := publication.Quarantine; q != nil {
+				if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)}); err != nil {
+					return err
+				}
 			}
 
 		}

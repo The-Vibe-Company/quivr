@@ -65,6 +65,14 @@ class ManifestContent(Model):
 
 
 @dataclass(kw_only=True)
+class NormalizationProvenanceFallback(Model):
+    "Present when the route is optional and the normalizer failed: the published Manifest comes from the built-in text path, and invocation_id names the failed invocation."
+
+    code: str
+    message: str
+
+
+@dataclass(kw_only=True)
 class NormalizationProvenance(Model):
     "Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob."
 
@@ -75,6 +83,7 @@ class NormalizationProvenance(Model):
     invocation_id: str
     idempotency_key: str
     input_sha256: str
+    fallback: NormalizationProvenanceFallback | None = None
 
 
 @dataclass(kw_only=True)
@@ -282,6 +291,7 @@ __all__ = [
     "ManifestContent",
     "ManifestContributions",
     "NormalizationProvenance",
+    "NormalizationProvenanceFallback",
     "NormalizerContribution",
     "NormalizerRequest",
     "NormalizerResponse",

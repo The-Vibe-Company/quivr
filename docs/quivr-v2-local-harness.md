@@ -401,6 +401,22 @@ runs these steps in order:
 3. It stops the plugin, restarts the API and worker, and checks that both stay
    healthy.
 4. It rebuilds the Corpus while the plugin is still down.
+5. With the plugin still down, it ingests another routed Blob and checks for 40
+   seconds that the Receipt stays `pending` with `plugin_unavailable`, while both
+   `/healthz` probes, text ingestion and search keep working. It then restarts the
+   plugin and checks that the pending Version becomes searchable.
+6. It pins the controllable Go test plugin (`internal/plugins/devhost/fakeplugin`,
+   mode `by-record-key`) on a required and an optional `text/*` route, and restarts
+   the API and worker. It then checks each failure class (terminal error, malformed
+   Part, bad checksum, undeclared namespace, oversized response, timeout, exhausted
+   retries): the Version is quarantined with the right diagnostic on the Receipt and
+   the Version read, and a `record.quarantined` change event is published. It also
+   checks that the optional route stays searchable through the built-in text path.
+   Finally it restores the stack's pin.
+
+The PostgreSQL adapter suite also kills the test plugin process in the middle of an
+invocation, restarts it, and checks that the Version ends with exactly one published
+Manifest.
 
 THE-550 must implement the commands, run the integrated journey and record actual
 results against the table above, including failed attempts and missing behavior.

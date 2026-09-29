@@ -114,10 +114,12 @@ An installation can pin one external plugin in its startup configuration
   - `configuration` against the manifest's configuration schema;
   - that the endpoint is an http(s) URL;
   - that every route names a media type the normalizer declares, and that no media
-    type is routed twice.
-  
-  `required` is the only active mode. The plugin itself is never contacted at
-  startup, so an unreachable plugin does not affect `/healthz` or `/readyz`.
+    type is routed twice;
+  - that an `optional` route names a `text/*` media type.
+
+  A route's mode is `required` (the default) or `optional`; see failure handling
+  below. The plugin itself is never contacted at startup, so an unreachable plugin
+  does not affect `/healthz` or `/readyz`.
 - **Acceptance.** A routed Blob is accepted by reference without being read.
   The Version identity is the digest of the submitted input: the verified Blob, its
   checksum and media type, plus the submitted extensions. Replaying the same input
@@ -153,11 +155,50 @@ An installation can pin one external plugin in its startup configuration
   keeps naming the acquirer, and `source_blob_ids` keeps the input Blob. Clients
   cannot submit `normalization`.
 
-While normalization is pending or retrying, the Receipt stays `pending`, and
-`processing` together with its diagnostics shows the reason, for example
-`plugin_unavailable` or `normalizer_invalid_output`. Quarantine, bounded retries and
-optional fallback are not implemented yet. `make dev` pins the `quivr plugin init`
-template for `text/markdown`
+**Failure handling.** A misbehaving or absent plugin never publishes partial output
+and never blocks the API, text ingestion or search.
+
+- **Unavailable plugin** (connection failure, a 5xx answer without an error envelope,
+  or a discovery document that does not match the pinned manifest): the step retries
+  with backoff, without limit, and never quarantines. The Receipt stays `pending` with
+  the retryable diagnostic `plugin_unavailable`, and the Version is published once the
+  plugin is back.
+- **Retryable plugin error or timeout:** retried until the manifest's
+  `retry.max_attempts` (capped at 5) invocations have failed this way, then
+  quarantined with `normalizer_retries_exhausted` or `normalizer_timeout`.
+- **Terminal plugin error or invalid output** (schema, malformed or duplicate Parts, a
+  Blob Part that is not the input Blob, an undeclared extension namespace, too many
+  Parts, a response over the size bound): quarantined at once with
+  `normalizer_failed` or `normalizer_invalid_output`.
+- **Quarantine** publishes the Version with only its submitted input Blob Part, never
+  the plugin's output. Its availability is `quarantined`, and it is announced by a
+  `record.quarantined` change event. The Version read lists the reason in
+  `diagnostics`:
+
+  ```json
+  {"code": "normalizer_invalid_output", "message": "invalid normalizer output: …",
+   "retryable": false, "plugin": "acme.markdown", "contribution": "normalizer",
+   "invocation_id": "inv_…"}
+  ```
+
+  The input reference, the reason and the invocation are kept for a later
+  reprocessing, which is not available yet.
+- **Optional routes** (`"mode": "optional"`, `text/*` only): instead of quarantining,
+  the Version is published through the built-in text path and stays searchable. Its
+  `provenance.normalization` names the failed invocation and carries
+  `fallback: {code, message}`, and the failure is listed in `diagnostics`. An
+  unavailable plugin is still retried rather than bypassed.
+- **Divergent output** for the same idempotency key (`normalizer_conflict`): the first
+  recorded output is kept and published. The conflict is listed in the Version's
+  `diagnostics` with the divergent invocation.
+- **Skipped normalization.** A withdrawn Record, or a Version superseded by a newer
+  accepted revision before it was normalized, never calls the plugin. A withdrawal
+  resolves the Receipt as `conflict`, and a superseded Version is quarantined with
+  `normalization_superseded`. If a route is removed while work is pending, a `text/*`
+  Blob takes the built-in text path; any other media type is quarantined with
+  `normalizer_unrouted`.
+
+`make dev` pins the `quivr plugin init` template for `text/markdown`
 ([SDK guide](../sdks/python/README.md)).
 
 ## Processing: segmentation and embeddings

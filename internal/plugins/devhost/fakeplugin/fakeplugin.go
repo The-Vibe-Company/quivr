@@ -29,7 +29,10 @@ const (
 	// (default), retry, terminal, invalid, large, garbage, exit, unhealthy, and
 	// the broken plugins of tests/plugin-contract: malformed-part, bad-checksum,
 	// undeclared-namespace, nondeterministic, slow, wrong-error-class,
-	// accept-invalid.
+	// accept-invalid; hang, which never answers a normalizer request; and
+	// by-record-key, which takes each request's mode from its Record Key up to
+	// the first "." (so "terminal.1" answers like the terminal mode), letting
+	// one pinned plugin exercise every failure class through the public API.
 	EnvMode   = "QUIVR_FAKE_PLUGIN_MODE"
 	EnvMarker = "QUIVR_FAKE_PLUGIN_MARKER" // file appended with "start\n" on every start
 )
@@ -102,9 +105,13 @@ func serve() error {
 		})
 	})
 	mux.HandleFunc("POST /v0/contributions/normalizer", func(w http.ResponseWriter, r *http.Request) {
+		mode := mode
 		var request struct {
 			InvocationID string `json:"invocation_id"`
-			Input        struct {
+			Source       struct {
+				RecordKey string `json:"record_key"`
+			} `json:"source"`
+			Input struct {
 				BlobID    string `json:"blob_id"`
 				MediaType string `json:"media_type"`
 				SHA256    string `json:"sha256"`
@@ -131,6 +138,9 @@ func serve() error {
 			}
 			write(w, 400, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": false})
 			return
+		}
+		if mode == "by-record-key" {
+			mode, _, _ = strings.Cut(request.Source.RecordKey, ".")
 		}
 		text := "echo " + request.Input.Reference.URL
 		ok := map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
@@ -174,6 +184,8 @@ func serve() error {
 				return
 			}
 			write(w, 200, ok)
+		case "hang":
+			<-r.Context().Done()
 		case "wrong-error-class":
 			write(w, 200, ok)
 		case "retry":

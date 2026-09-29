@@ -24,30 +24,62 @@ import (
 
 const taskQueue = "quivr-content-v0"
 
-// normalizationTerminal is the application error type of a normalization
-// failure that retrying cannot fix.
-const normalizationTerminal = "normalization_terminal"
-
 type Input struct {
 	Organization string
 	ReceiptID    string
+}
+
+// ProcessResult is the result of process-token-windows-v2.
+type ProcessResult struct {
+	// NormalizationRequired reports a routed Blob Version without a recorded
+	// normalization outcome: nothing was published, normalize-external must
+	// run first.
+	NormalizationRequired bool
 }
 
 // normalizationActivityTimeout bounds one external normalization attempt: the
 // engine invocation cap plus discovery and durable recording.
 const normalizationActivityTimeout = normalization.TimeoutCap + time.Minute
 
+// maxNormalizationRounds bounds normalize-then-process rounds of one receipt.
+// normalize-external records an outcome (or leaves one to publication), so a
+// second round only happens when a route or the pin changed in between.
+const maxNormalizationRounds = 3
+
 func materializeWorkflow(ctx workflow.Context, input Input) error {
-	// Histories started before external normalization existed replay without it.
-	if workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 1) == 1 {
-		normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, NonRetryableErrorTypes: []string{normalizationTerminal}}})
+	// Histories started before external normalization existed replay without
+	// it (DefaultVersion). Version 1 ran normalize-external first for every
+	// receipt; version 2 runs it only when publication reports a routed Blob
+	// without a normalization outcome, so other content runs no extra Activity.
+	version := workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 2)
+	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	switch version {
+	case 1:
 		if err := workflow.ExecuteActivity(normalize, "normalize-external", input).Get(ctx, nil); err != nil {
 			return err
 		}
-	}
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
-	if err := workflow.ExecuteActivity(ctx, "process-token-windows", input).Get(ctx, nil); err != nil {
-		return err
+		fallthrough
+	case workflow.DefaultVersion:
+		if err := workflow.ExecuteActivity(ctx, "process-token-windows", input).Get(ctx, nil); err != nil {
+			return err
+		}
+	default:
+		for round := 0; ; round++ {
+			var result ProcessResult
+			if err := workflow.ExecuteActivity(ctx, "process-token-windows-v2", input).Get(ctx, &result); err != nil {
+				return err
+			}
+			if !result.NormalizationRequired {
+				break
+			}
+			if round == maxNormalizationRounds {
+				return errors.New("normalization recorded no outcome")
+			}
+			if err := workflow.ExecuteActivity(normalize, "normalize-external", input).Get(ctx, nil); err != nil {
+				return err
+			}
+		}
 	}
 	return workflow.ExecuteActivity(ctx, "enrich-e5", input).Get(ctx, nil)
 }
@@ -77,13 +109,15 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
 		return service.Run(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "process-token-windows"})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		err := service.Normalize(ctx, in.Organization, in.ReceiptID)
-		var terminal *normalization.TerminalError
-		if errors.As(err, &terminal) {
-			return temporal.NewNonRetryableApplicationError(terminal.Error(), normalizationTerminal, nil)
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) (ProcessResult, error) {
+		err := service.Run(ctx, in.Organization, in.ReceiptID)
+		if errors.Is(err, content.ErrNormalizationPending) {
+			return ProcessResult{NormalizationRequired: true}, nil
 		}
-		return err
+		return ProcessResult{}, err
+	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		return service.Normalize(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "normalize-external"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
 	registerRebuild(w, rebuilder)

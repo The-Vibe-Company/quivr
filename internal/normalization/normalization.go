@@ -1,9 +1,16 @@
 // Package normalization invokes the pinned external normalizer for accepted
 // routed Blobs, between acceptance and publication. It validates the output
-// with the engine's kind "manifest" rules and stores it durably once per
+// with the engine's kind "manifest" rules and records one durable outcome per
 // Record Version, so re-running the invocation converges and publication,
-// rebuilds and retrieval generations read the stored Manifest without ever
+// rebuilds and retrieval generations read the stored outcome without ever
 // calling the plugin again.
+//
+// Failures are classified once (see Normalize): plugin unavailability retries
+// without limit and never quarantines; plugin-declared retryable errors and
+// invocation timeouts retry up to the declared retry budget, capped by the
+// engine; terminal errors, invalid output and an exhausted budget record a
+// failed outcome, which publication turns into a quarantined Version, or,
+// on an optional route, a fallback to the built-in text path.
 package normalization
 
 import (
@@ -14,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
@@ -28,6 +36,10 @@ const Contribution = "normalizer"
 const (
 	// TimeoutCap bounds one invocation: the deadline is min(declared timeout, TimeoutCap).
 	TimeoutCap = 2 * time.Minute
+	// MaxAttemptsCap bounds the declared retry.max_attempts: the number of
+	// invocations of one Version that may end in a retryable error or a
+	// timeout before it is quarantined.
+	MaxAttemptsCap = 5
 	// MaxManifestBytes bounds the stored normalized Manifest, like any canonical
 	// object the engine reads back.
 	MaxManifestBytes = 2 << 20
@@ -35,12 +47,35 @@ const (
 	referenceMargin = time.Minute
 )
 
-// Store keeps the durable normalizer output of each Record Version.
+// Public diagnostic codes of a normalization that could not publish the
+// plugin's output. They are documented in contracts/http/v0/openapi.yaml.
+const (
+	CodeFailed           = "normalizer_failed"
+	CodeInvalidOutput    = "normalizer_invalid_output"
+	CodeTimeout          = "normalizer_timeout"
+	CodeRetriesExhausted = "normalizer_retries_exhausted"
+	CodeInputUnverified  = "input_unverified"
+	CodeRequestInvalid   = "normalizer_request_invalid"
+)
+
+// Receipt progress codes while normalization retries.
+const (
+	codeUnavailable = "plugin_unavailable"
+	codeRetrying    = "normalizer_retrying"
+)
+
+// Store keeps the durable normalization outcome of each Record Version.
 type Store interface {
 	content.NormalizationStore
-	// SaveNormalized records n for a Version unless one is already recorded,
-	// and returns the recorded output.
+	// SaveNormalized records n for a Version unless an outcome is already
+	// recorded, and returns the recorded outcome.
 	SaveNormalized(ctx context.Context, org, versionID string, n content.Normalized) (content.Normalized, error)
+	// RecordConflict records, once, a divergent output for the recorded
+	// idempotency key. It never changes the recorded outcome.
+	RecordConflict(ctx context.Context, org, versionID string, c content.NormalizationConflict) error
+	// CountAttempt durably counts one invocation that ended in a retryable
+	// error or a timeout and returns the Version's count.
+	CountAttempt(ctx context.Context, org, versionID, code, invocationID string) (int, error)
 }
 
 // Signer issues a short-lived signed GET reference to a stored object.
@@ -53,16 +88,6 @@ type Plugin interface {
 	CheckDiscovery(ctx context.Context) error
 	Normalize(ctx context.Context, request []byte, oc plugins.OutputContext) (pluginhttp.Response, error)
 }
-
-// TerminalError is a normalization failure retrying cannot fix. Code is the
-// Receipt diagnostic code.
-type TerminalError struct {
-	Code string
-	Err  error
-}
-
-func (e *TerminalError) Error() string { return e.Code + ": " + e.Err.Error() }
-func (e *TerminalError) Unwrap() error { return e.Err }
 
 // Service runs one normalization per accepted routed Blob Version.
 type Service struct {
@@ -88,9 +113,31 @@ func invocationID() string {
 	return "inv_" + hex.EncodeToString(b[:])
 }
 
+// MaxAttempts is the retry budget of a normalizer: its declared
+// retry.max_attempts, capped by MaxAttemptsCap.
+func MaxAttempts(n *plugins.Normalizer) int {
+	attempts := plugins.DefaultMaxAttempts
+	if n != nil && n.Retry.MaxAttempts > 0 {
+		attempts = n.Retry.MaxAttempts
+	}
+	return min(attempts, MaxAttemptsCap)
+}
+
+// invocation is one normalization attempt of a Version.
+type invocation struct {
+	org, receiptID string
+	work           content.Work
+	optional       bool
+	budget         int
+	provenance     content.Normalization
+}
+
 // Normalize invokes the pinned normalizer for the receipt's routed Blob and
-// records its validated output. It does nothing for other content, for a
-// resolved receipt, or when the Version already has a recorded output.
+// records its outcome. It does nothing for other content, for a resolved
+// receipt, for a Version that already has an outcome, and it never calls the
+// plugin for a withdrawn Record, a superseded Version or a media type that is
+// no longer routed: publication decides those. A nil error means an outcome is
+// recorded or none is needed; an error means the activity must retry.
 func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	work, done, err := s.Content.Repository.Work(ctx, org, receiptID)
 	if err != nil || done {
@@ -103,30 +150,37 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	if _, found, err := s.Store.Normalized(ctx, org, work.VersionID); err != nil || found {
 		return err
 	}
-	retry := func(code string, err error) error {
-		_ = s.Content.Repository.Progress(ctx, org, receiptID, "retrying", code)
-		return fmt.Errorf("%s: %w", code, err)
+	if s.Content.Supersession != nil {
+		withdrawn, superseded, err := s.Content.Supersession.Superseded(ctx, org, work.RecordID, work.VersionID)
+		if err != nil {
+			return s.retry(ctx, org, receiptID, "normalization_store_unavailable", err)
+		}
+		if withdrawn || superseded {
+			return nil
+		}
 	}
-	terminal := func(code string, err error) error {
-		_ = s.Content.Repository.Progress(ctx, org, receiptID, "blocked", code)
-		return &TerminalError{Code: code, Err: err}
-	}
-	if !s.Pin.Routed(c.Content.MediaType) {
-		return terminal("normalizer_unrouted", fmt.Errorf("no normalizer route for %q", c.Content.MediaType))
+	route, routed := s.Pin.Route(c.Content.MediaType)
+	if !routed {
+		return nil
 	}
 	normalizer := s.Pin.Manifest.Contributions.Normalizer
-	if err := s.Content.Repository.Progress(ctx, org, receiptID, "running", ""); err != nil {
-		return err
-	}
+	inv := invocation{org: org, receiptID: receiptID, work: work, optional: route.Mode == plugins.RouteOptional, budget: MaxAttempts(normalizer),
+		provenance: content.Normalization{PluginID: s.Pin.Manifest.ID, PluginVersion: s.Pin.Manifest.Version, PluginAPI: plugins.PluginAPIVersion, Contribution: Contribution, InvocationID: invocationID(),
+			IdempotencyKey: IdempotencyKey(s.Pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
 	input, err := s.Content.BlobSource.VerifiedBlob(ctx, org, c.Content.BlobID)
 	if errors.Is(err, content.ErrUnverifiedBlob) || (err == nil && (input.Blob.SHA256 != c.Content.BlobSHA256 || input.MediaType != c.Content.MediaType)) {
-		return terminal("input_unverified", errors.New("the input Blob is no longer the verified accepted input"))
+		return s.fail(ctx, inv, CodeInputUnverified, "The input Blob is no longer the verified accepted input.", false)
 	}
 	if err != nil {
-		return retry("blob_verification_unavailable", err)
+		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", err)
 	}
 	if err := s.Plugin.CheckDiscovery(ctx); err != nil {
-		return retry("plugin_unavailable", err)
+		return s.retry(ctx, org, receiptID, codeUnavailable, err)
+	}
+	// Running only once the plugin answers: an outage keeps the receipt's
+	// retrying plugin_unavailable diagnostic between attempts.
+	if err := s.Content.Repository.Progress(ctx, org, receiptID, "running", ""); err != nil {
+		return err
 	}
 	timeout := time.Duration(normalizer.TimeoutMS) * time.Millisecond
 	if timeout <= 0 || timeout > TimeoutCap {
@@ -134,13 +188,11 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	}
 	signed, expires, err := s.Signer.PresignGet(ctx, input.Blob.Key, timeout+referenceMargin)
 	if err != nil {
-		return retry("blob_reference_unavailable", err)
+		return s.retry(ctx, org, receiptID, "blob_reference_unavailable", err)
 	}
-	key := IdempotencyKey(s.Pin.Generation(), Contribution, org, work.VersionID, input.Blob.SHA256)
-	provenance := content.Normalization{PluginID: s.Pin.Manifest.ID, PluginVersion: s.Pin.Manifest.Version, PluginAPI: plugins.PluginAPIVersion, Contribution: Contribution, InvocationID: invocationID(), IdempotencyKey: key, InputSHA256: input.Blob.SHA256}
-	request, err := buildRequest(work, input, provenance, signed, expires, s.Pin.Configuration)
+	request, err := buildRequest(work, input, inv.provenance, signed, expires, s.Pin.Configuration)
 	if err != nil {
-		return terminal("normalizer_request_invalid", err)
+		return s.fail(ctx, inv, CodeRequestInvalid, err.Error(), false)
 	}
 	// The plugin output is judged like the Contract Runner does: response
 	// bound, schema, kind "manifest" rules, max_parts and input-only Blob Parts.
@@ -156,21 +208,24 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 		}}
 	invoke, cancel := context.WithTimeout(ctx, timeout)
 	response, err := s.Plugin.Normalize(invoke, request, oc)
+	timedOut := errors.Is(invoke.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	cancel()
 	if outage != nil {
-		return retry("blob_verification_unavailable", outage)
+		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", outage)
 	}
 	var declared *pluginhttp.PluginError
 	var invalid *pluginhttp.InvalidOutput
 	switch {
 	case errors.As(err, &declared) && declared.Retryable:
-		return retry("normalizer_retryable_error", err)
+		return s.counted(ctx, inv, CodeRetriesExhausted, fmt.Sprintf("The normalizer kept answering the retryable error %s: %s", declared.Code, declared.Message))
 	case errors.As(err, &declared):
-		return terminal("normalizer_failed", err)
+		return s.fail(ctx, inv, CodeFailed, fmt.Sprintf("The normalizer refused the input with %s: %s", declared.Code, declared.Message), false)
 	case errors.As(err, &invalid):
-		return terminal("normalizer_invalid_output", err)
+		return s.fail(ctx, inv, CodeInvalidOutput, invalid.Error(), false)
+	case err != nil && timedOut:
+		return s.counted(ctx, inv, CodeTimeout, fmt.Sprintf("The normalizer did not answer within %s.", timeout))
 	case err != nil:
-		return retry("plugin_unavailable", err)
+		return s.retry(ctx, org, receiptID, codeUnavailable, err)
 	}
 	// Extensions, top-level and on Parts, were checked against the namespaces,
 	// schema versions and schemas the pinned manifest declares: Part ones stay
@@ -186,24 +241,111 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	manifest.Kind = "manifest"
 	raw, err := json.Marshal(manifest)
 	if err != nil {
-		return terminal("normalizer_invalid_output", err)
+		return s.fail(ctx, inv, CodeInvalidOutput, err.Error(), false)
 	}
 	if len(raw) > MaxManifestBytes {
-		return terminal("normalizer_invalid_output", fmt.Errorf("the normalized Manifest exceeds %d bytes", MaxManifestBytes))
+		return s.fail(ctx, inv, CodeInvalidOutput, fmt.Sprintf("the normalized Manifest exceeds %d bytes", MaxManifestBytes), false)
 	}
 	blob, err := s.Content.Blobs.Put(ctx, org, raw)
 	if err != nil {
-		return retry("blob_verification_unavailable", err)
+		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", err)
 	}
-	stored, err := s.Store.SaveNormalized(ctx, org, work.VersionID, content.Normalized{Manifest: blob, Provenance: provenance, Extensions: response.Extensions})
+	stored, err := s.Store.SaveNormalized(ctx, org, work.VersionID, content.Normalized{Outcome: content.OutcomeNormalized, Manifest: blob, Provenance: inv.provenance, InputBlobID: input.ID, Extensions: response.Extensions})
 	if err != nil {
-		return retry("normalization_store_unavailable", err)
+		return s.retry(ctx, org, receiptID, "normalization_store_unavailable", err)
 	}
 	// The same logical invocation must converge: divergent output for the same
-	// key is a normalizer_conflict and never overwrites the recorded Manifest,
-	// which is the one the Version publishes.
-	if stored.Provenance.IdempotencyKey == key && stored.Manifest.SHA256 != blob.SHA256 {
-		slog.Warn("normalizer_conflict: divergent output for one idempotency key; the recorded Manifest is kept", "receipt_id", receiptID, "version_id", work.VersionID, "plugin_id", s.Pin.Manifest.ID)
+	// key is a normalizer_conflict. It never overwrites the recorded outcome,
+	// which is the one the Version publishes, and it is recorded so that the
+	// Version read shows it.
+	if stored.Provenance.IdempotencyKey == inv.provenance.IdempotencyKey && stored.Outcome == content.OutcomeNormalized && (stored.Manifest.SHA256 != blob.SHA256 || !sameExtensions(stored.Extensions, response.Extensions)) {
+		slog.Warn("normalizer_conflict: divergent output for one idempotency key; the recorded Manifest is kept", "receipt_id", receiptID, "version_id", work.VersionID, "plugin_id", s.Pin.Manifest.ID, "invocation_id", inv.provenance.InvocationID)
+		if err := s.Store.RecordConflict(ctx, org, work.VersionID, content.NormalizationConflict{InvocationID: inv.provenance.InvocationID, ManifestSHA256: blob.SHA256}); err != nil {
+			return s.retry(ctx, org, receiptID, "normalization_store_unavailable", err)
+		}
+	}
+	return nil
+}
+
+// sameExtensions compares two outputs' top-level extensions by their
+// canonical JSON (map keys are sorted), empty and absent being equal.
+func sameExtensions(a, b content.Extensions) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	x, errA := json.Marshal(a)
+	y, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(x) == string(y)
+}
+
+// maxMessageRunes bounds a stored and published failure message.
+const maxMessageRunes = 1000
+
+// boundedMessage makes a failure message, which may quote the plugin's own
+// error text, storable and publishable: valid UTF-8 without NUL, at most
+// maxMessageRunes characters, never empty.
+func boundedMessage(message string) string {
+	message = strings.ReplaceAll(strings.ToValidUTF8(message, "�"), "\x00", "")
+	if runes := []rune(message); len(runes) > maxMessageRunes {
+		message = string(runes[:maxMessageRunes])
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "The normalizer failed."
+	}
+	return message
+}
+
+// retry reports a failure that retrying can fix; it never records an outcome.
+func (s Service) retry(ctx context.Context, org, receiptID, code string, err error) error {
+	_ = s.Content.Repository.Progress(ctx, org, receiptID, "retrying", code)
+	return fmt.Errorf("%s: %w", code, err)
+}
+
+// counted counts a retryable error or a timeout against the Version's retry
+// budget: the activity retries until the budget is spent, then the failure is
+// recorded with code (retryable, since the same input may succeed later).
+func (s Service) counted(ctx context.Context, inv invocation, code, message string) error {
+	attempts, err := s.Store.CountAttempt(ctx, inv.org, inv.work.VersionID, code, inv.provenance.InvocationID)
+	if err != nil {
+		return s.retry(ctx, inv.org, inv.receiptID, "normalization_store_unavailable", err)
+	}
+	if attempts < inv.budget {
+		return s.retry(ctx, inv.org, inv.receiptID, codeRetrying, fmt.Errorf("attempt %d of %d: %s", attempts, inv.budget, message))
+	}
+	return s.fail(ctx, inv, code, fmt.Sprintf("%s (%d attempts)", message, attempts), true)
+}
+
+// fail records the outcome of a normalization that cannot publish the
+// plugin's output. An optional route falls back to the built-in text path;
+// otherwise, or when the built-in path refuses the bytes too, the failure is
+// recorded and publication quarantines the Version. Nothing from the plugin
+// is stored.
+func (s Service) fail(ctx context.Context, inv invocation, code, message string, retryable bool) error {
+	message = boundedMessage(message)
+	slog.Warn("normalization failed", "code", code, "optional", inv.optional, "receipt_id", inv.receiptID, "version_id", inv.work.VersionID, "plugin_id", inv.provenance.PluginID, "invocation_id", inv.provenance.InvocationID)
+	failure := &content.NormalizationFailure{Code: code, Message: message, Retryable: retryable}
+	outcome := content.Normalized{Outcome: content.OutcomeFailed, Provenance: inv.provenance, InputBlobID: inv.work.Command.Content.BlobID, Failure: failure}
+	if inv.optional {
+		m, err := s.Content.BuiltinManifest(ctx, inv.org, inv.work.Command.Content)
+		switch {
+		case err == nil:
+			raw, err := json.Marshal(m)
+			if err != nil {
+				return err
+			}
+			blob, err := s.Content.Blobs.Put(ctx, inv.org, raw)
+			if err != nil {
+				return s.retry(ctx, inv.org, inv.receiptID, "blob_verification_unavailable", err)
+			}
+			outcome.Outcome = content.OutcomeFallback
+			outcome.Manifest = blob
+			outcome.Provenance.Fallback = &content.NormalizationFallback{Code: code, Message: message}
+		case !content.BuiltinRefusal(err):
+			return s.retry(ctx, inv.org, inv.receiptID, "blob_verification_unavailable", err)
+		}
+	}
+	if _, err := s.Store.SaveNormalized(ctx, inv.org, inv.work.VersionID, outcome); err != nil {
+		return s.retry(ctx, inv.org, inv.receiptID, "normalization_store_unavailable", err)
 	}
 	return nil
 }
