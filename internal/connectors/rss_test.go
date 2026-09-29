@@ -351,12 +351,11 @@ func TestRSSMapsFailuresToHealthClasses(t *testing.T) {
 
 func TestRSSBoundsSizeRedirectsAndTime(t *testing.T) {
 	big := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `<rss version="2.0"><channel><title>`+strings.Repeat("x", 64<<10)+`</title></channel></rss>`)
+		fmt.Fprint(w, `<rss version="2.0"><channel><title>`+strings.Repeat("x", rssMaxResponseSize)+`</title></channel></rss>`)
 	}))
 	defer big.Close()
-	small := RSS{AllowPrivateAddresses: true, MaxBytes: 32 << 10}
 	var typed *Error
-	if _, err := rssFetch(t, small, cfg(big.URL), "", nil); !errors.As(err, &typed) || typed.Code != "response_too_large" {
+	if _, err := rssFetch(t, local(), cfg(big.URL), "", nil); !errors.As(err, &typed) || typed.Code != "response_too_large" {
 		t.Errorf("size: %v", err)
 	}
 	var loop *httptest.Server
@@ -449,7 +448,9 @@ func TestRSSSchemasValidateConfigAndCredential(t *testing.T) {
 			t.Errorf("%s: %v", c, err)
 		}
 	}
-	for _, c := range []string{`{}`, `{"url":"ftp://news.example.org/rss"}`, `{"url":"https://user:pw@news.example.org/rss"}`, `{"url":"https://news.example.org/rss","extra":1}`} {
+	// The generic pattern, additionalProperties and oneOf-branch rows are owned
+	// by TestValidationFailuresPointAtTheOffendingField; these are the RSS rules.
+	for _, c := range []string{`{}`, `{"url":"https://user:pw@news.example.org/rss"}`} {
 		if err := ok(c, ""); !errors.Is(err, ErrInvalidConfig) {
 			t.Errorf("%s accepted: %v", c, err)
 		}
@@ -459,7 +460,7 @@ func TestRSSSchemasValidateConfigAndCredential(t *testing.T) {
 			t.Errorf("%s: %v", s, err)
 		}
 	}
-	for _, s := range []string{`{"username":"u"}`, `{"token":"t","username":"u","password":"p"}`, `{}`} {
+	for _, s := range []string{`{"token":"t","username":"u","password":"p"}`, `{}`} {
 		if err := ok(`{"url":"https://news.example.org/rss"}`, s); !errors.Is(err, ErrInvalidCredential) {
 			t.Errorf("%s accepted: %v", s, err)
 		}

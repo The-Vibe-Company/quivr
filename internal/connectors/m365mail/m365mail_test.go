@@ -20,6 +20,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
 var now = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
@@ -41,17 +42,48 @@ func typed(t *testing.T, err error) *connectors.Error {
 	return e
 }
 
-func TestSchemasAcceptSecretOrCertificateAndBoundTheBackfill(t *testing.T) {
+// createOnly reports whether a creation reached persistence: every refusal
+// comes earlier, from the registry's schemas or CheckConfig.
+type createOnly struct {
+	connectors.Store
+	created int
+}
+
+func (s *createOnly) CreateConnector(_ context.Context, n connectors.NewInstance) (connectors.Instance, error) {
+	s.created++
+	return n.Instance, nil
+}
+
+func TestCredentialIsASecretOrACertificateAndTheBackfillIsBounded(t *testing.T) {
 	registry, err := connectors.NewRegistry(New("https://login.invalid", "https://graph.invalid/v1.0", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := registry.Lookup("m365_mail"); !ok {
-		t.Fatal("kind not registered")
+	sealer, _ := connectors.NewSealer("m365-unit-credential-key-0123456789-not-a-secret")
+	store := &createOnly{}
+	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer}
+	scope := corpus.Scope{Organization: "org_a", Actions: []string{"connectors:write"}, Corpora: []string{"*"}}
+	for _, c := range []struct {
+		name, secret string
+		want         error
+	}{
+		{"client secret", `{"client_id":"c","client_secret":"s"}`, nil},
+		{"certificate and key", `{"client_id":"c","certificate_pem":"cert","private_key_pem":"key"}`, nil},
+		{"secret and certificate", `{"client_id":"c","client_secret":"s","certificate_pem":"cert","private_key_pem":"key"}`, connectors.ErrInvalidCredential},
+		{"certificate without its key", `{"client_id":"c","certificate_pem":"cert"}`, connectors.ErrInvalidCredential},
+		{"neither", `{"client_id":"c"}`, connectors.ErrInvalidCredential},
+	} {
+		before := store.created
+		_, err := service.Create(context.Background(), scope, connectors.CreateInput{Key: c.name, CorpusID: "corpus_1", Namespace: "mail", Kind: Kind,
+			Config: json.RawMessage(`{"tenant_id":"t","mailbox":"m"}`), Secret: json.RawMessage(c.secret)})
+		if !errors.Is(err, c.want) || (c.want == nil) != (store.created == before+1) {
+			t.Errorf("%s: %v (stored %v)", c.name, err, store.created > before)
+		}
 	}
+
 	c := New("", "", nil)
 	if c.DefaultInterval() != time.Minute {
-		t.Fatal("mail polls every minute by default")
+		t.Fatal("mail polls every minute by default (docs/connectors/microsoft-365.md)")
 	}
 	if err = c.CheckConfig(json.RawMessage(cfgJSON), now); err != nil {
 		t.Fatalf("backfill within 7 days: %v", err)
@@ -181,16 +213,22 @@ func TestAMessageMapsToTitleBodyOriginalAndAttachmentParts(t *testing.T) {
 	if !reasons["too_large"] || !reasons["reference_attachment"] {
 		t.Fatalf("skipped %+v", skipped)
 	}
+	// Both extensions validate against their declared schemas once
+	// round-tripped through JSON, as the ingestion path stores them.
+	for _, e := range []content.Extensions{item.Extensions, item.Attachments[1].Extensions} {
+		var exts content.Extensions
+		_ = json.Unmarshal(mustJSON(e), &exts)
+		if err = (content.BuiltinExtensions{}).Validate(context.Background(), exts); err != nil {
+			t.Fatalf("extension schema: %v", err)
+		}
+	}
 }
 
-func TestRevisionIgnoresReadStateButFollowsContent(t *testing.T) {
+// Reading a mail creates no Version: acceptance TestConnectorM365CollectsMailBodiesAndAttachments.
+func TestChangedContentGetsANewRevision(t *testing.T) {
 	msg := message{ID: "m1", InternetMessageID: "<m1@example.org>", Subject: "S", ReceivedDateTime: "2026-09-28T10:00:00Z"}
 	msg.Body.ContentType, msg.Body.Content = "text", "Hello"
 	a := revision(msg, nil)
-	msg.IsRead = true
-	if revision(msg, nil) != a {
-		t.Fatal("reading a mail must not create a new Version")
-	}
 	msg.Body.Content = "Hello, corrected"
 	if revision(msg, nil) == a {
 		t.Fatal("changed content must produce a new revision")
@@ -290,12 +328,19 @@ func TestARotatedSecretGetsItsOwnToken(t *testing.T) {
 	}
 }
 
-func TestCheckpointLinksOutsideTheGraphEndpointAreNotFollowed(t *testing.T) {
+// A stored link outside the configured endpoint is never followed with the
+// bearer token: the round restarts on the endpoint, at most 7 days back.
+func TestAStoredLinkOutsideTheEndpointRestartsWithinSevenDays(t *testing.T) {
 	g := newFakeGraph(t)
 	g.addMessage("m1", "2026-09-28T10:00:00Z")
-	page, err := fetch(t, g.connector(), json.RawMessage(`{"link":"https://attacker.invalid/steal","since":"2026-09-28T09:00:00Z"}`))
+	page, err := fetch(t, g.connector(), json.RawMessage(`{"link":"https://attacker.invalid/steal","since":"2026-01-01T00:00:00Z"}`))
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("%+v %v", page, err)
+	}
+	var cp checkpoint
+	_ = json.Unmarshal(page.Checkpoint, &cp)
+	if cp.Since.Before(now.Add(-MaxBackfill)) {
+		t.Fatalf("restart window %v exceeds 7 days", cp.Since)
 	}
 }
 
@@ -346,29 +391,6 @@ func TestErrorsNeverCarryTheSecretOrToken(t *testing.T) {
 	}
 }
 
-func TestMappedExtensionsValidateAgainstTheDeclaredSchemas(t *testing.T) {
-	g := newFakeGraph(t)
-	g.pageSize = 10
-	g.addMessage("m1", "2026-09-28T10:00:00Z", fileAttachment("a1", "r.pdf", "application/pdf", "%PDF", 0),
-		fileAttachment("a2", "huge.zip", "application/zip", "", 26<<20))
-	page, err := fetch(t, g.connector(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Round-trip through JSON as the ingestion path stores it.
-	var exts content.Extensions
-	raw, _ := json.Marshal(page.Items[0].Extensions)
-	_ = json.Unmarshal(raw, &exts)
-	if err = (content.BuiltinExtensions{}).Validate(context.Background(), exts); err != nil {
-		t.Fatalf("mail extension: %v", err)
-	}
-	raw, _ = json.Marshal(page.Items[0].Attachments[1].Extensions)
-	_ = json.Unmarshal(raw, &exts)
-	if err = (content.BuiltinExtensions{}).Validate(context.Background(), exts); err != nil {
-		t.Fatalf("attachment extension: %v", err)
-	}
-}
-
 func TestHeaderStringsAreCleanedAndRecipientListsBounded(t *testing.T) {
 	msg := message{ID: "m1", InternetMessageID: "<m1@example.org>", Subject: "Alerte\x00 urgente", ReceivedDateTime: "2026-09-28T10:00:00Z"}
 	msg.Body.ContentType, msg.Body.Content = "text", "Hello"
@@ -405,19 +427,6 @@ func TestAnAttachmentSkippedWhileStreamingIsListedWithItsReason(t *testing.T) {
 	skipped := item.Extensions[MailExtension].Data["attachments_skipped"].([]any)
 	if len(skipped) != 1 || skipped[0].(map[string]any)["name"] != "r.pdf" {
 		t.Fatalf("skipped %v", skipped)
-	}
-}
-
-func TestAStoredLinkOutsideTheEndpointRestartsWithinSevenDays(t *testing.T) {
-	g := newFakeGraph(t)
-	page, err := fetch(t, g.connector(), json.RawMessage(`{"link":"https://elsewhere.invalid/x","since":"2026-01-01T00:00:00Z"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cp checkpoint
-	_ = json.Unmarshal(page.Checkpoint, &cp)
-	if cp.Since.Before(now.Add(-MaxBackfill)) {
-		t.Fatalf("restart window %v exceeds 7 days", cp.Since)
 	}
 }
 

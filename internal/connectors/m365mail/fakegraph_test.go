@@ -30,7 +30,6 @@ type fakeGraph struct {
 	tokenErr string // AADSTS code returned by the token endpoint
 	// fail maps a path fragment to the statuses to return, one per request.
 	fail      map[string][]failure
-	requests  []string
 	pageSize  int
 	expireTok bool // next delta with a delta token fails with syncStateNotFound
 }
@@ -91,7 +90,6 @@ func (g *fakeGraph) failNext(fragment string, f ...failure) {
 func (g *fakeGraph) serve(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.requests = append(g.requests, r.URL.Path)
 	for fragment, list := range g.fail {
 		if len(list) > 0 && strings.Contains(r.URL.Path, fragment) {
 			g.fail[fragment] = list[1:]
@@ -210,16 +208,4 @@ func (g *fakeGraph) delta(w http.ResponseWriter, r *http.Request) {
 		out["@odata.deltaLink"] = base + keep.Encode()
 	}
 	_ = json.NewEncoder(w).Encode(out)
-}
-
-func (g *fakeGraph) count(fragment string) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	n := 0
-	for _, p := range g.requests {
-		if strings.Contains(p, fragment) {
-			n++
-		}
-	}
-	return n
 }

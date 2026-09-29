@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 // validate owns the JSON Pointer of a schema failure and the registry's
@@ -50,6 +51,8 @@ func TestRegistryDescribesEnabledKindsFromTheirSchemas(t *testing.T) {
 		t.Fatalf("kinds %+v", kinds)
 	}
 	want := map[string]string{"fixture": CredentialOptional, "rss": CredentialOptional, "x_list": CredentialRequired}
+	// Documented per-kind defaults (docs/connectors/rss.md, x.md).
+	interval := map[string]time.Duration{"fixture": 5 * time.Minute, "rss": 5 * time.Minute, "x_list": 2 * time.Minute}
 	for _, k := range kinds {
 		if k.Title == "" || k.Title == k.Kind || k.Description == "" {
 			t.Errorf("%s: missing title/description annotations", k.Kind)
@@ -57,7 +60,7 @@ func TestRegistryDescribesEnabledKindsFromTheirSchemas(t *testing.T) {
 		if k.Credential != want[k.Kind] || k.CredentialSchema == nil {
 			t.Errorf("%s: credential %q", k.Kind, k.Credential)
 		}
-		if k.DefaultInterval <= 0 || !json.Valid(k.ConfigSchema) {
+		if k.DefaultInterval != interval[k.Kind] || !json.Valid(k.ConfigSchema) {
 			t.Errorf("%s: interval or schema", k.Kind)
 		}
 	}

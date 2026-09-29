@@ -185,14 +185,13 @@ func TestXListConfigAndCredentialAreValidated(t *testing.T) {
 			t.Fatalf("%s: %v", c, err)
 		}
 	}
-	bad := []string{`{}`, `{"list_id":"abc"}`, `{"list_id":"12345678901234567890"}`, `{"list_id":"1","extra":1}`, `{"list_id":"1","recheck_window_seconds":60}`, `{"list_id":"1","recheck_window_seconds":700000}`, `{"list_id":"1","recheck_interval_seconds":10}`}
+	// Missing list_id and a secret without bearer_token are rows of
+	// TestValidationFailuresPointAtTheOffendingField; these are the X rules.
+	bad := []string{`{"list_id":"1","extra":1}`, `{"list_id":"abc"}`, `{"list_id":"12345678901234567890"}`, `{"list_id":"1","recheck_window_seconds":60}`, `{"list_id":"1","recheck_window_seconds":700000}`, `{"list_id":"1","recheck_interval_seconds":10}`}
 	for _, c := range bad {
 		if err := registry.validate("x_list", json.RawMessage(c), nil, "/credential/secret"); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("%s accepted: %v", c, err)
 		}
-	}
-	if err := registry.validate("x_list", json.RawMessage(`{"list_id":"1"}`), json.RawMessage(`{"token":"t"}`), "/credential/secret"); !errors.Is(err, ErrInvalidCredential) {
-		t.Fatalf("credential: %v", err)
 	}
 	check := XList{}
 	now := time.Now()
@@ -206,9 +205,6 @@ func TestXListConfigAndCredentialAreValidated(t *testing.T) {
 	}
 	if check.CheckConfig(json.RawMessage(`{"list_id":"1","backfill_since":"yesterday"}`), now) == nil {
 		t.Fatal("unparseable backfill_since accepted")
-	}
-	if (XList{}).DefaultInterval() != 2*time.Minute {
-		t.Fatal("default interval")
 	}
 }
 
@@ -462,7 +458,7 @@ func TestXListMapsSourceFailuresToHealth(t *testing.T) {
 			t.Fatalf("%s: %+v", errType, e)
 		}
 	}
-	// A refused credential never reaches the source.
+	// A token X refuses is an unauthorized access error.
 	a, runs, _, _ = xAcquirer(t, srv, `{"list_id":"77"}`)
 	sealed, _ := a.Sealer.Seal("org_a", "connector_x", []byte(`{"bearer_token":"wrong"}`))
 	runs.target.Sealed = &sealed

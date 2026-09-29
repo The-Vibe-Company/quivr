@@ -26,7 +26,6 @@ type XList struct {
 	BaseURL string
 	// PageSize is max_results per list request (1-100); default 100.
 	PageSize int
-	Client   *http.Client
 }
 
 // XExtensionNamespace is the Record Version extension holding the X post metadata.
@@ -425,11 +424,7 @@ func (x XList) get(ctx context.Context, token, path string, q url.Values, now ti
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
-	client := x.Client
-	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
-	}
-	resp, err := client.Do(req)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
 		return TransientError("source_unavailable")
 	}

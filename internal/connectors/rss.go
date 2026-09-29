@@ -30,7 +30,7 @@ const RSSExtension = "connector.rss"
 // RSS collection bounds.
 const (
 	rssDefaultTimeout  = 20 * time.Second
-	rssDefaultMaxBytes = 10 << 20
+	rssMaxResponseSize = 10 << 20
 	rssMaxRedirects    = 5
 	rssItemsPerPage    = 250
 	rssMaxFeedItems    = 1000
@@ -57,9 +57,8 @@ type RSS struct {
 	// AllowPrivateAddresses lifts the refusal of loopback, private and
 	// link-local destinations. Local and CI deployments only.
 	AllowPrivateAddresses bool
-	// Timeout and MaxBytes override the request bounds (tests).
-	Timeout  time.Duration
-	MaxBytes int64
+	// Timeout overrides the request timeout (tests).
+	Timeout time.Duration
 	// transport, when set, is the base HTTP transport (tests with TLS servers).
 	transport *http.Transport
 }
@@ -237,10 +236,6 @@ func (r RSS) get(ctx context.Context, rawURL string, cred *rssCredential, cp rss
 	if timeout <= 0 {
 		timeout = rssDefaultTimeout
 	}
-	limit := r.MaxBytes
-	if limit <= 0 {
-		limit = rssDefaultMaxBytes
-	}
 	dialer := &net.Dialer{Timeout: timeout}
 	if !r.AllowPrivateAddresses {
 		dialer.Control = netguard.Control
@@ -305,11 +300,11 @@ func (r RSS) get(ctx context.Context, rawURL string, cred *rssCredential, cp rss
 	case resp.StatusCode < 200 || resp.StatusCode > 299:
 		return nil, nil, SourceError("http_status")
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, rssMaxResponseSize+1))
 	if err != nil {
 		return nil, nil, classifyTransport(ctx, err)
 	}
-	if int64(len(body)) > limit {
+	if len(body) > rssMaxResponseSize {
 		return nil, nil, SourceError("response_too_large")
 	}
 	return resp, body, nil

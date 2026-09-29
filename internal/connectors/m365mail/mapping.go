@@ -47,7 +47,6 @@ type message struct {
 	ReceivedDateTime string    `json:"receivedDateTime"`
 	ConversationID   string    `json:"conversationId"`
 	HasAttachments   bool      `json:"hasAttachments"`
-	IsRead           bool      `json:"isRead"`
 }
 
 type attachment struct {
