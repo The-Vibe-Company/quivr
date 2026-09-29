@@ -93,6 +93,7 @@ scripts/image_context.py
   s_54b80c92daa9cb::t_818d60485ba3da 12-13,47-49,52-58,63,65-67,75,94-96,103-148
 .github/workflows/verify.yml
   s_54b80c92daa9cb::t_d9760acb634dd8 72-73,81-85
+  s_54b80c92daa9cb::t_22d8a20865ea54 79-80
 plugins/x-list/testdata/builtin/backfill_resumes_interrupted_sweep.json
   s_54b80c92daa9cb::t_c415a0691df394 1-292
 plugins/x-list/testdata/builtin/source_failures.json
@@ -128,12 +129,14 @@ plugins/x-list/mappost.go
 scripts/plugin_x_list_fixtures.py
   s_54b80c92daa9cb::t_ec67a69632e6d4 2-5,7,9-34,36-39
   s_54b80c92daa9cb::t_ddf28c9c448c87 6,8,35
+  s_54b80c92daa9cb::t_bd0e6e2e8dabf0 1
 internal/connectors/xlist_capture_test.go
   s_54b80c92daa9cb::t_abee43788c9ff5 1-309
 plugins/x-list/xlist_test.go
   s_54b80c92daa9cb::t_ca55d339572574 1-99
 scripts/plugin_sdk_go.sh
   s_54b80c92daa9cb::t_ddf28c9c448c87 8,33
+  s_54b80c92daa9cb::t_bd0e6e2e8dabf0 11
 plugins/x-list/testdata/builtin/cutover_mid_life.json
   s_54b80c92daa9cb::t_c415a0691df394 1-723,730-741,743-752,754-767,769,771-772,775-778,782-789,791-804,806,808-809,812-815,819-826,828-841,843,845-846,849-852,856-941,943-945,947-961,968-1021,1023-1052,1059-1106,1108-1118,1120-1123
   s_54b80c92daa9cb::t_ba70643facc228 724-729,742,753,768,770,773-774,779-781,790,805,807,810-811,816-818,827,842,844,847-848,853-855,942,946,962-967,1022,1053-1058,1107,1119
