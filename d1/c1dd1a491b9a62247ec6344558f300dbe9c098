@@ -1,0 +1,42 @@
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_76f9acd83aaf72 838-881,2817-2818,2826-2828,2874-2875,2883-2884,2903-2904,2911-2931,2984-2985,2999,3038-3039,3047-3048
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_6f109a54c54d20 309-310
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_309b3f45c28139 672,1036,1039-1050,1069,1071-1080,1349,1351,1355-1361,1364,1369-1385,1388,1393-1400,1473,1539-1546,1920-1922,3017-3075,3466,4906-4944,5448-5450,6530-6548,6550,6553-6554
+  s_54b80c92daa9cb::t_4126b60f91819f 6549,6551-6552,6555
+internal/transport/httpapi/changes.go
+  s_54b80c92daa9cb::t_6f109a54c54d20 70
+contracts/http/v0/checks/validate.py
+  s_54b80c92daa9cb::t_e6ea1a909040f9 71-72
+internal/transport/httpapi/matches.go
+  s_54b80c92daa9cb::t_6f109a54c54d20 164
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_79ecc8573e9a30 1066-1140
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_e6ea1a909040f9 57-58
+internal/transport/httpapi/matches_test.go
+  s_54b80c92daa9cb::t_34d6510bc1132f 20
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_34d6510bc1132f 9-10,89,144-164,375-462
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_6f109a54c54d20 6-7,11,40-41,52-53,87-90,132-133,219,223-322
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_5e61464810b75e 84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1c1dd1a491b9a62247ec6344558f300dbe9c098",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
