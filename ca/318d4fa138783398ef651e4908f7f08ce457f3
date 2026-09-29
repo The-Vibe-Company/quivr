@@ -2,6 +2,7 @@ docs/inventory.toml
   s_54b80c92daa9cb::t_f746afa4b6fd6e 59-76,78-82,84-94,117
   s_54b80c92daa9cb::t_a519d4916cd5ed 12-16,27-28
   s_54b80c92daa9cb::t_6b33ef9daa0c60 83
+  s_54b80c92daa9cb::t_ea5dc374b2bc8d 77
 docs/agents/documentation.md
   s_54b80c92daa9cb::t_98b5132ceab21f 3,21-24
 scripts/test_docs.py
@@ -12,15 +13,18 @@ docs/start/functional.md
   s_54b80c92daa9cb::t_bd3b66f42f5fdd 35
   s_54b80c92daa9cb::t_a519d4916cd5ed 1-19,21-24,29-34,36
   s_54b80c92daa9cb::t_3feab60b619a10 25-28
+  s_54b80c92daa9cb::t_fe867c0795a2fc 20
 docs/what-quivr-can-do.md
   s_54b80c92daa9cb::t_bd31bdde0c178e 13,35-36
   s_54b80c92daa9cb::t_4dfbab7a8f6591 1-12,14-31,37-42,46-48,51-57
   s_54b80c92daa9cb::t_f746afa4b6fd6e 43-45
+  s_54b80c92daa9cb::t_fe867c0795a2fc 32-34,49-50
 docs/start/plugin-author.md
   s_54b80c92daa9cb::t_a519d4916cd5ed 1-20
 Makefile
   s_54b80c92daa9cb::t_40812bf022b171 37-39
   s_54b80c92daa9cb::t_9b6e7b9ae109c6 33-34
+  s_54b80c92daa9cb::t_ea5dc374b2bc8d 2
 README.md
   s_54b80c92daa9cb::t_2ed6bf28981c07 217-228,255-257
 scripts/docs.py
