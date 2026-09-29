@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s tests
 """
 import json
+import pathlib
 import subprocess
 import sys
 import unittest
@@ -85,6 +86,21 @@ class Parse(unittest.TestCase):
         self.assertEqual(tree("NOT (a OR (b AND NOT (c OR (d AND e))))"),
                          {"not": {"any": [T("a"), {"all": [T("b"), {"not": {"any": [T("c"), {"all": [T("d"), T("e")]}]}}]}]}})
         self.assertEqual(tree("((((a))))"), T("a"))
+
+
+class SharedCases(unittest.TestCase):
+    """tests/notation-cases.json is also asserted by the demo's TypeScript port
+    (quivr-search/tests/notation.spec.ts), so both parsers read queries the same way."""
+
+    def test_the_shared_cases(self):
+        cases = json.loads((pathlib.Path(__file__).parent / "notation-cases.json").read_text())
+        for case in cases["valid"]:
+            with self.subTest(query=case["query"]):
+                self.assertEqual(tree(case["query"]), case["match"])
+        for query in cases["invalid"]:
+            with self.subTest(query=query[:40]):
+                with self.assertRaises(NotationError):
+                    parse(query)
 
 
 class Command(unittest.TestCase):

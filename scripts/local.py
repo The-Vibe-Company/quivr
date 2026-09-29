@@ -22,6 +22,8 @@ def alive(pid):
 # Obvious local test signing secret of the capture receiver destination.
 CAPTURE_DESTINATION='local-receiver-capture'
 CAPTURE_SECRET='whsec_'+base64.b64encode(b'local-test-signing-secret-capture').decode()
+# Webhook destination of the browser demo's Organization (scripts/demo.py, THE-734).
+DEMO_DESTINATION='local-receiver-org-d'
 # Shortened webhook retry policy of the local harness, like its other short intervals (dev and verify;
 # deployment defaults: 1s/5m/24h/10s). Verification reports it in report.json. The local receivers listen
 # on loopback, so the harness also lifts the private-destination refusal (deployment default: refused).
@@ -78,7 +80,8 @@ class Stack:
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
             # The browser demo (scripts/demo.py) owns org_d: its connectors keep polling without touching acceptance Organizations.
-            s['demo']:scope('org_d',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write'],['*']),
+            # Its keyword alerts (THE-734) need the monitoring rights and org_d's destination below.
+            s['demo']:scope('org_d',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*']),
             # Change-journal prune acceptance owns org_r, the only Organization the harness prunes.
             s['retention']:scope('org_r',['corpora:read','corpora:write','content:read','content:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
@@ -93,6 +96,8 @@ class Stack:
             # local test values; real deployments reference the signing secret through secret_env.
             destinations={'local-receiver-org-a':dict(organization='org_a',url='http://127.0.0.1:9/local-receiver-org-a',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-a!').decode()),
                           'local-receiver-org-b':dict(organization='org_b',url='http://127.0.0.1:9/local-receiver-org-b',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-b!').decode()),
+                          # The browser demo reads its alerts from Matches; nothing needs to receive these webhooks.
+                          DEMO_DESTINATION:dict(organization='org_d',url='http://127.0.0.1:9/local-receiver-org-d',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-d!').decode()),
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
                           CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
             delivery=DELIVERY_OVERRIDES,

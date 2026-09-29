@@ -50,6 +50,14 @@ items arrive live, chips filter by source and an item opens in the document view
 server builds it from the change feed and catalog (`feed.mjs`; needs `changes:read`).
 Time is when the server saw an item arrive; older items show their RSS date or **Déjà présent**.
 
+### Alertes
+
+The **Alertes** tab (`?view=alerts`) sets [keyword alerts](../docs/keyword-alerts.md) on new
+articles, from RSS or added by hand. Type a query such as `orage AND (grêle OR vent) NOT
+football` and the page shows how it reads it. Each alert lists what it caught, live, with the
+matched words and where; it can be paused, resumed, edited and deleted. `src/lib/notation.ts`
+ports the plugin's parser; `alerts.mjs` explains how alerts are stored and read.
+
 ## Frontend development and checks
 
 With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`.
@@ -74,7 +82,9 @@ make verify-demo
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |
 | `DEMO_SECURE_COOKIE` | Set `true` behind HTTPS; cookie is always HttpOnly and SameSite=Strict |
 | `DEMO_FEED_SUGGESTIONS` | Optional one-click feeds on the Sources tab: a JSON array of `{"title", "url"}` (at most 12; invalid entries are skipped with a warning). Empty by default |
-| `DEMO_STATE_FILE` | Optional file keeping removed sources across restarts; without it they come back as paused after a restart. `make demo` keeps it in the stack directory |
+| `DEMO_STATE_FILE` | Optional file keeping removed sources and paused alerts across restarts. `make demo` keeps it in the stack directory |
+| `QUIVR_DEMO_DESTINATION_ID` | Webhook destination of the demo's Organization; enables the Alertes tab with the `monitoring:read` and `monitoring:write` permissions |
+| `QUIVR_DEMO_ALERTS_EVALUATOR` | Keyword alerts evaluator, `plugin@version`; default `alerts@0.1.0` |
 | `DEMO_FEED_PRIVATE_ORIGINS` | Tests only: comma-separated exact origins (`http://127.0.0.1:8080`) exempt from the private-address refusal, for a local test feed server. Never set it in production |
 
 Example, with placeholder addresses to replace with the feeds you want to offer:

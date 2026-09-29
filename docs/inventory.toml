@@ -101,6 +101,6 @@ excluded = [
 "docs/plugins/write-a-normalizer.md" = 360
 "docs/runnable-guides.md" = 85
 "plugins/pdf-text/README.md" = 120
-"quivr-search/README.md" = 90
+"quivr-search/README.md" = 100
 "sdks/python/README.md" = 125
 "tests/acceptance/README.md" = 50

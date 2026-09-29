@@ -11,7 +11,8 @@ import time
 import urllib.request
 import uuid
 import fake_feeds
-from local import ROOT, Stack, port, run
+import subscription_plugin
+from local import DEMO_DESTINATION, ROOT, Stack, port, run
 
 
 def main():
@@ -35,13 +36,17 @@ def main():
         run(['npm', 'run', 'build', '--prefix', 'quivr-search'])
         if verify:
             run(['quivr-search/node_modules/.bin/playwright', 'install', 'chromium'])
+        # The Alertes tab needs the keyword alerts plugin, whatever QUIVR_ALERTS says.
+        subscription_plugin.select(stack, True)
         stack.up()
         demo_port = port() if verify else int(os.environ.get('DEMO_PORT', '5183'))
         demo_password = secrets.token_hex(24) if verify else os.environ.get('DEMO_PASSWORD', '')
         env = {**os.environ, 'HOST': '127.0.0.1', 'PORT': str(demo_port),
                'QUIVR_API_URL': f"http://127.0.0.1:{stack.state['api_port']}",
                'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
-               'DEMO_SECURE_COOKIE': 'false', 'DEMO_STATE_FILE': str(stack.directory / 'demo-state.json')}
+               'DEMO_SECURE_COOKIE': 'false', 'DEMO_STATE_FILE': str(stack.directory / 'demo-state.json'),
+               # Keyword alerts (THE-734): the pinned alerts plugin and org_d's webhook destination.
+               'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR}
         feeds_url = None
         if verify:
             # Browser tests add feeds from a local test site, never from the internet.

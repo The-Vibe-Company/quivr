@@ -105,6 +105,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
     plugin configuration), and a filter alone is a valid alert;
   - each Match's evidence names the matched terms and the Parts where they matched
     ([guide](docs/keyword-alerts.md)).
+  - the browser demo's **Alertes** tab writes these alerts and shows what each one
+    caught, live ([`quivr-search/`](quivr-search/README.md#alertes)).
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list

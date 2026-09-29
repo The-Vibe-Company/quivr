@@ -20,6 +20,8 @@ import {
   formatRelative,
   type Connector,
 } from "../lib/connectors";
+import { useAlertMarks } from "../lib/alerts";
+import { AlertMarks } from "./alerts/AlertMarks";
 
 type Status = "loading" | "ready" | "error";
 
@@ -47,11 +49,14 @@ export function FeedView({
   onOpen,
   onAdd,
   onSources,
+  onAlert,
   onUnauthorized,
 }: {
   onOpen: (record: string, version: string) => void;
   onAdd: () => void;
   onSources: () => void;
+  /** Opens one keyword alert (THE-734). */
+  onAlert: (id: string) => void;
   onUnauthorized: () => void;
 }) {
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -65,6 +70,8 @@ export function FeedView({
   const [announcement, setAnnouncement] = useState("");
   // Items that arrived while the page was open, for the arrival highlight.
   const fresh = useRef(new Set<string>());
+  // Articles a keyword alert caught carry its name (THE-734).
+  const marks = useAlertMarks(onUnauthorized);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -289,6 +296,7 @@ export function FeedView({
                   <li
                     key={item.record_id + item.version_id}
                     className="feed-item"
+                    data-alerted={marks.has(item.record_id) || undefined}
                     data-fresh={
                       fresh.current.has(item.record_id + item.version_id) ||
                       undefined
@@ -321,6 +329,12 @@ export function FeedView({
                     </h2>
                     {item.excerpt && (
                       <p className="feed-excerpt">{item.excerpt}</p>
+                    )}
+                    {marks.has(item.record_id) && (
+                      <AlertMarks
+                        alerts={marks.get(item.record_id)!}
+                        onAlert={onAlert}
+                      />
                     )}
                   </li>
                 );

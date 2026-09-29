@@ -9,6 +9,8 @@ links and into their titles, so each test run gets its own sources.
 - GET /plain/      HTML page without any feed
 - GET /feeds/news.xml, /feeds/world.xml (RSS 2.0), /feeds/tech.atom (Atom)
 - GET /feeds/ticker.xml  RSS whose every fetch adds one new item
+- GET /feeds/alerts.xml  RSS for the keyword alert tests: every item carries the run
+                         id as a word, one about a storm and one about a flower market
 - GET /_hits?path=/feeds/ticker.xml&run=<id>  {"hits": n} fetches of that feed
 
 All content is synthetic.
@@ -65,6 +67,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if url.path == '/feeds/tech.atom':
             return self.send(200, 'application/atom+xml; charset=utf-8', atom('La Revue exemple — Technologie' + suffix, [
                 ('tech-1', 'Un métier à tisser programmable par cartes perforées', 'Un atelier restaure un métier à tisser et ses cartes perforées.')], run))
+        if url.path == '/feeds/alerts.xml':
+            return self.send(200, 'application/rss+xml; charset=utf-8', rss('La Vigie exemple' + suffix, [
+                ('alert-1', f'Grêle et orage sur le vignoble {run}', f'Un orage de grêle a couché les vignes du coteau ({run}).'),
+                ('alert-2', f'Le marché aux fleurs rouvre {run}', f'Les fleuristes reviennent sur le quai ({run}).')], run))
         if url.path == '/feeds/ticker.xml':
             items = [(f'tick-{n}', f'Bulletin numéro {n}', f'Bulletin automatique numéro {n} du fil continu.') for n in range(max(1, count - 4), count + 1)]
             return self.send(200, 'application/rss+xml; charset=utf-8', rss('Fil continu exemple' + suffix, items, run))

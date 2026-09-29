@@ -6,6 +6,7 @@ import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { feedGuard, parseSuggestions } from "./feeds.mjs";
 import { createFeed } from "./feed.mjs";
+import { alertRoutes } from "./alerts.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -30,16 +31,20 @@ const suggestions = parseSuggestions(
 );
 const stateFile = process.env.DEMO_STATE_FILE;
 let removed = new Set();
+// Keyword alerts (THE-734) created by the demo, oldest first.
+let alertIDs = [];
 if (stateFile)
   try {
-    removed = new Set(JSON.parse(await readFile(stateFile, "utf8")).removed);
+    const saved = JSON.parse(await readFile(stateFile, "utf8"));
+    removed = new Set(saved.removed || []);
+    alertIDs = Array.isArray(saved.alerts) ? saved.alerts : [];
   } catch (error) {
     if (error.code !== "ENOENT")
       console.warn("DEMO_STATE_FILE is unreadable; starting empty.");
   }
-async function saveRemoved() {
+async function saveState() {
   if (!stateFile) return;
-  const data = JSON.stringify({ removed: [...removed] });
+  const data = JSON.stringify({ removed: [...removed], alerts: alertIDs });
   try {
     await writeFile(stateFile + ".tmp", data);
     await rename(stateFile + ".tmp", stateFile);
@@ -49,6 +54,25 @@ async function saveRemoved() {
   }
 }
 let feed;
+const alerts = alertRoutes({
+  upstream: (...args) => upstream(...args),
+  jsonBody: (req) => jsonBody(req),
+  fail: (status, message) => fail(status, message),
+  destination: process.env.QUIVR_DEMO_DESTINATION_ID,
+  evaluator: process.env.QUIVR_DEMO_ALERTS_EVALUATOR,
+  owner: "quivr-web-demo",
+  registry: {
+    ids: () => [...alertIDs],
+    add: async (ids) => {
+      alertIDs = [...alertIDs, ...ids.filter((id) => !alertIDs.includes(id))];
+      await saveState();
+    },
+    remove: async (ids) => {
+      alertIDs = alertIDs.filter((id) => !ids.includes(id));
+      await saveState();
+    },
+  },
+});
 const equal = (a, b) =>
   timingSafeEqual(
     createHash("sha256").update(a).digest(),
@@ -224,7 +248,7 @@ async function removeSource(req, corpus) {
   }
   for (const c of siblings) removed.add(c.connector_id);
   removed.add(current.data.connector_id);
-  await saveRemoved();
+  await saveState();
   return { status: 200, data: { removed: siblings.map((c) => c.connector_id) } };
 }
 const server = http.createServer(async (req, res) => {
@@ -275,7 +299,9 @@ const server = http.createServer(async (req, res) => {
       path.startsWith("/demo/feeds/") ||
       path === "/demo/sources/remove" ||
       path === "/demo/feed" ||
-      path === "/demo/feed/stream"
+      path === "/demo/feed/stream" ||
+      path === "/demo/alerts" ||
+      path.startsWith("/demo/alerts/")
     ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
@@ -295,7 +321,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       let response;
-      if (path === "/demo/feeds/suggestions" && req.method === "GET")
+      if (path.startsWith("/demo/alerts"))
+        response = await alerts(req, path, id);
+      else if (path === "/demo/feeds/suggestions" && req.method === "GET")
         response = { status: 200, data: { items: suggestions } };
       else if (path === "/demo/feeds/discover" && req.method === "POST") {
         const body = await jsonBody(req);

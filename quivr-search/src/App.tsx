@@ -15,11 +15,12 @@ import { DocumentPanel } from "./components/DocumentPanel";
 import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
 import { FeedView } from "./components/FeedView";
+import { AlertsView } from "./components/alerts/AlertsView";
 import { APIError, login, search, session, tokenize } from "./lib/search";
 import type { Mode, SearchResponse } from "./types";
 
 type Auth = "loading" | "login" | "ready" | "error";
-type View = "search" | "veille" | "connectors";
+type View = "search" | "veille" | "connectors" | "alerts";
 function urlState() {
   const p = new URLSearchParams(location.search);
   return {
@@ -27,7 +28,10 @@ function urlState() {
       ? "veille"
       : ["sources", "connectors"].includes(p.get("view") || "")
         ? "connectors"
-        : "search") as View,
+        : p.get("view") === "alerts"
+          ? "alerts"
+          : "search") as View,
+    alert: p.get("alert"),
     query: p.get("q") || "",
     mode: (["hybrid", "lexical", "semantic"].includes(p.get("mode") || "")
       ? p.get("mode")
@@ -57,6 +61,7 @@ export default function App() {
   const [doc, setDoc] = useState(initial.doc);
   const [adding, setAdding] = useState(false);
   const [view, setView] = useState<View>(initial.view);
+  const [alert, setAlert] = useState<string | null>(initial.alert);
   const inputRef = useRef<HTMLInputElement>(null);
   const terms = tokenize(query);
   const connect = useCallback(async () => {
@@ -112,6 +117,8 @@ export default function App() {
     const p = new URLSearchParams();
     if (view === "connectors") p.set("view", "sources");
     if (view === "veille") p.set("view", "veille");
+    if (view === "alerts") p.set("view", "alerts");
+    if (view === "alerts" && alert) p.set("alert", alert);
     if (query) p.set("q", query);
     if (mode !== "hybrid") p.set("mode", mode);
     if (doc) {
@@ -128,10 +135,12 @@ export default function App() {
         ? "Sources — Quivr Search"
         : view === "veille"
           ? "Veille — Quivr Search"
-          : query
-            ? `${query} — Quivr Search`
-            : "Quivr Search";
-  }, [query, mode, doc, view]);
+          : view === "alerts"
+            ? "Alertes — Quivr Search"
+            : query
+              ? `${query} — Quivr Search`
+              : "Quivr Search";
+  }, [query, mode, doc, view, alert]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       document.documentElement.dataset.input = "keyboard";
@@ -322,6 +331,18 @@ export default function App() {
           >
             Sources
           </a>
+          <a
+            href="/?view=alerts"
+            aria-current={view === "alerts" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              setDoc(null);
+              setAlert(null);
+              setView("alerts");
+            }}
+          >
+            Alertes
+          </a>
         </nav>
         <div className="topbar-spacer" />
         <span className="workspace-label">
@@ -343,6 +364,17 @@ export default function App() {
           onOpen={openDoc}
           onAdd={() => setAdding(true)}
           onSources={() => setView("connectors")}
+          onAlert={(id) => {
+            setAlert(id);
+            setView("alerts");
+          }}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : view === "alerts" ? (
+        <AlertsView
+          selected={alert}
+          onSelect={setAlert}
+          onOpen={openDoc}
           onUnauthorized={onUnauthorized}
         />
       ) : (
