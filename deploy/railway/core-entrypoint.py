@@ -32,6 +32,8 @@ PLUGINS = [
 CONNECTORS = [
     {'id': 'rss', 'port': 9920},
     {'id': 'x-list', 'port': 9930},
+    # Microsoft 365 mail on the public cloud endpoints (the plugin's defaults).
+    {'id': 'm365-mail', 'port': 9940},
 ]
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never

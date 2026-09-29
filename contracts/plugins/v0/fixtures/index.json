@@ -661,7 +661,7 @@
       "errors": [],
       "request": "requests/connector/fetch.json",
       "manifest": "manifests/valid/connector.yaml",
-      "description": "Text, a Manifest with an attachment, a withdrawal, declared extensions, more pages."
+      "description": "Text, a Manifest, a withdrawal, declared extensions, more pages."
     },
     {
       "file": "responses/connector/empty.json",
@@ -752,7 +752,7 @@
         "invalid_item"
       ],
       "request": "requests/connector/fetch.json",
-      "manifest": "manifests/valid/connector.yaml",
+      "manifest": "manifests/valid/connector-attachments.yaml",
       "description": "Attachments are Parts of a Manifest, not of text content."
     },
     {
@@ -764,7 +764,7 @@
         "invalid_manifest"
       ],
       "request": "requests/connector/fetch.json",
-      "manifest": "manifests/valid/connector.yaml",
+      "manifest": "manifests/valid/connector-attachments.yaml",
       "description": "An attachment's parent_key names a Part of the item."
     },
     {
@@ -862,6 +862,185 @@
       "valid": false,
       "schema_valid": false,
       "description": "A refused credential is an error envelope with error_class access, not a status."
+    },
+    {
+      "file": "manifests/valid/connector-attachments.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.4 manifest that declares attachments."
+    },
+    {
+      "file": "manifests/invalid/connector-attachments-plugin-api-0.3.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "attachments need a plugin_api range that admits 0.4."
+    },
+    {
+      "file": "manifests/invalid/connector-attachments-too-large.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "attachments.max_bytes can only lower the engine's 25 MiB cap."
+    },
+    {
+      "file": "responses/connector/attachments.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "Attachments, one with its exact size and SHA-256, declared by the manifest."
+    },
+    {
+      "file": "responses/connector/attachments-undeclared.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachments_unsupported"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Attachments need contributions.connector.attachments."
+    },
+    {
+      "file": "responses/connector/attachment-exact-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachment_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "An exact size above attachments.max_bytes."
+    },
+    {
+      "file": "responses/connector/attachment-sha256-without-size.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "sha256 needs the exact size_bytes."
+    },
+    {
+      "file": "requests/connector/describe-attachment.json",
+      "schema": "connector-describe-attachment-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The core asks for one attachment's size and SHA-256."
+    },
+    {
+      "file": "requests/connector/describe-attachment-no-item.json",
+      "schema": "connector-describe-attachment-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A describe request names the item."
+    },
+    {
+      "file": "requests/connector/upload-attachment.json",
+      "schema": "connector-upload-attachment-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The core has the plugin upload one attachment to a presigned PUT."
+    },
+    {
+      "file": "requests/connector/upload-attachment-post.json",
+      "schema": "connector-upload-attachment-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A grant is always a PUT."
+    },
+    {
+      "file": "responses/connector/describe-size.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The exact size and SHA-256.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-skip.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A skip that records the skipped attachment in the item's extensions.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-too-large.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachment_too_large"
+      ],
+      "description": "A size above attachments.max_bytes is answered as a skip.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-undeclared-namespace.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "description": "item_extensions use only declared namespaces.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-size-and-skip.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A describe answer is a size or a skip, not both.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/upload-uploaded.json",
+      "schema": "connector-upload-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The bytes were uploaded."
+    },
+    {
+      "file": "responses/connector/upload-other-status.json",
+      "schema": "connector-upload-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The only upload status is uploaded."
     },
     {
       "file": "protocol/error-connector-access.json",

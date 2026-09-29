@@ -6,7 +6,7 @@ id: certified.connector-valid
 version: 0.1.0
 compatibility:
   engine: ">=0.1.0 <0.2.0"
-  plugin_api: ">=0.3.0 <0.4.0"
+  plugin_api: ">=0.3.0 <0.5.0"
 contributions:
   connector:
     kinds:
@@ -25,6 +25,7 @@ contributions:
                 properties:
                   key: {type: string, minLength: 1}
                   text: {type: string, minLength: 1}
+                  attachment: {type: string, minLength: 1}
             page_size: {type: integer, minimum: 1}
         credential_schema:
           type: object
@@ -36,5 +37,6 @@ contributions:
     timeout_ms: 5000
     limits:
       max_items: 3
+    attachments: {max_bytes: 1024}
 run:
   command: [quivr-fake-plugin]

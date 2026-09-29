@@ -93,6 +93,34 @@ func TestCreateReplaysAndPresigns(t *testing.T) {
 	}
 }
 
+// A grant reuses a verified Blob of the same identity instead of issuing an
+// upload; otherwise it is an upload session that only Confirm verifies.
+func TestGrantReusesAVerifiedBlobOrIssuesAnUpload(t *testing.T) {
+	store := newMemoryStore()
+	transfer := &fakeTransfer{}
+	service := uploads.Service{Store: store, Transfer: transfer}
+	req := uploads.Request{Key: "connector:attachment-1", SizeBytes: 5, SHA256: digest, MediaType: "text/plain"}
+	granted, err := service.Grant(context.Background(), "org_a", req)
+	if err != nil || granted.State != "awaiting_upload" || granted.UploadURL == "" || granted.BlobID != "" {
+		t.Fatalf("first grant %+v %v", granted, err)
+	}
+	confirmed, err := service.Confirm(context.Background(), "org_a", granted.ID)
+	if err != nil || confirmed.State != "verified" {
+		t.Fatalf("confirm %+v %v", confirmed, err)
+	}
+	req.Key = "connector:attachment-2"
+	reused, err := service.Grant(context.Background(), "org_a", req)
+	if err != nil || reused.State != "verified" || reused.BlobID != confirmed.BlobID || reused.UploadURL != "" || transfer.signed != 1 {
+		t.Fatalf("same bytes must reuse the verified Blob: %+v %v (signed %d)", reused, err, transfer.signed)
+	}
+	if other, err := service.Grant(context.Background(), "org_b", req); err != nil || other.State != "awaiting_upload" {
+		t.Fatalf("another Organization's Blob is never reused: %+v %v", other, err)
+	}
+	if _, err := service.Grant(context.Background(), "org_a", uploads.Request{Key: "x", SizeBytes: 5, SHA256: "nope", MediaType: "text/plain"}); !errors.Is(err, uploads.ErrInvalid) {
+		t.Fatalf("invalid expectation: %v", err)
+	}
+}
+
 func TestConfirmVerifiesAndIsRepeatable(t *testing.T) {
 	store := newMemoryStore()
 	service := uploads.Service{Store: store, Transfer: &fakeTransfer{}}

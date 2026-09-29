@@ -13,7 +13,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors/m365mail"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -65,12 +64,9 @@ type Config struct {
 	ConnectorFixtures bool `json:"connector_fixtures"`
 	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
 	ConnectorMinInterval string `json:"connector_min_interval"`
-	// M365 overrides the Microsoft identity and Graph endpoints of the
-	// m365_mail kind (national clouds, local fakes). Instances cannot.
-	M365 struct {
-		LoginEndpoint string `json:"login_endpoint"`
-		GraphEndpoint string `json:"graph_endpoint"`
-	} `json:"m365"`
+	// M365 is refused: the m365_mail kind moved to the connector.m365_mail
+	// plugin, whose pin configuration carries its endpoints.
+	M365 json.RawMessage `json:"m365"`
 	// Plugin pins one external plugin; it is shorthand for a one-item
 	// Plugins list and may be combined with it (it comes first).
 	Plugin *plugins.PinConfig `json:"plugin"`
@@ -150,6 +146,9 @@ func Run(command string) error {
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		return errors.New("invalid configuration JSON")
 	}
+	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
+		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (docs/connectors/microsoft-365.md)")
+	}
 	// Validate the pins before logs move to files, so a refusal is reported on stderr.
 	pins, err := cfg.loadPins(command)
 	if err != nil {
@@ -183,7 +182,7 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil)}
+	var kinds []connectors.Connector
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}
@@ -244,7 +243,7 @@ func Run(command string) error {
 	if pins != nil {
 		contents.Routes = pins
 	}
-	uploadService := uploads.Service{Store: store, Transfer: blobs, Writer: blobs}
+	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
 	encoder := &tokenizer.Server{Config: cfg.Tokenizer}

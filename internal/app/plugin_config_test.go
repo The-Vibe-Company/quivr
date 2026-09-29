@@ -84,11 +84,11 @@ func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
 func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "quivr-plugin.yaml")
-	body := "id: acme.mail\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      m365_mail:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
+	body := "id: acme.mail\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      fixture:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
 	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"database_url": "postgres://127.0.0.1:1/unused", "cursor_key": strings.Repeat("c", 32),
+	raw, _ := json.Marshal(map[string]any{"database_url": "postgres://127.0.0.1:1/unused", "cursor_key": strings.Repeat("c", 32), "connector_fixtures": true,
 		"keys":    map[string]any{strings.Repeat("k", 32): map[string]any{"organization": "org_a", "actions": []string{"connectors:read"}, "corpora": []string{"*"}}},
 		"plugins": []any{map[string]any{"manifest": manifest, "endpoint": "http://127.0.0.1:1"}}})
 	config := filepath.Join(dir, "config.json")
@@ -98,8 +98,22 @@ func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
 	t.Setenv("QUIVR_CONFIG", config)
 	for _, command := range []string{"api", "worker"} {
 		err := Run(command)
-		if err == nil || !strings.Contains(err.Error(), `connector kind "m365_mail"`) || !strings.Contains(err.Error(), "the engine") || !strings.Contains(err.Error(), "plugin acme.mail@1.0.0") {
+		if err == nil || !strings.Contains(err.Error(), `connector kind "fixture"`) || !strings.Contains(err.Error(), "the engine") || !strings.Contains(err.Error(), "plugin acme.mail@1.0.0") {
 			t.Fatalf("%s started with a kind provided twice: %v", command, err)
 		}
+	}
+}
+
+// The m365_mail kind moved to the connector.m365_mail plugin: a deployment
+// that still configures the engine's m365 block refuses to start and says
+// where its endpoints go now.
+func TestTheEngineM365BlockRefusesStartup(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(config, []byte(`{"m365":{"graph_endpoint":"http://127.0.0.1:1/v1.0"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QUIVR_CONFIG", config)
+	if err := Run("worker"); err == nil || !strings.Contains(err.Error(), "connector.m365_mail plugin") {
+		t.Fatalf("started with an m365 block: %v", err)
 	}
 }

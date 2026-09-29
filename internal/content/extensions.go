@@ -38,48 +38,6 @@ func CheckExtensions(ctx context.Context, validator ExtensionValidator, exts Ext
 type BuiltinExtensions struct{}
 
 var declaredExtensionSchemas = map[string]map[string]string{
-	// Source headers of a mail collected by the m365_mail connector.
-	"connector.m365_mail": {
-		"1": `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "$defs": {"address": {"type": "object", "properties": {"name": {"type": "string"}, "address": {"type": "string"}}, "additionalProperties": false}},
-  "properties": {
-    "graph_id": {"type": "string"},
-    "internet_message_id": {"type": "string"},
-    "conversation_id": {"type": "string"},
-    "subject": {"type": "string"},
-    "from": {"$ref": "#/$defs/address"},
-    "sender": {"$ref": "#/$defs/address"},
-    "to": {"type": "array", "items": {"$ref": "#/$defs/address"}},
-    "cc": {"type": "array", "items": {"$ref": "#/$defs/address"}},
-    "to_count": {"type": "integer", "minimum": 0},
-    "cc_count": {"type": "integer", "minimum": 0},
-    "sent_at": {"type": "string"},
-    "received_at": {"type": "string"},
-    "folder": {"type": "string"},
-    "attachments_skipped": {"type": "array", "items": {"type": "object", "required": ["reason"], "properties": {
-      "name": {"type": "string"}, "media_type": {"type": "string"}, "size": {"type": "integer"},
-      "reason": {"enum": ["too_large", "reference_attachment", "empty"]}}, "additionalProperties": false}}
-  },
-  "required": ["graph_id"],
-  "additionalProperties": false
-}`,
-	},
-	// Attachment metadata of a Blob Part collected by the m365_mail connector.
-	"connector.m365_mail.attachment": {
-		"1": `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "name": {"type": "string"},
-    "size": {"type": "integer"},
-    "is_inline": {"type": "boolean"},
-    "attachment_type": {"enum": ["file", "item"]}
-  },
-  "additionalProperties": false
-}`,
-	},
 	"example.editorial": {
 		"1": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",

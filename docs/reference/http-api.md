@@ -2800,7 +2800,7 @@ description: Pin a plugin-provided profile when resolving config. Explicit field
 
 ### `ConnectorKind`
 
-Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it) and m365_mail (Microsoft 365 mailboxes). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 
 Type: string. Pattern `^[a-z][a-z0-9_]{0,31}$`.
 
@@ -2810,7 +2810,7 @@ Type: string. Pattern `^[a-z][a-z0-9_]{0,31}$`.
 ```yaml
 type: string
 pattern: ^[a-z][a-z0-9_]{0,31}$
-description: Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it) and m365_mail (Microsoft 365 mailboxes). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+description: Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 ```
 
 </details>

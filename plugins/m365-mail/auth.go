@@ -1,4 +1,4 @@
-package m365mail
+package main
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
 )
 
 // credential is the decrypted Deposited Credential: a client secret or a
@@ -31,9 +31,9 @@ type credential struct {
 	PrivateKeyPEM  string `json:"private_key_pem"`
 }
 
-func parseCredential(raw json.RawMessage) (credential, error) {
+func parseCredential(raw quivrplugin.Credential) (credential, error) {
 	var c credential
-	if len(raw) == 0 || json.Unmarshal(raw, &c) != nil || c.ClientID == "" || (c.ClientSecret == "") == (c.CertificatePEM == "") {
+	if raw.Decode(&c) != nil || c.ClientID == "" || (c.ClientSecret == "") == (c.CertificatePEM == "") {
 		return c, errors.New("invalid m365_mail credential")
 	}
 	return c, nil
@@ -59,7 +59,7 @@ const tokenMargin = 5 * time.Minute
 
 func (s session) cacheKey() string {
 	h := sha256.New()
-	for _, part := range []string{s.c.login, s.cfg.TenantID, s.cred.ClientID, s.cred.ClientSecret, s.cred.CertificatePEM, s.cred.PrivateKeyPEM} {
+	for _, part := range []string{s.end.Login, s.cfg.TenantID, s.cred.ClientID, s.cred.ClientSecret, s.cred.CertificatePEM, s.cred.PrivateKeyPEM} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
 	}
@@ -67,45 +67,45 @@ func (s session) cacheKey() string {
 }
 
 func (s session) forgetToken() {
-	s.c.tokens.mu.Lock()
-	delete(s.c.tokens.entries, s.cacheKey())
-	s.c.tokens.mu.Unlock()
+	s.m.tokens.mu.Lock()
+	delete(s.m.tokens.entries, s.cacheKey())
+	s.m.tokens.mu.Unlock()
 }
 
 // token returns a cached or newly issued access token.
 func (s session) token(ctx context.Context) (string, error) {
 	key := s.cacheKey()
-	s.c.tokens.mu.Lock()
-	cached, ok := s.c.tokens.entries[key]
-	s.c.tokens.mu.Unlock()
+	s.m.tokens.mu.Lock()
+	cached, ok := s.m.tokens.entries[key]
+	s.m.tokens.mu.Unlock()
 	if ok && time.Now().Before(cached.expires) {
 		return cached.value, nil
 	}
-	tokenURL := s.c.login + "/" + url.PathEscape(s.cfg.TenantID) + "/oauth2/v2.0/token"
+	tokenURL := s.end.Login + "/" + url.PathEscape(s.cfg.TenantID) + "/oauth2/v2.0/token"
 	form := url.Values{"client_id": {s.cred.ClientID}, "scope": {"https://graph.microsoft.com/.default"}, "grant_type": {"client_credentials"}}
 	if s.cred.ClientSecret != "" {
 		form.Set("client_secret", s.cred.ClientSecret)
 	} else {
 		assertion, err := clientAssertion(s.cred, tokenURL, time.Now())
 		if err != nil {
-			return "", connectors.AccessError("invalid_certificate")
+			return "", accessError("invalid_certificate")
 		}
 		form.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
 		form.Set("client_assertion", assertion)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", connectors.SourceError("invalid_config")
+		return "", sourceError("invalid_config")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := s.c.client.Do(req)
+	resp, err := s.m.client.Do(req)
 	if err != nil {
-		return "", connectors.TransientError("token_unavailable")
+		return "", transientError("token_unavailable")
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		return "", &connectors.Error{Class: connectors.ClassTransient, Code: "token_unavailable", RetryAfter: retryAfter(resp.Header.Get("Retry-After"))}
+		return "", transientError("token_unavailable").WithRetryAfter(retryAfter(resp.Header.Get("Retry-After")))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", tokenError(body)
@@ -115,12 +115,12 @@ func (s session) token(ctx context.Context) (string, error) {
 		ExpiresIn   int64  `json:"expires_in"`
 	}
 	if json.Unmarshal(body, &issued) != nil || issued.AccessToken == "" {
-		return "", connectors.TransientError("token_unavailable")
+		return "", transientError("token_unavailable")
 	}
 	expires := time.Now().Add(time.Duration(issued.ExpiresIn)*time.Second - tokenMargin)
-	s.c.tokens.mu.Lock()
-	s.c.tokens.entries[key] = cachedToken{value: issued.AccessToken, expires: expires}
-	s.c.tokens.mu.Unlock()
+	s.m.tokens.mu.Lock()
+	s.m.tokens.entries[key] = cachedToken{value: issued.AccessToken, expires: expires}
+	s.m.tokens.mu.Unlock()
 	return issued.AccessToken, nil
 }
 
@@ -135,18 +135,18 @@ func tokenError(body []byte) error {
 	for _, code := range e.Codes {
 		switch code {
 		case 7000222:
-			return connectors.AccessError("secret_expired")
+			return accessError("secret_expired")
 		case 7000215, 700027, 700024, 7000274:
-			return connectors.AccessError("invalid_client_credential")
+			return accessError("invalid_client_credential")
 		case 700016:
-			return connectors.AccessError("app_not_found")
+			return accessError("app_not_found")
 		case 90002, 90023:
-			return connectors.AccessError("tenant_not_found")
+			return accessError("tenant_not_found")
 		case 65001, 7000112, 700025:
-			return connectors.AccessError("consent_missing")
+			return accessError("consent_missing")
 		}
 	}
-	return connectors.AccessError("token_refused")
+	return accessError("token_refused")
 }
 
 // clientAssertion builds the certificate credential JWT: PS256, x5t#S256

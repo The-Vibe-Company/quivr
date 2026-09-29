@@ -185,14 +185,18 @@ type Extension struct {
 }
 
 // Attachment is a binary Part whose bytes the core asks for later, only when
-// the item is not already accepted. Ref is an opaque handle the plugin
-// understands. Attachments need Manifest content.
+// the item is not already accepted (Plugin API 0.4: declare
+// contributions.connector.attachments and implement AttachmentSource). Ref
+// is an opaque handle the plugin understands. Set SizeBytes and SHA256 when
+// the plugin already holds the exact bytes: the core then asks for no
+// description. Attachments need Manifest content.
 type Attachment struct {
 	Key        string               `json:"key"`
 	ParentKey  string               `json:"parent_key,omitempty"`
 	Role       string               `json:"role"`
 	MediaType  string               `json:"media_type"`
 	SizeBytes  *int64               `json:"size_bytes,omitempty"`
+	SHA256     string               `json:"sha256,omitempty"`
 	Extensions map[string]Extension `json:"extensions,omitempty"`
 	Ref        string               `json:"ref"`
 }

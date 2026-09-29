@@ -46,7 +46,10 @@ without changes. A kind that declares a credential schema needs a credential.
 3. Each answer is checked like the Contract Runner checks it. Its items go
    through the ingestion path, with the Connector Instance as producer, and only
    then does the checkpoint advance. `reads`, `diagnostics` and `notice` feed
-   the usage counters and health as they do for a built-in kind.
+   the usage counters and health as they do for a built-in kind. For an item
+   not accepted yet, each attachment is described by the plugin, uploaded by it
+   to a presigned PUT the core issues, and read back before the item is
+   accepted (Plugin API 0.4). A run starts no new page after 2 minutes.
 
 The Deposited Credential is decrypted in the worker for the run and sent only
 in request bodies. It is never logged, and it is never shown by the API.
@@ -61,6 +64,7 @@ in request bodies. It is never logged, and it is never shown by the API.
 | The error has no class, or a class contradicting `retryable` | `plugin_invalid_error` | The run ends; fix the plugin |
 | The answer breaks the contract | `plugin_invalid_response` | Nothing from the page is accepted |
 | The answer contains the credential | `credential_leak` | Nothing from the page is accepted |
-| An item has attachments | `attachments_unsupported` | Attachments are not supported yet |
+| An item has attachments, but the manifest declares no `attachments` | `attachments_unsupported` | Nothing from the page is accepted |
+| Storage does not hold the granted bytes after an upload | `attachment_unverified` | The item is not accepted; the checkpoint stays |
 
 The operator guide for Connector Instances is [Connector Instances](../connectors/README.md).

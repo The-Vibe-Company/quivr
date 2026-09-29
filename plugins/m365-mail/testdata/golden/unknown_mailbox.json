@@ -1,0 +1,29 @@
+{
+  "name": "unknown_mailbox",
+  "now": "2026-09-28T12:00:00Z",
+  "config": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "mailbox": "monitoring@example.org",
+    "backfill_since": "2026-09-28T09:00:00Z"
+  },
+  "credential": {
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "test-secret-not-real"
+  },
+  "ops": [
+    {
+      "op": "fail",
+      "id": "ErrorInvalidUser",
+      "n": 404
+    },
+    {
+      "op": "fetch",
+      "want": {
+        "error": {
+          "class": "access",
+          "code": "mailbox_not_found"
+        }
+      }
+    }
+  ]
+}

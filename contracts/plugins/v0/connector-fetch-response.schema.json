@@ -110,7 +110,7 @@
         "media_type",
         "ref"
       ],
-      "description": "A binary Part of the item. The core asks for the bytes later through a core-issued upload grant (not part of Plugin API 0.3), only when the item is not already accepted.",
+      "description": "A binary Part of the item. Since Plugin API 0.4, the core asks for the bytes later through describe_attachment and upload_attachment, only when the item is not already accepted; the manifest must declare contributions.connector.attachments.",
       "properties": {
         "key": {
           "type": "string",
@@ -135,7 +135,12 @@
         "size_bytes": {
           "type": "integer",
           "minimum": 0,
-          "description": "Announced size, when the source provides it."
+          "description": "Announced size, when the source provides it; the exact size when sha256 is set."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex SHA-256 of the exact bytes, when the plugin already knows them; the core then skips describe_attachment."
         },
         "extensions": {
           "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions"
@@ -146,6 +151,11 @@
           "maxLength": 1024,
           "description": "Opaque handle the plugin understands, given back when the core asks for the bytes."
         }
+      },
+      "dependentRequired": {
+        "sha256": [
+          "size_bytes"
+        ]
       }
     }
   }

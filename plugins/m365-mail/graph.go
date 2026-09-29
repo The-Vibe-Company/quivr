@@ -1,4 +1,4 @@
-package m365mail
+package main
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 )
 
 var (
@@ -20,7 +18,7 @@ var (
 )
 
 // Retry policy: short Retry-After delays are waited in-run; longer ones end
-// the run and reach the scheduler through connectors.Error.RetryAfter.
+// the run and reach the core scheduler through the error's retry_after.
 const (
 	maxRetries      = 2
 	maxInRunWait    = 10 * time.Second
@@ -38,17 +36,17 @@ func (s session) do(ctx context.Context, link string) (*http.Response, error) {
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 		if err != nil {
-			return nil, connectors.SourceError("invalid_delta_response")
+			return nil, sourceError("invalid_delta_response")
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Prefer", `odata.maxpagesize=`+strconv.Itoa(pageSize)+`, IdType="ImmutableId"`)
-		resp, err := s.c.client.Do(req)
+		resp, err := s.m.client.Do(req)
 		if err != nil {
 			if ctx.Err() != nil || attempt >= maxRetries {
-				return nil, connectors.TransientError("source_unavailable")
+				return nil, transientError("source_unavailable")
 			}
-			if err = s.c.Sleep(ctx, backoff(attempt)); err != nil {
-				return nil, connectors.TransientError("source_unavailable")
+			if err = s.m.Sleep(ctx, backoff(attempt)); err != nil {
+				return nil, transientError("source_unavailable")
 			}
 			continue
 		}
@@ -69,9 +67,9 @@ func (s session) do(ctx context.Context, link string) (*http.Response, error) {
 			attempt--
 			continue
 		case status == http.StatusUnauthorized:
-			return nil, connectors.AccessError("unauthorized")
+			return nil, accessError("unauthorized")
 		case status == http.StatusForbidden:
-			return nil, connectors.AccessError("mailbox_access_denied")
+			return nil, accessError("mailbox_access_denied")
 		case status == http.StatusNotFound:
 			return nil, notFound(code)
 		case status == http.StatusTooManyRequests || status >= 500:
@@ -80,16 +78,16 @@ func (s session) do(ctx context.Context, link string) (*http.Response, error) {
 				errCode = "throttled"
 			}
 			if attempt >= maxRetries || wait > maxInRunWait {
-				return nil, &connectors.Error{Class: connectors.ClassTransient, Code: errCode, RetryAfter: wait}
+				return nil, transientError(errCode).WithRetryAfter(wait)
 			}
 			if wait <= 0 {
 				wait = backoff(attempt)
 			}
-			if err = s.c.Sleep(ctx, wait); err != nil {
-				return nil, connectors.TransientError(errCode)
+			if err = s.m.Sleep(ctx, wait); err != nil {
+				return nil, transientError(errCode)
 			}
 		default:
-			return nil, connectors.SourceError("graph_request_rejected")
+			return nil, sourceError("graph_request_rejected")
 		}
 	}
 }
@@ -98,7 +96,7 @@ func (s session) do(ctx context.Context, link string) (*http.Response, error) {
 func notFound(code string) error {
 	switch code {
 	case "ErrorInvalidUser", "MailboxNotEnabledForRESTAPI", "MailboxNotFound", "ErrorNonExistentMailbox":
-		return connectors.AccessError("mailbox_not_found")
+		return accessError("mailbox_not_found")
 	}
 	return errGone
 }
@@ -110,7 +108,7 @@ func (s session) getJSON(ctx context.Context, link string, out any) error {
 	}
 	defer resp.Body.Close()
 	if json.NewDecoder(io.LimitReader(resp.Body, maxResponseSize)).Decode(out) != nil {
-		return connectors.SourceError("invalid_delta_response")
+		return sourceError("invalid_delta_response")
 	}
 	return nil
 }

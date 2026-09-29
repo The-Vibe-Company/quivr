@@ -1,0 +1,266 @@
+{
+  "name": "attachments",
+  "now": "2026-09-28T12:00:00Z",
+  "config": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "mailbox": "monitoring@example.org",
+    "backfill_since": "2026-09-28T09:00:00Z"
+  },
+  "credential": {
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "test-secret-not-real"
+  },
+  "ops": [
+    {
+      "op": "page_size",
+      "n": 10
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003em1\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-m1",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": true,
+        "id": "m1",
+        "internetMessageId": "\u003cm1@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:00:00Z",
+        "sentDateTime": "2026-09-28T10:00:00Z",
+        "subject": "Subject m1",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      },
+      "attachments": [
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "contentType": "application/pdf; name=report.pdf",
+            "id": "a1",
+            "isInline": false,
+            "lastModifiedDateTime": "2026-09-28T10:00:00Z",
+            "name": "report.pdf",
+            "size": 15
+          },
+          "bytes_b64": "JVBERi0xLjcgcmVwb3J0"
+        },
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "contentType": "application/zip",
+            "id": "a2",
+            "isInline": false,
+            "lastModifiedDateTime": "2026-09-28T10:00:00Z",
+            "name": "huge.zip",
+            "size": 27262976
+          },
+          "bytes_b64": ""
+        },
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.referenceAttachment",
+            "id": "a3",
+            "name": "link",
+            "size": 10
+          },
+          "bytes_b64": ""
+        },
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.itemAttachment",
+            "contentType": "",
+            "id": "a4",
+            "isInline": true,
+            "lastModifiedDateTime": "2026-09-28T10:00:00Z",
+            "name": "forwarded",
+            "size": 12
+          },
+          "bytes_b64": "U3ViamVjdDogZncK"
+        },
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "contentType": "text/plain",
+            "id": "a5",
+            "isInline": false,
+            "lastModifiedDateTime": "2026-09-28T10:00:00Z",
+            "name": "empty.txt",
+            "size": 0
+          },
+          "bytes_b64": ""
+        },
+        {
+          "meta": {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "contentType": "not a media type",
+            "id": "a6",
+            "isInline": false,
+            "lastModifiedDateTime": "2026-09-28T10:00:00Z",
+            "name": "note",
+            "size": 10
+          },
+          "bytes_b64": "bm90ZSBieXRlcw=="
+        }
+      ]
+    },
+    {
+      "op": "fetch",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003cm1@example.org\u003e",
+            "revision": "sha256:19d31f1dc1d44b9dc78ae09a4fb0b835f45722e215155f6f4168552c978ba437",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject m1"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello m1"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [
+                    {
+                      "media_type": "application/zip",
+                      "name": "huge.zip",
+                      "reason": "too_large",
+                      "size": 27262976
+                    },
+                    {
+                      "media_type": "application/octet-stream",
+                      "name": "link",
+                      "reason": "reference_attachment",
+                      "size": 10
+                    },
+                    {
+                      "media_type": "text/plain",
+                      "name": "empty.txt",
+                      "reason": "empty",
+                      "size": 0
+                    }
+                  ],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-m1",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "m1",
+                  "internet_message_id": "\u003cm1@example.org\u003e",
+                  "received_at": "2026-09-28T10:00:00Z",
+                  "sent_at": "2026-09-28T10:00:00Z",
+                  "subject": "Subject m1",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "653964f62bff952c77ad6a9f53e8a0968d7bcef69aedbb0c24e9d24539a35452"
+              },
+              {
+                "key": "attachment-01",
+                "role": "attachment",
+                "media_type": "application/pdf",
+                "extensions": {
+                  "connector.m365_mail.attachment": {
+                    "schema_version": "1",
+                    "data": {
+                      "attachment_type": "file",
+                      "is_inline": false,
+                      "name": "report.pdf",
+                      "size": 15
+                    }
+                  }
+                },
+                "size": 15,
+                "sha256": "336276927fc27d28c262f08eae5511abe9336bfb08fdeca8c7845c8a69d2e5e7"
+              },
+              {
+                "key": "attachment-04",
+                "role": "attachment",
+                "media_type": "message/rfc822",
+                "extensions": {
+                  "connector.m365_mail.attachment": {
+                    "schema_version": "1",
+                    "data": {
+                      "attachment_type": "item",
+                      "is_inline": true,
+                      "name": "forwarded",
+                      "size": 12
+                    }
+                  }
+                },
+                "size": 12,
+                "sha256": "34cff3dc598ec18ecf0d5d35474842d5c683cd17163c37684e60967ab1417ecd"
+              },
+              {
+                "key": "attachment-06",
+                "role": "attachment",
+                "media_type": "application/octet-stream",
+                "extensions": {
+                  "connector.m365_mail.attachment": {
+                    "schema_version": "1",
+                    "data": {
+                      "attachment_type": "file",
+                      "is_inline": false,
+                      "name": "note",
+                      "size": 10
+                    }
+                  }
+                },
+                "size": 10,
+                "sha256": "8634ee6a6b6d5a8c082f1c43607b68a3708456b6137ca91726affd6d2fc921ce"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?%24deltatoken=1\u0026%24filter=receivedDateTime+ge+2026-09-28T09%3A00%3A00Z",
+          "since": "2026-09-28T09:00:00Z"
+        }
+      }
+    }
+  ]
+}

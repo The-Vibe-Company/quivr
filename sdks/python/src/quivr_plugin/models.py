@@ -250,12 +250,21 @@ class ConnectorLimits(Model):
 
 
 @dataclass(kw_only=True)
+class ConnectorContributionAttachments(Model):
+    "Since Plugin API 0.4: items may carry attachments. The core asks for each attachment's size and SHA-256 (describe_attachment), issues an upload grant and has the plugin upload the bytes against it (upload_attachment). Without this block a page with attachments is refused."
+
+    max_bytes: int | None = None
+    timeout_ms: int | None = None
+
+
+@dataclass(kw_only=True)
 class ConnectorContribution(Model):
     "Source collectors, since Plugin API 0.3: fetch pages of new or changed items from a source after an opaque checkpoint. The core keeps Connector Instances, schedules, checkpoints, credentials and health."
 
     kinds: dict[str, ConnectorKind]
     timeout_ms: int | None = None
     limits: ConnectorLimits | None = None
+    attachments: ConnectorContributionAttachments | None = None
 
 
 @dataclass(kw_only=True)
@@ -489,13 +498,14 @@ class ConnectorFetchRequest(Model):
 
 @dataclass(kw_only=True)
 class ConnectorAttachment(Model):
-    "A binary Part of the item. The core asks for the bytes later through a core-issued upload grant (not part of Plugin API 0.3), only when the item is not already accepted."
+    "A binary Part of the item. Since Plugin API 0.4, the core asks for the bytes later through describe_attachment and upload_attachment, only when the item is not already accepted; the manifest must declare contributions.connector.attachments."
 
     key: str
     parent_key: str | None = None
     role: str
     media_type: str
     size_bytes: int | None = None
+    sha256: str | None = None
     extensions: dict[str, ExtensionEntry] | None = None
     ref: str
 
@@ -597,15 +607,98 @@ class ConnectorFixture(Model):
     expect: ConnectorExpectation | None = None
 
 
+@dataclass(kw_only=True)
+class AttachmentItem(Model):
+    "The item the attachment belongs to, as the plugin returned it."
+
+    record_key: str
+    revision: str | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorDescribeAttachmentRequest(Model):
+    "POST /v0/contributions/connector/describe_attachment, since Plugin API 0.4. The core asks for the exact size and SHA-256 of one attachment of an item it has not accepted yet, before it issues an upload grant. The plugin reads the bytes from the source, at most attachments.max_bytes, or answers a skip."
+
+    invocation_id: str
+    contribution: Literal["connector"] = "connector"
+    organization_id: str
+    configuration: dict[str, Any]
+    connector: ConnectorInstanceRef
+    credential: Any
+    now: str
+    item: AttachmentItem
+    attachment: ConnectorAttachment
+
+
+@dataclass(kw_only=True)
+class ConnectorDescribeAttachmentResponse(Model):
+    "200 body of POST /v0/contributions/connector/describe_attachment: the exact size and SHA-256 of the bytes the plugin will upload, or a skip that leaves the attachment out of the item."
+
+    size_bytes: int | None = None
+    sha256: str | None = None
+    skip: str | None = None
+    item_extensions: dict[str, ExtensionEntry] | None = None
+
+
+@dataclass(kw_only=True)
+class UploadAttachmentItem(Model):
+    "The item the attachment belongs to, as the plugin returned it."
+
+    record_key: str
+    revision: str | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
+
+
+@dataclass(kw_only=True)
+class UploadGrant(Model):
+    "One presigned PUT for one storage object. Storage refuses any other length, checksum or media type. Send exactly these headers, never log the URL or the headers, and do not reuse the grant."
+
+    url: str
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str]
+    size_bytes: int
+    sha256: str
+    media_type: str
+    expires_at: str
+
+
+@dataclass(kw_only=True)
+class ConnectorUploadAttachmentRequest(Model):
+    "POST /v0/contributions/connector/upload_attachment, since Plugin API 0.4. The plugin uploads the bytes it described to the grant, then answers. The core verifies the stored bytes before it accepts the item. Bytes that changed at the source since describe_attachment are a source error attachment_changed; the core describes the attachment again once."
+
+    invocation_id: str
+    contribution: Literal["connector"] = "connector"
+    organization_id: str
+    configuration: dict[str, Any]
+    connector: ConnectorInstanceRef
+    credential: Any
+    now: str
+    item: UploadAttachmentItem
+    attachment: ConnectorAttachment
+    grant: UploadGrant
+
+
+@dataclass(kw_only=True)
+class ConnectorUploadAttachmentResponse(Model):
+    "200 body of POST /v0/contributions/connector/upload_attachment: the bytes were uploaded to the grant."
+
+    status: Literal["uploaded"] = "uploaded"
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
+    "AttachmentItem",
     "BlobContent",
     "ConnectorAttachment",
     "ConnectorContribution",
+    "ConnectorContributionAttachments",
     "ConnectorCredentialRequest",
     "ConnectorCredentialResponse",
+    "ConnectorDescribeAttachmentRequest",
+    "ConnectorDescribeAttachmentResponse",
     "ConnectorExpectation",
     "ConnectorExpectationCheckCredential",
     "ConnectorFetchRequest",
@@ -616,6 +709,8 @@ __all__ = [
     "ConnectorKind",
     "ConnectorLimits",
     "ConnectorOrigin",
+    "ConnectorUploadAttachmentRequest",
+    "ConnectorUploadAttachmentResponse",
     "Decision",
     "Discovery",
     "ErrorEnvelope",
@@ -666,4 +761,6 @@ __all__ = [
     "SubscriptionRequest",
     "SubscriptionResponse",
     "TextContent",
+    "UploadAttachmentItem",
+    "UploadGrant",
 ]

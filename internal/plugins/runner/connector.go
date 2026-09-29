@@ -146,6 +146,15 @@ func orAny(code string) string {
 	return code
 }
 
+type connectorRoute int
+
+const (
+	routeFetch connectorRoute = iota
+	routeCheckCredential
+	routeDescribe
+	routeUpload
+)
+
 type fetchedItem struct {
 	key, revision string
 	content       json.RawMessage
@@ -165,6 +174,7 @@ func (r *run) invokeConnector(ctx context.Context, cr connectorRun) {
 	var reads int64
 	var pages [][]string
 	var fetched []fetchedItem
+	var attachments []fetchedAttachment
 	complete := false
 	for page := 0; page < run.MaxPages; page++ {
 		result, problem := r.callFetch(ctx, run.FetchRequest(checkpoint, page, reads, fmt.Sprintf("page-%d", page)))
@@ -192,6 +202,13 @@ func (r *run) invokeConnector(ctx context.Context, cr connectorRun) {
 		for _, item := range answer.Items {
 			keys = append(keys, item.RecordKey)
 			fetched = append(fetched, fetchedItem{key: item.RecordKey, revision: item.Revision, content: item.Content})
+			var extensions json.RawMessage
+			if len(item.Extensions) > 0 {
+				extensions, _ = json.Marshal(item.Extensions)
+			}
+			for _, at := range item.Attachments {
+				attachments = append(attachments, fetchedAttachment{item: devhost.AttachmentItem{RecordKey: item.RecordKey, Revision: item.Revision, Extensions: extensions}, at: at})
+			}
 		}
 		pages = append(pages, keys)
 		reads += answer.Reads
@@ -225,6 +242,9 @@ func (r *run) invokeConnector(ctx context.Context, cr connectorRun) {
 		}
 	}
 	r.add(check, started)
+	if len(check.Issues) == 0 {
+		r.attachmentsCheck(ctx, cr, attachments)
+	}
 
 	started = time.Now()
 	switch {
@@ -319,14 +339,14 @@ func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.Connect
 	}
 	type connectorCase struct {
 		invalidCase
-		fetch bool
+		route connectorRoute
 	}
 	cases := []connectorCase{
-		{invalidCase{label: "fetch/non-json-body", reason: "the body is not JSON", body: []byte(`{"invocation_id": `)}, true},
-		{invalidCase{label: "fetch/unknown-field", reason: "the request carries an unknown top-level field", body: withRequest(valid, func(m map[string]any) { m["unexpected_field"] = true })}, true},
-		{invalidCase{label: "fetch/unknown-kind", reason: "the kind is not declared", body: withRequest(valid, unknownKind)}, true},
-		{invalidCase{label: "check_credential/non-json-body", reason: "the body is not JSON", body: []byte(`{"invocation_id": `)}, false},
-		{invalidCase{label: "check_credential/unknown-kind", reason: "the kind is not declared", body: withRequest(credential, unknownKind)}, false},
+		{invalidCase{label: "fetch/non-json-body", reason: "the body is not JSON", body: []byte(`{"invocation_id": `)}, routeFetch},
+		{invalidCase{label: "fetch/unknown-field", reason: "the request carries an unknown top-level field", body: withRequest(valid, func(m map[string]any) { m["unexpected_field"] = true })}, routeFetch},
+		{invalidCase{label: "fetch/unknown-kind", reason: "the kind is not declared", body: withRequest(valid, unknownKind)}, routeFetch},
+		{invalidCase{label: "check_credential/non-json-body", reason: "the body is not JSON", body: []byte(`{"invocation_id": `)}, routeCheckCredential},
+		{invalidCase{label: "check_credential/unknown-kind", reason: "the kind is not declared", body: withRequest(credential, unknownKind)}, routeCheckCredential},
 	}
 	names, _ := fs.Glob(contracts.PluginFixtures(), "requests/connector/*.json")
 	sort.Strings(names)
@@ -335,14 +355,22 @@ func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.Connect
 		if err != nil {
 			continue
 		}
-		schema, fetch := "connector-fetch-request.schema.json", true
-		if strings.HasPrefix(name, "requests/connector/check-credential") {
-			schema, fetch = "connector-check-credential-request.schema.json", false
+		schema, route := "connector-fetch-request.schema.json", routeFetch
+		switch {
+		case strings.HasPrefix(name, "requests/connector/check-credential"):
+			schema, route = "connector-check-credential-request.schema.json", routeCheckCredential
+		case strings.HasPrefix(name, "requests/connector/describe-attachment"):
+			schema, route = "connector-describe-attachment-request.schema.json", routeDescribe
+		case strings.HasPrefix(name, "requests/connector/upload-attachment"):
+			schema, route = "connector-upload-attachment-request.schema.json", routeUpload
+		}
+		if route >= routeDescribe && plugins.AttachmentMaxBytes(r.m) == 0 {
+			continue // a plugin without attachments does not serve those routes
 		}
 		if len(plugins.ValidateDocument(schema, raw)) == 0 {
 			continue // only the contract's invalid requests
 		}
-		cases = append(cases, connectorCase{invalidCase{label: normativeFixturePrefix + name, reason: "the normative fixture violates " + schema, body: raw}, fetch})
+		cases = append(cases, connectorCase{invalidCase{label: normativeFixturePrefix + name, reason: "the normative fixture violates " + schema, body: raw}, route})
 	}
 	for _, c := range cases {
 		started := time.Now()
@@ -350,10 +378,21 @@ func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.Connect
 			Title: "an invalid request is refused with a terminal error envelope (" + c.reason + ")"}
 		var result *devhost.Result
 		var problem *plugins.Issue
-		if c.fetch {
+		switch c.route {
+		case routeFetch:
 			result, problem = r.callFetch(ctx, c.body)
-		} else {
+		case routeCheckCredential:
 			result, problem = r.callCheckCredential(ctx, c.body)
+		default:
+			callCtx, cancel := context.WithTimeout(ctx, time.Duration(plugins.AttachmentTimeoutMS(r.m))*time.Millisecond)
+			var err error
+			if c.route == routeDescribe {
+				result, err = devhost.InvokeDescribeAttachment(callCtx, r.baseURL, c.body, func([]byte) []plugins.Issue { return nil })
+			} else {
+				result, err = devhost.InvokeUploadAttachment(callCtx, r.baseURL, c.body)
+			}
+			result, problem = r.connectorResult(ctx, callCtx, result, err)
+			cancel()
 		}
 		check.Issues = judgeRefusal(result, problem, c.reason)
 		r.add(check, started)

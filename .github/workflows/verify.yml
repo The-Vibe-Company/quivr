@@ -83,6 +83,13 @@ jobs:
           path: .scratch/plugin-sdk/x-list-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m365-mail-contract-report
+          path: .scratch/plugin-sdk/m365-mail-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
       # The public contracts this commit checked.
       - uses: actions/upload-artifact@v4
         if: always()

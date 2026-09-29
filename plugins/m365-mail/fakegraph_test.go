@@ -1,4 +1,4 @@
-package m365mail
+package main
 
 import (
 	"context"
@@ -22,7 +22,10 @@ type fakeGraph struct {
 	mu       sync.Mutex
 	messages []map[string]any
 	removed  []string
-	files    map[string]map[string]fakeAttachment // message id -> attachment id
+	// partial lists ids the next delta returns without their properties, as
+	// Graph does for a changed message; the connector re-reads them.
+	partial []string
+	files   map[string]map[string]fakeAttachment // message id -> attachment id
 	// tokens counts token requests; forms keeps the last token form.
 	tokens   int
 	form     url.Values
@@ -52,10 +55,15 @@ func newFakeGraph(t *testing.T) *fakeGraph {
 	return g
 }
 
-func (g *fakeGraph) connector() *Connector {
-	c := New(g.server.URL, g.server.URL+"/v1.0", g.server.Client())
+func (g *fakeGraph) connector() *Mail {
+	c := New(g.server.Client())
 	c.Sleep = func(context.Context, time.Duration) error { return nil }
 	return c
+}
+
+// configuration pins the plugin to this fake.
+func (g *fakeGraph) configuration() map[string]any {
+	return map[string]any{"login_endpoint": g.server.URL, "graph_endpoint": g.server.URL + "/v1.0"}
 }
 
 func (g *fakeGraph) addMessage(id, received string, attachments ...fakeAttachment) {
@@ -72,6 +80,18 @@ func (g *fakeGraph) addMessage(id, received string, attachments ...fakeAttachmen
 		files[a.meta["id"].(string)] = a
 	}
 	g.files[id] = files
+}
+
+// addRaw adds a message exactly as Graph returns it.
+func (g *fakeGraph) addRaw(msg map[string]any, attachments ...fakeAttachment) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.messages = append(g.messages, msg)
+	files := map[string]fakeAttachment{}
+	for _, a := range attachments {
+		files[a.meta["id"].(string)] = a
+	}
+	g.files[msg["id"].(string)] = files
 }
 
 func fileAttachment(id, name, contentType, bytes string, size int) fakeAttachment {
@@ -122,6 +142,17 @@ func (g *fakeGraph) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(a.bytes))
+	case strings.Contains(r.URL.Path, "/messages/") && !strings.Contains(r.URL.Path, "/attachments"):
+		parts := strings.Split(r.URL.Path, "/")
+		id := parts[len(parts)-1]
+		for _, m := range g.messages {
+			if m["id"] == id {
+				_ = json.NewEncoder(w).Encode(m)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "ErrorItemNotFound"}})
 	case strings.HasSuffix(r.URL.Path, "/attachments"):
 		parts := strings.Split(r.URL.Path, "/")
 		msg := parts[len(parts)-2]
@@ -199,6 +230,10 @@ func (g *fakeGraph) delta(w http.ResponseWriter, r *http.Request) {
 		value = append(value, map[string]any{"id": id, "@removed": map[string]any{"reason": "deleted"}})
 	}
 	g.removed = nil
+	for _, id := range g.partial {
+		value = append(value, map[string]any{"id": id})
+	}
+	g.partial = nil
 	out := map[string]any{"value": value}
 	if i < len(g.messages) {
 		keep.Set("$skiptoken", strconv.Itoa(i))

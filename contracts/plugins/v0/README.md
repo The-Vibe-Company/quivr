@@ -40,7 +40,7 @@ equivalent copies under other names out of both contracts.
 
 ## Contributions
 
-Plugin API 0.3 accepts three Contributions, and a manifest declares at least one:
+Plugin API 0.4 accepts three Contributions, and a manifest declares at least one:
 
 | Contribution | Since | Purpose |
 | --- | --- | --- |
@@ -55,9 +55,12 @@ are **reserved**. A manifest that declares them is rejected
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.3.1` and still serves every `0.1`, `0.2` and `0.3.0` plugin unchanged: a
+implements `0.4.0` and still serves every `0.1`, `0.2` and `0.3` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0` or `0.3.1`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1` or `0.4.0`), and the engine speaks the highest one the range admits.
+A manifest field introduced by a later minor version needs a range that admits
+it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
+is `incompatible_plugin_api` at that field.
 A patch version only adds optional fields; a plugin that validates requests
 strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
@@ -81,6 +84,8 @@ version.
 | `POST /v0/contributions/subscription` | 200 subscription response | Decide a batch of evaluations for one Record Version |
 | `POST /v0/contributions/connector/fetch` | 200 fetch response | Fetch one page of items after a checkpoint |
 | `POST /v0/contributions/connector/check_credential` | 200 `{"status":"ok"}` | Check that the source accepts a credential |
+| `POST /v0/contributions/connector/describe_attachment` | 200 size and SHA-256, or a skip | Describe one attachment's bytes (since 0.4, with `attachments`) |
+| `POST /v0/contributions/connector/upload_attachment` | 200 `{"status":"uploaded"}` | Upload one attachment to a core grant (since 0.4, with `attachments`) |
 
 - **Errors.** Every non-2xx response carries the error envelope
   `{code, message, retryable}`. `retryable: true` asks the engine to retry
@@ -329,8 +334,8 @@ refuses a Saved Query of any other kind with `invalid_expression`.
 A source collector (since Plugin API 0.3). The core keeps everything durable:
 Connector Instances, schedules and leases, Acquisition Checkpoints, Deposited
 Credentials and Connector Health. The plugin only fetches, and is stateless
-between invocations. Plugin API 0.3 defines the contract; the core starts
-calling connector plugins in a later release.
+between invocations. Pinned connector plugins provide Connector Instance kinds
+([Run a connector plugin](../../../docs/plugins/run-a-connector-plugin.md)).
 
 **`fetch`** (`connector-fetch-request.schema.json`) carries `invocation_id`,
 `organization_id`, the installer `configuration`, the Connector Instance
@@ -347,10 +352,11 @@ answers `more: true`) and `reads_today`. The response carries:
   such as a post deleted at the source). Extensions, on the item and its Parts,
   use only namespaces the plugin declares. A Manifest has no Blob Parts
   (`blob_part_not_allowed`): binary Parts are `attachments` (`key`,
-  `parent_key`, `role`, `media_type`, optional `size_bytes` and `extensions`,
-  and an opaque `ref`), which need Manifest content. The core asks for their
-  bytes later, only for an item it does not already have; that exchange is not
-  part of Plugin API 0.3;
+  `parent_key`, `role`, `media_type`, optional `size_bytes`, `sha256` and
+  `extensions`, and an opaque `ref`), which need Manifest content and a
+  manifest that declares `attachments` (`attachments_unsupported` otherwise).
+  The core asks for their bytes later, only for an item it does not already
+  have ([Connector attachments](#connector-attachments));
 - `checkpoint` (required, any JSON value of at most `max_checkpoint_bytes`
   serialized as compact JSON, 64 KiB unless the manifest declares more), which resumes after
   this page. The core persists it and advances it only after the page's items
@@ -369,6 +375,40 @@ deduplicates items by Record Key and revision. `CheckConnectorOutput` in
 `duplicate_record_key`, `too_many_items`, `checkpoint_too_large`,
 `diagnostics_too_large`, `invalid_not_due`, the engine's Manifest rules with
 the attachments as Parts, declared namespaces and `response_too_large`.
+
+### Connector attachments
+
+Since Plugin API 0.4, a manifest that declares `contributions.connector.attachments`
+(`max_bytes`, at most and by default 25 MiB, and `timeout_ms`, at most and by
+default 120 s, per call) lets items carry attachments. The plugin never writes
+to storage on its own. For each attachment of an item the core has not accepted
+yet:
+
+1. **`describe_attachment`** (`connector-describe-attachment-request.schema.json`)
+   carries the usual envelope, the `item` (`record_key`, `revision`, current
+   `extensions`) and the `attachment` descriptor. The plugin reads the bytes and
+   answers `{"size_bytes", "sha256"}` (lowercase hex), or `{"skip": "<code>"}`
+   with optional `item_extensions` that replace the item's, for example to
+   record the skipped attachment. A size above `max_bytes` is
+   `attachment_too_large`: answer `{"skip": "too_large"}` instead. A descriptor
+   that already carries an exact `size_bytes` and `sha256` is not described.
+2. The core reuses a verified Blob with the same identity, or issues a
+   **grant**: one presigned PUT (`url`, `method`, `headers`, `size_bytes`,
+   `sha256`, `media_type`, `expires_at`) that storage accepts only with exactly
+   those bytes. A grant is a capability: never log or return it
+   (`credential_leak`).
+3. **`upload_attachment`** (`connector-upload-attachment-request.schema.json`)
+   carries the same fields and the `grant`. The plugin sends the PUT with
+   exactly the grant's headers and answers `{"status": "uploaded"}`. Bytes that
+   changed at the source since they were described are a source error
+   `attachment_changed`; the core describes the attachment again once, then
+   rejects only that item.
+4. The core reads the stored bytes back and checks their size and SHA-256
+   before the Blob becomes a Blob Part of the item. Bytes that fail the check
+   are never used, the item is not accepted and the checkpoint does not move.
+
+`CheckAttachmentAnswer` and `CheckUploadAnswer` in `internal/plugins` judge
+the answers for the engine and the Contract Runner.
 
 **`check_credential`** (`connector-check-credential-request.schema.json`)
 carries the same Instance, credential and `now`, and answers
@@ -561,6 +601,7 @@ When the manifest declares `connector`, it adds checks with
 | `check_credential` (per fixture) | The answer is `ok` or a classified error, as the fixture expects. |
 | `invalid_request` | A non-JSON body, an unknown field, an undeclared kind and the normative invalid requests in `fixtures/requests/connector/` are refused on both routes with a terminal error envelope. |
 | `credentials` | No fixture credential string of 8 characters or more appears in any answer, or in the plugin's output when the runner launched it (`credential_leak`). |
+| `attachments` (per fixture) | When the manifest declares `attachments`, each attachment the pages returned is described (unless its descriptor is exact), granted to the runner's loopback storage and uploaded; the stored bytes match the description (`attachment_mismatch`, `attachment_too_large`). |
 
 The human report goes to stdout; the plugin's own output goes to stderr.
 `--report <file>` writes the JSON report described by

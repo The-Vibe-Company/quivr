@@ -687,7 +687,7 @@ type Connector struct {
 		SilentAfterSeconds       int `json:"silent_after_seconds"`
 	} `json:"health_policy"`
 
-	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it) and m365_mail (Microsoft 365 mailboxes). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind     ConnectorKind `json:"kind"`
 	Schedule struct {
 		IntervalSeconds int `json:"interval_seconds"`
@@ -704,7 +704,7 @@ type ConnectorCreate struct {
 	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
 	IdempotencyKey string                 `json:"idempotency_key"`
 
-	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it) and m365_mail (Microsoft 365 mailboxes). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind            ConnectorKind      `json:"kind"`
 	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
 	SourceNamespace string             `json:"source_namespace"`
@@ -742,7 +742,7 @@ type ConnectorHealthPolicy struct {
 	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
 }
 
-// ConnectorKind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it) and m365_mail (Microsoft 365 mailboxes). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+// ConnectorKind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 type ConnectorKind = string
 
 // ConnectorKindCatalog defines model for ConnectorKindCatalog.

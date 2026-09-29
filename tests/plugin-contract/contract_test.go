@@ -180,19 +180,20 @@ func TestContractRunnerJudgesConnectors(t *testing.T) {
 			passed[c.Contribution+"/"+c.ID]++
 		}
 	}
-	for _, want := range []string{"connector/fixtures", "connector/invoke", "connector/resume", "connector/check_credential", "connector/invalid_request", "connector/credentials", "/discovery"} {
+	for _, want := range []string{"connector/fixtures", "connector/invoke", "connector/resume", "connector/check_credential", "connector/invalid_request", "connector/credentials", "connector/attachments", "/discovery"} {
 		if passed[want] == 0 {
 			t.Errorf("no passing %s check:\n%s", want, out)
 		}
 	}
 	for mode, want := range map[string]expectation{
-		"connector-credential-leak":    {Check: "credentials", Code: "credential_leak"},
-		"connector-stalled-checkpoint": {Check: "invoke", Code: "stalled_checkpoint"},
-		"connector-ignores-checkpoint": {Check: "resume", Code: "checkpoint_not_honoured"},
-		"connector-wrong-error-class":  {Check: "invoke", Code: "wrong_error_class"},
-		"connector-blob-part":          {Check: "invoke", Code: "blob_part_not_allowed"},
-		"connector-too-many-items":     {Check: "invoke", Code: "too_many_items"},
-		"accept-invalid":               {Check: "invalid_request", Code: "accepted_invalid_request"},
+		"connector-credential-leak":     {Check: "credentials", Code: "credential_leak"},
+		"connector-stalled-checkpoint":  {Check: "invoke", Code: "stalled_checkpoint"},
+		"connector-ignores-checkpoint":  {Check: "resume", Code: "checkpoint_not_honoured"},
+		"connector-wrong-error-class":   {Check: "invoke", Code: "wrong_error_class"},
+		"connector-blob-part":           {Check: "invoke", Code: "blob_part_not_allowed"},
+		"connector-too-many-items":      {Check: "invoke", Code: "too_many_items"},
+		"connector-attachment-mismatch": {Check: "attachments", Code: "attachment_mismatch"},
+		"accept-invalid":                {Check: "invalid_request", Code: "accepted_invalid_request"},
 	} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv(fakeplugin.EnvMode, mode)

@@ -1,0 +1,36 @@
+# A mail collector plugin (Plugin API 0.4): items carry attachments whose
+# bytes the plugin uploads through core-issued grants.
+id: example-mail
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.4.0 <0.5.0"
+contributions:
+  connector:
+    kinds:
+      mailbox:
+        config_schema:
+          type: object
+          required: [mailbox]
+          properties:
+            mailbox: {type: string}
+        credential_schema:
+          type: object
+          required: [token]
+          properties:
+            token: {type: string, minLength: 8}
+        default_interval_seconds: 60
+    attachments:
+      max_bytes: 1048576
+      timeout_ms: 60000
+extensions:
+  example-mail:
+    "1":
+      type: object
+      properties:
+        skipped: {type: array, items: {type: string}}
+  example-mail.attachment:
+    "1":
+      type: object
+      properties:
+        name: {type: string}

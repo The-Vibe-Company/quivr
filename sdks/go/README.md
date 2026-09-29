@@ -79,7 +79,7 @@ func main() {
 
 | Concern | Behavior |
 | --- | --- |
-| Routes | `GET /v0/discovery` (identity, `connector`, the highest Plugin API version the range admits, up to 0.3.1, the `sha256:` digest of the exact manifest bytes), `GET /v0/health`, `POST /v0/contributions/connector/fetch` and `/check_credential` |
+| Routes | `GET /v0/discovery` (identity, `connector`, the highest Plugin API version the range admits, up to 0.4.0, the `sha256:` digest of the exact manifest bytes), `GET /v0/health`, `POST /v0/contributions/connector/fetch` and `/check_credential`; `/describe_attachment` and `/upload_attachment` when the manifest declares `attachments` |
 | Request checks | Request schema → 400 `invalid_request`; undeclared kind → 400 `unknown_kind`; installer configuration, instance config and credential against the declared schemas → 400 `invalid_configuration`, `invalid_config` or `invalid_credential`. All terminal; a credential never appears in the message |
 | Errors | `AccessError` → 403, `SourceError` → 422 (terminal), `TransientError(...).WithRetryAfter(d)` → 503 with `retry_after_seconds`, all with `error_class`. `ErrNotDue` → a skipped run with the checkpoint unchanged. Any other error → 503 `transient` `unexpected_error`; a panic → 500 `source` `internal_error`. Details go to the log, never to the envelope |
 | Response checks | Before sending: the response schema, `max_items`, `max_response_bytes`, a checkpoint of at most `limits.max_checkpoint_bytes` (64 KiB by default, at most 1 MiB) and diagnostics of at most 16 KiB (500 `invalid_response`). The engine still applies its own item validation |
@@ -101,9 +101,13 @@ func main() {
 - **Items** carry a stable `RecordKey`, a `Revision` when the source has one
   (the core skips an unchanged revision), text or a Manifest of text Parts
   (`quivrplugin.NewManifest`), extensions in namespaces your manifest
-  declares, or `Withdraw: true` for an item deleted at the source. Binary Parts
-  are `Attachments` with an opaque `Ref`; the core will ask for their bytes in
-  a later Plugin API version.
+  declares, or `Withdraw: true` for an item deleted at the source.
+- **Attachments** (Plugin API 0.4): declare `contributions.connector.attachments`
+  and implement `OpenAttachment`, which streams `req.Attachment.Ref`. The SDK
+  reads the bytes once into a temporary file, answers their size and SHA-256 or
+  a skip (optional `SkippedAttachment` updates the item's extensions), then
+  uploads them to the core's grant, which never prints. Set `SizeBytes` and
+  `SHA256` when you already hold the exact bytes.
 - **Errors** tell the core what to show operators: `AccessError` for a
   refused credential (health `access_error`), `TransientError` for an outage or
   a rate limit (retried), `SourceError` for data you cannot use.

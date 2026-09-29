@@ -12,7 +12,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors/m365mail"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
@@ -241,42 +240,6 @@ func TestReceiptProbeRecognisesOnlyTheAcceptedIdempotencyKey(t *testing.T) {
 	}
 	if known, _ := store.HasReceipt(ctx, "another-org", key); known {
 		t.Fatal("receipts are Organization-scoped")
-	}
-}
-
-// TestBackfillIsBoundedAtCreationOnly: backfill_since is checked against the
-// clock when an instance is created, never when its credential is rotated
-// later, when the stored window is naturally older than 7 days.
-func TestBackfillIsBoundedAtCreationOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	pool := adapterPool(t, ctx)
-	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-backfill-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
-	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Backfill"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(m365mail.New("https://login.invalid", "https://graph.invalid/v1.0", nil))
-	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
-	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
-	config := func(since time.Time) json.RawMessage {
-		return json.RawMessage(fmt.Sprintf(`{"tenant_id":"00000000-0000-0000-0000-000000000000","mailbox":"monitoring@example.org","backfill_since":%q}`, since.UTC().Format(time.RFC3339)))
-	}
-	secret := json.RawMessage(`{"client_id":"11111111-1111-1111-1111-111111111111","client_secret":"adapter-secret-not-real"}`)
-	if _, err = service.Create(ctx, scope, connectors.CreateInput{Key: "old", CorpusID: c.ID, Namespace: "mail-old", Kind: "m365_mail", Config: config(time.Now().Add(-8 * 24 * time.Hour)), Secret: secret}); !errors.Is(err, connectors.ErrInvalidConfig) {
-		t.Fatalf("an 8-day backfill must be refused at creation: %v", err)
-	}
-	created, err := service.Create(ctx, scope, connectors.CreateInput{Key: "ok", CorpusID: c.ID, Namespace: "mail", Kind: "m365_mail", Config: config(time.Now().Add(-time.Hour)), Secret: secret})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Age the stored window past 7 days, as time would.
-	if _, err = pool.Exec(ctx, `UPDATE connector_instances SET config=$3 WHERE organization=$1 AND id=$2`, scope.Organization, created.ID, config(time.Now().Add(-30*24*time.Hour))); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = service.ReplaceCredential(ctx, scope, created.ID, connectors.CredentialInput{Key: "rotate", Secret: secret}); err != nil {
-		t.Fatalf("rotation after the backfill window aged: %v", err)
 	}
 }
 

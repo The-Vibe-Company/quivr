@@ -16,6 +16,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
@@ -80,13 +81,24 @@ func (p *sourcePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+// attachmentManifest is sourceManifest at Plugin API 0.4 with attachments.
+var attachmentManifest = strings.Replace(strings.Replace(sourceManifest, `plugin_api: ">=0.3.0 <0.4.0"`, `plugin_api: ">=0.4.0 <0.5.0"`, 1),
+	"    timeout_ms: 2000\n", "    timeout_ms: 2000\n    attachments: {max_bytes: 1024, timeout_ms: 1000}\n", 1)
+
 func sourceConnector(t *testing.T, answer func(route string) (int, any)) (pluginhttp.Connector, *sourcePlugin, *httptest.Server) {
+	return pinnedConnector(t, sourceManifest, answer)
+}
+
+func pinnedConnector(t *testing.T, manifest string, answer func(route string) (int, any)) (pluginhttp.Connector, *sourcePlugin, *httptest.Server) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
-	if err := os.WriteFile(path, []byte(sourceManifest), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	plugin := &sourcePlugin{requests: map[string][]map[string]any{}, answer: answer}
+	if strings.Contains(manifest, ">=0.4.0") {
+		plugin.served = "0.4.0"
+	}
 	server := httptest.NewServer(plugin)
 	t.Cleanup(server.Close)
 	set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: path, Endpoint: server.URL, Configuration: json.RawMessage(`{}`)}})
@@ -282,4 +294,96 @@ func TestTheInstanceScopeReachesOnlyPluginsThatServeIt(t *testing.T) {
 			}
 		})
 	}
+}
+
+const digestHex = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+
+func attachmentRequest() connectors.AttachmentRequest {
+	r := fetchRequest()
+	size := int64(11)
+	return connectors.AttachmentRequest{Organization: r.Organization, InstanceID: r.InstanceID, Config: r.Config, Credential: r.Credential, Now: r.Now,
+		RecordKey: "a", Revision: "rev-1", Extensions: content.Extensions{"acme.source": {SchemaVersion: "1", Data: map[string]any{}}},
+		Attachment: connectors.Attachment{Key: "photo", Role: "attachment", MediaType: "image/jpeg", Ref: "media/1", SizeBytes: &size}}
+}
+
+func grant() connectors.UploadGrant {
+	return connectors.UploadGrant{URL: "https://storage.invalid/object?X-Signature=grant-signature-0000", Headers: map[string]string{"X-Amz-Checksum-Sha256": "checksum-header-value"},
+		SizeBytes: 11, SHA256: digestHex, MediaType: "image/jpeg", ExpiresAt: time.Date(2026, 9, 29, 8, 15, 0, 0, time.UTC)}
+}
+
+// Attachment pages map their descriptors, and the two attachment operations
+// carry the item, the descriptor and the grant; their answers are judged like
+// a fetch's.
+func TestAttachmentsAreExchangedThroughDescribeAndUpload(t *testing.T) {
+	answers := map[string]any{
+		fetchRoute: map[string]any{"checkpoint": nil, "more": false, "items": []any{map[string]any{"record_key": "a", "revision": "rev-1",
+			"content":     map[string]any{"kind": "manifest", "parts": []any{map[string]any{"key": "body", "role": "body", "content": map[string]any{"kind": "text", "text": "x"}}}},
+			"attachments": []any{map[string]any{"key": "photo", "role": "attachment", "media_type": "image/jpeg", "size_bytes": 11, "sha256": digestHex, "ref": "media/1"}}}}},
+		"/v0/contributions/connector/describe_attachment": map[string]any{"size_bytes": 11, "sha256": digestHex},
+		"/v0/contributions/connector/upload_attachment":   map[string]any{"status": "uploaded"},
+	}
+	c, plugin, _ := pinnedConnector(t, attachmentManifest, func(route string) (int, any) { return 200, answers[route] })
+	if c.MaxAttachmentBytes() != 1024 {
+		t.Fatalf("max bytes %d", c.MaxAttachmentBytes())
+	}
+	page, err := c.Fetch(context.Background(), fetchRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at := page.Items[0].Attachments; len(at) != 1 || at[0].Ref != "media/1" || at[0].SHA256 != digestHex || *at[0].SizeBytes != 11 {
+		t.Fatalf("attachments %+v", at)
+	}
+	d, err := c.DescribeAttachment(context.Background(), attachmentRequest())
+	if err != nil || d.SizeBytes != 11 || d.SHA256 != digestHex {
+		t.Fatalf("describe %+v %v", d, err)
+	}
+	sent := plugin.requests["/v0/contributions/connector/describe_attachment"][0]
+	if sent["item"].(map[string]any)["record_key"] != "a" || sent["attachment"].(map[string]any)["ref"] != "media/1" || sent["credential"].(map[string]any)["token"] != token || sent["grant"] != nil {
+		t.Fatalf("describe request %v", sent)
+	}
+	if err := c.UploadAttachment(context.Background(), attachmentRequest(), grant()); err != nil {
+		t.Fatal(err)
+	}
+	g := plugin.requests["/v0/contributions/connector/upload_attachment"][0]["grant"].(map[string]any)
+	if g["method"] != "PUT" || g["url"] != grant().URL || g["sha256"] != digestHex || g["media_type"] != "image/jpeg" || g["expires_at"] != "2026-09-29T08:15:00Z" {
+		t.Fatalf("grant %v", g)
+	}
+}
+
+func TestAttachmentAnswersAreJudgedBeforeUse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		route  string
+		answer any
+		code   string
+	}{
+		"size above max_bytes": {"describe_attachment", map[string]any{"size_bytes": 4096, "sha256": digestHex}, pluginhttp.CodePluginInvalidResponse},
+		"undeclared extension": {"describe_attachment", map[string]any{"skip": "too_large", "item_extensions": map[string]any{"other": map[string]any{"schema_version": "1", "data": map[string]any{}}}}, pluginhttp.CodePluginInvalidResponse},
+		"credential echo":      {"describe_attachment", map[string]any{"skip": token}, pluginhttp.CodeCredentialLeak},
+		"grant URL echo":       {"upload_attachment", map[string]any{"status": "uploaded", "url": grant().URL}, pluginhttp.CodeCredentialLeak},
+		"grant header echo":    {"upload_attachment", map[string]any{"status": "checksum-header-value"}, pluginhttp.CodeCredentialLeak},
+		"unknown status":       {"upload_attachment", map[string]any{"status": "stored"}, pluginhttp.CodePluginInvalidResponse},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _, _ := pinnedConnector(t, attachmentManifest, func(string) (int, any) { return 200, tc.answer })
+			var err error
+			if tc.route == "describe_attachment" {
+				_, err = c.DescribeAttachment(context.Background(), attachmentRequest())
+			} else {
+				err = c.UploadAttachment(context.Background(), attachmentRequest(), grant())
+			}
+			var typed *connectors.Error
+			if !errors.As(err, &typed) || typed.Class != connectors.ClassSource || typed.Code != tc.code {
+				t.Fatalf("got %v, want source %s", err, tc.code)
+			}
+		})
+	}
+	t.Run("declared error", func(t *testing.T) {
+		c, _, _ := pinnedConnector(t, attachmentManifest, func(string) (int, any) {
+			return 422, map[string]any{"code": connectors.CodeAttachmentChanged, "message": "changed", "retryable": false, "error_class": "source"}
+		})
+		var typed *connectors.Error
+		if err := c.UploadAttachment(context.Background(), attachmentRequest(), grant()); !errors.As(err, &typed) || typed.Code != connectors.CodeAttachmentChanged {
+			t.Fatalf("got %v", err)
+		}
+	})
 }

@@ -127,12 +127,17 @@ func TestConnectorM365CollectsMailBodiesAndAttachments(t *testing.T) {
 		map[string]any{"id": "a3", "name": "shared link", "type": "reference", "size": 100})
 	corpusID, cursor := connectorCorpus(t, token, "m365-collect")
 
-	// Invalid configurations are refused before anything is stored.
+	// A backfill older than 7 days is refused when collection starts: the
+	// plugin reports invalid_config and reads nothing.
 	old := m365Connector("m365-old", corpusID, "mail-old", mailbox, clientID, secret, nil)
 	old["config"].(map[string]any)["backfill_since"] = time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
-	if e := request(t, "POST", "/v0/connectors", token, old, 422); e["code"] != "invalid_config" {
-		t.Fatal(e)
-	}
+	oldID := request(t, "POST", "/v0/connectors", token, old, 201)["connector_id"].(string)
+	awaitHealth(t, token, oldID, func(h map[string]any) bool {
+		e, _ := h["last_error"].(map[string]any)
+		return e != nil && e["code"] == "invalid_config"
+	})
+	request(t, "POST", "/v0/connectors/"+oldID+"/disable", token, map[string]any{"idempotency_key": "m365-old-stop"}, 200)
+	// An invalid credential is refused before anything is stored.
 	both := m365Connector("m365-both", corpusID, "mail-both", mailbox, clientID, secret, nil)
 	both["credential"].(map[string]any)["secret"].(map[string]any)["certificate_pem"] = "-----BEGIN CERTIFICATE-----"
 	if e := request(t, "POST", "/v0/connectors", token, both, 422); e["code"] != "invalid_credential" {

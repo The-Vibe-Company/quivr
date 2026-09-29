@@ -1,0 +1,13 @@
+{
+  "skip": "too_large",
+  "item_extensions": {
+    "example-mail": {
+      "schema_version": "1",
+      "data": {
+        "skipped": [
+          "report.pdf"
+        ]
+      }
+    }
+  }
+}

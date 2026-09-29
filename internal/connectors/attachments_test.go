@@ -4,50 +4,113 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
 
-// attachingConnector returns the same scripted items on every fetch.
-type attachingConnector struct {
-	items  func() []Item
-	opened *int
+// exchangingConnector returns the same scripted items on every fetch and
+// plays the source side of the attachment exchange: it describes the bytes
+// it holds and "uploads" them to the fake storage behind a grant.
+type exchangingConnector struct {
+	items func() []Item
+	src   *fakeSource
+	more  bool
 }
 
-func (attachingConnector) Kind() string                   { return "fixture" }
-func (attachingConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
-func (attachingConnector) CredentialSchema() []byte       { return nil }
-func (attachingConnector) DefaultInterval() time.Duration { return time.Minute }
-func (c attachingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
-	return Page{Items: c.items(), Checkpoint: json.RawMessage(`{}`)}, nil
+type fakeSource struct {
+	bytes     map[string]string // ref -> bytes
+	changed   map[string]int    // ref -> uploads that send other bytes
+	describes int
+	uploads   int
+	err       error
+	skip      *AttachmentDescription
+	storage   *fakeGrants
 }
 
-type fakeBlobs struct {
-	deposited map[string]string
-	fail      error
+func (exchangingConnector) Kind() string                   { return "fixture" }
+func (exchangingConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
+func (exchangingConnector) CredentialSchema() []byte       { return nil }
+func (exchangingConnector) DefaultInterval() time.Duration { return time.Minute }
+func (exchangingConnector) MaxAttachmentBytes() int64      { return 1 << 20 }
+func (c exchangingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
+	return Page{Items: c.items(), Checkpoint: json.RawMessage(`{}`), More: c.more}, nil
 }
 
-func (f *fakeBlobs) Deposit(_ context.Context, org string, r io.Reader, mediaType string, max int64) (string, int64, error) {
-	if f.fail != nil {
-		return "", 0, f.fail
+func (c exchangingConnector) DescribeAttachment(_ context.Context, r AttachmentRequest) (AttachmentDescription, error) {
+	c.src.describes++
+	if c.src.err != nil {
+		return AttachmentDescription{}, c.src.err
 	}
-	b, err := io.ReadAll(io.LimitReader(r, max+1))
-	if err != nil {
-		return "", 0, err
+	if c.src.skip != nil {
+		return *c.src.skip, nil
 	}
-	if int64(len(b)) > max {
-		return "", 0, content.ErrInvalid
+	b := c.src.bytes[r.Attachment.Ref]
+	return AttachmentDescription{SizeBytes: int64(len(b)), SHA256: content.Hash([]byte(b))}, nil
+}
+
+func (c exchangingConnector) UploadAttachment(_ context.Context, r AttachmentRequest, g UploadGrant) error {
+	c.src.uploads++
+	b := c.src.bytes[r.Attachment.Ref]
+	if c.src.changed[r.Attachment.Ref] > 0 {
+		c.src.changed[r.Attachment.Ref]--
+		b += " (edited)"
 	}
-	id := "blob_" + content.Hash(b)[:8]
-	if f.deposited == nil {
-		f.deposited = map[string]string{}
+	if content.Hash([]byte(b)) != g.SHA256 {
+		return SourceError(CodeAttachmentChanged)
 	}
-	f.deposited[id] = string(b)
-	return id, int64(len(b)), nil
+	c.src.storage.put(g.URL, b)
+	return nil
+}
+
+// fakeGrants plays uploads.Service: one session per grant key, a PUT only
+// through the grant URL, Confirm that reads back what was stored.
+type fakeGrants struct {
+	sessions map[string]uploads.Session
+	stored   map[string]string // grant URL -> bytes
+	blobs    map[string]string // blob id -> bytes
+	expected map[string]string // session id -> sha256
+	tamper   bool
+	fail     error
+}
+
+func newFakeGrants() *fakeGrants {
+	return &fakeGrants{sessions: map[string]uploads.Session{}, stored: map[string]string{}, blobs: map[string]string{}, expected: map[string]string{}}
+}
+
+func (g *fakeGrants) put(url, b string) { g.stored[url] = b }
+
+func (g *fakeGrants) Grant(_ context.Context, org string, req uploads.Request) (uploads.Session, error) {
+	if g.fail != nil {
+		return uploads.Session{}, g.fail
+	}
+	id := content.StableID("blob", org, req.SHA256, req.MediaType)
+	if _, ok := g.blobs[id]; ok {
+		return uploads.Session{State: "verified", BlobID: id}, nil
+	}
+	s := uploads.Session{ID: "upload-" + req.Key, State: "awaiting_upload", UploadURL: "https://storage.invalid/" + req.Key, SHA256: req.SHA256, MediaType: req.MediaType}
+	g.sessions[s.ID] = s
+	return s, nil
+}
+
+func (g *fakeGrants) Confirm(_ context.Context, org, id string) (uploads.Session, error) {
+	s := g.sessions[id]
+	b, ok := g.stored[s.UploadURL]
+	if g.tamper {
+		b += "tampered"
+	}
+	switch {
+	case !ok:
+		s.State, s.ErrorCode = "awaiting_upload", "verification_unavailable"
+	case content.Hash([]byte(b)) != s.SHA256:
+		s.State, s.ErrorCode = "rejected", "verification_failed"
+	default:
+		s.State, s.BlobID = "verified", content.StableID("blob", org, s.SHA256, s.MediaType)
+		g.blobs[s.BlobID] = b
+	}
+	return s, nil
 }
 
 type fakeReceipts struct{ keys map[string]bool }
@@ -56,36 +119,35 @@ func (f fakeReceipts) HasReceipt(_ context.Context, _, key string) (bool, error)
 	return f.keys[key], nil
 }
 
-func mailItem(revision string, opened *int) Item {
-	open := func(text string) func(context.Context) (io.ReadCloser, error) {
-		return func(context.Context) (io.ReadCloser, error) {
-			*opened++
-			return io.NopCloser(strings.NewReader(text)), nil
-		}
-	}
+const bodyBytes = "<p>Hello</p>"
+
+func mailItem(revision string) Item {
+	size := int64(len(bodyBytes))
 	return Item{RecordKey: "<m1@example.org>", Revision: revision,
-		Manifest: &content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Hello"}}}},
+		Manifest:   &content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Hello"}}}},
+		Extensions: content.Extensions{"connector.fixture": {SchemaVersion: "1", Data: map[string]any{"skipped": []any{}}}},
 		Attachments: []Attachment{
-			{Key: "original_body", Role: "original_body", MediaType: "text/html", Open: open("<p>Hello</p>")},
-			{Key: "attachment-1", Role: "attachment", MediaType: "application/pdf", Open: open("%PDF-1.7 bytes")},
+			// The body's bytes are already known: no description is asked for.
+			{Key: "original_body", Role: "original_body", MediaType: "text/html", Ref: "body:m1", SizeBytes: &size, SHA256: content.Hash([]byte(bodyBytes))},
+			{Key: "attachment-1", Role: "attachment", MediaType: "application/pdf", Ref: "att:m1/a1"},
 		}}
 }
 
-func attachingAcquirer(t *testing.T, items func() []Item) (Acquirer, *fakeRuns, *fakeIngest, *fakeBlobs) {
+func exchangingAcquirer(t *testing.T, items func() []Item) (Acquirer, *fakeRuns, *fakeIngest, *fakeSource) {
 	t.Helper()
 	a, runs, ingest := newAcquirer(t, `{}`, "")
-	registry, err := NewRegistry(attachingConnector{items: items})
+	grants := newFakeGrants()
+	src := &fakeSource{bytes: map[string]string{"body:m1": bodyBytes, "att:m1/a1": "%PDF-1.7 bytes"}, changed: map[string]int{}, storage: grants}
+	registry, err := NewRegistry(exchangingConnector{items: items, src: src})
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs := &fakeBlobs{}
-	a.Registry, a.Blobs = registry, blobs
-	return a, runs, ingest, blobs
+	a.Registry, a.Blobs = registry, grants
+	return a, runs, ingest, src
 }
 
-func TestAttachmentsAreStreamedIntoVerifiedBlobPartsBeforeSubmission(t *testing.T) {
-	opened := 0
-	a, runs, ingest, blobs := attachingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1", &opened)} })
+func TestAttachmentBytesReachStorageOnlyThroughVerifiedGrants(t *testing.T) {
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}
@@ -96,62 +158,117 @@ func TestAttachmentsAreStreamedIntoVerifiedBlobPartsBeforeSubmission(t *testing.
 	if c.Revision != "sha256:r1" || len(c.Manifest.Parts) != 3 {
 		t.Fatalf("command %+v", c)
 	}
-	for _, p := range c.Manifest.Parts[1:] {
-		if p.Content.Kind != "blob" || blobs.deposited[p.Content.BlobID] == "" || p.Content.MediaType == "" {
-			t.Fatalf("part %+v not a deposited Blob Part", p)
+	for i, want := range []string{bodyBytes, "%PDF-1.7 bytes"} {
+		p := c.Manifest.Parts[i+1]
+		if p.Content.Kind != "blob" || src.storage.blobs[p.Content.BlobID] != want || p.Content.MediaType == "" {
+			t.Fatalf("part %+v is not the verified Blob of %q", p, want)
 		}
 	}
-	if blobs.deposited[c.Manifest.Parts[2].Content.BlobID] != "%PDF-1.7 bytes" {
-		t.Fatal("attachment bytes not preserved")
+	if src.describes != 1 || src.uploads != 2 {
+		t.Fatalf("described %d uploaded %d; a descriptor with its exact bytes is not described", src.describes, src.uploads)
 	}
 }
 
-func TestAnAlreadyAcceptedRevisionIsSkippedBeforeAnyDownload(t *testing.T) {
-	opened := 0
-	a, _, ingest, _ := attachingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1", &opened)} })
+func TestStoredBytesThatFailVerificationAreNeverAccepted(t *testing.T) {
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+	src.storage.tamper = true
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	got := runs.finished[0]
+	if got == nil || got.Class != ClassSource || got.Code != "attachment_unverified" || len(ingest.accepted) != 0 || len(runs.checkpoints) != 0 || len(src.storage.blobs) != 0 {
+		t.Fatalf("finished %+v accepted %d checkpoints %v blobs %d", got, len(ingest.accepted), runs.checkpoints, len(src.storage.blobs))
+	}
+}
+
+func TestAnAlreadyAcceptedRevisionIsSkippedBeforeAnyTransfer(t *testing.T) {
+	a, _, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
 	key := KeyPrefix + content.StableID("item", "connector_1", "<m1@example.org>", "sha256:r1")
 	a.Receipts = fakeReceipts{keys: map[string]bool{key: true}}
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}
-	if opened != 0 || len(ingest.accepted) != 0 {
-		t.Fatalf("opened %d accepted %d; an accepted revision must not be downloaded again", opened, len(ingest.accepted))
+	if src.describes != 0 || src.uploads != 0 || len(ingest.accepted) != 0 {
+		t.Fatalf("described %d uploaded %d accepted %d; an accepted revision must not be read again", src.describes, src.uploads, len(ingest.accepted))
 	}
-}
-
-func TestAChangedRevisionOfAnAcceptedRecordIsStillSubmitted(t *testing.T) {
-	opened := 0
-	a, _, ingest, _ := attachingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r2", &opened)} })
-	old := KeyPrefix + content.StableID("item", "connector_1", "<m1@example.org>", "sha256:r1")
-	a.Receipts = fakeReceipts{keys: map[string]bool{old: true}}
+	// A changed revision of the same Record is still read and submitted.
+	items := func() []Item { return []Item{mailItem("sha256:r2")} }
+	a, _, ingest, src = exchangingAcquirer(t, items)
+	a.Receipts = fakeReceipts{keys: map[string]bool{key: true}}
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}
-	if opened != 2 || len(ingest.accepted) != 1 || ingest.accepted[0].Revision != "sha256:r2" {
-		t.Fatalf("opened %d accepted %+v; a changed message must become a correction", opened, ingest.accepted)
+	if src.uploads != 2 || len(ingest.accepted) != 1 || ingest.accepted[0].Revision != "sha256:r2" {
+		t.Fatalf("uploaded %d accepted %+v; a changed message must become a correction", src.uploads, ingest.accepted)
+	}
+}
+
+func TestBytesAlreadyStoredAsABlobAreNotUploadedAgain(t *testing.T) {
+	a, _, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+	for ref, b := range src.bytes {
+		src.storage.blobs[content.StableID("blob", "org_a", content.Hash([]byte(b)), map[string]string{"body:m1": "text/html", "att:m1/a1": "application/pdf"}[ref])] = b
+	}
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if src.uploads != 0 || len(ingest.accepted) != 1 || len(ingest.accepted[0].Manifest.Parts) != 3 {
+		t.Fatalf("uploaded %d accepted %+v", src.uploads, ingest.accepted)
+	}
+}
+
+func TestBytesThatChangeWhileUploadingAreDescribedAgainOnce(t *testing.T) {
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+	src.changed["att:m1/a1"] = 1
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(ingest.accepted) != 1 || runs.finished[0] != nil || src.describes != 2 {
+		t.Fatalf("accepted %d finished %+v described %d", len(ingest.accepted), runs.finished, src.describes)
+	}
+	// Bytes that keep changing reject only their item; the source moves on.
+	a, runs, ingest, src = exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+	src.changed["att:m1/a1"] = 2
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(ingest.accepted) != 0 || runs.finished[0] == nil || runs.finished[0].Code != "item_rejected" || !runs.finished[0].Completed || len(runs.checkpoints) != 1 {
+		t.Fatalf("finished %+v checkpoints %v", runs.finished, runs.checkpoints)
+	}
+}
+
+func TestASkippedAttachmentIsLeftOutAndRecordedInTheItemExtensions(t *testing.T) {
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+	recorded := content.Extensions{"connector.fixture": {SchemaVersion: "1", Data: map[string]any{"skipped": []any{"attachment-1"}}}}
+	src.skip = &AttachmentDescription{Skip: "too_large", ItemExtensions: recorded}
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(ingest.accepted) != 1 || runs.finished[0] != nil {
+		t.Fatalf("accepted %d finished %+v", len(ingest.accepted), runs.finished)
+	}
+	c := ingest.accepted[0]
+	for _, p := range c.Manifest.Parts {
+		if p.Key == "attachment-1" {
+			t.Fatal("a skipped attachment must not become a Part")
+		}
+	}
+	if skipped := c.Extensions["connector.fixture"].Data["skipped"].([]any); len(skipped) != 1 {
+		t.Fatalf("extensions %+v", c.Extensions)
 	}
 }
 
 func TestAttachmentFailuresEndTheRunWithTheirClass(t *testing.T) {
 	for name, tc := range map[string]struct {
-		open  error
-		store error
-		class ErrorClass
-		code  string
+		source, grant error
+		class         ErrorClass
+		code          string
 	}{
-		"source refuses":    {open: AccessError("mailbox_access_denied"), class: ClassAccess, code: "mailbox_access_denied"},
-		"source unreadable": {open: errors.New("reset"), class: ClassTransient, code: "source_unavailable"},
-		"storage down":      {store: errors.New("s3 down"), class: ClassTransient, code: "ingestion_unavailable"},
+		"source refuses": {source: AccessError("mailbox_access_denied"), class: ClassAccess, code: "mailbox_access_denied"},
+		"storage down":   {grant: errors.New("database down"), class: ClassTransient, code: "ingestion_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			a, runs, ingest, blobs := attachingAcquirer(t, func() []Item {
-				item := mailItem("sha256:r1", new(int))
-				if tc.open != nil {
-					item.Attachments[1].Open = func(context.Context) (io.ReadCloser, error) { return nil, tc.open }
-				}
-				return []Item{item}
-			})
-			blobs.fail = tc.store
+			a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{mailItem("sha256:r1")} })
+			src.err, src.storage.fail = tc.source, tc.grant
 			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 				t.Fatal(err)
 			}
@@ -163,70 +280,40 @@ func TestAttachmentFailuresEndTheRunWithTheirClass(t *testing.T) {
 	}
 }
 
-func TestAnAttachmentLargerThanAnnouncedIsSkippedWithItsReason(t *testing.T) {
-	var reasons []string
-	a, runs, ingest, _ := attachingAcquirer(t, func() []Item {
-		item := mailItem("sha256:r1", new(int))
-		item.Attachments[1].Open = func(context.Context) (io.ReadCloser, error) {
-			return io.NopCloser(io.LimitReader(zeroReader{}, MaxAttachmentBytes+1)), nil
-		}
-		item.Attachments[1].Skip = func(reason string) { reasons = append(reasons, reason) }
-		return []Item{item}
-	})
+func TestAttachmentsNeedAnExchangingConnector(t *testing.T) {
+	a, runs, ingest := newAcquirer(t, `{}`, "")
+	registry, _ := NewRegistry(plainConnector{items: []Item{mailItem("sha256:r1")}})
+	a.Registry, a.Blobs = registry, newFakeGrants()
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}
-	if len(ingest.accepted) != 1 || runs.finished[0] != nil || len(reasons) != 1 || reasons[0] != "too_large" {
-		t.Fatalf("accepted %d finished %+v reasons %v", len(ingest.accepted), runs.finished, reasons)
-	}
-	for _, p := range ingest.accepted[0].Manifest.Parts {
-		if p.Key == "attachment-1" {
-			t.Fatal("an oversized attachment must not become a Part")
-		}
+	if len(ingest.accepted) != 0 || runs.finished[0] == nil || runs.finished[0].Code != "item_rejected" {
+		t.Fatalf("finished %+v", runs.finished)
 	}
 }
 
-func TestAnOversizedAttachmentWithoutSkipRejectsOnlyItsItem(t *testing.T) {
-	a, runs, ingest, _ := attachingAcquirer(t, func() []Item {
-		item := mailItem("sha256:r1", new(int))
-		item.Attachments[1].Open = func(context.Context) (io.ReadCloser, error) {
-			return io.NopCloser(io.LimitReader(zeroReader{}, MaxAttachmentBytes+1)), nil
-		}
-		return []Item{item}
-	})
+// A run keeps starting pages only until its soft time limit; the page that
+// crosses it is committed and the next run continues.
+func TestARunStopsStartingPagesAfterItsSoftLimit(t *testing.T) {
+	a, runs, _, _ := exchangingAcquirer(t, func() []Item { return nil })
+	registry, _ := NewRegistry(exchangingConnector{items: func() []Item { return nil }, src: &fakeSource{}, more: true})
+	clock := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	a.Registry, a.MaxPages = registry, 10
+	a.Now = func() time.Time { clock = clock.Add(50 * time.Second); return clock }
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}
-	if len(ingest.accepted) != 0 || runs.finished[0] == nil || runs.finished[0].Code != "item_rejected" || !runs.finished[0].Completed || len(runs.checkpoints) != 1 {
-		t.Fatalf("finished %+v checkpoints %v", runs.finished, runs.checkpoints)
+	if n := len(runs.checkpoints); n < 1 || n > 3 || runs.finished[0] != nil {
+		t.Fatalf("%d pages committed, finished %+v; a run past its soft limit must stop starting pages", n, runs.finished)
 	}
 }
 
-func TestASourceFailureWhileStreamingIsASourceFailure(t *testing.T) {
-	a, runs, ingest, _ := attachingAcquirer(t, func() []Item {
-		item := mailItem("sha256:r1", new(int))
-		item.Attachments[1].Open = func(context.Context) (io.ReadCloser, error) {
-			return io.NopCloser(io.MultiReader(strings.NewReader("partial"), failingReader{})), nil
-		}
-		return []Item{item}
-	})
-	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
-		t.Fatal(err)
-	}
-	if got := runs.finished[0]; got == nil || got.Code != "source_unavailable" || len(ingest.accepted) != 0 || len(runs.checkpoints) != 0 {
-		t.Fatalf("finished %+v", got)
-	}
-}
+type plainConnector struct{ items []Item }
 
-type failingReader struct{}
-
-func (failingReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
-
-type zeroReader struct{}
-
-func (zeroReader) Read(p []byte) (int, error) {
-	for i := range p {
-		p[i] = 0
-	}
-	return len(p), nil
+func (plainConnector) Kind() string                   { return "fixture" }
+func (plainConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
+func (plainConnector) CredentialSchema() []byte       { return nil }
+func (plainConnector) DefaultInterval() time.Duration { return time.Minute }
+func (c plainConnector) Fetch(context.Context, FetchRequest) (Page, error) {
+	return Page{Items: c.items, Checkpoint: json.RawMessage(`{}`)}, nil
 }

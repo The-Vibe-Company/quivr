@@ -1,0 +1,13 @@
+# attachments exist since Plugin API 0.4; this range stops at 0.3.
+id: example-mail
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      mailbox:
+        config_schema: {type: object}
+        default_interval_seconds: 60
+    attachments: {}

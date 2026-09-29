@@ -59,5 +59,7 @@ for mod in "$root"/plugins/*/go.mod; do
   "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "PASS  credentials" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  # A plugin that declares attachments must have them exchanged, not skipped.
+  if grep -q "^    attachments:" quivr-plugin.yaml; then grep -q "PASS  attachments" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }; fi
   echo "quivr plugin test certified the $id connector plugin: $work/$id-contract-report.json"
 done

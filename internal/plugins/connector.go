@@ -40,7 +40,35 @@ const (
 	CodeInvalidConfig       = "invalid_config"
 	CodeInvalidCredential   = "invalid_credential"
 	CodeWrongErrorClass     = "wrong_error_class"
+	// CodeAttachmentsUnsupported: items carry attachments but the manifest
+	// declares no contributions.connector.attachments (Plugin API 0.4).
+	CodeAttachmentsUnsupported = "attachments_unsupported"
+	// CodeAttachmentTooLarge: an exact attachment size above the effective
+	// attachments.max_bytes.
+	CodeAttachmentTooLarge = "attachment_too_large"
 )
+
+// AttachmentMaxBytes is the effective attachment size cap: the declared
+// attachments.max_bytes, capped by the engine's MaxAttachmentBytes. It is 0
+// when the manifest declares no attachments.
+func AttachmentMaxBytes(m *Manifest) int64 {
+	if m == nil || m.Contributions.Connector == nil || m.Contributions.Connector.Attachments == nil {
+		return 0
+	}
+	if limit := m.Contributions.Connector.Attachments.MaxBytes; limit > 0 {
+		return min(limit, MaxAttachmentBytes)
+	}
+	return MaxAttachmentBytes
+}
+
+// AttachmentTimeoutMS is the effective deadline of one attachment invocation
+// in milliseconds: the declared attachments.timeout_ms, capped by the engine.
+func AttachmentTimeoutMS(m *Manifest) int {
+	if m == nil || m.Contributions.Connector == nil || m.Contributions.Connector.Attachments == nil || m.Contributions.Connector.Attachments.TimeoutMS <= 0 {
+		return DefaultAttachmentTimeoutMS
+	}
+	return min(m.Contributions.Connector.Attachments.TimeoutMS, DefaultAttachmentTimeoutMS)
+}
 
 // ConnectorMaxResponseBytes is the response bound for a connector: the declared
 // max_response_bytes (or its default), capped by EngineMaxResponseBytes.
@@ -104,6 +132,7 @@ type ConnectorAttachment struct {
 	Role       string             `json:"role"`
 	MediaType  string             `json:"media_type"`
 	SizeBytes  *int64             `json:"size_bytes,omitempty"`
+	SHA256     string             `json:"sha256,omitempty"`
 	Extensions content.Extensions `json:"extensions,omitempty"`
 	Ref        string             `json:"ref"`
 }
@@ -165,6 +194,17 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 			continue
 		}
 		seen[item.RecordKey] = i
+		if len(item.Attachments) > 0 && !item.Withdraw {
+			if limit := AttachmentMaxBytes(m); limit == 0 {
+				issues = append(issues, Issue{Code: CodeAttachmentsUnsupported, Path: path + "/attachments",
+					Message: fmt.Sprintf("item %q carries attachments, which need contributions.connector.attachments in the manifest (Plugin API 0.4)", item.RecordKey)})
+				continue
+			} else if issue := attachmentSizeIssue(item.Attachments, limit); issue != nil {
+				issue.Path = path + issue.Path
+				issues = append(issues, *issue)
+				continue
+			}
+		}
 		if issue := checkConnectorItem(ctx, item, validator); issue != nil {
 			issue.Path = path + issue.Path
 			issues = append(issues, *issue)
@@ -234,6 +274,54 @@ func checkConnectorItem(ctx context.Context, item ConnectorItem, validator *Decl
 		return &issue
 	}
 	return nil
+}
+
+func attachmentSizeIssue(attachments []ConnectorAttachment, limit int64) *Issue {
+	for i, at := range attachments {
+		if at.SHA256 != "" && at.SizeBytes != nil && *at.SizeBytes > limit {
+			return &Issue{Code: CodeAttachmentTooLarge, Path: fmt.Sprintf("/attachments/%d/size_bytes", i),
+				Message: fmt.Sprintf("attachment %q is %d bytes; attachments.max_bytes allows %d, so leave it out of the item", at.Key, *at.SizeBytes, limit)}
+		}
+	}
+	return nil
+}
+
+// AttachmentAnswer is a decoded valid describe_attachment response.
+type AttachmentAnswer struct {
+	SizeBytes      int64              `json:"size_bytes,omitempty"`
+	SHA256         string             `json:"sha256,omitempty"`
+	Skip           string             `json:"skip,omitempty"`
+	ItemExtensions content.Extensions `json:"item_extensions,omitempty"`
+}
+
+// CheckAttachmentAnswer judges a 200 describe_attachment response exactly as
+// the engine does before it issues an upload grant: the response schema, the
+// effective attachments.max_bytes, and item_extensions only in namespaces
+// and schema versions the manifest declares.
+func CheckAttachmentAnswer(ctx context.Context, raw []byte, m *Manifest) []Issue {
+	if len(raw) > EngineMaxResponseBytes {
+		return []Issue{{Code: CodeResponseTooLarge, Message: fmt.Sprintf("the response is %d bytes; the limit is %d", len(raw), EngineMaxResponseBytes)}}
+	}
+	if issues := ValidateDocument("connector-describe-attachment-response.schema.json", raw); len(issues) > 0 {
+		return issues
+	}
+	var answer AttachmentAnswer
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return []Issue{{Code: CodeSchema, Message: err.Error()}}
+	}
+	if limit := AttachmentMaxBytes(m); answer.Skip == "" && answer.SizeBytes > limit {
+		return []Issue{{Code: CodeAttachmentTooLarge, Path: "/size_bytes",
+			Message: fmt.Sprintf("the attachment is %d bytes; attachments.max_bytes allows %d, so answer {\"skip\": \"too_large\"}", answer.SizeBytes, limit)}}
+	}
+	if err := withPrefix(content.CheckExtensions(ctx, NewDeclaredExtensions(m), answer.ItemExtensions), "/item_extensions"); err != nil {
+		return []Issue{issueFrom(err)}
+	}
+	return nil
+}
+
+// CheckUploadAnswer judges a 200 upload_attachment response.
+func CheckUploadAnswer(raw []byte) []Issue {
+	return ValidateDocument("connector-upload-attachment-response.schema.json", raw)
 }
 
 // CheckCredentialOutput judges a 200 check_credential response.

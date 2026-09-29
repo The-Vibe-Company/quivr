@@ -1,0 +1,9 @@
+{
+  "skip": "too_large",
+  "item_extensions": {
+    "other-plugin": {
+      "schema_version": "1",
+      "data": {}
+    }
+  }
+}

@@ -32,10 +32,14 @@ func TestModelsCarryEveryContractField(t *testing.T) {
 		t.Fatal(err)
 	}
 	models := map[string]func() any{
-		"connector-fetch-request.schema.json":             func() any { return &FetchRequest{} },
-		"connector-check-credential-request.schema.json":  func() any { return &CredentialRequest{} },
-		"connector-fetch-response.schema.json":            func() any { return &pageJSON{} },
-		"connector-check-credential-response.schema.json": func() any { return &credentialJSON{} },
+		"connector-fetch-request.schema.json":                func() any { return &FetchRequest{} },
+		"connector-check-credential-request.schema.json":     func() any { return &CredentialRequest{} },
+		"connector-fetch-response.schema.json":               func() any { return &pageJSON{} },
+		"connector-check-credential-response.schema.json":    func() any { return &credentialJSON{} },
+		"connector-describe-attachment-request.schema.json":  func() any { return &AttachmentRequest{} },
+		"connector-upload-attachment-request.schema.json":    func() any { return &AttachmentRequest{} },
+		"connector-describe-attachment-response.schema.json": func() any { return &describeJSON{} },
+		"connector-upload-attachment-response.schema.json":   func() any { return &uploadJSON{} },
 	}
 	checked := map[string]int{}
 	for _, c := range index.Cases {

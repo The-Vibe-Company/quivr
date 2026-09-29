@@ -16,10 +16,7 @@
           {"key": "title", "role": "title", "content": {"kind": "text", "text": "Port reopens"}},
           {"key": "body", "role": "body", "content": {"kind": "text", "text": "The port reopened on Tuesday."}}
         ]
-      },
-      "attachments": [
-        {"key": "photo", "parent_key": "body", "role": "attachment", "media_type": "image/jpeg", "size_bytes": 48213, "ref": "media/9f2c"}
-      ]
+      }
     },
     {"record_key": "article-099", "withdraw": true}
   ],

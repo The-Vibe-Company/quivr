@@ -1,0 +1,37 @@
+{
+  "invocation_id": "inv-mail-1",
+  "contribution": "connector",
+  "organization_id": "org-1",
+  "configuration": {},
+  "connector": {
+    "instance_id": "connector-9",
+    "kind": "mailbox",
+    "config": {
+      "mailbox": "desk@example.org"
+    }
+  },
+  "credential": {
+    "token": "test-token-0000"
+  },
+  "now": "2026-09-29T09:00:00Z",
+  "item": {
+    "record_key": "<m1@example.org>",
+    "revision": "sha256:rev-1",
+    "extensions": {
+      "example-mail": {
+        "schema_version": "1",
+        "data": {
+          "skipped": []
+        }
+      }
+    }
+  },
+  "attachment": {
+    "key": "attachment-01",
+    "parent_key": "body",
+    "role": "attachment",
+    "media_type": "application/pdf",
+    "size_bytes": 48213,
+    "ref": "att:m1/a1"
+  }
+}

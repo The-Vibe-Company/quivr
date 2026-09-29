@@ -1,0 +1,10 @@
+{
+  "description": "A mailbox folder: an HTML mail with a PDF attachment and a reference attachment, and a text mail, then nothing new when resumed. scripts/plugin_sdk_go.sh seeds them in the local fake Graph and points the configuration endpoints at it.",
+  "connector": {"kind": "m365_mail", "config": {"tenant_id": "00000000-0000-0000-0000-000000000000", "mailbox": "monitoring-certify@example.org", "backfill_since": "2026-09-28T09:00:00Z"}},
+  "credential": {"client_id": "app-certify", "client_secret": "m365-certify-secret-not-real"},
+  "now": "2026-09-28T12:00:00Z",
+  "expect": {
+    "pages": [{"record_keys": ["<c1@example.org>", "<c2@example.org>"], "more": false}],
+    "check_credential": {"status": "ok"}
+  }
+}

@@ -1,0 +1,14 @@
+# attachments.max_bytes can only lower the engine's 25 MiB cap.
+id: example-mail
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.4.0 <0.5.0"
+contributions:
+  connector:
+    kinds:
+      mailbox:
+        config_schema: {type: object}
+        default_interval_seconds: 60
+    attachments:
+      max_bytes: 30000000

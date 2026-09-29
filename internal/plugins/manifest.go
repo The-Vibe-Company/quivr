@@ -19,18 +19,23 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.3.1"
+const PluginAPIVersion = "0.4.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
 // admits that version or a later supported one.
 var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0"}
+
+// FieldSince is the Plugin API version that introduced a manifest field
+// inside a Contribution (a JSON Pointer). A manifest that declares it needs a
+// plugin_api range that admits that version or a later supported one.
+var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.0"}
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
@@ -59,6 +64,12 @@ const (
 	DefaultMaxParts         = 256
 	DefaultMaxBatchSize     = 32
 	DefaultMaxItems         = 100
+	// MaxAttachmentBytes is the engine's cap on one connector attachment and
+	// the default of attachments.max_bytes.
+	MaxAttachmentBytes int64 = 25 << 20
+	// DefaultAttachmentTimeoutMS is the default and the engine cap of
+	// attachments.timeout_ms.
+	DefaultAttachmentTimeoutMS = 120000
 )
 
 // Stable issue codes.
@@ -149,6 +160,18 @@ type Connector struct {
 	Kinds     map[string]ConnectorKind `json:"kinds"`
 	TimeoutMS int                      `json:"timeout_ms"`
 	Limits    ConnectorLimits          `json:"limits"`
+	// Attachments, since Plugin API 0.4, lets items carry attachments whose
+	// bytes the plugin uploads through core-issued grants; nil refuses them.
+	Attachments *ConnectorAttachments `json:"attachments,omitempty"`
+}
+
+// ConnectorAttachments bounds the attachment exchange (Plugin API 0.4).
+type ConnectorAttachments struct {
+	// MaxBytes lowers the engine's attachment size cap.
+	MaxBytes int64 `json:"max_bytes"`
+	// TimeoutMS is the deadline of one describe_attachment or
+	// upload_attachment invocation.
+	TimeoutMS int `json:"timeout_ms"`
 }
 
 // ConnectorKind is one connector kind a plugin provides.
@@ -347,6 +370,14 @@ func applyDefaults(m *Manifest) {
 		}
 		if c.Limits.MaxCheckpointBytes == 0 {
 			c.Limits.MaxCheckpointBytes = DefaultMaxCheckpointBytes
+		}
+		if a := c.Attachments; a != nil {
+			if a.MaxBytes == 0 {
+				a.MaxBytes = MaxAttachmentBytes
+			}
+			if a.TimeoutMS == 0 {
+				a.TimeoutMS = DefaultAttachmentTimeoutMS
+			}
 		}
 		for name, kind := range c.Kinds {
 			if len(kind.Modes) == 0 {
@@ -569,19 +600,39 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 		if !known {
 			continue
 		}
-		minimum, _ := ParseVersion(since)
-		admitted := false
-		for _, supported := range SupportedPluginAPIVersions {
-			if v, err := ParseVersion(supported); err == nil && v.Compare(minimum) >= 0 && r.Contains(v) {
-				admitted = true
-			}
-		}
-		if !admitted {
+		if minimum, admitted := admits(r, since); !admitted {
 			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/" + name,
 				Message: fmt.Sprintf("the %s Contribution exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", name, since, r.String(), since, minimum.Major, minimum.Minor+1)})
 		}
 	}
+	pointers := make([]string, 0, len(FieldSince))
+	for pointer := range FieldSince {
+		pointers = append(pointers, pointer)
+	}
+	sort.Strings(pointers)
+	for _, pointer := range pointers {
+		if !pointerPresent(root, pointer) {
+			continue
+		}
+		since := FieldSince[pointer]
+		if minimum, admitted := admits(r, since); !admitted {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: pointer,
+				Message: fmt.Sprintf("%s exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", pointer, since, r.String(), since, minimum.Major, minimum.Minor+1)})
+		}
+	}
 	return issues
+}
+
+// admits reports whether the range admits a supported Plugin API version at
+// least since.
+func admits(r Range, since string) (Version, bool) {
+	minimum, _ := ParseVersion(since)
+	for _, supported := range SupportedPluginAPIVersions {
+		if v, err := ParseVersion(supported); err == nil && v.Compare(minimum) >= 0 && r.Contains(v) {
+			return minimum, true
+		}
+	}
+	return minimum, false
 }
 
 // pointerPresent reports whether a JSON Pointer made of object keys resolves

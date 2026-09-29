@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector upload_attachment response, v0",
+  "description": "200 body of POST /v0/contributions/connector/upload_attachment: the bytes were uploaded to the grant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status"
+  ],
+  "properties": {
+    "status": {
+      "const": "uploaded"
+    }
+  }
+}

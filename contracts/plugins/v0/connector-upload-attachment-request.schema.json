@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector upload_attachment request, v0",
+  "description": "POST /v0/contributions/connector/upload_attachment, since Plugin API 0.4. The plugin uploads the bytes it described to the grant, then answers. The core verifies the stored bytes before it accepts the item. Bytes that changed at the source since describe_attachment are a source error attachment_changed; the core describes the attachment again once.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "connector",
+    "credential",
+    "now",
+    "item",
+    "attachment",
+    "grant"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "contribution": {
+      "const": "connector"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The plugin configuration the installer supplies, valid against configuration.schema."
+    },
+    "connector": {
+      "$ref": "connector-fetch-request.schema.json#/properties/connector"
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The decrypted Deposited Credential, or null for a kind without one. Never log, echo or persist it."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The core's clock for this invocation (RFC 3339, UTC)."
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_key"
+      ],
+      "description": "The item the attachment belongs to, as the plugin returned it.",
+      "properties": {
+        "record_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "extensions": {
+          "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+          "description": "The item's current extensions."
+        }
+      }
+    },
+    "attachment": {
+      "$ref": "connector-fetch-response.schema.json#/$defs/Attachment",
+      "description": "The attachment descriptor, as the plugin returned it."
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "method",
+        "headers",
+        "size_bytes",
+        "sha256",
+        "media_type",
+        "expires_at"
+      ],
+      "description": "One presigned PUT for one storage object. Storage refuses any other length, checksum or media type. Send exactly these headers, never log the URL or the headers, and do not reuse the grant.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "method": {
+          "const": "PUT"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Headers the PUT must carry exactly."
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

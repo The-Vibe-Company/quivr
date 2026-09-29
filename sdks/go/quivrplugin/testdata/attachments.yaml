@@ -1,0 +1,23 @@
+# Test manifest of the Go SDK attachment tests (Plugin API 0.4).
+id: sdk-mail
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.4.0 <0.5.0"
+contributions:
+  connector:
+    kinds:
+      mail:
+        config_schema: {type: object}
+        credential_schema:
+          type: object
+          required: [token]
+          properties:
+            token: {type: string}
+        default_interval_seconds: 60
+    attachments:
+      max_bytes: 16
+      timeout_ms: 5000
+extensions:
+  sdk-mail:
+    "1": {type: object}

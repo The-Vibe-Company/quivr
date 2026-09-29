@@ -41,6 +41,10 @@ FILES = {
     "connector-check-credential-request.schema.json": "ConnectorCredentialRequest",
     "connector-check-credential-response.schema.json": "ConnectorCredentialResponse",
     "connector-fixture.schema.json": "ConnectorFixture",
+    "connector-describe-attachment-request.schema.json": "ConnectorDescribeAttachmentRequest",
+    "connector-describe-attachment-response.schema.json": "ConnectorDescribeAttachmentResponse",
+    "connector-upload-attachment-request.schema.json": "ConnectorUploadAttachmentRequest",
+    "connector-upload-attachment-response.schema.json": "ConnectorUploadAttachmentResponse",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".
@@ -85,6 +89,9 @@ NAMES = {
     "plugins/v0/connector-fixture.schema.json#/properties/expect": "ConnectorExpectation",
     "plugins/v0/connector-fixture.schema.json#/properties/expect/properties/pages/items": "ExpectedPage",
     "plugins/v0/connector-fixture.schema.json#/properties/expect/properties/error": "ExpectedError",
+    "plugins/v0/connector-describe-attachment-request.schema.json#/properties/item": "AttachmentItem",
+    "plugins/v0/connector-upload-attachment-request.schema.json#/properties/item": "UploadAttachmentItem",
+    "plugins/v0/connector-upload-attachment-request.schema.json#/properties/grant": "UploadGrant",
 }
 
 HEADER = '''"""Typed Plugin Protocol v0 models.

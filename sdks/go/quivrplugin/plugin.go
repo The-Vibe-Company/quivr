@@ -39,6 +39,7 @@ type Plugin struct {
 	kinds     map[string]*kind
 	logger    *slog.Logger
 	configSch *jsonschema.Schema
+	spool     spool
 }
 
 type kind struct {
@@ -125,6 +126,13 @@ func (p *Plugin) checkRegistered() error {
 		sort.Strings(missing)
 		return fmt.Errorf("no implementation registered for declared kinds %v", missing)
 	}
+	if p.m.Connector.Attachments != nil {
+		for name, k := range p.kinds {
+			if _, ok := k.impl.(AttachmentSource); !ok {
+				return fmt.Errorf("the manifest declares attachments, so kind %q must implement AttachmentSource", name)
+			}
+		}
+	}
 	return nil
 }
 
@@ -148,6 +156,10 @@ func (p *Plugin) Handler() (http.Handler, error) {
 	})
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
+	if p.m.Connector.Attachments != nil {
+		mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", p.serveDescribeAttachment)
+		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
+	}
 	return mux, nil
 }
 
@@ -345,6 +357,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	body := buf.Bytes()
 	diagnostics, _ := json.Marshal(page.Diagnostics)
 	switch {
+	case p.m.Connector.Attachments == nil && hasAttachments(page.Items):
+		return nil, "items carry attachments; declare contributions.connector.attachments in the manifest (Plugin API 0.4) and implement AttachmentSource"
 	case len(page.Items) > p.m.maxItems:
 		return nil, fmt.Sprintf("%d items exceed max_items %d; answer More and return the rest on the next page", len(page.Items), p.m.maxItems)
 	case len(body) > p.m.maxBytes:

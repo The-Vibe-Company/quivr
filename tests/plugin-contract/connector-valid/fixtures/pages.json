@@ -2,7 +2,7 @@
   "description": "Five items in pages of two, then nothing new when resumed.",
   "connector": {"kind": "static", "config": {"page_size": 2, "items": [
     {"key": "item-1", "text": "First item"},
-    {"key": "item-2", "text": "Second item"},
+    {"key": "item-2", "text": "Second item", "attachment": "attached notes"},
     {"key": "item-3", "text": "Third item"},
     {"key": "item-4", "text": "Fourth item"},
     {"key": "item-5", "text": "Fifth item"}

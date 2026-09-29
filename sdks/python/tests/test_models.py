@@ -28,6 +28,10 @@ MODELS = {
     "connector-check-credential-request.schema.json": models.ConnectorCredentialRequest,
     "connector-check-credential-response.schema.json": models.ConnectorCredentialResponse,
     "connector-fixture.schema.json": models.ConnectorFixture,
+    "connector-describe-attachment-request.schema.json": models.ConnectorDescribeAttachmentRequest,
+    "connector-describe-attachment-response.schema.json": models.ConnectorDescribeAttachmentResponse,
+    "connector-upload-attachment-request.schema.json": models.ConnectorUploadAttachmentRequest,
+    "connector-upload-attachment-response.schema.json": models.ConnectorUploadAttachmentResponse,
 }
 
 

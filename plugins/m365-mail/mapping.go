@@ -1,23 +1,23 @@
-package m365mail
+package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"net/url"
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
 	"golang.org/x/net/html"
 )
 
-// Extension namespaces declared in content.BuiltinExtensions.
+// Extension namespaces the plugin owns (quivr-plugin.yaml).
 const (
 	MailExtension       = "connector.m365_mail"
 	AttachmentExtension = "connector.m365_mail.attachment"
@@ -59,33 +59,33 @@ type attachment struct {
 	LastModified string `json:"lastModifiedDateTime"`
 }
 
-// item turns one delta entry into an Item. Removed entries (deleted or moved
+// item turns one delta entry into an item. Removed entries (deleted or moved
 // out) are ignored: a source disappearance never withdraws a Record. An entry
 // carrying only changed properties is re-read in full.
-func (s session) item(ctx context.Context, raw json.RawMessage) (connectors.Item, bool, error) {
+func (s session) item(ctx context.Context, raw json.RawMessage) (quivrplugin.Item, bool, error) {
 	var msg message
 	if json.Unmarshal(raw, &msg) != nil || msg.ID == "" {
-		return connectors.Item{}, false, connectors.SourceError("invalid_delta_response")
+		return quivrplugin.Item{}, false, sourceError("invalid_delta_response")
 	}
 	if len(msg.Removed) > 0 {
-		return connectors.Item{}, false, nil
+		return quivrplugin.Item{}, false, nil
 	}
 	if msg.ReceivedDateTime == "" {
 		err := s.getJSON(ctx, s.messageURL(msg.ID)+"?$select="+messageFields, &msg)
-		if errors.Is(err, errGone) {
-			return connectors.Item{}, false, nil
+		if err == errGone {
+			return quivrplugin.Item{}, false, nil
 		}
 		if err != nil {
-			return connectors.Item{}, false, err
+			return quivrplugin.Item{}, false, err
 		}
 	}
 	var list []attachment
 	if msg.HasAttachments {
 		var err error
-		if list, err = s.attachments(ctx, msg.ID); errors.Is(err, errGone) {
-			return connectors.Item{}, false, nil
+		if list, err = s.attachments(ctx, msg.ID); err == errGone {
+			return quivrplugin.Item{}, false, nil
 		} else if err != nil {
-			return connectors.Item{}, false, err
+			return quivrplugin.Item{}, false, err
 		}
 	}
 	return s.mapMessage(msg, list), true, nil
@@ -116,8 +116,12 @@ func (s session) attachments(ctx context.Context, id string) ([]attachment, erro
 	return all, nil
 }
 
+func validText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
+
+func hash(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
+
 func recordKey(m message) string {
-	if k := strings.TrimSpace(m.InternetMessageID); k != "" && content.ValidText(k) {
+	if k := strings.TrimSpace(m.InternetMessageID); k != "" && validText(k) {
 		return k
 	}
 	return "graph:" + m.ID
@@ -132,25 +136,44 @@ func revision(m message, list []attachment) string {
 		To, Cc                                                     []address
 		Attachments                                                []attachment
 	}{recordKey(m), m.Subject, m.Body.ContentType, m.Body.Content, m.SentDateTime, m.ReceivedDateTime, m.ConversationID, m.From, m.Sender, m.To, m.Cc, list})
-	return "sha256:" + content.Hash(b)
+	return "sha256:" + hash(b)
 }
 
-func (s session) mapMessage(m message, list []attachment) connectors.Item {
-	item := connectors.Item{RecordKey: recordKey(m), Revision: revision(m, list)}
-	parts := []content.Part{}
+// Attachment refs: the Graph ids of the message (and attachment) as JSON, so
+// no id character can be mistaken for a separator.
+type ref struct {
+	Message    string `json:"message"`
+	Attachment string `json:"attachment,omitempty"`
+}
+
+const (
+	bodyRef       = "body:"
+	attachmentRef = "att:"
+)
+
+func encodeRef(prefix string, r ref) string {
+	b, _ := json.Marshal(r)
+	return prefix + string(b)
+}
+
+func (s session) mapMessage(m message, list []attachment) quivrplugin.Item {
+	item := quivrplugin.Item{RecordKey: recordKey(m), Revision: revision(m, list)}
+	parts := []quivrplugin.Part{}
 	if subject := clean(strings.TrimSpace(m.Subject)); subject != "" {
-		parts = append(parts, content.Part{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: subject}})
+		parts = append(parts, quivrplugin.TextPart("title", "title", subject))
 	}
 	body := m.Body.Content
 	if strings.EqualFold(m.Body.ContentType, "html") {
 		body = htmlToText(m.Body.Content)
-		if original := m.Body.Content; strings.TrimSpace(original) != "" && content.ValidText(original) {
-			item.Attachments = append(item.Attachments, connectors.Attachment{Key: "original_body", Role: "original_body", MediaType: "text/html",
-				Open: func(context.Context) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(original)), nil }})
+		if original := m.Body.Content; strings.TrimSpace(original) != "" && validText(original) {
+			// The plugin holds the exact bytes: the core asks for no description.
+			size := int64(len(original))
+			item.Attachments = append(item.Attachments, quivrplugin.Attachment{Key: "original_body", Role: "original_body", MediaType: "text/html",
+				SizeBytes: &size, SHA256: hash([]byte(original)), Ref: encodeRef(bodyRef, ref{Message: m.ID})})
 		}
 	}
 	if body = clean(strings.TrimSpace(body)); body != "" {
-		parts = append(parts, content.Part{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: body}})
+		parts = append(parts, quivrplugin.TextPart("body", "body", body))
 	}
 	if len(parts) == 0 {
 		// A Manifest needs a text Part; describe the mail from its headers.
@@ -158,9 +181,9 @@ func (s session) mapMessage(m message, list []attachment) connectors.Item {
 		if m.From != nil && m.From.EmailAddress.Address != "" {
 			summary += " from " + m.From.EmailAddress.Address
 		}
-		parts = append(parts, content.Part{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: clean(summary)}})
+		parts = append(parts, quivrplugin.TextPart("body", "body", clean(summary)))
 	}
-	item.Manifest = &content.Manifest{Kind: "manifest", Parts: parts}
+	item.Content = quivrplugin.NewManifest(parts...)
 	// Source strings are cleaned (valid UTF-8, no NUL) like the text Parts, and
 	// recipient lists are bounded, so one unusual mail cannot stall the source.
 	data := map[string]any{"graph_id": m.ID, "internet_message_id": clean(m.InternetMessageID), "conversation_id": clean(m.ConversationID), "subject": clean(m.Subject),
@@ -172,16 +195,13 @@ func (s session) mapMessage(m message, list []attachment) connectors.Item {
 	if m.Sender != nil {
 		data["sender"] = addresses([]address{*m.Sender})[0]
 	}
-	skip := func(name, mediaType string, size int64, reason string) {
-		data["attachments_skipped"] = append(data["attachments_skipped"].([]any), map[string]any{"name": clean(name), "media_type": mediaType, "size": size, "reason": reason})
-	}
 	for i, a := range list {
 		kind := strings.TrimPrefix(a.Type, "#microsoft.graph.")
 		reason := ""
 		switch {
 		case kind != "fileAttachment" && kind != "itemAttachment":
 			reason = "reference_attachment"
-		case a.Size > connectors.MaxAttachmentBytes:
+		case a.Size > MaxAttachmentBytes:
 			reason = "too_large"
 		case a.Size <= 0:
 			reason = "empty"
@@ -191,28 +211,23 @@ func (s session) mapMessage(m message, list []attachment) connectors.Item {
 			mediaType = "message/rfc822"
 		}
 		if reason != "" {
-			skip(a.Name, mediaType, a.Size, reason)
+			data["attachments_skipped"] = append(data["attachments_skipped"].([]any), skipped(a.Name, mediaType, a.Size, reason))
 			continue
 		}
-		link := s.messageURL(m.ID) + "/attachments/" + url.PathEscape(a.ID) + "/$value"
 		attachmentType := strings.TrimSuffix(kind, "Attachment")
-		item.Attachments = append(item.Attachments, connectors.Attachment{
-			Key: "attachment-" + itoa(i+1), Role: "attachment", MediaType: mediaType,
-			Extensions: content.Extensions{AttachmentExtension: {SchemaVersion: "1", Data: map[string]any{"name": clean(a.Name), "size": a.Size, "is_inline": a.IsInline, "attachment_type": attachmentType}}},
-			Skip:       func(reason string) { skip(a.Name, mediaType, a.Size, reason) },
-			Open: func(ctx context.Context) (io.ReadCloser, error) {
-				resp, err := s.do(ctx, link)
-				if errors.Is(err, errGone) {
-					return nil, connectors.SourceError("attachment_gone")
-				}
-				if err != nil {
-					return nil, err
-				}
-				return resp.Body, nil
-			}})
+		size := a.Size
+		item.Attachments = append(item.Attachments, quivrplugin.Attachment{
+			Key: "attachment-" + itoa(i+1), Role: "attachment", MediaType: mediaType, SizeBytes: &size,
+			Extensions: map[string]quivrplugin.Extension{AttachmentExtension: {SchemaVersion: "1", Data: map[string]any{"name": clean(a.Name), "size": a.Size, "is_inline": a.IsInline, "attachment_type": attachmentType}}},
+			Ref:        encodeRef(attachmentRef, ref{Message: m.ID, Attachment: a.ID})})
 	}
-	item.Extensions = content.Extensions{MailExtension: {SchemaVersion: "1", Data: data}}
+	item.Extensions = map[string]quivrplugin.Extension{MailExtension: {SchemaVersion: "1", Data: data}}
 	return item
+}
+
+// skipped is one attachments_skipped entry.
+func skipped(name, mediaType string, size int64, reason string) map[string]any {
+	return map[string]any{"name": clean(name), "media_type": mediaType, "size": size, "reason": reason}
 }
 
 // maxRecipients bounds each recipient list kept in the header extension; the

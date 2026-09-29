@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+
 	"sort"
 	"time"
 
@@ -63,27 +63,79 @@ type Item struct {
 	Extensions content.Extensions
 	// Withdraw asks for a Tombstone instead of a new version (source terms, e.g. deleted posts).
 	Withdraw bool
-	// Attachments are binary Parts fetched lazily: the Acquirer streams each
-	// one into a verified Blob and appends it to the Manifest as a Blob Part,
-	// only when the item is not already accepted. A connector returning
-	// attachments should set Revision so an unchanged item is recognised
-	// before anything is downloaded.
+	// Attachments are binary Parts whose bytes the source uploads later,
+	// through the connector's AttachmentExchanger, only when the item is not
+	// already accepted; the Acquirer appends each verified Blob to the
+	// Manifest as a Blob Part. A connector returning attachments should set
+	// Revision so an unchanged item is recognised before anything is read.
 	Attachments []Attachment
 }
 
-// Attachment is one binary Part of an item, opened only when needed.
+// Attachment is one binary Part of an item, described by the source.
 type Attachment struct {
 	Key        string
 	ParentKey  string
 	Role       string
 	MediaType  string
 	Extensions content.Extensions
-	// Open streams the bytes; typed *Error failures end the run like a fetch.
-	Open func(context.Context) (io.ReadCloser, error)
-	// Skip, when set, is told why an attachment was left out (e.g. its bytes
-	// exceed MaxAttachmentBytes although the source announced less) and the
-	// item is submitted without it; otherwise the whole item is rejected.
-	Skip func(reason string)
+	// Ref is the opaque handle the connector gives back to read the bytes.
+	Ref string
+	// SizeBytes and SHA256, when both set, are the exact bytes: the Acquirer
+	// then asks for no description before it issues the upload grant.
+	SizeBytes *int64
+	SHA256    string
+}
+
+// AttachmentRequest names one attachment of one item for the connector.
+type AttachmentRequest struct {
+	Organization string
+	InstanceID   string
+	Config       json.RawMessage
+	Credential   json.RawMessage
+	Now          time.Time
+	RecordKey    string
+	Revision     string
+	// Extensions are the item's current extensions.
+	Extensions content.Extensions
+	Attachment Attachment
+}
+
+// AttachmentDescription is the exact size and SHA-256 of an attachment's
+// bytes, or Skip: why it is left out, with the item's replacement
+// extensions when ItemExtensions is set.
+type AttachmentDescription struct {
+	SizeBytes      int64
+	SHA256         string
+	Skip           string
+	ItemExtensions content.Extensions
+}
+
+// UploadGrant is one presigned PUT, pinned to the exact length, checksum and
+// media type, that the core issues for one attachment.
+type UploadGrant struct {
+	URL       string
+	Headers   map[string]string
+	SizeBytes int64
+	SHA256    string
+	MediaType string
+	ExpiresAt time.Time
+}
+
+// CodeAttachmentChanged is the source error an AttachmentExchanger returns
+// when the bytes changed since they were described; the Acquirer describes
+// the attachment again once.
+const CodeAttachmentChanged = "attachment_changed"
+
+// AttachmentExchanger is implemented by a Connector whose items carry
+// attachments (plugin kinds, Plugin API 0.4). The source never writes to
+// storage on its own: it describes the bytes, the core issues a grant, the
+// source uploads against it and the core verifies what was stored.
+type AttachmentExchanger interface {
+	DescribeAttachment(context.Context, AttachmentRequest) (AttachmentDescription, error)
+	UploadAttachment(context.Context, AttachmentRequest, UploadGrant) error
+	// MaxAttachmentBytes is the connector's own cap; the engine's
+	// MaxAttachmentBytes still applies.
+	MaxAttachmentBytes() int64
 }
 
 // FetchRequest is one page request. Credential is the decrypted secret JSON,

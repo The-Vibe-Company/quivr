@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
 
 // KeyPrefix reserves an idempotency-key family for connector-originated
@@ -31,15 +32,22 @@ const DefaultMaxPages = 10
 // MaxAttachmentBytes bounds one attachment stored as a Blob Part.
 const MaxAttachmentBytes int64 = 25 << 20
 
-// DefaultAttachmentBudget bounds the attachment bytes one run stores; the run
+// DefaultAttachmentBudget bounds the attachment bytes one run grants; the run
 // stops after the page that crosses it and the next run continues.
 const DefaultAttachmentBudget int64 = 200 << 20
 
-// BlobDepositor streams bytes into a verified Blob of the Organization. It
-// must not buffer the whole stream in memory and must refuse more than max
-// bytes with an error wrapping content.ErrInvalid.
-type BlobDepositor interface {
-	Deposit(ctx context.Context, org string, r io.Reader, mediaType string, max int64) (blobID string, size int64, err error)
+// DefaultSoftRunLimit bounds how long one run keeps starting pages: after
+// the page that crosses it is committed, the run ends and the next run
+// continues, so a run with slow attachment uploads still ends well within
+// its activity deadline.
+const DefaultSoftRunLimit = 2 * time.Minute
+
+// BlobGrants issues upload grants for attachment bytes and verifies what was
+// stored (uploads.Service). Grant answers a verified session carrying the
+// Blob when one with the same identity exists, and uploads nothing.
+type BlobGrants interface {
+	Grant(ctx context.Context, org string, req uploads.Request) (uploads.Session, error)
+	Confirm(ctx context.Context, org, id string) (uploads.Session, error)
 }
 
 // ReceiptChecker reports whether an ingestion idempotency key already has a
@@ -92,13 +100,15 @@ type Acquirer struct {
 	Registry *Registry
 	Sealer   Sealer
 	Ingest   Ingestor
-	// Blobs stores item attachments; Receipts (optional) skips revisions
-	// already accepted before their attachments are downloaded.
-	Blobs            BlobDepositor
+	// Blobs grants and verifies attachment uploads; Receipts (optional)
+	// skips revisions already accepted before their attachments are read.
+	Blobs            BlobGrants
 	Receipts         ReceiptChecker
 	MaxPages         int
 	AttachmentBudget int64
-	Now              func() time.Time
+	// SoftRunLimit overrides DefaultSoftRunLimit.
+	SoftRunLimit time.Duration
+	Now          func() time.Time
 }
 
 func (a Acquirer) now() time.Time {
@@ -170,6 +180,12 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	if budget <= 0 {
 		budget = DefaultAttachmentBudget
 	}
+	soft := a.SoftRunLimit
+	if soft <= 0 {
+		soft = DefaultSoftRunLimit
+	}
+	started := a.now()
+	rc := runContext{connector: connector, target: target, credential: credential}
 	var stored int64
 	var rejected string
 	var notice string
@@ -194,14 +210,12 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		// a replayed Receipt (re-fetched unchanged item) does not.
 		fresh := false
 		for _, item := range page.Items {
-			size, created, err := a.submit(ctx, scope, target.Instance, item)
+			size, created, err := a.submit(ctx, scope, rc, item)
 			if err != nil {
 				var typed *Error
 				switch {
 				case errors.As(err, &typed):
 					return deferred(typed)
-				case errors.Is(err, errSourceRead):
-					return failure(ClassTransient, "source_unavailable")
 				case errors.Is(err, errSkipped):
 					continue
 				case errors.Is(err, corpus.ErrNotFound), errors.Is(err, corpus.ErrForbidden):
@@ -230,7 +244,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		if page.Notice != "" {
 			notice = page.Notice
 		}
-		if !page.More || stored >= budget {
+		if !page.More || stored >= budget || a.now().Sub(started) >= soft {
 			break
 		}
 	}
@@ -245,17 +259,21 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	return a.Store.FinishRun(ctx, org, id, run, nil)
 }
 
-var (
-	// errSkipped marks an item whose revision was already accepted.
-	errSkipped = errors.New("already accepted")
-	// errSourceRead marks an untyped failure while streaming from the source.
-	errSourceRead = errors.New("source read failed")
-)
+// errSkipped marks an item whose revision was already accepted.
+var errSkipped = errors.New("already accepted")
+
+// runContext is what submitting an item needs from its run.
+type runContext struct {
+	connector  Connector
+	target     Target
+	credential json.RawMessage
+}
 
 // submit sends one item through the ingestion command path. It returns the
-// attachment bytes it stored and whether the item reserved a new Record
+// attachment bytes it granted and whether the item reserved a new Record
 // Version (replays and withdrawals do not).
-func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance, item Item) (int64, bool, error) {
+func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext, item Item) (int64, bool, error) {
+	inst := rc.target.Instance
 	source := content.Source{CorpusID: inst.CorpusID, Namespace: inst.Namespace, RecordKey: item.RecordKey}
 	revision := item.Revision
 	if revision == "" {
@@ -302,7 +320,8 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 				return 0, false, errSkipped
 			}
 		}
-		if a.Blobs == nil {
+		exchanger, ok := rc.connector.(AttachmentExchanger)
+		if !ok || a.Blobs == nil {
 			return 0, false, content.ErrUnsupported
 		}
 		m := content.Manifest{Kind: "manifest"}
@@ -311,16 +330,20 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 			m.Parts = append([]content.Part(nil), manifest.Parts...)
 		}
 		for _, at := range item.Attachments {
-			id, size, err := a.deposit(ctx, scope.Organization, at)
-			if errors.Is(err, errTooLarge) && at.Skip != nil {
-				at.Skip("too_large")
-				continue
-			}
+			req := AttachmentRequest{Organization: scope.Organization, InstanceID: inst.ID, Config: inst.Config, Credential: rc.credential, Now: a.now(),
+				RecordKey: item.RecordKey, Revision: revision, Extensions: item.Extensions, Attachment: at}
+			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.target.RunSequence, key, req)
 			if err != nil {
 				return 0, false, err
 			}
+			if skip != nil {
+				if skip.ItemExtensions != nil {
+					item.Extensions = skip.ItemExtensions
+				}
+				continue
+			}
 			stored += size
-			m.Parts = append(m.Parts, content.Part{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, Content: content.Text{Kind: "blob", BlobID: id, MediaType: at.MediaType}, Extensions: at.Extensions})
+			m.Parts = append(m.Parts, content.Part{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, Content: content.Text{Kind: "blob", BlobID: blobID, MediaType: at.MediaType}, Extensions: at.Extensions})
 		}
 		manifest = &m
 	}
@@ -332,53 +355,71 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, inst Instance,
 	return stored, err == nil && receipt.NewRevision, err
 }
 
-// errTooLarge marks an attachment whose bytes exceed MaxAttachmentBytes.
-var errTooLarge = fmt.Errorf("%w: attachment exceeds %d bytes", content.ErrInvalid, MaxAttachmentBytes)
+// errAttachmentInvalid rejects only the item: its attachment can never be
+// stored as described (too large, or bytes that keep changing).
+var errAttachmentInvalid = fmt.Errorf("%w: attachment cannot be stored", content.ErrInvalid)
 
-// meter counts streamed bytes and remembers a source read failure, so a
-// failure can be attributed to the source or to storage.
-type meter struct {
-	r   io.Reader
-	n   int64
-	err error
-}
-
-func (m *meter) Read(p []byte) (int, error) {
-	n, err := m.r.Read(p)
-	m.n += int64(n)
-	if err != nil && err != io.EOF {
-		m.err = err
+// transfer stores one attachment as a verified Blob through a core-issued
+// grant: describe (unless the descriptor already carries the exact bytes),
+// grant (or reuse a Blob with the same identity), upload, then verify what
+// storage holds. Bytes that changed between describe and upload are
+// described again once. It returns the Blob and its size, or the skip the
+// source asked for.
+func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, run int64, itemKey string, req AttachmentRequest) (string, int64, *AttachmentDescription, error) {
+	at := req.Attachment
+	limit := MaxAttachmentBytes
+	if own := ex.MaxAttachmentBytes(); own > 0 && own < limit {
+		limit = own
 	}
-	return n, err
-}
-
-// deposit streams one attachment from the source into a verified Blob.
-func (a Acquirer) deposit(ctx context.Context, org string, at Attachment) (string, int64, error) {
-	if at.Open == nil {
-		return "", 0, content.ErrInvalid
-	}
-	body, err := at.Open(ctx)
-	if err != nil {
-		var typed *Error
-		if errors.As(err, &typed) {
-			return "", 0, err
+	for attempt := 0; attempt < 2; attempt++ {
+		var d AttachmentDescription
+		if attempt == 0 && at.SHA256 != "" && at.SizeBytes != nil {
+			d = AttachmentDescription{SizeBytes: *at.SizeBytes, SHA256: at.SHA256}
+		} else {
+			var err error
+			if d, err = ex.DescribeAttachment(ctx, req); err != nil {
+				return "", 0, nil, err
+			}
 		}
-		return "", 0, errSourceRead
-	}
-	defer body.Close()
-	m := &meter{r: body}
-	id, size, err := a.Blobs.Deposit(ctx, org, m, at.MediaType, MaxAttachmentBytes)
-	switch {
-	case err == nil:
-		return id, size, nil
-	case m.err != nil:
-		var typed *Error
-		if errors.As(m.err, &typed) {
-			return "", 0, m.err
+		if d.Skip != "" {
+			return "", 0, &d, nil
 		}
-		return "", 0, errSourceRead
-	case m.n > MaxAttachmentBytes:
-		return "", 0, errTooLarge
+		if d.SizeBytes < 1 || d.SizeBytes > limit {
+			return "", 0, nil, errAttachmentInvalid
+		}
+		session, err := a.Blobs.Grant(ctx, req.Organization, uploads.Request{
+			Key:       KeyPrefix + content.StableID("attachment", itemKey, at.Key, d.SHA256, strconv.FormatInt(run, 10), strconv.Itoa(attempt)),
+			SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType})
+		if errors.Is(err, uploads.ErrInvalid) {
+			return "", 0, nil, errAttachmentInvalid
+		}
+		if err != nil {
+			return "", 0, nil, err
+		}
+		if session.State == "verified" {
+			return session.BlobID, d.SizeBytes, nil, nil
+		}
+		err = ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+		var typed *Error
+		if errors.As(err, &typed) && typed.Class == ClassSource && typed.Code == CodeAttachmentChanged {
+			continue
+		}
+		if err != nil {
+			return "", 0, nil, err
+		}
+		verified, err := a.Blobs.Confirm(ctx, req.Organization, session.ID)
+		switch {
+		case err != nil:
+			return "", 0, nil, err
+		case verified.State == "verified":
+			return verified.BlobID, d.SizeBytes, nil, nil
+		case verified.State == "rejected":
+			// Storage holds other bytes than the grant allowed: nothing from
+			// this upload is used, and the checkpoint does not move.
+			return "", 0, nil, SourceError("attachment_unverified")
+		default:
+			return "", 0, nil, TransientError("attachment_unverified")
+		}
 	}
-	return "", 0, err
+	return "", 0, nil, errAttachmentInvalid
 }

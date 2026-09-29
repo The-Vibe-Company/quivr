@@ -1,6 +1,9 @@
 package fakeplugin
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,17 +22,21 @@ import (
 // connector-credential-leak (logs the credential), connector-stalled-checkpoint
 // (more: true without moving the checkpoint), connector-ignores-checkpoint
 // (every run restarts from the first item), connector-wrong-error-class (an
-// access error marked retryable), connector-blob-part (a Blob Part in a
-// Manifest), connector-too-many-items (one item over max_items) and
-// accept-invalid (invalid requests answered 202).
+// access error marked retryable), // connector-blob-part (a Blob Part in a
+// Manifest), connector-too-many-items (one item over max_items),
+// connector-attachment-mismatch (uploads other bytes than it described) and
+// accept-invalid (invalid requests answered 202). An item with an
+// "attachment" text carries it as a text/plain attachment whose ref is the
+// item key, described and uploaded through the core's grant (Plugin API 0.4).
 func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write func(http.ResponseWriter, int, any)) {
 	type request struct {
 		Connector struct {
 			Kind   string `json:"kind"`
 			Config struct {
 				Items []struct {
-					Key  string `json:"key"`
-					Text string `json:"text"`
+					Key        string `json:"key"`
+					Text       string `json:"text"`
+					Attachment string `json:"attachment"`
 				} `json:"items"`
 				PageSize int `json:"page_size"`
 			} `json:"config"`
@@ -40,7 +47,15 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		Checkpoint *struct {
 			Offset int `json:"offset"`
 		} `json:"checkpoint"`
-		PageInRun int `json:"page_in_run"`
+		PageInRun  int `json:"page_in_run"`
+		Attachment struct {
+			Ref string `json:"ref"`
+		} `json:"attachment"`
+		Grant *struct {
+			URL       string            `json:"url"`
+			Headers   map[string]string `json:"headers"`
+			SizeBytes int64             `json:"size_bytes"`
+		} `json:"grant"`
 	}
 	// read decodes and validates a request; it answers the refusal itself and
 	// returns false when the request is invalid or the credential is refused.
@@ -94,6 +109,12 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		}
 		items := []any{}
 		for _, item := range config.Items[min(offset, end):end] {
+			if item.Attachment != "" {
+				items = append(items, map[string]any{"record_key": item.Key, "revision": "1",
+					"content":     map[string]any{"kind": "manifest", "parts": []any{map[string]any{"key": "body", "role": "body", "content": map[string]any{"kind": "text", "text": item.Text}}}},
+					"attachments": []any{map[string]any{"key": "file", "role": "attachment", "media_type": "text/plain", "ref": item.Key}}})
+				continue
+			}
 			items = append(items, map[string]any{"record_key": item.Key, "revision": "1", "content": map[string]any{"kind": "text", "text": item.Text}})
 		}
 		if mode == "connector-blob-part" && len(items) > 0 {
@@ -106,5 +127,44 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 			next = map[string]any{"offset": offset}
 		}
 		write(w, 200, map[string]any{"items": items, "checkpoint": next, "more": end < len(config.Items), "reads": len(items)})
+	})
+	if m.Contributions.Connector.Attachments == nil {
+		return
+	}
+	attachment := func(req request) []byte {
+		for _, item := range req.Connector.Config.Items {
+			if item.Key == req.Attachment.Ref {
+				return []byte(item.Attachment)
+			}
+		}
+		return nil
+	}
+	mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", func(w http.ResponseWriter, r *http.Request) {
+		if req, ok := read(w, r, "connector-describe-attachment-request.schema.json"); ok {
+			b := attachment(req)
+			sum := sha256.Sum256(b)
+			write(w, 200, map[string]any{"size_bytes": len(b), "sha256": hex.EncodeToString(sum[:])})
+		}
+	})
+	mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", func(w http.ResponseWriter, r *http.Request) {
+		req, ok := read(w, r, "connector-upload-attachment-request.schema.json")
+		if !ok {
+			return
+		}
+		b := attachment(req)
+		if mode == "connector-attachment-mismatch" && len(b) > 0 {
+			b = append(bytes.ToUpper(b[:1]), b[1:]...)
+		}
+		put, _ := http.NewRequest(http.MethodPut, req.Grant.URL, bytes.NewReader(b))
+		for name, value := range req.Grant.Headers {
+			put.Header.Set(name, value)
+		}
+		resp, err := http.DefaultClient.Do(put)
+		if err != nil {
+			write(w, 503, map[string]any{"code": "upload_unavailable", "message": "storage did not answer", "retryable": true, "error_class": "transient"})
+			return
+		}
+		resp.Body.Close()
+		write(w, 200, map[string]any{"status": "uploaded"})
 	})
 }

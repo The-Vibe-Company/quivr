@@ -31,15 +31,16 @@ const (
 	CodePluginInvalidResponse = "plugin_invalid_response"
 	// CodeCredentialLeak: an answer that contains a credential value.
 	CodeCredentialLeak = "credential_leak"
-	// CodeAttachmentsUnsupported: items with attachments, whose byte exchange
-	// the engine does not implement yet.
+	// CodeAttachmentsUnsupported: items with attachments from a plugin whose
+	// manifest declares no attachments (Plugin API 0.4).
 	CodeAttachmentsUnsupported = "attachments_unsupported"
 )
 
 // Connector is one connector kind of a pinned plugin, installed in the
 // connector Registry beside the built-in kinds. It implements
-// connectors.Connector over Plugin Protocol 0.3 and judges every answer with
-// plugins.CheckConnectorOutput, as the Contract Runner does. Every failure is
+// connectors.Connector over Plugin Protocol 0.3 (0.4 for attachments) and
+// judges every answer with the checks the Contract Runner uses
+// (plugins.CheckConnectorOutput, plugins.CheckAttachmentAnswer). Every failure is
 // a typed *connectors.Error, so the Acquirer maps it to Connector Health like
 // a built-in kind's and never advances the checkpoint past it.
 type Connector struct {
@@ -48,11 +49,12 @@ type Connector struct {
 }
 
 var (
-	_ connectors.Connector          = Connector{}
-	_ connectors.CredentialChecker  = Connector{}
-	_ connectors.CredentialRequirer = Connector{}
-	_ connectors.ExtensionOwner     = Connector{}
-	_ connectors.Provider           = Connector{}
+	_ connectors.Connector           = Connector{}
+	_ connectors.CredentialChecker   = Connector{}
+	_ connectors.CredentialRequirer  = Connector{}
+	_ connectors.ExtensionOwner      = Connector{}
+	_ connectors.Provider            = Connector{}
+	_ connectors.AttachmentExchanger = Connector{}
 )
 
 // Connectors installs every connector kind of the pinned plugins.
@@ -209,7 +211,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		return plugins.CheckConnectorOutput(invoke, body, checkpoint, manifest)
 	}
 	result, err := devhost.InvokeConnectorFetch(invoke, c.Pin.Endpoint, request, plugins.ConnectorMaxResponseBytes(manifest), check)
-	if failure := judge(result, err, r.Credential); failure != nil {
+	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
 		return connectors.Page{}, failure
 	}
 	var page plugins.ConnectorPage
@@ -244,17 +246,113 @@ func (c Connector) CheckCredential(ctx context.Context, r connectors.CredentialR
 	invoke, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 	result, err := devhost.InvokeCheckCredential(invoke, c.Pin.Endpoint, request)
-	return judge(result, err, r.Credential)
+	return judge(result, err, plugins.CredentialSecrets(r.Credential))
+}
+
+// MaxAttachmentBytes is the plugin's effective attachments.max_bytes; 0 when
+// its manifest declares no attachments.
+func (c Connector) MaxAttachmentBytes() int64 { return plugins.AttachmentMaxBytes(&c.Pin.Manifest) }
+
+func (c Connector) attachmentTimeout() time.Duration {
+	return time.Duration(plugins.AttachmentTimeoutMS(&c.Pin.Manifest)) * time.Millisecond
+}
+
+type attachmentItem struct {
+	RecordKey  string             `json:"record_key"`
+	Revision   string             `json:"revision,omitempty"`
+	Extensions content.Extensions `json:"extensions,omitempty"`
+}
+
+type attachmentGrant struct {
+	URL       string            `json:"url"`
+	Method    string            `json:"method"`
+	Headers   map[string]string `json:"headers"`
+	SizeBytes int64             `json:"size_bytes"`
+	SHA256    string            `json:"sha256"`
+	MediaType string            `json:"media_type"`
+	ExpiresAt string            `json:"expires_at"`
+}
+
+type attachmentRequest struct {
+	credentialRequest
+	Item       attachmentItem              `json:"item"`
+	Attachment plugins.ConnectorAttachment `json:"attachment"`
+	Grant      *attachmentGrant            `json:"grant,omitempty"`
+}
+
+func (c Connector) attachmentRequest(r connectors.AttachmentRequest, grant *attachmentGrant) ([]byte, error) {
+	at := r.Attachment
+	return json.Marshal(attachmentRequest{
+		credentialRequest: credentialRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
+			Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: orNull(r.Credential), Now: r.Now.UTC().Format(time.RFC3339)},
+		Item: attachmentItem{RecordKey: r.RecordKey, Revision: r.Revision, Extensions: r.Extensions},
+		Attachment: plugins.ConnectorAttachment{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, MediaType: at.MediaType, SizeBytes: at.SizeBytes,
+			SHA256: at.SHA256, Extensions: at.Extensions, Ref: at.Ref},
+		Grant: grant})
+}
+
+// DescribeAttachment asks the plugin for the exact size and SHA-256 of one
+// attachment, or a skip, judged by plugins.CheckAttachmentAnswer.
+func (c Connector) DescribeAttachment(ctx context.Context, r connectors.AttachmentRequest) (connectors.AttachmentDescription, error) {
+	request, err := c.attachmentRequest(r, nil)
+	if err != nil {
+		return connectors.AttachmentDescription{}, connectors.SourceError(CodePluginInvalidResponse)
+	}
+	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
+	defer cancel()
+	manifest := &c.Pin.Manifest
+	result, err := devhost.InvokeDescribeAttachment(invoke, c.Pin.Endpoint, request, func(body []byte) []plugins.Issue {
+		return plugins.CheckAttachmentAnswer(invoke, body, manifest)
+	})
+	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
+		return connectors.AttachmentDescription{}, failure
+	}
+	var answer plugins.AttachmentAnswer
+	if err := json.Unmarshal(result.Body, &answer); err != nil {
+		return connectors.AttachmentDescription{}, connectors.SourceError(CodePluginInvalidResponse)
+	}
+	return connectors.AttachmentDescription{SizeBytes: answer.SizeBytes, SHA256: answer.SHA256, Skip: answer.Skip, ItemExtensions: answer.ItemExtensions}, nil
+}
+
+// UploadAttachment has the plugin upload one attachment to a grant. The
+// grant URL and headers are secrets like the credential: an answer that
+// echoes them is refused.
+func (c Connector) UploadAttachment(ctx context.Context, r connectors.AttachmentRequest, g connectors.UploadGrant) error {
+	grant := &attachmentGrant{URL: g.URL, Method: "PUT", Headers: g.Headers, SizeBytes: g.SizeBytes, SHA256: g.SHA256, MediaType: g.MediaType, ExpiresAt: g.ExpiresAt.UTC().Format(time.RFC3339)}
+	if grant.Headers == nil {
+		grant.Headers = map[string]string{}
+	}
+	request, err := c.attachmentRequest(r, grant)
+	if err != nil {
+		return connectors.SourceError(CodePluginInvalidResponse)
+	}
+	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
+	defer cancel()
+	result, err := devhost.InvokeUploadAttachment(invoke, c.Pin.Endpoint, request)
+	return judge(result, err, grantSecrets(r.Credential, g))
+}
+
+// grantSecrets are the strings an upload_attachment answer must not echo:
+// the credential's values, the grant URL and its header values.
+func grantSecrets(credential json.RawMessage, g connectors.UploadGrant) []string {
+	secrets := append(plugins.CredentialSecrets(credential), g.URL)
+	for _, v := range g.Headers {
+		if len(v) >= plugins.MinSecretLength {
+			secrets = append(secrets, v)
+		}
+	}
+	return secrets
 }
 
 // judge maps one invocation to nil (a valid 200 answer) or a typed failure.
 // Nothing the plugin wrote (a message, an invalid output) is logged or kept:
-// only its declared class and code reach Connector Health.
-func judge(result *devhost.Result, err error, credential json.RawMessage) error {
+// only its declared class and code reach Connector Health. An answer that
+// contains one of the secrets (credential values, a grant) is refused.
+func judge(result *devhost.Result, err error, secrets []string) error {
 	if err != nil || result == nil {
 		return connectors.TransientError(CodePluginUnavailable)
 	}
-	if plugins.ContainsSecret(result.Body, plugins.CredentialSecrets(credential)) {
+	if plugins.ContainsSecret(result.Body, secrets) {
 		return connectors.SourceError(CodeCredentialLeak)
 	}
 	if e := result.Error; e != nil {
@@ -267,6 +365,9 @@ func judge(result *devhost.Result, err error, credential json.RawMessage) error 
 		if result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope {
 			return connectors.TransientError(CodePluginUnavailable)
 		}
+		if result.Issues[0].Code == plugins.CodeAttachmentsUnsupported {
+			return connectors.SourceError(CodeAttachmentsUnsupported)
+		}
 		return connectors.SourceError(CodePluginInvalidResponse)
 	}
 	return nil
@@ -274,10 +375,11 @@ func judge(result *devhost.Result, err error, credential json.RawMessage) error 
 
 // mapItem turns a checked item into the Acquirer's item.
 func mapItem(item plugins.ConnectorItem) (connectors.Item, error) {
-	if len(item.Attachments) > 0 {
-		return connectors.Item{}, connectors.SourceError(CodeAttachmentsUnsupported)
-	}
 	out := connectors.Item{RecordKey: item.RecordKey, Revision: item.Revision, Position: item.SourcePosition, Extensions: item.Extensions, Withdraw: item.Withdraw}
+	for _, at := range item.Attachments {
+		out.Attachments = append(out.Attachments, connectors.Attachment{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, MediaType: at.MediaType,
+			Extensions: at.Extensions, Ref: at.Ref, SizeBytes: at.SizeBytes, SHA256: at.SHA256})
+	}
 	if item.Withdraw {
 		return out, nil
 	}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector describe_attachment request, v0",
+  "description": "POST /v0/contributions/connector/describe_attachment, since Plugin API 0.4. The core asks for the exact size and SHA-256 of one attachment of an item it has not accepted yet, before it issues an upload grant. The plugin reads the bytes from the source, at most attachments.max_bytes, or answers a skip.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "connector",
+    "credential",
+    "now",
+    "item",
+    "attachment"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "contribution": {
+      "const": "connector"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The plugin configuration the installer supplies, valid against configuration.schema."
+    },
+    "connector": {
+      "$ref": "connector-fetch-request.schema.json#/properties/connector"
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The decrypted Deposited Credential, or null for a kind without one. Never log, echo or persist it."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The core's clock for this invocation (RFC 3339, UTC)."
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_key"
+      ],
+      "description": "The item the attachment belongs to, as the plugin returned it.",
+      "properties": {
+        "record_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "extensions": {
+          "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+          "description": "The item's current extensions."
+        }
+      }
+    },
+    "attachment": {
+      "$ref": "connector-fetch-response.schema.json#/$defs/Attachment",
+      "description": "The attachment descriptor, as the plugin returned it."
+    }
+  }
+}

@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.3.1"
+const PluginAPIVersion = "0.4.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector Contribution. The engine validates the
@@ -49,6 +49,15 @@ type ConnectorContribution struct {
 		MaxItems           int `json:"max_items"`
 		MaxCheckpointBytes int `json:"max_checkpoint_bytes"`
 	} `json:"limits"`
+	// Attachments, since Plugin API 0.4, lets items carry attachments; the
+	// connector then implements AttachmentSource.
+	Attachments *AttachmentLimits `json:"attachments,omitempty"`
+}
+
+// AttachmentLimits is contributions.connector.attachments, with defaults.
+type AttachmentLimits struct {
+	MaxBytes  int64 `json:"max_bytes"`
+	TimeoutMS int   `json:"timeout_ms"`
 }
 
 // ConnectorKind is one declared connector kind.
@@ -71,6 +80,8 @@ const (
 	MaxCheckpointBytes      = 64 << 10 // default; limits.max_checkpoint_bytes raises it
 	MaxDeclaredCheckpoint   = 1 << 20
 	MaxDiagnosticsBytes     = 16 << 10
+	// MaxAttachmentBytes is the engine's cap on one attachment.
+	MaxAttachmentBytes int64 = 25 << 20
 )
 
 type loadedManifest struct {
@@ -136,12 +147,23 @@ func loadManifest(path string) (*loadedManifest, error) {
 	if c.Limits.MaxCheckpointBytes > 0 {
 		m.maxCheckpt = min(c.Limits.MaxCheckpointBytes, MaxDeclaredCheckpoint)
 	}
+	if a := c.Attachments; a != nil {
+		if a.MaxBytes <= 0 || a.MaxBytes > MaxAttachmentBytes {
+			a.MaxBytes = MaxAttachmentBytes
+		}
+		if a.TimeoutMS <= 0 || a.TimeoutMS > 120000 {
+			a.TimeoutMS = 120000
+		}
+	}
 	api, ok, err := negotiate(m.Compatibility.PluginAPI)
 	if err != nil {
 		return nil, fmt.Errorf("%s: compatibility.plugin_api: %w", path, err)
 	}
 	if !ok || compareVersions(api, "0.3.0") < 0 {
 		return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.3.0, which introduced connectors", path, m.Compatibility.PluginAPI)
+	}
+	if c.Attachments != nil && compareVersions(api, "0.4.0") < 0 {
+		return nil, fmt.Errorf("%s: contributions.connector.attachments needs a plugin_api range that admits Plugin API 0.4.0", path)
 	}
 	m.pluginAPI = api
 	return m, nil

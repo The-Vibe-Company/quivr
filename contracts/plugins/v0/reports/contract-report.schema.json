@@ -156,7 +156,8 @@
             "batch",
             "resume",
             "check_credential",
-            "credentials"
+            "credentials",
+            "attachments"
           ]
         },
         "title": {

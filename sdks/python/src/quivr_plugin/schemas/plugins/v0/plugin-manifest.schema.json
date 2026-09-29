@@ -324,6 +324,27 @@
               "description": "Largest checkpoint, serialized as compact JSON, the core accepts from this plugin (since Plugin API 0.3.1)."
             }
           }
+        },
+        "attachments": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Since Plugin API 0.4: items may carry attachments. The core asks for each attachment's size and SHA-256 (describe_attachment), issues an upload grant and has the plugin upload the bytes against it (upload_attachment). Without this block a page with attachments is refused.",
+          "properties": {
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 26214400,
+              "default": 26214400,
+              "description": "Largest attachment the plugin uploads; it can only lower the engine's 25 MiB cap."
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000,
+              "default": 120000,
+              "description": "Deadline of one describe_attachment or upload_attachment invocation."
+            }
+          }
         }
       }
     },

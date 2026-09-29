@@ -1,0 +1,449 @@
+{
+  "name": "delta_paging",
+  "now": "2026-09-28T12:00:00Z",
+  "config": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "mailbox": "monitoring@example.org",
+    "backfill_since": "2026-09-28T09:00:00Z"
+  },
+  "credential": {
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "test-secret-not-real"
+  },
+  "ops": [
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003eold\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-old",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "old",
+        "internetMessageId": "\u003cold@example.org\u003e",
+        "receivedDateTime": "2026-09-28T08:00:00Z",
+        "sentDateTime": "2026-09-28T08:00:00Z",
+        "subject": "Subject old",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003em1\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-m1",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "m1",
+        "internetMessageId": "\u003cm1@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:00:00Z",
+        "sentDateTime": "2026-09-28T10:00:00Z",
+        "subject": "Subject m1",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003em2\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-m2",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "m2",
+        "internetMessageId": "\u003cm2@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:01:00Z",
+        "sentDateTime": "2026-09-28T10:01:00Z",
+        "subject": "Subject m2",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003em3\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-m3",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "m3",
+        "internetMessageId": "\u003cm3@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:02:00Z",
+        "sentDateTime": "2026-09-28T10:02:00Z",
+        "subject": "Subject m3",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "fetch",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003cm1@example.org\u003e",
+            "revision": "sha256:e1db8d5b813f67dc2b2425311f1aae9156259a7d249da88e4b82dd7d28a21783",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject m1"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello m1"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-m1",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "m1",
+                  "internet_message_id": "\u003cm1@example.org\u003e",
+                  "received_at": "2026-09-28T10:00:00Z",
+                  "sent_at": "2026-09-28T10:00:00Z",
+                  "subject": "Subject m1",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "653964f62bff952c77ad6a9f53e8a0968d7bcef69aedbb0c24e9d24539a35452"
+              }
+            ]
+          },
+          {
+            "record_key": "\u003cm2@example.org\u003e",
+            "revision": "sha256:0e65b266134544d97ee8069369aa1950564fa5231b7bd627a8ebf92b0342116e",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject m2"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello m2"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-m2",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "m2",
+                  "internet_message_id": "\u003cm2@example.org\u003e",
+                  "received_at": "2026-09-28T10:01:00Z",
+                  "sent_at": "2026-09-28T10:01:00Z",
+                  "subject": "Subject m2",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "0366886d7c033b5b6814a4d07a0c5a48ecd44a36def2a1dd45f11af94bd9c69a"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?%24filter=receivedDateTime+ge+2026-09-28T09%3A00%3A00Z\u0026%24skiptoken=3",
+          "since": "2026-09-28T09:00:00Z"
+        },
+        "more": true
+      }
+    },
+    {
+      "op": "fetch",
+      "checkpoint": "previous",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003cm3@example.org\u003e",
+            "revision": "sha256:e54a115a18cdb90b19c4bd30e20ca1843dee163e31f1d62c3e879071e693b4a2",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject m3"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello m3"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-m3",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "m3",
+                  "internet_message_id": "\u003cm3@example.org\u003e",
+                  "received_at": "2026-09-28T10:02:00Z",
+                  "sent_at": "2026-09-28T10:02:00Z",
+                  "subject": "Subject m3",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "1e0db3bb18b9f61cb50b8c6121b332fd81bd1685aab199ce61fe97bda8a33006"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?%24deltatoken=4\u0026%24filter=receivedDateTime+ge+2026-09-28T09%3A00%3A00Z",
+          "since": "2026-09-28T09:00:00Z"
+        }
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003em4\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-m4",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "m4",
+        "internetMessageId": "\u003cm4@example.org\u003e",
+        "receivedDateTime": "2026-09-28T11:00:00Z",
+        "sentDateTime": "2026-09-28T11:00:00Z",
+        "subject": "Subject m4",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "fetch",
+      "checkpoint": "previous",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003cm4@example.org\u003e",
+            "revision": "sha256:a8c8a28ded1f5748bf0202280ba99d49d99fc574eb72b90770fcbe033a82cbfe",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject m4"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello m4"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-m4",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "m4",
+                  "internet_message_id": "\u003cm4@example.org\u003e",
+                  "received_at": "2026-09-28T11:00:00Z",
+                  "sent_at": "2026-09-28T11:00:00Z",
+                  "subject": "Subject m4",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "7ce518eaf3d59cbddff03fad332a5026743c0d906784c5340b7f89fe51ba78a1"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?%24deltatoken=5\u0026%24filter=receivedDateTime+ge+2026-09-28T09%3A00%3A00Z",
+          "since": "2026-09-28T09:00:00Z"
+        }
+      }
+    }
+  ]
+}

@@ -96,6 +96,14 @@ func TestNormativeFixtures(t *testing.T) {
 				issues = plugins.CheckSubscriptionOutput(raw, view, nil)
 			case "connector-fetch-response.schema.json":
 				issues = checkConnectorFixture(t, c, raw)
+			case "connector-describe-attachment-response.schema.json":
+				report := plugins.Inspect(filepath.Join(fixtures, c.Manifest))
+				if report.Manifest == nil {
+					t.Fatalf("describe_attachment answers name a valid manifest: %+v", report.Errors)
+				}
+				issues = plugins.CheckAttachmentAnswer(context.Background(), raw, report.Manifest)
+			case "connector-upload-attachment-response.schema.json":
+				issues = plugins.CheckUploadAnswer(raw)
 			default:
 				issues = plugins.ValidateDocument(c.Schema, raw)
 			}
@@ -160,7 +168,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.3.1" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.4.0" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer

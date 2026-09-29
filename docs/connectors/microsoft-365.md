@@ -2,14 +2,15 @@
 
 The `m365_mail` kind collects one folder of one Microsoft 365 mailbox through
 Microsoft Graph, for example a shared monitoring mailbox that receives alerts,
-press releases or newsletters. Read the [Connector Instances overview](README.md)
-first: creation, credentials, health and the change feed work the same way for
-every kind.
+press releases or newsletters, through the first-party plugin
+[`plugins/m365-mail`](../../plugins/m365-mail/) (step 3). Read the
+[Connector Instances overview](README.md) first: creation, credentials, health
+and the change feed work the same way for every kind.
 
 ## What it collects
 
 - **New mail only.** An instance collects mail received from its creation, or
-  from `backfill_since` when set (at most 7 days back). Mail already in the
+  from `backfill_since` when set (at most 7 days before its first poll). Mail already in the
   folder before that point is not collected.
 - **One Record per mail.** The Record Key is the mail's `internetMessageId`.
   When a mail has none, the key is `graph:` followed by its immutable Graph id.
@@ -98,16 +99,28 @@ hours to apply. Until then Quivr may report `mailbox_access_denied`.
 
 ## 3. Deployment settings
 
-By default the connector talks to the global Microsoft cloud. A deployment
-can override both endpoints in its `QUIVR_CONFIG` file, for example for a
-national cloud:
+The kind comes from the `connector.m365_mail` plugin: build `plugins/m365-mail`
+(`go build`), run it beside the worker and pin it in `QUIVR_CONFIG`
+([run a connector plugin](../plugins/run-a-connector-plugin.md)). `make dev`,
+`make verify` and the Railway image pin it already. By default it talks to the
+global Microsoft cloud; the pin `configuration` overrides both endpoints, for
+example for a national cloud:
 
 ```json
-"m365": { "login_endpoint": "https://login.microsoftonline.com", "graph_endpoint": "https://graph.microsoft.com/v1.0" }
+"plugins": [{ "manifest": "plugins/m365-mail/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9940",
+  "configuration": { "login_endpoint": "https://login.microsoftonline.com", "graph_endpoint": "https://graph.microsoft.com/v1.0" } }]
 ```
 
 An API caller cannot choose these endpoints, so a deposited secret is only
-ever sent to them. The worker needs outbound HTTPS access to both.
+ever sent to them. The plugin needs outbound HTTPS access to both and to
+storage: it uploads each attachment to a presigned URL the core issues, pinned
+to its size, SHA-256 and media type, and the core reads the bytes back before
+accepting the mail. The plugin never holds storage credentials.
+
+**Upgrading from the built-in kind.** A deployment that still sets the engine's
+`m365` block refuses to start: move its endpoints into the pin `configuration`.
+Instances, checkpoints, credentials and health carry over, with no duplicate
+and no second download. Unpinned, instances report `unsupported_connector_kind`.
 
 ## 4. Create the instance
 
@@ -137,7 +150,7 @@ POST /v0/connectors
 | `config.tenant_id` | yes | Directory (tenant) ID, or a verified domain of the tenant. |
 | `config.mailbox` | yes | User principal name or object ID of the mailbox. |
 | `config.folder` | no | A well-known folder name (`inbox`, the default) or a folder ID. Subfolders are not included. |
-| `config.backfill_since` | no | Also collect mail received since this instant. At most 7 days before creation (a one-hour grace lets a retried creation replay), otherwise `422 invalid_config`. |
+| `config.backfill_since` | no | Also collect mail received since this instant. At most 7 days before the first poll (with one hour of grace); an older value is reported as `invalid_config` in health and nothing is collected. |
 | `schedule.interval_seconds` | no | Polling interval. Defaults to 60 seconds. |
 | `credential.secret` | yes | `{client_id, client_secret}` or `{client_id, certificate_pem, private_key_pem}`. Anything else is `422 invalid_credential`. |
 | `credential.expires_at` | recommended | The secret's or certificate's expiry date, which enables the expiry warning. |
@@ -159,8 +172,8 @@ short-lived client assertion with it and never sends the key.
 
 3. Once health is `active` again, delete the old credential in Entra ID.
 
-Quivr caches access tokens in the worker's memory only, keyed by the
-credential, so the next run already uses the new secret.
+The plugin caches access tokens in its memory only, keyed by the credential,
+so the next run already uses the new secret.
 
 ## Health codes and troubleshooting
 
@@ -185,7 +198,9 @@ credential, so the next run already uses the new secret.
 | `folder_not_found` | `access_error` | Unknown folder ID or name. | Check `folder`. |
 | `throttled` | unchanged | Graph returned 429. Quivr honoured `Retry-After` and retries on a later run. | None, unless it persists. Then raise `interval_seconds`. |
 | `source_unavailable`, `token_unavailable` | unchanged | Graph or the identity platform was unreachable or returned 5xx. | None; collection resumes automatically. |
-| `item_rejected` | unchanged | One mail could not be ingested. Other mail keeps flowing. | Check the worker logs by connector ID. |
+| `invalid_config` | unchanged | `backfill_since` is more than 7 days before the first poll. | Create a new instance with a recent `backfill_since`. |
+| `item_rejected` | unchanged | One mail could not be ingested, or its attachment kept changing while uploaded. Other mail keeps flowing. | Check the worker logs by connector ID. |
+| `attachment_unverified` | unchanged | Storage did not hold the granted bytes after an upload. The mail is not accepted and is retried on the next run. | None, unless it persists; then check storage. |
 
 Other behaviour:
 - **Retry-After.** Short delays (up to 10 seconds) are waited within the run.
@@ -200,19 +215,16 @@ Other behaviour:
 - 25 MB per stored attachment. Larger attachments are listed as `too_large`.
 - One folder per instance, without subfolders. Create one instance per folder,
   each with its own Source Namespace.
-- A run reads up to 10 pages of 10 mails and stores up to 200 MB of
-  attachments. A larger backlog continues on the next run.
+- A run reads up to 10 pages of 10 mails, stores up to 200 MB of attachments
+  and starts no new page after 2 minutes. A larger backlog continues on the
+  next run.
 - Attachment text (PDF, Office documents) is not extracted yet.
 
 ## Optional check against a real tenant
 
 `make verify` uses a local fake of Graph (`scripts/fake_graph.py`) and never
-contacts Microsoft. To check a real test tenant by hand:
-1. Register an application as above, scoped to a test mailbox.
-2. Run a local stack with `make dev`.
-3. Create an instance with the test tenant's values.
-4. Send a mail with an attachment to the test mailbox.
-5. Within a minute, follow `GET /v0/changes?corpus_id=…` until the Record
-   appears, then read its current Version and the attachment Blob.
-
-Keep the tenant ID, mailbox and credential out of the repository.
+contacts Microsoft. To check a real test tenant by hand, register an
+application scoped to a test mailbox, run `make dev` with the plugin pinned to
+the public cloud, create an instance, send a mail with an attachment, and
+follow `GET /v0/changes?corpus_id=…` until the Record and its attachment Blob
+appear. Keep the tenant ID, mailbox and credential out of the repository.

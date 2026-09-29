@@ -221,3 +221,60 @@ func InvokeConnectorFetch(ctx context.Context, baseURL string, request []byte, m
 func InvokeCheckCredential(ctx context.Context, baseURL string, request []byte) (*Result, error) {
 	return invoke(ctx, baseURL, ConnectorCheckCredentialRoute, request, 64<<10, plugins.CheckCredentialOutput)
 }
+
+// AttachmentItem is the item an attachment request names.
+type AttachmentItem struct {
+	RecordKey  string          `json:"record_key"`
+	Revision   string          `json:"revision,omitempty"`
+	Extensions json.RawMessage `json:"extensions,omitempty"`
+}
+
+// AttachmentGrant is the presigned PUT of an upload_attachment request.
+type AttachmentGrant struct {
+	URL       string            `json:"url"`
+	Method    string            `json:"method"`
+	Headers   map[string]string `json:"headers"`
+	SizeBytes int64             `json:"size_bytes"`
+	SHA256    string            `json:"sha256"`
+	MediaType string            `json:"media_type"`
+	ExpiresAt string            `json:"expires_at"`
+}
+
+type attachmentRequest struct {
+	connectorCredentialRequest
+	Item       AttachmentItem              `json:"item"`
+	Attachment plugins.ConnectorAttachment `json:"attachment"`
+	Grant      *AttachmentGrant            `json:"grant,omitempty"`
+}
+
+// AttachmentRequest builds a describe_attachment request (grant nil) or an
+// upload_attachment request of the run.
+func (r *ConnectorRun) AttachmentRequest(item AttachmentItem, at plugins.ConnectorAttachment, grant *AttachmentGrant, suffix string) []byte {
+	body, _ := json.Marshal(attachmentRequest{connectorCredentialRequest: connectorCredentialRequest{
+		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
+		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.ref(r.Kind),
+		Credential: r.Credential, Now: r.Now,
+	}, Item: item, Attachment: at, Grant: grant})
+	return body
+}
+
+// Attachment routes (Plugin API 0.4).
+const (
+	ConnectorDescribeAttachmentRoute = "/v0/contributions/connector/describe_attachment"
+	ConnectorUploadAttachmentRoute   = "/v0/contributions/connector/upload_attachment"
+)
+
+// attachmentAnswerBytes bounds a describe_attachment or upload_attachment answer.
+const attachmentAnswerBytes = 1 << 20
+
+// InvokeDescribeAttachment posts a describe_attachment request and applies
+// check to a 200 body, such as a closure over plugins.CheckAttachmentAnswer.
+func InvokeDescribeAttachment(ctx context.Context, baseURL string, request []byte, check func(body []byte) []plugins.Issue) (*Result, error) {
+	return invoke(ctx, baseURL, ConnectorDescribeAttachmentRoute, request, attachmentAnswerBytes, check)
+}
+
+// InvokeUploadAttachment posts an upload_attachment request and validates a
+// 200 body with plugins.CheckUploadAnswer.
+func InvokeUploadAttachment(ctx context.Context, baseURL string, request []byte) (*Result, error) {
+	return invoke(ctx, baseURL, ConnectorUploadAttachmentRoute, request, attachmentAnswerBytes, plugins.CheckUploadAnswer)
+}
