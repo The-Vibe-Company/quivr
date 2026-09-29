@@ -1,0 +1,37 @@
+deploy/railway/core.Dockerfile
+  s_54b80c92daa9cb::t_ae2d9dc519c5fd 12-28,54-55
+scripts/local.py
+  s_54b80c92daa9cb::t_3be411e7d8362f 132,143,246,383,604-605,608
+scripts/demo.py
+  s_54b80c92daa9cb::t_35fd35766260b2 13
+  s_54b80c92daa9cb::t_7df86f63e9718c 50-51
+scripts/test_image_context.py
+  s_54b80c92daa9cb::t_35577a80a50199 40-80
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_3edd04d3d770d8 26-32
+  s_54b80c92daa9cb::t_eb61e9aae39d15 69-73
+  s_54b80c92daa9cb::t_33fefc5f2856b8 122-129
+  s_54b80c92daa9cb::t_1f3ac951e8cc07 103-104,106
+  s_54b80c92daa9cb::t_2f62a4e2a9e287 195-197
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_1a699c7b95b8a6 39-141
+  s_54b80c92daa9cb::t_3535b79529596c 16-25
+scripts/image_context.py
+  s_54b80c92daa9cb::t_818d60485ba3da 12-13,47-49,52-58,63,65-67,75,94-96,103-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8f3ec7594742af07c9d7f1c96bf9a588474daf3",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
