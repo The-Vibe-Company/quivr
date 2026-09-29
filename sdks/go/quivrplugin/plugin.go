@@ -347,8 +347,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 		return nil, fmt.Sprintf("%d items exceed max_items %d; answer More and return the rest on the next page", len(page.Items), p.m.maxItems)
 	case len(body) > p.m.maxBytes:
 		return nil, fmt.Sprintf("the response is %d bytes; max_response_bytes is %d", len(body), p.m.maxBytes)
-	case compactLen(checkpoint) > MaxCheckpointBytes:
-		return nil, fmt.Sprintf("the checkpoint encodes to %d bytes; the core stores at most %d", compactLen(checkpoint), MaxCheckpointBytes)
+	case compactLen(checkpoint) > p.m.maxCheckpt:
+		return nil, fmt.Sprintf("the checkpoint encodes to %d bytes; max_checkpoint_bytes is %d", compactLen(checkpoint), p.m.maxCheckpt)
 	case page.Diagnostics != nil && len(diagnostics) > MaxDiagnosticsBytes:
 		return nil, fmt.Sprintf("diagnostics encode to %d bytes; the core stores at most %d", len(diagnostics), MaxDiagnosticsBytes)
 	}

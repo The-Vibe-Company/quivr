@@ -63,7 +63,10 @@ type ConnectorRun struct {
 	Checkpoint json.RawMessage
 	Now        string
 	MaxPages   int
-	Expect     struct {
+	// PluginAPI is the Plugin API version the plugin's discovery serves; it
+	// decides whether fetch requests carry the instance scope.
+	PluginAPI string
+	Expect    struct {
 		Pages           []ConnectorExpectedPage      `json:"pages,omitempty"`
 		Error           *ConnectorExpectedError      `json:"error,omitempty"`
 		CheckCredential *ConnectorExpectedCredential `json:"check_credential,omitempty"`
@@ -87,9 +90,11 @@ type connectorFixture struct {
 }
 
 type connectorRef struct {
-	InstanceID string          `json:"instance_id"`
-	Kind       string          `json:"kind"`
-	Config     json.RawMessage `json:"config"`
+	InstanceID      string          `json:"instance_id"`
+	Kind            string          `json:"kind"`
+	CorpusID        string          `json:"corpus_id,omitempty"`
+	SourceNamespace string          `json:"source_namespace,omitempty"`
+	Config          json.RawMessage `json:"config"`
 }
 
 type connectorFetchRequest struct {
@@ -169,12 +174,27 @@ func (r *ConnectorRun) ref(kind string) connectorRef {
 	return connectorRef{InstanceID: "dev-connector-" + r.short, Kind: kind, Config: r.Config}
 }
 
+// Dev scope of a replayed fixture's fetch requests, sent when the run's
+// PluginAPI (the version discovery serves) is 0.3.1 or later.
+const (
+	DevCorpusID        = "dev-corpus"
+	DevSourceNamespace = "dev-namespace"
+)
+
+func (r *ConnectorRun) scopedRef(kind string) connectorRef {
+	ref := r.ref(kind)
+	if plugins.SendsInstanceScope(r.PluginAPI) {
+		ref.CorpusID, ref.SourceNamespace = DevCorpusID, DevSourceNamespace
+	}
+	return ref
+}
+
 // FetchRequest builds the fetch request of one page of the run. suffix makes
 // the invocation id unique per attempt.
 func (r *ConnectorRun) FetchRequest(checkpoint json.RawMessage, page int, readsToday int64, suffix string) []byte {
 	body, _ := json.Marshal(connectorFetchRequest{
 		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
-		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.ref(r.Kind),
+		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.scopedRef(r.Kind),
 		Credential: r.Credential, Checkpoint: checkpoint, Now: r.Now, PageInRun: page, ReadsToday: readsToday,
 	})
 	return body

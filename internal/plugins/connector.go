@@ -10,10 +10,13 @@ import (
 )
 
 // Connector output bounds the schema cannot express. They mirror what the
-// core stores: an Acquisition Checkpoint and Connector Health diagnostics.
+// core stores: an Acquisition Checkpoint and Connector Health diagnostics. A
+// manifest may raise the checkpoint bound up to MaxDeclaredCheckpointBytes
+// with limits.max_checkpoint_bytes (since Plugin API 0.3.1).
 const (
-	MaxCheckpointBytes  = 64 << 10
-	MaxDiagnosticsBytes = 16 << 10
+	DefaultMaxCheckpointBytes  = 64 << 10
+	MaxDeclaredCheckpointBytes = 1 << 20
+	MaxDiagnosticsBytes        = 16 << 10
 )
 
 // Connector error classes (error envelope class, since Plugin API 0.3). They
@@ -57,6 +60,31 @@ func ConnectorMaxItems(m *Manifest) int {
 	return DefaultMaxItems
 }
 
+// InstanceScopeSince is the Plugin API version that added connector.corpus_id
+// and connector.source_namespace to fetch requests.
+const InstanceScopeSince = "0.3.1"
+
+// SendsInstanceScope reports whether a plugin whose discovery serves Plugin
+// API served receives the instance scope in fetch requests. A plugin built for
+// 0.3.0 may validate requests strictly, so it never receives the new fields.
+func SendsInstanceScope(served string) bool {
+	v, err := ParseVersion(served)
+	if err != nil {
+		return false
+	}
+	since, _ := ParseVersion(InstanceScopeSince)
+	return v.Compare(since) >= 0
+}
+
+// ConnectorMaxCheckpointBytes is the declared max_checkpoint_bytes, or its
+// default.
+func ConnectorMaxCheckpointBytes(m *Manifest) int {
+	if m != nil && m.Contributions.Connector != nil && m.Contributions.Connector.Limits.MaxCheckpointBytes > 0 {
+		return min(m.Contributions.Connector.Limits.MaxCheckpointBytes, MaxDeclaredCheckpointBytes)
+	}
+	return DefaultMaxCheckpointBytes
+}
+
 // ConnectorItem is one decoded item of a valid fetch response.
 type ConnectorItem struct {
 	RecordKey      string                `json:"record_key"`
@@ -93,8 +121,8 @@ type ConnectorPage struct {
 
 // CheckConnectorOutput judges a 200 fetch response exactly as the engine does
 // before it accepts any item: the response bound, the response schema
-// (unknown fields are rejected), the declared max_items, the checkpoint and
-// diagnostics bounds, not_due coherence against the request's checkpoint,
+// (unknown fields are rejected), the declared max_items and
+// max_checkpoint_bytes, the diagnostics bound, not_due coherence against the request's checkpoint,
 // then per item: exactly one of content and withdraw, unique Record Keys,
 // attachments only beside a Manifest, the engine's structural Manifest rules
 // with the attachments as Parts, no Blob Parts, and extensions only in
@@ -115,9 +143,9 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 		issues = append(issues, Issue{Code: CodeTooManyItems, Path: "/items",
 			Message: fmt.Sprintf("%d items exceed the declared max_items %d; answer more: true and return the rest on the next page", len(page.Items), limit)})
 	}
-	if n := compactLen(page.Checkpoint); n > MaxCheckpointBytes {
+	if limit, n := ConnectorMaxCheckpointBytes(m), compactLen(page.Checkpoint); n > limit {
 		issues = append(issues, Issue{Code: CodeCheckpointTooLarge, Path: "/checkpoint",
-			Message: fmt.Sprintf("the checkpoint serializes to %d bytes; the core stores at most %d", n, MaxCheckpointBytes)})
+			Message: fmt.Sprintf("the checkpoint serializes to %d bytes; the limit is %d (declared max_checkpoint_bytes, at most %d)", n, limit, MaxDeclaredCheckpointBytes)})
 	}
 	if n := compactLen(page.Diagnostics); n > MaxDiagnosticsBytes {
 		issues = append(issues, Issue{Code: CodeDiagnosticsTooLarge, Path: "/diagnostics",

@@ -1,8 +1,10 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.3.0`**: `0.2.0` added the
-`subscription` Contribution to Plugin API `0.1.0`, and `0.3.0` adds `connector`. JSON Schemas in this
+external plugin. It covers **Plugin API version `0.3.1`**: `0.2.0` added the
+`subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
+and `0.3.1` adds the instance scope to connector fetch requests, the declared
+checkpoint bound and `_` in plugin ids and extension namespaces. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -53,9 +55,11 @@ are **reserved**. A manifest that declares them is rejected
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.3.0` and still serves every `0.1` and `0.2` plugin unchanged: a
+implements `0.3.1` and still serves every `0.1`, `0.2` and `0.3.0` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0` or `0.3.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0` or `0.3.1`), and the engine speaks the highest one the range admits.
+A patch version only adds optional fields; a plugin that validates requests
+strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
 a supported version inside the declared range that is at least the version
 each declared Contribution needs; SDKs serve the negotiated one. A
@@ -93,7 +97,7 @@ version.
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Lowercase dotted or dashed identifier, at most 64 characters |
+| `id` | Lowercase identifier of letters, digits, `-` and `_` segments separated by dots, at most 64 characters (`_` since 0.3.1) |
 | `version` | SemVer 2.0.0 plugin version |
 | `description` | Optional human description |
 | `compatibility.engine`, `compatibility.plugin_api` | Version ranges (grammar below) |
@@ -108,7 +112,7 @@ version.
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
 | `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]` (`push` is `reserved_field`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
-| `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB) and `max_items` per page (default 100, at most 1000) |
+| `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
 | `configuration.schema` | JSON Schema 2020-12 for installer configuration |
 | `secrets[]` | Secret names (`^[A-Z][A-Z0-9_]*$`), description, `required` (default true). Values never appear in the manifest |
 | `extensions` | Owned extension namespaces: namespace, then schema version, then JSON Schema 2020-12 |
@@ -127,7 +131,7 @@ Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
 `>=0.3.0 <0.2.0`, is invalid. `fixtures/ranges.json` is normative for every
 implementation.
 
-This engine implements Plugin API `0.3.0` (and serves `0.1.0` and `0.2.0`) and reports
+This engine implements Plugin API `0.3.1` (and serves `0.1.0`, `0.2.0` and `0.3.0`) and reports
 engine version `0.1.0`. Release builds may override the engine version.
 `quivr plugin inspect --json` reports both, and the negotiated Plugin API
 version under `compatibility.plugin_api.version`.
@@ -330,7 +334,9 @@ calling connector plugins in a later release.
 
 **`fetch`** (`connector-fetch-request.schema.json`) carries `invocation_id`,
 `organization_id`, the installer `configuration`, the Connector Instance
-(`connector`: `instance_id`, `kind`, `config`), the decrypted `credential` (null
+(`connector`: `instance_id`, `kind`, `config`, and since 0.3.1 the `corpus_id`
+and `source_namespace` the instance writes to, so a plugin can bind Relation
+targets to full Source Identities), the decrypted `credential` (null
 for a kind without one), the opaque `checkpoint` the plugin returned last (null
 on a first run), `now`, `page_in_run` (0, then counting up while the plugin
 answers `more: true`) and `reads_today`. The response carries:
@@ -345,7 +351,8 @@ answers `more: true`) and `reads_today`. The response carries:
   and an opaque `ref`), which need Manifest content. The core asks for their
   bytes later, only for an item it does not already have; that exchange is not
   part of Plugin API 0.3;
-- `checkpoint` (required, any JSON value of at most 64 KiB), which resumes after
+- `checkpoint` (required, any JSON value of at most `max_checkpoint_bytes`
+  serialized as compact JSON, 64 KiB unless the manifest declares more), which resumes after
   this page. The core persists it and advances it only after the page's items
   are accepted, so a migrated plugin keeps reading the checkpoints it wrote;
 - `more`, which asks for another page in the same run and needs a checkpoint
@@ -392,7 +399,8 @@ optional plugin `configuration`, a starting `checkpoint` (default null), `now`
 the Record Keys (and `more`) of each page, an `error` (`error_class`, optional
 `code`) or the `check_credential` answer. The Instance is
 `dev-connector-<digest>`, invocations `dev-invocation-<digest>-<page>`, from the
-first 16 hex digits of the SHA-256 of the fixture bytes.
+first 16 hex digits of the SHA-256 of the fixture bytes; fetch requests carry
+`corpus_id` `dev-corpus` and `source_namespace` `dev-namespace`.
 `fixtures/connectors/feed.json` is a normative example.
 
 ## Normative fixtures

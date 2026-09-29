@@ -160,7 +160,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.3.0" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.3.1" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer

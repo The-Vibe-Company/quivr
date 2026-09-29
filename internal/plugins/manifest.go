@@ -19,13 +19,13 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.3.0"
+const PluginAPIVersion = "0.3.1"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -166,6 +166,9 @@ type ConnectorKind struct {
 type ConnectorLimits struct {
 	MaxResponseBytes int `json:"max_response_bytes"`
 	MaxItems         int `json:"max_items"`
+	// MaxCheckpointBytes bounds the compact JSON checkpoint (since Plugin API
+	// 0.3.1).
+	MaxCheckpointBytes int `json:"max_checkpoint_bytes"`
 }
 
 type SubscriptionLimits struct {
@@ -333,6 +336,9 @@ func applyDefaults(m *Manifest) {
 		}
 		if c.Limits.MaxItems == 0 {
 			c.Limits.MaxItems = DefaultMaxItems
+		}
+		if c.Limits.MaxCheckpointBytes == 0 {
+			c.Limits.MaxCheckpointBytes = DefaultMaxCheckpointBytes
 		}
 		for name, kind := range c.Kinds {
 			if len(kind.Modes) == 0 {

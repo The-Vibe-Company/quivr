@@ -124,12 +124,23 @@ func (f *Fixture) defaults() (credential, configuration, checkpoint json.RawMess
 	return
 }
 
+// The instance scope of fetch requests, as `quivr plugin test` sends it
+// (Plugin API 0.3.1).
+const (
+	DevCorpusID        = "dev-corpus"
+	DevSourceNamespace = "dev-namespace"
+)
+
 func (f *Fixture) request(extra map[string]any) []byte {
 	credential, configuration, _, now, _ := f.defaults()
+	connector := map[string]any{"instance_id": "dev-connector-" + f.short, "kind": f.Connector.Kind, "config": f.Connector.Config}
+	if _, fetch := extra["checkpoint"]; fetch {
+		connector["corpus_id"], connector["source_namespace"] = DevCorpusID, DevSourceNamespace
+	}
 	body := map[string]any{
 		"invocation_id": "dev-invocation-" + f.short, "contribution": "connector", "organization_id": "dev-organization",
 		"configuration": configuration,
-		"connector":     map[string]any{"instance_id": "dev-connector-" + f.short, "kind": f.Connector.Kind, "config": f.Connector.Config},
+		"connector":     connector,
 		"credential":    credential, "now": now,
 	}
 	for k, v := range extra {

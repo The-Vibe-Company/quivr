@@ -25,6 +25,11 @@ type Connector interface {
 type Instance struct {
 	ID   string `json:"instance_id"`
 	Kind string `json:"kind"`
+	// CorpusID and SourceNamespace are the Corpus and Source Namespace the
+	// instance writes to (fetch requests, since Plugin API 0.3.1): bind a
+	// Relation target to them with the target's Record Key.
+	CorpusID        string `json:"corpus_id,omitempty"`
+	SourceNamespace string `json:"source_namespace,omitempty"`
 	// Config is the instance configuration, already valid against the
 	// kind's config_schema.
 	Config json.RawMessage `json:"config"`
@@ -99,7 +104,7 @@ type CredentialStatus struct {
 type Page struct {
 	Items []Item
 	// Checkpoint resumes after this page (any JSON-encodable value, at most
-	// 64 KiB encoded). Return the request's checkpoint when nothing moved.
+	// limits.max_checkpoint_bytes encoded, 64 KiB by default). Return the request's checkpoint when nothing moved.
 	Checkpoint any
 	// More asks for another page in the same run; the checkpoint must move.
 	More bool

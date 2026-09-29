@@ -587,6 +587,24 @@
       "description": "A connector declares at least one kind."
     },
     {
+      "file": "manifests/valid/connector-scoped.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.3.1: an underscore in the plugin id and extension namespace, and a declared max_checkpoint_bytes."
+    },
+    {
+      "file": "manifests/invalid/connector-checkpoint-bound-too-large.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "max_checkpoint_bytes is at most 1 MiB."
+    },
+    {
       "file": "requests/connector/fetch.json",
       "schema": "connector-fetch-request.schema.json",
       "valid": true,
@@ -784,6 +802,16 @@
       "request": "requests/connector/fetch.json",
       "manifest": "manifests/valid/connector.yaml",
       "description": "A checkpoint over 64 KiB."
+    },
+    {
+      "file": "responses/connector/checkpoint-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-scoped.yaml",
+      "description": "The same checkpoint is accepted from a manifest that declares max_checkpoint_bytes 256 KiB."
     },
     {
       "file": "responses/connector/diagnostics-too-large.json",

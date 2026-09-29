@@ -232,15 +232,22 @@ func describeEnvelope(body []byte) string {
 // manifest: schema, manifest digest, plugin id and version, Plugin API version
 // within the declared range, and Contributions.
 func CheckDiscovery(ctx context.Context, baseURL string, report plugins.Report) ([]plugins.Issue, error) {
+	_, issues, err := Discover(ctx, baseURL, report)
+	return issues, err
+}
+
+// Discover is CheckDiscovery that also returns the Plugin API version the
+// discovery document serves (empty when the document is unusable).
+func Discover(ctx context.Context, baseURL string, report plugins.Report) (string, []plugins.Issue, error) {
 	status, body, err := get(ctx, baseURL+"/v0/discovery", 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("GET /v0/discovery: %w", err)
+		return "", nil, fmt.Errorf("GET /v0/discovery: %w", err)
 	}
 	if status != http.StatusOK {
-		return []plugins.Issue{{Code: CodeDiscoveryMismatch, Message: fmt.Sprintf("GET /v0/discovery returned %d %s", status, describeEnvelope(body))}}, nil
+		return "", []plugins.Issue{{Code: CodeDiscoveryMismatch, Message: fmt.Sprintf("GET /v0/discovery returned %d %s", status, describeEnvelope(body))}}, nil
 	}
 	if issues := plugins.ValidateDocument("discovery.schema.json", body); len(issues) > 0 {
-		return issues, nil
+		return "", issues, nil
 	}
 	var doc struct {
 		PluginAPI string `json:"plugin_api"`
@@ -252,7 +259,7 @@ func CheckDiscovery(ctx context.Context, baseURL string, report plugins.Report) 
 		Contributions  []string `json:"contributions"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	var issues []plugins.Issue
 	mismatch := func(path, format string, args ...any) {
@@ -264,7 +271,7 @@ func CheckDiscovery(ctx context.Context, baseURL string, report plugins.Report) 
 	}
 	m := report.Manifest
 	if m == nil {
-		return issues, nil
+		return doc.PluginAPI, issues, nil
 	}
 	if doc.Plugin.ID != m.ID {
 		mismatch("/plugin/id", "discovery serves plugin id %q; the manifest declares %q", doc.Plugin.ID, m.ID)
@@ -292,7 +299,7 @@ func CheckDiscovery(ctx context.Context, baseURL string, report plugins.Report) 
 	if !slices.Equal(served, slices.Sorted(slices.Values(declared))) {
 		mismatch("/contributions", "discovery lists Contributions %v; the manifest declares %v", doc.Contributions, declared)
 	}
-	return issues, nil
+	return doc.PluginAPI, issues, nil
 }
 
 // fixture mirrors contracts/plugins/v0/plugin-fixture.schema.json.

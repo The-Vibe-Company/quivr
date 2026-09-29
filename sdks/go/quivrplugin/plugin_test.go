@@ -82,7 +82,7 @@ func TestDiscoveryServesTheNegotiatedVersionAndDigest(t *testing.T) {
 		Contributions  []string `json:"contributions"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
-	if doc.PluginAPI != "0.3.0" || doc.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) || fmt.Sprint(doc.Contributions) != "[connector]" {
+	if doc.PluginAPI != "0.3.1" || doc.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) || fmt.Sprint(doc.Contributions) != "[connector]" {
 		t.Fatalf("discovery %+v", doc)
 	}
 }

@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.3.0"
+const PluginAPIVersion = "0.3.1"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector Contribution. The engine validates the
@@ -45,8 +45,9 @@ type ConnectorContribution struct {
 	Kinds     map[string]ConnectorKind `json:"kinds"`
 	TimeoutMS int                      `json:"timeout_ms"`
 	Limits    struct {
-		MaxResponseBytes int `json:"max_response_bytes"`
-		MaxItems         int `json:"max_items"`
+		MaxResponseBytes   int `json:"max_response_bytes"`
+		MaxItems           int `json:"max_items"`
+		MaxCheckpointBytes int `json:"max_checkpoint_bytes"`
 	} `json:"limits"`
 }
 
@@ -64,7 +65,8 @@ const (
 	DefaultMaxResponseBytes = 4 << 20
 	EngineMaxResponseBytes  = 16 << 20
 	DefaultMaxItems         = 100
-	MaxCheckpointBytes      = 64 << 10
+	MaxCheckpointBytes      = 64 << 10 // default; limits.max_checkpoint_bytes raises it
+	MaxDeclaredCheckpoint   = 1 << 20
 	MaxDiagnosticsBytes     = 16 << 10
 )
 
@@ -76,6 +78,7 @@ type loadedManifest struct {
 	pluginAPI  string
 	maxBytes   int
 	maxItems   int
+	maxCheckpt int
 	timeoutDur time.Duration
 }
 
@@ -125,6 +128,10 @@ func loadManifest(path string) (*loadedManifest, error) {
 	m.maxItems = DefaultMaxItems
 	if c.Limits.MaxItems > 0 {
 		m.maxItems = c.Limits.MaxItems
+	}
+	m.maxCheckpt = MaxCheckpointBytes
+	if c.Limits.MaxCheckpointBytes > 0 {
+		m.maxCheckpt = min(c.Limits.MaxCheckpointBytes, MaxDeclaredCheckpoint)
 	}
 	api, ok, err := negotiate(m.Compatibility.PluginAPI)
 	if err != nil {

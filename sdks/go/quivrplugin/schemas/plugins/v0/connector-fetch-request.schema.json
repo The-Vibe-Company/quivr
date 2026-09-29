@@ -53,6 +53,17 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]{0,31}$"
         },
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Corpus the instance writes to, since Plugin API 0.3.1. Relation targets bind to it: a target Source Identity is this corpus_id and source_namespace with the target's Record Key."
+        },
+        "source_namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The Source Namespace of the instance's Records, since Plugin API 0.3.1."
+        },
         "config": {
           "type": "object",
           "description": "The Connector Instance configuration, already valid against the kind's config_schema."

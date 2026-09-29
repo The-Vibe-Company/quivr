@@ -1,0 +1,25 @@
+# A Plugin API 0.3.1 connector: an id and an extension namespace with an
+# underscore, and a checkpoint bound above the 64 KiB default.
+id: example.mail_archive
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.1 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      mail_archive:
+        config_schema:
+          type: object
+          required: [folder]
+          properties:
+            folder: {type: string}
+        default_interval_seconds: 300
+    limits:
+      max_checkpoint_bytes: 262144
+extensions:
+  example.mail_archive:
+    "1":
+      type: object
+      properties:
+        folder: {type: string}

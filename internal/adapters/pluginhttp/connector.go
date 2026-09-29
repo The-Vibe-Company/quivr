@@ -3,6 +3,7 @@ package pluginhttp
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -96,9 +97,11 @@ func (c Connector) Provider() string {
 }
 
 type connectorRef struct {
-	InstanceID string          `json:"instance_id"`
-	Kind       string          `json:"kind"`
-	Config     json.RawMessage `json:"config"`
+	InstanceID      string          `json:"instance_id"`
+	Kind            string          `json:"kind"`
+	CorpusID        string          `json:"corpus_id,omitempty"`
+	SourceNamespace string          `json:"source_namespace,omitempty"`
+	Config          json.RawMessage `json:"config"`
 }
 
 type fetchRequest struct {
@@ -150,19 +153,46 @@ func (c Connector) timeout() time.Duration {
 	return d
 }
 
-// Fetch asks the plugin for one page. The first page of a run first checks
-// the discovery document against the pinned manifest. The credential travels
-// only in the request body and is looked for in the answer: an answer that
-// echoes it is refused before anything from it is used.
-func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
-	if r.PageInRun == 0 {
-		if err := (Client{Pin: c.Pin}).CheckDiscovery(ctx); err != nil {
-			return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
+// servedAPI remembers, per plugin endpoint and manifest digest, the Plugin API
+// version its discovery served at the first page of the latest run.
+var servedAPI sync.Map
+
+func (c Connector) servedKey() string { return c.Pin.Endpoint + " " + c.Pin.ManifestDigest }
+
+// served checks discovery at the first page of a run (or when no version is
+// known yet) and returns the Plugin API version the plugin serves.
+func (c Connector) served(ctx context.Context, pageInRun int) (string, error) {
+	if pageInRun > 0 {
+		if v, ok := servedAPI.Load(c.servedKey()); ok {
+			return v.(string), nil
 		}
 	}
+	v, err := (Client{Pin: c.Pin}).Discover(ctx)
+	if err != nil {
+		return "", err
+	}
+	servedAPI.Store(c.servedKey(), v)
+	return v, nil
+}
+
+// Fetch asks the plugin for one page. The first page of a run first checks
+// the discovery document against the pinned manifest. A plugin that serves
+// Plugin API 0.3.1 or later also receives the instance's corpus_id and
+// source_namespace. The credential travels only in the request body and is
+// looked for in the answer: an answer that echoes it is refused before
+// anything from it is used.
+func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
+	served, err := c.served(ctx, r.PageInRun)
+	if err != nil {
+		return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
+	}
 	checkpoint := orNull(r.Checkpoint)
+	scoped := c.ref(r.InstanceID, r.Config)
+	if plugins.SendsInstanceScope(served) {
+		scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
+	}
 	request, err := json.Marshal(fetchRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
-		Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: orNull(r.Credential), Checkpoint: checkpoint,
+		Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint,
 		Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
 	if err != nil {
 		return connectors.Page{}, connectors.SourceError(CodePluginInvalidResponse)

@@ -79,10 +79,10 @@ func main() {
 
 | Concern | Behavior |
 | --- | --- |
-| Routes | `GET /v0/discovery` (identity, `connector`, Plugin API 0.3.0, the `sha256:` digest of the exact manifest bytes), `GET /v0/health`, `POST /v0/contributions/connector/fetch` and `/check_credential` |
+| Routes | `GET /v0/discovery` (identity, `connector`, the highest Plugin API version the range admits, up to 0.3.1, the `sha256:` digest of the exact manifest bytes), `GET /v0/health`, `POST /v0/contributions/connector/fetch` and `/check_credential` |
 | Request checks | Request schema → 400 `invalid_request`; undeclared kind → 400 `unknown_kind`; installer configuration, instance config and credential against the declared schemas → 400 `invalid_configuration`, `invalid_config` or `invalid_credential`. All terminal; a credential never appears in the message |
 | Errors | `AccessError` → 403, `SourceError` → 422 (terminal), `TransientError(...).WithRetryAfter(d)` → 503 with `retry_after_seconds`, all with `error_class`. `ErrNotDue` → a skipped run with the checkpoint unchanged. Any other error → 503 `transient` `unexpected_error`; a panic → 500 `source` `internal_error`. Details go to the log, never to the envelope |
-| Response checks | Before sending: the response schema, `max_items`, `max_response_bytes`, a checkpoint of at most 64 KiB and diagnostics of at most 16 KiB (500 `invalid_response`). The engine still applies its own item validation |
+| Response checks | Before sending: the response schema, `max_items`, `max_response_bytes`, a checkpoint of at most `limits.max_checkpoint_bytes` (64 KiB by default, at most 1 MiB) and diagnostics of at most 16 KiB (500 `invalid_response`). The engine still applies its own item validation |
 | Credentials | `Credential` prints `[redacted]` in `fmt`, JSON and `slog`. Its string values are scrubbed from error messages and from `req.Logger()` |
 | Deadline | The request context ends at the manifest's `timeout_ms` |
 
@@ -91,11 +91,13 @@ func main() {
 - **The checkpoint is yours.** Any JSON value that resumes after the returned
   items: a cursor, a timestamp, a set of seen ids. The core stores it and
   sends it back unchanged, and moves it forward only after your items are
-  accepted, so a crash never loses items. Keep it under 64 KiB.
+  accepted, so a crash never loses items. Keep it under 64 KiB, or declare
+  `limits.max_checkpoint_bytes` (at most 1 MiB).
 - **Pages.** Return at most `max_items` items and `More: true` to be called
   again at once in the same run, with the checkpoint moved. Use `req.Now`,
   not `time.Now()`, and `req.PageInRun` and `req.ReadsToday` to respect
-  source quotas.
+  source quotas. `req.Connector.CorpusID` and `req.Connector.SourceNamespace`
+  (Plugin API 0.3.1) name where the instance writes, to bind Relation targets.
 - **Items** carry a stable `RecordKey`, a `Revision` when the source has one
   (the core skips an unchanged revision), text or a Manifest of text Parts
   (`quivrplugin.NewManifest`), extensions in namespaces your manifest

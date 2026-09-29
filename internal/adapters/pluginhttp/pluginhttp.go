@@ -72,14 +72,21 @@ type Client struct {
 // CheckDiscovery compares GET /v0/discovery with the pinned manifest: digest,
 // id, version, Plugin API version and Contributions.
 func (c Client) CheckDiscovery(ctx context.Context) error {
-	issues, err := devhost.CheckDiscovery(ctx, c.Pin.Endpoint, c.Pin.Report())
+	_, err := c.Discover(ctx)
+	return err
+}
+
+// Discover is CheckDiscovery that also returns the Plugin API version the
+// plugin serves.
+func (c Client) Discover(ctx context.Context) (string, error) {
+	served, issues, err := devhost.Discover(ctx, c.Pin.Endpoint, c.Pin.Report())
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if len(issues) > 0 {
-		return fmt.Errorf("%w: discovery does not match the pinned manifest: %s", ErrUnavailable, describe(issues))
+		return "", fmt.Errorf("%w: discovery does not match the pinned manifest: %s", ErrUnavailable, describe(issues))
 	}
-	return nil
+	return served, nil
 }
 
 // Normalize posts one normalizer request and judges a 200 answer with

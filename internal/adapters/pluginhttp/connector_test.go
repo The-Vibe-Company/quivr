@@ -49,6 +49,7 @@ const token = "fixture-test-token-connector"
 type sourcePlugin struct {
 	mu       sync.Mutex
 	digest   string
+	served   string // Plugin API version discovery serves; default 0.3.0
 	requests map[string][]map[string]any
 	answer   func(route string) (int, any)
 }
@@ -58,7 +59,11 @@ func (p *sourcePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if r.URL.Path == "/v0/discovery" {
-		_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": "0.3.0", "plugin": map[string]any{"id": "acme.source", "version": "1.0.0"}, "manifest_digest": p.digest, "contributions": []string{"connector"}})
+		served := p.served
+		if served == "" {
+			served = "0.3.0"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": served, "plugin": map[string]any{"id": "acme.source", "version": "1.0.0"}, "manifest_digest": p.digest, "contributions": []string{"connector"}})
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
@@ -225,5 +230,37 @@ func TestCheckCredentialAsksThePlugin(t *testing.T) {
 	var typed *connectors.Error
 	if err := c.CheckCredential(context.Background(), request); !errors.As(err, &typed) || typed.Class != connectors.ClassAccess || typed.Code != "token_rejected" {
 		t.Fatalf("refusal %v", err)
+	}
+}
+
+// The instance scope (corpus_id, source_namespace) reaches only a plugin whose
+// discovery serves Plugin API 0.3.1 or later, on every page of a run: a plugin
+// built for 0.3.0 may refuse unknown request fields.
+func TestTheInstanceScopeReachesOnlyPluginsThatServeIt(t *testing.T) {
+	for _, tc := range []struct {
+		served string
+		scoped bool
+	}{{"0.3.0", false}, {"0.3.1", true}} {
+		t.Run(tc.served, func(t *testing.T) {
+			c, plugin, _ := sourceConnector(t, func(string) (int, any) {
+				return 200, map[string]any{"checkpoint": map[string]any{"offset": 2}, "more": false, "items": []any{}}
+			})
+			plugin.served = tc.served
+			for page := range 2 {
+				r := fetchRequest()
+				r.CorpusID, r.Namespace, r.PageInRun = "corpus_a", "feeds.example", page
+				if _, err := c.Fetch(context.Background(), r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, req := range plugin.requests[fetchRoute] {
+				ref := req["connector"].(map[string]any)
+				_, hasCorpus := ref["corpus_id"]
+				_, hasNamespace := ref["source_namespace"]
+				if hasCorpus != tc.scoped || hasNamespace != tc.scoped || tc.scoped && (ref["corpus_id"] != "corpus_a" || ref["source_namespace"] != "feeds.example") {
+					t.Fatalf("Plugin API %s, page %d: connector %v, want scope %v", tc.served, i, ref, tc.scoped)
+				}
+			}
+		})
 	}
 }

@@ -3,7 +3,7 @@
   "contribution": "connector",
   "organization_id": "org-1",
   "configuration": {},
-  "connector": {"instance_id": "connector-7", "kind": "feed", "config": {"feed_url": "https://feeds.example.com/news"}},
+  "connector": {"instance_id": "connector-7", "kind": "feed", "corpus_id": "corpus-3", "source_namespace": "feeds.example.com", "config": {"feed_url": "https://feeds.example.com/news"}},
   "credential": {"token": "test-token-0000"},
   "checkpoint": {"cursor": "2026-09-29T08:00:00Z"},
   "now": "2026-09-29T09:00:00Z",

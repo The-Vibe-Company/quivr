@@ -245,6 +245,7 @@ class ConnectorKind(Model):
 class ConnectorLimits(Model):
     max_response_bytes: int | None = None
     max_items: int | None = None
+    max_checkpoint_bytes: int | None = None
 
 
 @dataclass(kw_only=True)
@@ -464,6 +465,8 @@ class ConnectorInstanceRef(Model):
 
     instance_id: str
     kind: str
+    corpus_id: str | None = None
+    source_namespace: str | None = None
     config: dict[str, Any]
 
 

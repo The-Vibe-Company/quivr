@@ -154,7 +154,9 @@ type run struct {
 	report  Report
 	m       *plugins.Manifest
 	baseURL string
-	tmp     string // extracted normative fixtures
+	// pluginAPI is the Plugin API version discovery serves.
+	pluginAPI string
+	tmp       string // extracted normative fixtures
 	// logs captures the launched plugin's output for the credential check.
 	logs *lockedBuffer
 	// seen collects every connector answer body for the credential check.
@@ -222,10 +224,11 @@ func (r *run) execute(ctx context.Context) {
 		return
 	}
 	started := time.Now()
-	issues, err := devhost.CheckDiscovery(ctx, r.baseURL, plugins.Report{Path: r.report.Plugin.ManifestPath, ManifestDigest: r.report.Plugin.ManifestDigest, Manifest: r.m})
+	served, issues, err := devhost.Discover(ctx, r.baseURL, plugins.Report{Path: r.report.Plugin.ManifestPath, ManifestDigest: r.report.Plugin.ManifestDigest, Manifest: r.m})
 	if err != nil {
 		issues = append(issues, plugins.Issue{Code: CodeUnavailable, Path: "/v0/discovery", Message: err.Error()})
 	}
+	r.pluginAPI = served
 	r.add(Check{ID: CheckDiscovery, Title: "GET /v0/discovery matches quivr-plugin.yaml", Issues: issues}, started)
 
 	own := r.ownFixtures()

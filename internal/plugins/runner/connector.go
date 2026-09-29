@@ -64,6 +64,7 @@ func (r *run) connectorFixtures(own []ownFixture) []connectorRun {
 			}
 			continue
 		}
+		run.PluginAPI = r.pluginAPI
 		out = append(out, connectorRun{label: f.label, run: run})
 	}
 	if len(out) == 0 && len(check.Issues) == 0 {

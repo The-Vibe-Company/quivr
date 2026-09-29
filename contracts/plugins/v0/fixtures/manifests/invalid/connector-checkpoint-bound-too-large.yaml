@@ -1,0 +1,14 @@
+# max_checkpoint_bytes is at most 1 MiB.
+id: example-feeds
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.1 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        config_schema: {type: object}
+        default_interval_seconds: 900
+    limits:
+      max_checkpoint_bytes: 2097152

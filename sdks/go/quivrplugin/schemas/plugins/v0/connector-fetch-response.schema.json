@@ -19,7 +19,7 @@
       "description": "At most the declared max_items."
     },
     "checkpoint": {
-      "description": "The opaque checkpoint that resumes after this page (any JSON value, at most 64 KiB serialized). Return the request's checkpoint unchanged when nothing moved."
+      "description": "The opaque checkpoint that resumes after this page (any JSON value, at most the declared limits.max_checkpoint_bytes serialized, 64 KiB by default). Return the request's checkpoint unchanged when nothing moved."
     },
     "more": {
       "type": "boolean",

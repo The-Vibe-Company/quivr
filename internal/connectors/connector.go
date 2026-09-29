@@ -93,10 +93,15 @@ type FetchRequest struct {
 	// connectors that run outside the engine (plugin kinds).
 	Organization string
 	InstanceID   string
-	Config       json.RawMessage
-	Credential   json.RawMessage
-	Checkpoint   json.RawMessage
-	Now          time.Time
+	// CorpusID and Namespace are the Corpus and Source Namespace the
+	// instance writes to, for connectors that bind Relation targets
+	// themselves (plugin kinds).
+	CorpusID   string
+	Namespace  string
+	Config     json.RawMessage
+	Credential json.RawMessage
+	Checkpoint json.RawMessage
+	Now        time.Time
 	// PageInRun is 0 for the first page of a run, then counts up.
 	PageInRun int
 	// ReadsToday is the number of source resources read during the current

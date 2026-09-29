@@ -106,7 +106,7 @@
       "maxProperties": 32,
       "description": "Extension namespaces the plugin owns, each mapping schema versions to JSON Schema 2020-12. Every namespace must equal the plugin id or start with the plugin id followed by a dot.",
       "propertyNames": {
-        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+        "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)*$",
         "maxLength": 128
       },
       "additionalProperties": {
@@ -145,7 +145,7 @@
   "$defs": {
     "PluginId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+      "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)*$",
       "maxLength": 64
     },
     "Version": {
@@ -315,6 +315,13 @@
               "minimum": 1,
               "maximum": 1000,
               "default": 100
+            },
+            "max_checkpoint_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 1048576,
+              "default": 65536,
+              "description": "Largest checkpoint, serialized as compact JSON, the core accepts from this plugin (since Plugin API 0.3.1)."
             }
           }
         }
