@@ -1,0 +1,32 @@
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_f1098f07efcd98 4-6,25-30,37-39,50-58,112-117,131-169
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f1098f07efcd98 9,28,40
+internal/plugins/runner/attachments.go
+  s_54b80c92daa9cb::t_28f4dacbf6f0fe 1-162
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_10dd22ea0fb5f0 205-208
+  s_54b80c92daa9cb::t_8e234c6bae8373 149-157,177,209-211,245-247,342,345-349,358-368,373,381-382,384,386-395
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_f1098f07efcd98 183,189-196
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_88e3e8391b95ec 159-160
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_f1098f07efcd98 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c4b3bd6555aafae4ec656b928c68029f51cd1591",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
