@@ -27,7 +27,9 @@ DEMO_DESTINATION='local-receiver-org-d'
 # Shortened webhook retry policy of the local harness, like its other short intervals (dev and verify;
 # deployment defaults: 1s/5m/24h/10s). Verification reports it in report.json. The local receivers listen
 # on loopback, so the harness also lifts the private-destination refusal (deployment default: refused).
-DELIVERY_OVERRIDES={'retry_initial':'1s','retry_max':'2s','window':'20s','allow_private_destinations':True}
+# retry_initial stays 2 s: the first retry is jittered into [1 s, 2 s], so each attempt's webhook-timestamp (whole
+# seconds) and therefore its signature differ, which acceptance checks; 1 s allowed two attempts in one second.
+DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'2s','window':'20s','allow_private_destinations':True}
 # The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
 # short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
 PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}

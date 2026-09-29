@@ -16,7 +16,9 @@ import (
 )
 
 // Retry acceptance runs against the shortened, reported harness policy in
-// scripts/local.py (DELIVERY_OVERRIDES): initial 1s, cap 2s, window 20s.
+// scripts/local.py (DELIVERY_OVERRIDES): initial 2s, cap 2s, window 20s. A
+// retry therefore waits at least 1s, so each attempt carries its own
+// whole-second webhook-timestamp and signature (sameNotice).
 const (
 	shortWindow = 20 * time.Second
 	// quietPeriod is how long a check watches for an attempt that must not
