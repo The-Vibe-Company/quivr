@@ -1,0 +1,72 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_d9760acb634dd8 72-78
+plugins/x-list/testdata/builtin/backfill_resumes_interrupted_sweep.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-292
+plugins/x-list/testdata/builtin/source_failures.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-183
+plugins/x-list/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_ddd1d85052596a 1-103
+plugins/x-list/testdata/builtin/maps_posts_and_edits.json
+  s_54b80c92daa9cb::t_ba70643facc228 50-55,58,167-201,219,225-230,245-246,248,251-252,254,257,266-305,309
+  s_54b80c92daa9cb::t_c415a0691df394 1-49,56-57,59-166,202-218,220-224,231-244,247,249-250,253,255-256,258-265,306-308,310-320
+plugins/x-list/xlist.go
+  s_54b80c92daa9cb::t_1588e04526c96c 1-393
+plugins/x-list/testdata/builtin/expired_token_restarts_sweep.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-169
+plugins/x-list/parity_test.go
+  s_54b80c92daa9cb::t_6b8d52f0bf51a7 1-198
+plugins/x-list/testdata/builtin/start_now_then_watermark.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-870
+plugins/x-list/testdata/builtin/recheck_withdraws_deleted_and_protected.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-781
+plugins/x-list/testdata/builtin/daily_cap_stops_polling_keeps_rechecking.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-252
+plugins/x-list/xapi.go
+  s_54b80c92daa9cb::t_c7568f12f946e8 1-97
+plugins/x-list/fakex_test.go
+  s_54b80c92daa9cb::t_9565f5e813e16e 7-8,281
+  s_54b80c92daa9cb::t_f770e934fb5ee8 1-6,9-280,282-292
+plugins/x-list/fixtures/list.json
+  s_54b80c92daa9cb::t_12d1a006db43da 1-13
+plugins/x-list/fixtures/revoked.json
+  s_54b80c92daa9cb::t_cbe64e9ba66d67 1-10
+plugins/x-list/mappost.go
+  s_54b80c92daa9cb::t_67f659ffa5c510 1-161
+scripts/plugin_x_list_fixtures.py
+  s_54b80c92daa9cb::t_ec67a69632e6d4 1-5,7,9-34,36-39
+  s_54b80c92daa9cb::t_ddf28c9c448c87 6,8,35
+internal/connectors/xlist_capture_test.go
+  s_54b80c92daa9cb::t_abee43788c9ff5 1-309
+plugins/x-list/xlist_test.go
+  s_54b80c92daa9cb::t_ca55d339572574 1-99
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_ddf28c9c448c87 8-12,33-51
+plugins/x-list/testdata/builtin/cutover_mid_life.json
+  s_54b80c92daa9cb::t_c415a0691df394 1-723,730-741,743-752,754-767,769,771-772,775-778,782-789,791-804,806,808-809,812-815,819-826,828-841,843,845-846,849-852,856-941,943-945,947-961,968-1021,1023-1052,1059-1106,1108-1118,1120-1123
+  s_54b80c92daa9cb::t_ba70643facc228 724-729,742,753,768,770,773-774,779-781,790,805,807,810-811,816-818,827,842,844,847-848,853-855,942,946,962-967,1022,1053-1058,1107,1119
+plugins/x-list/go.mod
+  s_54b80c92daa9cb::t_8926193e59360c 1-13
+plugins/x-list/main.go
+  s_54b80c92daa9cb::t_da8e0575be3266 1-24
+plugins/x-list/testdata/scenarios.json
+  s_54b80c92daa9cb::t_4f8769dc84ef82 1-52,54-138
+  s_54b80c92daa9cb::t_ba70643facc228 53
+plugins/x-list/go.sum
+  s_54b80c92daa9cb::t_a27ab47a659db4 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e83980a81605984ae8e0ed56e28380c61819993b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
