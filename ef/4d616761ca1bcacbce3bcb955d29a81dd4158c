@@ -1,0 +1,43 @@
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_a281115e65949e 25-27,437-439,483-491,494-498
+  s_54b80c92daa9cb::t_88c19733e95531 499
+CONTEXT.md
+  s_54b80c92daa9cb::t_3b6d815c782da5 278
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_13314971c05dd9 325-328
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_88d5cb1caad377 1-98
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_dff5bcf7291b29 886-890,985-986,2798-2801
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_dff5bcf7291b29 979,1057,1368,1392,1407
+tests/acceptance/monitoring_plugin_test.go
+  s_54b80c92daa9cb::t_59f91bada6df6b 1-207
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_a281115e65949e 200-211,220-232,243-245,261-265,286-289
+  s_54b80c92daa9cb::t_bd263c7867a9d6 342-343,354-356,362-363
+README.md
+  s_54b80c92daa9cb::t_2d122e2c21c9d2 124-125
+docs/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_a939ab01643d21 111,164-176,227,232-258,263-267,619-621
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_7d1b0ea6957156 104-110
+scripts/local.py
+  s_54b80c92daa9cb::t_1474ac22f683e5 8,93-96,196-197,328,420-424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ef4d616761ca1bcacbce3bcb955d29a81dd4158c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
