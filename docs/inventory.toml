@@ -55,6 +55,7 @@ excluded = [
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide" }
+"docs/agents/testing.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide" }
 "docs/api-walkthrough.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/README.md" = { audience = "functional", kind = "guide" }
@@ -88,6 +89,7 @@ excluded = [
 "docs/agents/domain.md" = 45
 "docs/agents/fleet-workflow.md" = 65
 "docs/agents/issue-tracker.md" = 110
+"docs/agents/testing.md" = 85
 "docs/agents/triage-labels.md" = 15
 "docs/api-walkthrough.md" = 515
 "docs/connectors/README.md" = 225
