@@ -1,0 +1,36 @@
+deploy/railway/web.Dockerfile
+  s_54b80c92daa9cb::t_2b4dcb0008b176 11
+quivr-search/package.json
+  s_54b80c92daa9cb::t_2b4dcb0008b176 12
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_4787f0babc996a 4,7,21-44,146-151,158,169,173-219,262-267,276-283,361-366
+quivr-search/feeds.mjs
+  s_54b80c92daa9cb::t_e308b1176ef1be 1-11,14-57,62,67-207,210-225,227,229-295,297-364
+  s_54b80c92daa9cb::t_f72e267c9aa3e3 58-61,63-66
+  s_54b80c92daa9cb::t_beda65fa4591b9 208-209
+  s_54b80c92daa9cb::t_56a1f076ed26d6 12-13
+  s_54b80c92daa9cb::t_6e62610a799355 296
+  s_54b80c92daa9cb::t_36bc0fcd0c64c7 226,228
+quivr-search/tests/feeds.test.mjs
+  s_54b80c92daa9cb::t_6e62610a799355 92
+  s_54b80c92daa9cb::t_901c7e3fecd5bb 1-91,93-164
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_1da3a05cc8a8f7 82,92
+  s_54b80c92daa9cb::t_4fe66a87f97715 254-408
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34654e73bc84cb94dfdcb6b41418b78b99b4cde4",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
