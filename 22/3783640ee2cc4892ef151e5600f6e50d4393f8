@@ -1,0 +1,61 @@
+docs/start/functional.md
+  s_54b80c92daa9cb::t_a607feac14d911 28,30
+internal/reference/commands/commands.go
+  s_54b80c92daa9cb::t_f43acee2b36dcc 102-106
+  s_54b80c92daa9cb::t_4ad6a1a4d1341e 1-101,107-111
+internal/reference/commands/commands_test.go
+  s_54b80c92daa9cb::t_1fbdef1d535441 1-77
+cmd/quivr-reference/sources.go
+  s_54b80c92daa9cb::t_88d4fa8af2fc28 1-21,23-26,29-66,69-90
+  s_54b80c92daa9cb::t_2e75c0b2ad1c18 27-28,67
+  s_54b80c92daa9cb::t_c0b54f03f3db13 68
+  s_54b80c92daa9cb::t_4af387f1fcf748 22
+cmd/quivr-reference/main.go
+  s_54b80c92daa9cb::t_d3eaf4a62dd625 18-19,32-41
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_782df1b334bdfe 22-24,26-27,31-59,69,72,78
+  s_54b80c92daa9cb::t_4af387f1fcf748 70-71
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_a607feac14d911 285-286
+internal/reference/mcp/mcp_test.go
+  s_54b80c92daa9cb::t_1fbdef1d535441 1-82
+internal/reference/commands/testdata/expected.md
+  s_54b80c92daa9cb::t_c35b0bc4c9353a 1-54
+internal/reference/mcp/mcp.go
+  s_54b80c92daa9cb::t_8ac1d3088cb887 252-256
+  s_54b80c92daa9cb::t_8cd2a6bdaf1d66 64,264,277-290
+  s_54b80c92daa9cb::t_6ab2534e2bf345 1-63,65-242,257-263,265-267,276
+  s_54b80c92daa9cb::t_628397ba5800c5 243-251,268-275
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_4af387f1fcf748 13-17,73,81
+  s_54b80c92daa9cb::t_2e75c0b2ad1c18 1-6,8-12,18-72,74-80,82-192
+  s_54b80c92daa9cb::t_c0b54f03f3db13 7
+docs/inventory.toml
+  s_54b80c92daa9cb::t_a607feac14d911 84,86
+internal/app/run.go
+  s_54b80c92daa9cb::t_f8b8e235a9981f 127
+  s_54b80c92daa9cb::t_b7775497124d8e 113-126,128-139,141,144
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_2e75c0b2ad1c18 1-18,20-97,99-208
+  s_54b80c92daa9cb::t_8cd2a6bdaf1d66 19,98
+docs/connect-an-ai-agent.md
+  s_54b80c92daa9cb::t_a607feac14d911 37-38
+internal/reference/mcp/testdata/expected.md
+  s_54b80c92daa9cb::t_aae1462bf4de05 1-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "223783640ee2cc4892ef151e5600f6e50d4393f8",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
