@@ -1,0 +1,22 @@
+quivr-search/src/lib/alerts.ts
+  s_54b80c92daa9cb::t_4775f8212ee5da 6,112-201
+  s_54b80c92daa9cb::t_81657305d85087 4
+quivr-search/src/components/alerts/AlertsView.tsx
+  s_54b80c92daa9cb::t_4775f8212ee5da 8,132-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "988bcf45fd1dd74c8149353409d71f846ceab220",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
