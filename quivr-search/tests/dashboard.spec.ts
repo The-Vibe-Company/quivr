@@ -22,6 +22,15 @@ const side = (page: Page) =>
   page.getByRole("complementary", { name: "Alertes et sources" });
 const sent = (path: string) =>
   engine.sent.filter((s) => s.path === path).map((s) => s.body);
+// The body of the next POST to path. Start it before the click that sends it:
+// the click returns before the browser has sent the request (THE-773).
+const posted = (page: Page, path: string) =>
+  page
+    .waitForRequest(
+      (r) => r.method() === "POST" && new URL(r.url()).pathname === path,
+      { timeout: 10_000 },
+    )
+    .then((r) => r.postDataJSON());
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
@@ -207,8 +216,9 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   );
   await expect(edit.getByLabel(/Nom de l’alerte/)).toHaveJSProperty("readOnly", true);
   await edit.getByLabel("Requête avancée").fill("(port OR quai) AND grève");
+  const saved = posted(page, "/demo/alerts/alert_port/edit");
   await edit.getByRole("button", { name: "Enregistrer" }).click();
-  expect(sent("/demo/alerts/alert_port/edit").at(-1).expression).toEqual({
+  expect((await saved).expression).toEqual({
     kind: "keywords",
     match: { all: [{ any: [{ term: "port" }, { term: "quai" }] }, { term: "grève" }] },
   });
@@ -246,8 +256,9 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(page.getByText("Fil trouvé")).toBeVisible();
   await expect(page.getByLabel("Nom de la source")).toHaveValue("www.example.org — À la une");
   await page.getByRole("group", { name: "Vérifier les nouveautés toutes les…" }).getByRole("button", { name: "1 h" }).click();
+  const created = posted(page, "/v0/connectors");
   await page.getByRole("button", { name: "Commencer la collecte" }).click();
-  expect(sent("/v0/connectors").at(-1)).toMatchObject({
+  expect(await created).toMatchObject({
     kind: "rss",
     source_namespace: "www.example.org — À la une",
     config: { url: "https://www.example.org/rss.xml" },
