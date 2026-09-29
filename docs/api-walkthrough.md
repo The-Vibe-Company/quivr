@@ -86,11 +86,68 @@ holding an ID is not access).
 Then submit `POST /v0/records` with
 `content: {"kind": "blob", "blob_id": …, "media_type": "text/plain"}`. The verified
 text follows the same Receipt/Version path, keeps its original bytes, and the source
-Blob is recorded in `provenance.source_blob_ids`. Only `text/*` media are accepted
-for now; unverified references return `422 unverified_blob`. Permissions are
-`blobs:write` (create, confirm) and `blobs:read` (read session and Blob). Expired and
-absent sessions stay readable in their terminal state. There is no orphan sweep,
-retention or media extraction yet.
+Blob is recorded in `provenance.source_blob_ids`. `text/*` media are accepted, and
+so are media types that the installation routes to an external normalizer (next
+section). Other media types and unverified references return `422 unverified_blob`.
+Permissions are `blobs:write` (create, confirm) and `blobs:read` (read session and
+Blob). Expired and absent sessions stay readable in their terminal state. There is no
+orphan sweep or retention yet.
+
+### External normalizers
+
+An installation can pin one external plugin in its startup configuration
+(`QUIVR_CONFIG`) and route Blob media types to that plugin's normalizer:
+
+```json
+"plugin": {
+  "manifest": "/etc/quivr/plugins/markdown/quivr-plugin.yaml",
+  "endpoint": "http://127.0.0.1:9900",
+  "configuration": {"max_sections": 32},
+  "routes": [{"media_type": "text/markdown", "mode": "required"}]
+}
+```
+
+- **Startup checks.** `quivr api` and `quivr worker` validate the pin before
+  starting and refuse to start with the list of issues if any check fails. They
+  check:
+  - the manifest schema and its engine and Plugin API ranges;
+  - `configuration` against the manifest's configuration schema;
+  - that the endpoint is an http(s) URL;
+  - that every route names a media type the normalizer declares, and that no media
+    type is routed twice.
+  
+  `required` is the only active mode. The plugin itself is never contacted at
+  startup, so an unreachable plugin does not affect `/healthz` or `/readyz`.
+- **Acceptance.** A routed Blob is accepted by reference without being read.
+  The Version identity is the digest of the submitted input: the verified Blob, its
+  checksum and media type, plus the submitted extensions. Replaying the same input
+  converges on the same Version.
+- **Invocation.** In the worker, before publication, the engine:
+  - checks that the plugin's discovery document matches the pinned manifest digest;
+  - sends the invocation context with a short-lived signed GET URL to the input Blob,
+    never its bytes;
+  - waits at most the declared timeout, capped at 2 minutes;
+  - reads at most the declared `max_response_bytes`, capped at 16 MiB.
+- **Output checks.** The output goes through the same validation as a
+  `kind: "manifest"` submission, plus the declared `max_parts`. The stored Manifest
+  must fit in 2 MiB, like any canonical object. Blob Parts may
+  reference only the input Blob, and extensions are refused for now.
+- **Publication.** The validated Manifest is stored once per Version, so re-running
+  the step converges on it. It is then published and searchable like any Manifest.
+  Rebuilds and retrieval generations read the stored Manifest and never call the
+  plugin again.
+- **Provenance.** `GET /v0/records/{id}/versions/{version_id}` shows
+  `provenance.normalization`: `plugin_id`, `plugin_version`, `plugin_api`,
+  `contribution`, `invocation_id`, `idempotency_key` and `input_sha256`. `producer`
+  keeps naming the acquirer, and `source_blob_ids` keeps the input Blob. Clients
+  cannot submit `normalization`.
+
+While normalization is pending or retrying, the Receipt stays `pending`, and
+`processing` together with its diagnostics shows the reason, for example
+`plugin_unavailable` or `normalizer_invalid_output`. Quarantine, bounded retries and
+optional fallback are not implemented yet. `make dev` pins the `quivr plugin init`
+template for `text/markdown`
+([SDK guide](../sdks/python/README.md)).
 
 ## Processing: segmentation and embeddings
 

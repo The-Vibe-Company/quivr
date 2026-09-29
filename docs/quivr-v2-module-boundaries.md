@@ -221,8 +221,9 @@ internal/orchestration/temporal/  workflow code, Activities and outbox dispatche
 internal/adapters/postgres/       atomic operations, shared guards and event helpers
 internal/adapters/s3/
 internal/adapters/weaviate/
-internal/adapters/pluginhttp/     introduced when the external-plugin slice needs it
-internal/plugins/                 plugin manifest validation, `quivr plugin` CLI, local dev host, init template
+internal/adapters/pluginhttp/     engine Plugin Protocol v0 client (discovery check, normalizer invocation)
+internal/normalization/           external normalizer invocation before publication, durable output once per Version
+internal/plugins/                 plugin manifest and startup pin validation, `quivr plugin` CLI, local dev host, init template
 contracts/http/v0/openapi.yaml    authoritative HTTP contract
 contracts/shared/                shared JSON Schemas (Manifest) used by HTTP and plugin contracts
 contracts/plugins/               authoritative plugin JSON Schemas, added as needed

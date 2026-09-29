@@ -170,6 +170,10 @@ func commandFromTransport(in transport.IngestCommand) (content.Command, error) {
 		c.Extensions = extensionsFromTransport(*in.Extensions)
 	}
 	if in.Provenance != nil {
+		if in.Provenance.Normalization != nil {
+			// Engine-owned: only an external normalization publishes it.
+			return content.Command{}, content.ErrInvalid
+		}
 		c.Provenance = map[string]any{}
 		if in.Provenance.Producer != nil {
 			c.Provenance["producer"] = *in.Provenance.Producer
@@ -262,6 +266,9 @@ func versionToTransport(v content.Version) (transport.Version, error) {
 			}
 			p.SourceBlobIds = &values
 		}
+		if n, ok := v.Provenance["normalization"].(map[string]any); ok {
+			p.Normalization = normalizationToTransport(n)
+		}
 		out.Provenance = &p
 	}
 	for _, r := range v.Relations {
@@ -273,4 +280,9 @@ func versionToTransport(v content.Version) (transport.Version, error) {
 		out.Relations = append(out.Relations, resolved)
 	}
 	return out, nil
+}
+
+func normalizationToTransport(n map[string]any) *transport.NormalizationProvenance {
+	text := func(key string) string { value, _ := n[key].(string); return value }
+	return &transport.NormalizationProvenance{PluginId: text("plugin_id"), PluginVersion: text("plugin_version"), PluginApi: text("plugin_api"), Contribution: transport.NormalizationProvenanceContribution(text("contribution")), InvocationId: text("invocation_id"), IdempotencyKey: text("idempotency_key"), InputSha256: text("input_sha256")}
 }

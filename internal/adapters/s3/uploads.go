@@ -100,6 +100,21 @@ func (s *Store) holds(ctx context.Context, objectKey string, size int64) bool {
 	return err == nil && head.ContentLength != nil && *head.ContentLength == size
 }
 
+// PresignGet issues a short-lived signed GET reference to one stored object,
+// such as the input Blob of a plugin invocation. The URL reads only that
+// object, and only until it expires.
+func (s *Store) PresignGet(ctx context.Context, objectKey string, ttl time.Duration) (string, time.Time, error) {
+	if objectKey == "" || ttl <= 0 {
+		return "", time.Time{}, errors.New("invalid signed reference request")
+	}
+	expires := time.Now().Add(ttl)
+	request, err := awss3.NewPresignClient(s.client).PresignGetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey)}, awss3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", time.Time{}, errors.New("signed reference unavailable")
+	}
+	return request.URL, expires, nil
+}
+
 // ReadRange reads an inclusive byte range of a stored object.
 func (s *Store) ReadRange(ctx context.Context, objectKey string, start, end int64) ([]byte, error) {
 	if start < 0 || end < start {

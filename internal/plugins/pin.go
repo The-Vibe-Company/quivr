@@ -1,0 +1,169 @@
+package plugins
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"sort"
+	"strings"
+)
+
+// Issue codes of a startup pin, beside the manifest codes.
+const (
+	CodeInvalidPin    = "invalid_pin"
+	CodeRouteConflict = "route_conflict"
+)
+
+// Route modes. Plugin Platform v0 activates required routes only; optional
+// routes (falling back to the built-in text path) arrive with failure handling.
+const (
+	RouteRequired = "required"
+	RouteOptional = "optional"
+)
+
+// PinConfig is the startup configuration (`plugin` in QUIVR_CONFIG) that pins
+// one external plugin: its manifest file, its endpoint, its configuration and
+// the media types routed to its normalizer.
+type PinConfig struct {
+	Manifest      string          `json:"manifest"`
+	Endpoint      string          `json:"endpoint"`
+	Configuration json.RawMessage `json:"configuration,omitempty"`
+	Routes        []RouteConfig   `json:"routes"`
+}
+
+// RouteConfig maps one accepted Blob media type to the pinned normalizer.
+type RouteConfig struct {
+	MediaType string `json:"media_type"`
+	// Mode is "required" (the default).
+	Mode string `json:"mode,omitempty"`
+}
+
+// Pin is a validated startup pin. It is loaded without contacting the plugin,
+// so an unreachable plugin never prevents startup.
+type Pin struct {
+	Manifest       Manifest
+	ManifestDigest string
+	// Path is the manifest file the pin was loaded from.
+	Path     string
+	Endpoint string
+	// Configuration is the validated plugin configuration JSON object.
+	Configuration json.RawMessage
+	routes        map[string]RouteConfig
+}
+
+// PinError lists every actionable issue of a refused pin.
+type PinError struct {
+	Path   string
+	Issues []Issue
+}
+
+func (e *PinError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "invalid plugin pin (%s):", e.Path)
+	for _, issue := range e.Issues {
+		fmt.Fprintf(&b, "\n  %s %s: %s", issue.Code, issue.Path, issue.Message)
+	}
+	return b.String()
+}
+
+// LoadPin reads and validates a startup pin: the manifest (schema, engine and
+// Plugin API ranges), the configuration against the manifest's configuration
+// schema, the endpoint, and the routes (declared by the normalizer, no
+// duplicate, a supported mode).
+func LoadPin(c PinConfig) (*Pin, error) {
+	report := Inspect(c.Manifest)
+	refuse := func(issues []Issue) error { return &PinError{Path: report.Path, Issues: issues} }
+	if !report.Valid || report.Manifest == nil {
+		return nil, refuse(report.Errors)
+	}
+	m := report.Manifest
+	var issues []Issue
+	config := c.Configuration
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
+	}
+	issues = append(issues, ValidateConfiguration(m, config)...)
+	if u, err := url.Parse(c.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/endpoint", Message: fmt.Sprintf("endpoint %q must be an http(s) base URL such as http://127.0.0.1:9900", c.Endpoint)})
+	}
+	if m.Contributions.Normalizer == nil {
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/contributions", Message: "the manifest declares no normalizer Contribution to route to"})
+	}
+	if len(c.Routes) == 0 {
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "a pin needs at least one media type route"})
+	}
+	declared := map[string]bool{}
+	if m.Contributions.Normalizer != nil {
+		for _, mediaType := range m.Contributions.Normalizer.MediaTypes {
+			declared[mediaType] = true
+		}
+	}
+	routes := map[string]RouteConfig{}
+	for i, r := range c.Routes {
+		path := fmt.Sprintf("/routes/%d", i)
+		if r.Mode == "" {
+			r.Mode = RouteRequired
+		}
+		switch r.Mode {
+		case RouteRequired:
+		case RouteOptional:
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: "optional routes are not active in Plugin Platform v0 yet; use mode \"required\""})
+		default:
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path + "/mode", Message: fmt.Sprintf("unknown route mode %q; use \"required\"", r.Mode)})
+		}
+		if !declared[r.MediaType] {
+			issues = append(issues, Issue{Code: CodeRouteConflict, Path: path + "/media_type", Message: fmt.Sprintf("media type %q is not declared by the normalizer of %s (declared: %v)", r.MediaType, m.ID, keysOf(declared))})
+			continue
+		}
+		if _, exists := routes[r.MediaType]; exists {
+			issues = append(issues, Issue{Code: CodeRouteConflict, Path: path + "/media_type", Message: fmt.Sprintf("media type %q is routed more than once", r.MediaType)})
+			continue
+		}
+		routes[r.MediaType] = r
+	}
+	if len(issues) > 0 {
+		return nil, refuse(issues)
+	}
+	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, routes: routes}, nil
+}
+
+func keysOf(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// Routed reports whether a Blob media type is routed to the pinned normalizer.
+// Media types match exactly, as declared in the manifest.
+func (p *Pin) Routed(mediaType string) bool {
+	if p == nil {
+		return false
+	}
+	_, ok := p.routes[mediaType]
+	return ok
+}
+
+// Route returns the route of a media type.
+func (p *Pin) Route(mediaType string) (RouteConfig, bool) {
+	if p == nil {
+		return RouteConfig{}, false
+	}
+	r, ok := p.routes[mediaType]
+	return r, ok
+}
+
+// Generation is the Plugin Generation placeholder of a startup pin, the first
+// component of the invocation idempotency key. Spec 5 substitutes the Plugin
+// Generation id without changing the key's shape.
+func (p *Pin) Generation() string {
+	return "startup:" + p.Manifest.ID + "@" + p.Manifest.Version + "#" + p.ManifestDigest
+}
+
+// Report is the inspection report the discovery check compares against.
+func (p *Pin) Report() Report {
+	m := p.Manifest
+	return Report{Valid: true, Path: p.Path, ManifestDigest: p.ManifestDigest, Manifest: &m}
+}

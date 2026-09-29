@@ -59,6 +59,9 @@ jobs:
             .scratch/quivr-verify-*/seaweed.log
             .scratch/quivr-verify-*/weaviate.log
             .scratch/quivr-verify-*/adapters.log
+            .scratch/quivr-verify-*/normalizer-*.log
+            .scratch/quivr-verify-*/bad-pin-*.log
+            .scratch/quivr-verify-*/normalizer-startup.json
             .scratch/quivr-verify-*/outages.json
             .scratch/quivr-verify-*/keyless-report.json
             .scratch/quivr-verify-*/keyless/*.log*

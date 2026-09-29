@@ -3,6 +3,7 @@
 from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
+import normalizer_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -77,7 +78,9 @@ class Stack:
                           'local-receiver-org-b':dict(organization='org_b',url='http://127.0.0.1:9/local-receiver-org-b',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-b!').decode()),
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
                           CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
-            delivery=DELIVERY_OVERRIDES)
+            delivery=DELIVERY_OVERRIDES,
+            # The `quivr plugin init` template, pinned as the text/markdown normalizer (scripts/normalizer_plugin.py).
+            plugin=normalizer_plugin.pin(self))
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -177,7 +180,8 @@ class Stack:
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
         self.start_dependencies()
-        self.migrate();self.migrate();self.start_processes()
+        normalizer_plugin.prepare(self)
+        self.migrate();self.migrate();normalizer_plugin.start(self);self.start_processes()
     def start_dependencies(self,attempts=2):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
@@ -308,7 +312,7 @@ class Stack:
         """Stop this project's processes and containers. reset also deletes its volumes and the
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
-        self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
             self.save()
@@ -388,6 +392,11 @@ def verify(stack,steps):
     steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions')
     # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
     steps.run('monitoring',stack.tests,'TestMonitoring')
+    # A routed Markdown Blob is normalized by the pinned plugin; then invalid pins are refused,
+    # and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
+    steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable')
+    steps.run('normalizer_startup',normalizer_plugin.verify,stack)
+    steps.run('normalizer_rebuild_without_plugin',stack.tests,'TestNormalizerRebuildWithoutPlugin')
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
     steps.run('connectors',connectors,stack)

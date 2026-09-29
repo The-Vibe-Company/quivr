@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -23,12 +24,27 @@ import (
 
 const taskQueue = "quivr-content-v0"
 
+// normalizationTerminal is the application error type of a normalization
+// failure that retrying cannot fix.
+const normalizationTerminal = "normalization_terminal"
+
 type Input struct {
 	Organization string
 	ReceiptID    string
 }
 
+// normalizationActivityTimeout bounds one external normalization attempt: the
+// engine invocation cap plus discovery and durable recording.
+const normalizationActivityTimeout = normalization.TimeoutCap + time.Minute
+
 func materializeWorkflow(ctx workflow.Context, input Input) error {
+	// Histories started before external normalization existed replay without it.
+	if workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 1) == 1 {
+		normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, NonRetryableErrorTypes: []string{normalizationTerminal}}})
+		if err := workflow.ExecuteActivity(normalize, "normalize-external", input).Get(ctx, nil); err != nil {
+			return err
+		}
+	}
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
 	if err := workflow.ExecuteActivity(ctx, "process-token-windows", input).Get(ctx, nil); err != nil {
 		return err
@@ -61,6 +77,14 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
 		return service.Run(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "process-token-windows"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		err := service.Normalize(ctx, in.Organization, in.ReceiptID)
+		var terminal *normalization.TerminalError
+		if errors.As(err, &terminal) {
+			return temporal.NewNonRetryableApplicationError(terminal.Error(), normalizationTerminal, nil)
+		}
+		return err
+	}, activity.RegisterOptions{Name: "normalize-external"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
 	registerRebuild(w, rebuilder)
 	var cw worker.Worker

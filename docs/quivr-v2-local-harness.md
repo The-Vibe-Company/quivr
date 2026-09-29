@@ -381,6 +381,19 @@ The Plugin Contract Runner separately checks plugin input/result schemas and
 timeouts. Do not build a plugin registry or force local calls over HTTP for the
 harness. Private customer fixtures are not prerequisites for the public CC0 journey.
 
+The harness pins one external normalizer. `scripts/normalizer_plugin.py` scaffolds
+the `quivr plugin init` template, runs it as its own process with the repository
+SDK, and pins it for `text/markdown` in the stack configuration. Verification then
+runs these steps in order:
+
+1. It ingests a Markdown Blob through the public API.
+2. It checks that `quivr api` and `quivr worker` refuse invalid pins: an
+   incompatible Plugin API or engine range, and a configuration that fails the
+   plugin's schema.
+3. It stops the plugin, restarts the API and worker, and checks that both stay
+   healthy.
+4. It rebuilds the Corpus while the plugin is still down.
+
 THE-550 must implement the commands, run the integrated journey and record actual
 results against the table above, including failed attempts and missing behavior.
 Until that evidence exists, this proposal establishes a reproducible target only.

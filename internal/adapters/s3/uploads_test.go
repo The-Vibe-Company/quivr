@@ -86,6 +86,20 @@ func TestPresignedTransferVerifyAndRange(t *testing.T) {
 	if err != nil || string(window) != "Ligne" {
 		t.Fatalf("range read failed: %q %v", window, err)
 	}
+	// A signed GET reference reads exactly the stored bytes without credentials.
+	signed, expires, err := blobs.PresignGet(ctx, objectKey, time.Minute)
+	if err != nil || !expires.After(time.Now()) {
+		t.Fatalf("signed reference: %v", err)
+	}
+	got, err := http.Get(signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Body)
+	got.Body.Close()
+	if got.StatusCode != 200 || !bytes.Equal(body, data) {
+		t.Fatalf("signed GET returned %d %q", got.StatusCode, body)
+	}
 }
 
 func TestStreamedDepositIsStoredOnceAndVerified(t *testing.T) {

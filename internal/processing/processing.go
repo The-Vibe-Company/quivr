@@ -33,6 +33,9 @@ type Service struct {
 	Enrichment EnrichmentIndexer
 	// Observer receives processing outcomes for metrics; nil disables them.
 	Observer Observer
+	// Normalizer invokes the pinned external normalizer for routed Blobs
+	// before publication; nil normalizes nothing.
+	Normalizer Normalizer
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names)
@@ -53,6 +56,20 @@ func (s Service) outcome(stage, outcome, receiptID string, v content.Version, st
 	}
 	slog.Log(context.Background(), level, "processing outcome", "component", "worker", "stage", stage, "outcome", outcome, "code", code,
 		"receipt_id", receiptID, "record_id", v.RecordID, "version_id", v.ID, "duration_ms", time.Since(started).Milliseconds())
+}
+
+// Normalizer runs external normalization for one accepted receipt.
+type Normalizer interface {
+	Normalize(ctx context.Context, org, receiptID string) error
+}
+
+// Normalize runs external normalization before publication. Content that is
+// not a routed Blob needs none.
+func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
+	if s.Normalizer == nil {
+		return nil
+	}
+	return s.Normalizer.Normalize(ctx, org, receiptID)
 }
 
 func (s Service) Run(ctx context.Context, org, receiptID string) error {

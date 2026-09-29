@@ -253,6 +253,10 @@ type Service struct {
 	BlobSource BlobSource
 	Relations  RelationResolver
 	Extensions ExtensionValidator
+	// Routes names the Blob media types an external normalizer handles; nil
+	// routes none. Normalizations holds their durable validated output.
+	Routes         NormalizerRoutes
+	Normalizations NormalizationStore
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
@@ -262,6 +266,10 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 	if !scope.Contains(c.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
+	if _, forged := c.Provenance["normalization"]; forged {
+		// Normalization provenance is engine-owned; only publication writes it.
+		return Receipt{}, ErrInvalid
+	}
 	switch c.Content.Kind {
 	case "text":
 		// Inline text cannot assert Blob provenance; only verified references may.
@@ -269,6 +277,20 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 			return Receipt{}, ErrUnsupported
 		}
 	case "blob":
+		if s.Routes != nil && s.Routes.Routed(c.Content.MediaType) {
+			// A routed Blob is normalized after acceptance, never read here: the
+			// Version identity derives from the verified submitted input.
+			checksum, err := s.verifyPartBlob(ctx, scope.Organization, c.Content)
+			if err != nil {
+				return Receipt{}, err
+			}
+			if c.Provenance == nil {
+				c.Provenance = map[string]any{}
+			}
+			c.Provenance["source_blob_ids"] = []any{c.Content.BlobID}
+			c.Content = Text{Kind: "blob", BlobID: c.Content.BlobID, MediaType: c.Content.MediaType, BlobSHA256: checksum}
+			break
+		}
 		verified, err := s.resolveBlob(ctx, scope.Organization, c.Content)
 		if err != nil {
 			return Receipt{}, err
@@ -294,7 +316,7 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 	if c.Key == "" || c.Source.CorpusID == "" || c.Source.Namespace == "" || c.Source.RecordKey == "" {
 		return Receipt{}, ErrInvalid
 	}
-	if c.Content.Kind != "manifest" && (c.Content.Text == "" || !ValidText(c.Content.Text)) {
+	if c.Content.Kind == "text" && (c.Content.Text == "" || !ValidText(c.Content.Text)) {
 		return Receipt{}, ErrInvalid
 	}
 	if err := s.validateExtensions(ctx, c.Extensions); err != nil {
@@ -618,8 +640,14 @@ func (s Service) resolveRelations(ctx context.Context, scope corpus.Scope, relat
 }
 
 // ManifestFor returns the canonical Manifest an accepted Command publishes. An
-// inline text or Blob leaf normalizes to the single body Part contract.
+// inline text or Blob leaf normalizes to the single body Part contract. A
+// routed Blob, still a verified reference after acceptance, is described by
+// its single source Blob Part: that is the Version identity digest input,
+// while publication uses the durable normalizer output instead.
 func ManifestFor(c Command) Manifest {
+	if c.Content.Kind == "blob" {
+		return Manifest{Kind: "manifest", Parts: []Part{{Key: "source", Role: "source", Content: c.Content}}}
+	}
 	if c.Manifest != nil {
 		m := *c.Manifest
 		if m.Kind == "" {
@@ -711,6 +739,16 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	manifest := ManifestFor(work.Command)
+	if work.Command.Content.Kind == "blob" {
+		if manifest, err = s.normalizedManifest(ctx, &work); err != nil {
+			code := "blob_verification_unavailable"
+			if errors.Is(err, ErrNormalizationPending) {
+				code = "normalization_pending"
+			}
+			_ = s.Repository.Progress(ctx, org, receiptID, "retrying", code)
+			return err
+		}
+	}
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return err
@@ -748,3 +786,76 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 type Dispatch struct{ Organization, ReceiptID string }
 
 var ErrNoDispatch = errors.New("no_pending_dispatch")
+
+// NormalizerRoutes reports whether a Blob media type is routed to an external
+// normalizer.
+type NormalizerRoutes interface {
+	Routed(mediaType string) bool
+}
+
+// Normalization is the bounded provenance of one external normalization,
+// published as the Version's provenance.normalization. producer and
+// producer_version keep naming the acquirer.
+type Normalization struct {
+	PluginID       string `json:"plugin_id"`
+	PluginVersion  string `json:"plugin_version"`
+	PluginAPI      string `json:"plugin_api"`
+	Contribution   string `json:"contribution"`
+	InvocationID   string `json:"invocation_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+	InputSHA256    string `json:"input_sha256"`
+}
+
+// Normalized is the durable, validated normalizer output of one Record
+// Version: its Manifest object and its provenance.
+type Normalized struct {
+	Manifest   Blob
+	Provenance Normalization
+}
+
+// NormalizationStore reads the durable normalizer output of a Record Version.
+type NormalizationStore interface {
+	Normalized(ctx context.Context, org, versionID string) (Normalized, bool, error)
+}
+
+// ErrNormalizationPending means a routed Version has no durable normalizer
+// output yet; publication retries after normalization.
+var ErrNormalizationPending = errors.New("normalization_pending")
+
+// normalizedManifest loads the durable normalizer Manifest of a routed Blob
+// Version and records its provenance on the Work (never on the stored Command).
+func (s Service) normalizedManifest(ctx context.Context, work *Work) (Manifest, error) {
+	if s.Normalizations == nil {
+		return Manifest{}, ErrNormalizationPending
+	}
+	n, found, err := s.Normalizations.Normalized(ctx, work.Organization, work.VersionID)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if !found {
+		return Manifest{}, ErrNormalizationPending
+	}
+	data, err := s.Blobs.Read(ctx, n.Manifest)
+	if err != nil {
+		return Manifest{}, err
+	}
+	var m Manifest
+	if err = json.Unmarshal(data, &m); err != nil {
+		return Manifest{}, fmt.Errorf("normalized manifest: %w", ErrArtifactCorrupt)
+	}
+	raw, err := json.Marshal(n.Provenance)
+	if err != nil {
+		return Manifest{}, err
+	}
+	var normalization map[string]any
+	if err = json.Unmarshal(raw, &normalization); err != nil {
+		return Manifest{}, err
+	}
+	provenance := make(map[string]any, len(work.Command.Provenance)+1)
+	for k, v := range work.Command.Provenance {
+		provenance[k] = v
+	}
+	provenance["normalization"] = normalization
+	work.Command.Provenance = provenance
+	return m, nil
+}

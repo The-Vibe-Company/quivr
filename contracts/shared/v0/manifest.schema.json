@@ -199,9 +199,64 @@
         "producer_version": {
           "type": "string",
           "minLength": 1
+        },
+        "normalization": {
+          "$ref": "#/$defs/NormalizationProvenance"
         }
       },
       "required": []
+    },
+    "NormalizationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.",
+      "properties": {
+        "plugin_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "plugin_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "plugin_api": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Plugin API version the engine invoked."
+        },
+        "contribution": {
+          "type": "string",
+          "enum": [
+            "normalizer"
+          ]
+        },
+        "invocation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "plugin_version",
+        "plugin_api",
+        "contribution",
+        "invocation_id",
+        "idempotency_key",
+        "input_sha256"
+      ]
     }
   }
 }

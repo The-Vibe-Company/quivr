@@ -160,7 +160,12 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Retrieval measurement** with a frozen workload (`make measure`).
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
-  schemas, secrets and limits. The engine does not invoke plugins yet.
+  schemas, secrets and limits.
+- **External normalizer**: the startup configuration pins one plugin and routes Blob
+  media types to its normalizer. A Blob of a routed type, ingested by reference,
+  becomes searchable through the plugin's Parts, and its Version shows
+  `provenance.normalization`. This covers the successful path only; failure handling
+  comes next ([walkthrough](docs/api-walkthrough.md#external-normalizers)).
 - **Python Plugin SDK** (`sdks/python/`) with `quivr plugin init`, which scaffolds a
   Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
   discovery digest and replays a fixture through the engine's Manifest validation,
@@ -178,8 +183,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - Plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The rest of the plugin platform: out-of-process normalizers invoked by the engine
-  (starting with PDF to text).
+- The rest of the plugin platform: plugin-owned extension namespaces, retry,
+  quarantine and optional fallback for normalizer failures, and a PDF to text
+  reference normalizer.
 
 The contract already describes some of these routes; the ones not implemented yet are
 listed here, not in "What works today".

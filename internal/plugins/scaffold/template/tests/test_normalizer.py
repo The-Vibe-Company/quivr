@@ -51,7 +51,7 @@ class Normalizer(unittest.TestCase):
         parts = response.manifest.parts
         self.assertEqual(parts[0].role, "title")
         self.assertEqual(parts[0].content.text, "Quarterly field report")
-        self.assertEqual([p.role for p in parts[1:]], ["section", "section", "section"])
+        self.assertEqual([p.role for p in parts[1:]], ["body", "body", "body"])
         self.assertIsNone(response.warnings)
 
     def test_sections_beyond_the_limit_are_merged(self):

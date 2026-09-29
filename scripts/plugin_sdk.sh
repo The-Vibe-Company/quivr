@@ -39,7 +39,7 @@ python3 - <<'EOF'
 import json
 response = json.load(open("response.json"))
 roles = [part["role"] for part in response["manifest"]["parts"]]
-assert roles == ["title", "section", "section", "section"], roles
+assert roles == ["title", "body", "body", "body"], roles
 assert response["manifest"]["parts"][0]["content"]["text"] == "Quarterly field report"
 log = open("dev.log").read()
 assert "discovery matches quivr-plugin.yaml" in log, log

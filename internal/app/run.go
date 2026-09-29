@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
@@ -16,8 +17,10 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
@@ -72,6 +75,10 @@ type Config struct {
 	ConnectorRSSAllowPrivateAddresses bool `json:"connector_rss_allow_private_addresses"`
 	// X configures the x_list connector kind.
 	X XConfig `json:"x"`
+	// Plugin pins one external plugin and routes Blob media types to its
+	// normalizer. API and worker refuse to start on an invalid pin; an
+	// unreachable plugin never prevents startup.
+	Plugin *plugins.PinConfig `json:"plugin"`
 }
 
 // XConfig points the x_list connector at the X API; api_endpoint defaults to
@@ -101,6 +108,13 @@ func Run(command string) error {
 	var cfg Config
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		return errors.New("invalid configuration JSON")
+	}
+	// Validate the pin before logs move to files, so a refusal is reported on stderr.
+	var pin *plugins.Pin
+	if cfg.Plugin != nil && command != "migrate" {
+		if pin, err = plugins.LoadPin(*cfg.Plugin); err != nil {
+			return err
+		}
 	}
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
@@ -180,7 +194,10 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}, Normalizations: store}
+	if pin != nil {
+		contents.Routes = pin
+	}
 	uploadService := uploads.Service{Store: store, Transfer: blobs, Writer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
@@ -189,7 +206,9 @@ func Run(command string) error {
 	windows := processing.TokenWindows{Tokenizer: encoder}
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
-	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search}
+	// External normalization runs in the worker only, before publication.
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Plugin: pluginhttp.Client{Pin: pin}, Pin: pin}
+	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search, Normalizer: normalizer}
 	// Rebuilds reuse stored vectors; the TEI encoder only names the pinned space and producer.
 	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Artifacts: embedding, Segment: func(ctx context.Context, org string, v content.Version) (content.Segmentation, error) {
 		return windows.Process(ctx, processing.Input{Organization: org, Version: v})

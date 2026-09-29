@@ -1375,6 +1375,8 @@ components:
       $ref: ../../shared/v0/manifest.schema.json#/$defs/ManifestContent
     Provenance:
       $ref: ../../shared/v0/manifest.schema.json#/$defs/Provenance
+    NormalizationProvenance:
+      $ref: ../../shared/v0/manifest.schema.json#/$defs/NormalizationProvenance
     IngestCommand:
       type: object
       additionalProperties: false
@@ -1414,7 +1416,11 @@ components:
       description: Initial request shape. Same source identity creates or corrects a Record. Same external
         revision with different canonical content conflicts. No revision means canonical Manifest digest
         identity; no source position means durable acceptance order. Single and batch entry replay share
-        route_family=ingestion.
+        route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a
+        Blob whose media type the installation routes to an external normalizer; that normalizer runs after
+        acceptance and its output is the published Manifest, while the Version identity still derives from
+        the submitted Blob. Other media types are rejected with unverified_blob. provenance.normalization
+        is engine-owned and rejected on input.
     WithdrawalCommand:
       type: object
       additionalProperties: false

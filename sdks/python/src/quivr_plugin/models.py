@@ -65,10 +65,24 @@ class ManifestContent(Model):
 
 
 @dataclass(kw_only=True)
+class NormalizationProvenance(Model):
+    "Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob."
+
+    plugin_id: str
+    plugin_version: str
+    plugin_api: str
+    contribution: Literal["normalizer"] = "normalizer"
+    invocation_id: str
+    idempotency_key: str
+    input_sha256: str
+
+
+@dataclass(kw_only=True)
 class Provenance(Model):
     source_blob_ids: list[str] | None = None
     producer: str | None = None
     producer_version: str | None = None
+    normalization: NormalizationProvenance | None = None
 
 
 @dataclass(kw_only=True)
@@ -267,6 +281,7 @@ __all__ = [
     "ManifestConfiguration",
     "ManifestContent",
     "ManifestContributions",
+    "NormalizationProvenance",
     "NormalizerContribution",
     "NormalizerRequest",
     "NormalizerResponse",

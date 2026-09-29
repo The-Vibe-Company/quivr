@@ -1,8 +1,9 @@
 """A Markdown normalizer: one title Part and one Part per section.
 
 The first level-1 heading, when nothing precedes it, becomes the ``title``
-Part. Every heading then starts a ``section`` Part that holds the heading and
-its body. Headings inside fenced code blocks are ignored.
+Part. Every heading then starts a ``body`` Part keyed ``section-<n>`` that
+holds the heading and its text; Quivr indexes ``title`` and ``body`` text
+Parts. Headings inside fenced code blocks are ignored.
 """
 from __future__ import annotations
 
@@ -84,6 +85,6 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     if title:
         parts.append(Part(key="title", role="title", content=TextContent(text=title)))
     for number, section in enumerate(sections, start=1):
-        parts.append(Part(key=f"section-{number}", role="section", content=TextContent(text=section)))
+        parts.append(Part(key=f"section-{number}", role="body", content=TextContent(text=section)))
     invocation.logger.info("normalized", extra={"parts": len(parts)})
     return NormalizerResponse(manifest=ManifestContent(parts=parts), warnings=warnings or None)

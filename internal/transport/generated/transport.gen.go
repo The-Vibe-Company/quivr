@@ -288,6 +288,21 @@ func (e ManifestContentKind) Valid() bool {
 	}
 }
 
+// Defines values for NormalizationProvenanceContribution.
+const (
+	Normalizer NormalizationProvenanceContribution = "normalizer"
+)
+
+// Valid indicates whether the value is a known member of the NormalizationProvenanceContribution enum.
+func (e NormalizationProvenanceContribution) Valid() bool {
+	switch e {
+	case Normalizer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OperationState.
 const (
 	OperationStateCancelRequested OperationState = "cancel_requested"
@@ -944,7 +959,7 @@ type FieldMappingRoles string
 // FieldMappingType defines model for FieldMapping.Type.
 type FieldMappingType string
 
-// IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion.
+// IngestCommand Initial request shape. Same source identity creates or corrects a Record. Same external revision with different canonical content conflicts. No revision means canonical Manifest digest identity; no source position means durable acceptance order. Single and batch entry replay share route_family=ingestion. A blob content accepts a verified text/* Blob, read at acceptance, or a Blob whose media type the installation routes to an external normalizer; that normalizer runs after acceptance and its output is the published Manifest, while the Version identity still derives from the submitted Blob. Other media types are rejected with unverified_blob. provenance.normalization is engine-owned and rejected on input.
 type IngestCommand struct {
 	Content IngestCommand_Content `json:"content"`
 
@@ -1015,6 +1030,22 @@ type MonitoringReferences struct {
 	SubscriptionVersionId string  `json:"subscription_version_id"`
 }
 
+// NormalizationProvenance Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.
+type NormalizationProvenance struct {
+	Contribution   NormalizationProvenanceContribution `json:"contribution"`
+	IdempotencyKey string                              `json:"idempotency_key"`
+	InputSha256    string                              `json:"input_sha256"`
+	InvocationId   string                              `json:"invocation_id"`
+
+	// PluginApi Plugin API version the engine invoked.
+	PluginApi     string `json:"plugin_api"`
+	PluginId      string `json:"plugin_id"`
+	PluginVersion string `json:"plugin_version"`
+}
+
+// NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
+type NormalizationProvenanceContribution string
+
 // Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild and retrieval_configuration Operations require corpus_id; when succeeded they require result naming the activated logical generation. This result shape covers those two command kinds only.
 type Operation struct {
 	CorpusId            *string        `json:"corpus_id,omitempty"`
@@ -1071,9 +1102,11 @@ type ProjectionRebuildResult struct {
 
 // Provenance defines model for Provenance.
 type Provenance struct {
-	Producer        *string   `json:"producer,omitempty"`
-	ProducerVersion *string   `json:"producer_version,omitempty"`
-	SourceBlobIds   *[]string `json:"source_blob_ids,omitempty"`
+	// Normalization Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.
+	Normalization   *NormalizationProvenance `json:"normalization,omitempty"`
+	Producer        *string                  `json:"producer,omitempty"`
+	ProducerVersion *string                  `json:"producer_version,omitempty"`
+	SourceBlobIds   *[]string                `json:"source_blob_ids,omitempty"`
 }
 
 // Receipt Durable acceptance outcome, not workflow state. Availability is a separate authorized live read view; omitted before a linked version exists. Infrastructure retry never resolves a Receipt as failed.
