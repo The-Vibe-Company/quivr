@@ -202,7 +202,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **AI agents search and cite Quivr over MCP**: `quivr mcp --profile read` serves an
   agent on stdio with three read-only tools. The agent can list the Corpora its key
   reaches, search them, and read a hit's Record Version and Manifest, keeping Record,
-  Version, Part and exact excerpt offsets to cite. The API key alone decides access
+  Version, Part and exact excerpt offsets to cite. `--profile ingest` adds text to a
+  Corpus and follows its Ingestion Receipt until it is searchable; retries never
+  duplicate, and no tool deletes. The API key alone decides access
   ([Connect an AI agent](docs/connect-an-ai-agent.md)).
 - **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
   your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).

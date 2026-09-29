@@ -58,9 +58,9 @@ Call add, then find.
 
 **Find items**
 
-| Read-only | Profiles |
-| --- | --- |
-| yes: the tool changes no data | [`read`](#profile-read), [`write`](#profile-write) |
+| Read-only | Idempotent | Profiles |
+| --- | --- | --- |
+| yes: the tool changes no data | yes: repeating the same call has no further effect | [`read`](#profile-read), [`write`](#profile-write) |
 
 Description the agent receives:
 
@@ -118,9 +118,9 @@ Returns {"items": [...]}.
 
 **Add an item**
 
-| Read-only | Profiles |
-| --- | --- |
-| no: the tool can change data | [`write`](#profile-write) |
+| Read-only | Idempotent | Profiles |
+| --- | --- | --- |
+| no: the tool can change data | no | [`write`](#profile-write) |
 
 Description the agent receives:
 

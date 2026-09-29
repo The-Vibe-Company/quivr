@@ -13,7 +13,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 - [Railway evaluation demo](../../deploy/railway/README.md): run a hosted single-node evaluation demo
 - [API walkthrough](../api-walkthrough.md): endpoint behaviour, limits, processing and search in detail
-- [Connect an AI agent](../connect-an-ai-agent.md): let an AI agent search Quivr and cite sources over MCP
+- [Connect an AI agent](../connect-an-ai-agent.md): let an AI agent search Quivr, cite sources and add text over MCP
 - [Connector Instances: operator guide](../connectors/README.md): set up and operate scheduled sources of content
 - [Microsoft 365 mailbox (`m365_mail`): operator guide](../connectors/microsoft-365.md): collect mail from a Microsoft 365 mailbox
 - [RSS and Atom feeds (`rss`)](../connectors/rss.md): collect articles from RSS and Atom feeds

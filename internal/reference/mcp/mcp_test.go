@@ -29,8 +29,9 @@ var fixture = mcp.Source{
 				"kinds": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"type": "string", "enum": ["a", "b"]}},
 				"limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "maximum hits"}
 			}}`),
-			Profiles: []string{"read", "write"},
-			ReadOnly: true,
+			Profiles:   []string{"read", "write"},
+			ReadOnly:   true,
+			Idempotent: true,
 		},
 		{
 			Name: "add", Title: "Add an item", Description: "Add an item.",

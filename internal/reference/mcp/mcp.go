@@ -82,7 +82,7 @@ func Render(src Source) ([]byte, error) {
 	for _, t := range src.Tools {
 		p.Heading(3, toolHeading(t.Name))
 		p.Para("**" + t.Title + "**")
-		p.Table([]string{"Read-only", "Profiles"}, [][]string{{readOnly(t.ReadOnly), profileLinks(t.Profiles)}})
+		p.Table([]string{"Read-only", "Idempotent", "Profiles"}, [][]string{{readOnly(t.ReadOnly), idempotent(t.Idempotent), profileLinks(t.Profiles)}})
 		p.Para("Description the agent receives:")
 		p.CodeBlock("text", t.Description)
 		args, err := arguments(t.InputSchema)
@@ -128,6 +128,13 @@ func profileLinks(names []string) string {
 func yesNo(b bool) string {
 	if b {
 		return "yes"
+	}
+	return "no"
+}
+
+func idempotent(b bool) string {
+	if b {
+		return "yes: repeating the same call has no further effect"
 	}
 	return "no"
 }

@@ -2,6 +2,8 @@ package online
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const mcpUsage = "quivr mcp --profile read [--api-url <url>] [--api-key <key>]"
+const mcpUsage = "quivr mcp --profile read|ingest [--api-url <url>] [--api-key <key>]"
 
 const mcpSummary = "Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile."
 
@@ -42,12 +44,14 @@ var mcpCommand = Command{Name: "mcp", Usage: mcpUsage, Summary: mcpSummary, run:
 // JSON the agent receives, or a classified Failure.
 type mcpCaller func(ctx context.Context, cl *client.ClientWithResponses, base string, args json.RawMessage) (any, error)
 
-// mcpHandlers binds each catalogue tool to its implementation. Each one only
-// reads through the public API.
+// mcpHandlers binds each catalogue tool to its implementation. Each one goes
+// through the public API only; none withdraws, deletes or rebuilds anything.
 var mcpHandlers = map[string]mcpCaller{
 	"list_corpora": listCorporaTool,
 	"search":       searchTool,
 	"read_record":  readRecordTool,
+	"ingest_text":  ingestTextTool,
+	"read_receipt": readReceiptTool,
 }
 
 func serveMCP(ctx context.Context, env Env, args []string) int {
@@ -111,16 +115,20 @@ func newMCPServer(profile MCPProfile, cl *client.ClientWithResponses, base strin
 		if profile.Name == "read" && !tool.ReadOnly {
 			return nil, fmt.Errorf("mcp tool %s is not read-only and cannot join the read profile", tool.Name)
 		}
-		readOnly, notDestructive := tool.ReadOnly, false
+		// No catalogue tool is destructive, and none reaches outside Quivr.
+		notDestructive, closedWorld := false, false
 		t := &mcp.Tool{
 			Name:        tool.Name,
 			Title:       tool.Title,
 			Description: tool.Description,
 			InputSchema: tool.InputSchema,
-			Annotations: &mcp.ToolAnnotations{Title: tool.Title, ReadOnlyHint: readOnly, IdempotentHint: readOnly},
-		}
-		if readOnly {
-			t.Annotations.DestructiveHint = &notDestructive
+			Annotations: &mcp.ToolAnnotations{
+				Title:           tool.Title,
+				ReadOnlyHint:    tool.ReadOnly,
+				IdempotentHint:  tool.Idempotent,
+				DestructiveHint: &notDestructive,
+				OpenWorldHint:   &closedWorld,
+			},
 		}
 		mcp.AddTool(server, t, func(ctx context.Context, _ *mcp.CallToolRequest, args json.RawMessage) (*mcp.CallToolResult, any, error) {
 			// The SDK has validated args against the catalogue schema. The result
@@ -201,6 +209,96 @@ func readRecordTool(ctx context.Context, cl *client.ClientWithResponses, base st
 		return nil, err
 	}
 	return map[string]json.RawMessage{"record": rawRecord, "version": rawVersion}, nil
+}
+
+// mcpNamespace is the source namespace of text an agent ingests without naming one.
+const mcpNamespace = "mcp"
+
+func ingestTextTool(ctx context.Context, cl *client.ClientWithResponses, base string, args json.RawMessage) (any, error) {
+	var in struct {
+		CorpusID       string `json:"corpus_id"`
+		RecordKey      string `json:"record_key"`
+		Text           string `json:"text"`
+		Namespace      string `json:"namespace"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return nil, err
+	}
+	if in.Namespace == "" {
+		in.Namespace = mcpNamespace
+	}
+	var content client.IngestCommand_Content
+	if err := content.FromTextContent(client.TextContent{Kind: client.Text, Text: in.Text}); err != nil {
+		return nil, err
+	}
+	body := client.IngestCommand{
+		IdempotencyKey: in.IdempotencyKey,
+		Source:         client.SourceIdentity{CorpusId: in.CorpusID, Namespace: in.Namespace, RecordKey: in.RecordKey},
+		Content:        content,
+	}
+	if in.IdempotencyKey != "" {
+		raw, _, err := ingest(ctx, cl, base, body)
+		return json.RawMessage(raw), err
+	}
+	// A derived key replays the Receipt of the same arguments. When that Receipt
+	// created a Version the Record has since left (text A, then B, then A again),
+	// the call means "make this text current again": it chains a new key from the
+	// superseded Version, so the text is ingested anew and a retry of this call
+	// still follows the same chain to the same Receipt.
+	body.IdempotencyKey = ingestIdempotencyKey(in.CorpusID, in.Namespace, in.RecordKey, in.Text)
+	for hop := 0; ; hop++ {
+		raw, receipt, err := ingest(ctx, cl, base, body)
+		if err != nil || !superseded(receipt) {
+			return json.RawMessage(raw), err
+		}
+		if hop == maxIngestHops {
+			return nil, &Failure{Exit: ExitInvalid, Code: "conflict", Message: "this text went back and forth too often on this record_key to derive a retry key", Hint: "pass your own idempotency_key"}
+		}
+		body.IdempotencyKey = ingestIdempotencyKey(body.IdempotencyKey, *receipt.VersionId)
+	}
+}
+
+// maxIngestHops bounds how many superseded Receipts one ingest_text call follows.
+const maxIngestHops = 16
+
+func ingest(ctx context.Context, cl *client.ClientWithResponses, base string, body client.IngestCommand) ([]byte, client.Receipt, error) {
+	var receipt client.Receipt
+	resp, err := cl.IngestRecord(ctx, body)
+	raw, err := decode(ctx, base, resp, err, &receipt)
+	return raw, receipt, err
+}
+
+// superseded reports a replayed Receipt whose Version became retrieval ready
+// but is not the Record's current one: another text replaced it. A Version still
+// building its baseline is not current yet either, and is not superseded.
+func superseded(r client.Receipt) bool {
+	return r.State == "resolved" && r.Outcome != nil && (*r.Outcome == "created" || *r.Outcome == "duplicate") &&
+		r.VersionId != nil && r.Availability != nil && r.Availability.State == "retrieval_ready" && !r.Availability.IsCurrent
+}
+
+// ingestIdempotencyKey derives the retry key of an ingest_text call from its
+// arguments, so an agent repeating the same call replays the same Receipt.
+// Each field is length-prefixed so no two argument sets share a digest input.
+func ingestIdempotencyKey(fields ...string) string {
+	h := sha256.New()
+	for _, f := range fields {
+		fmt.Fprintf(h, "%d:%s", len(f), f)
+	}
+	return "mcp-ingest-" + hex.EncodeToString(h.Sum(nil))
+}
+
+func readReceiptTool(ctx context.Context, cl *client.ClientWithResponses, base string, args json.RawMessage) (any, error) {
+	var in struct {
+		ReceiptID string `json:"receipt_id"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return nil, err
+	}
+	var receipt client.Receipt
+	resp, err := cl.GetReceipt(ctx, in.ReceiptID)
+	raw, err := decode(ctx, base, resp, err, &receipt)
+	return json.RawMessage(raw), err
 }
 
 func mcpProfileNames() string {

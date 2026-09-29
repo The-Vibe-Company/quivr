@@ -13,11 +13,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// connectMCP starts `quivr mcp --profile read` from the built binary with only
-// the given API key, and connects an MCP client to it over stdio.
-func connectMCP(t *testing.T, bin, key string) *mcp.ClientSession {
+// connectMCP starts `quivr mcp --profile <profile>` from the built binary with
+// only the given API key, and connects an MCP client to it over stdio.
+func connectMCP(t *testing.T, bin, profile, key string) *mcp.ClientSession {
 	t.Helper()
-	cmd := exec.Command(bin, "mcp", "--profile", "read")
+	cmd := exec.Command(bin, "mcp", "--profile", profile)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "QUIVR_API_URL=" + os.Getenv("QUIVR_TEST_URL"), "QUIVR_API_KEY=" + key}
 	cmd.Stderr = os.Stderr
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -45,6 +45,26 @@ func callTool(t *testing.T, s *mcp.ClientSession, name string, args map[string]a
 		t.Fatalf("call %s: content %T", name, res.Content[0])
 	}
 	return text.Text, res.IsError
+}
+
+// toolNames lists a session's tools, sorted, and checks that none declares itself destructive.
+func toolNames(t *testing.T, s *mcp.ClientSession) ([]string, map[string]*mcp.Tool) {
+	t.Helper()
+	tools, err := s.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	byName := map[string]*mcp.Tool{}
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+		byName[tool.Name] = tool
+		if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
+			t.Errorf("tool %s is not declared non-destructive", tool.Name)
+		}
+	}
+	slices.Sort(names)
+	return names, byName
 }
 
 func decodeTool(t *testing.T, s *mcp.ClientSession, name string, args map[string]any, out any) {
@@ -103,19 +123,13 @@ func TestCLIMCPReadProfile(t *testing.T) {
 	r = awaitReceipt(t, r["receipt_id"].(string))
 	awaitSearchable(t, r)
 
-	agent := connectMCP(t, bin, admin)
-	tools, err := agent.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, tool := range tools.Tools {
-		names = append(names, tool.Name)
-		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+	agent := connectMCP(t, bin, "read", admin)
+	names, tools := toolNames(t, agent)
+	for _, tool := range tools {
+		if !tool.Annotations.ReadOnlyHint {
 			t.Errorf("tool %s is not declared read-only", tool.Name)
 		}
 	}
-	slices.Sort(names)
 	if want := []string{"list_corpora", "read_record", "search"}; !slices.Equal(names, want) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
@@ -164,7 +178,7 @@ func TestCLIMCPReadProfile(t *testing.T) {
 	}
 
 	// A key scoped to another Corpus never sees this one, and searching it is refused, not empty.
-	scoped := connectMCP(t, bin, os.Getenv("QUIVR_TEST_SCOPED"))
+	scoped := connectMCP(t, bin, "read", os.Getenv("QUIVR_TEST_SCOPED"))
 	var page struct {
 		Items []struct {
 			CorpusID string `json:"corpus_id"`
@@ -178,9 +192,135 @@ func TestCLIMCPReadProfile(t *testing.T) {
 		t.Fatalf("scoped search outside its Corpus: error %v, %q", isError, out)
 	}
 
-	for _, args := range [][]string{{"mcp"}, {"mcp", "--profile", "ingest"}} {
+	for _, args := range [][]string{{"mcp"}, {"mcp", "--profile", "write"}} {
 		if got := runCLI(t, bin, []string{"QUIVR_API_URL=" + os.Getenv("QUIVR_TEST_URL")}, t.TempDir(), args...); got.exit != 2 || got.stdout != "" {
 			t.Fatalf("%v: exit %d stdout %q, want exit 2 and no output", args, got.exit, got.stdout)
 		}
+	}
+}
+
+type mcpReceipt struct {
+	ReceiptID    string `json:"receipt_id"`
+	State        string `json:"state"`
+	Outcome      string `json:"outcome"`
+	RecordID     string `json:"record_id"`
+	VersionID    string `json:"version_id"`
+	Availability *struct {
+		Searchable bool `json:"searchable"`
+	} `json:"availability"`
+}
+
+// TestCLIMCPIngestProfile drives `quivr mcp --profile ingest` as an agent would:
+// it sees the read tools plus ingestion, adds text, follows the Receipt until the
+// text is searchable and finds it with search. A retry replays the same Receipt,
+// and a key that may not write is refused by the server.
+func TestCLIMCPIngestProfile(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	bin := quivrBinary(t)
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := monitoringRun()
+	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "MCP ingest", "idempotency_key": "mcp-ingest-corpus-" + run}, 201)["corpus_id"].(string)
+
+	agent := connectMCP(t, bin, "ingest", admin)
+	names, tools := toolNames(t, agent)
+	if want := []string{"ingest_text", "list_corpora", "read_receipt", "read_record", "search"}; !slices.Equal(names, want) {
+		t.Fatalf("tools %v, want %v", names, want)
+	}
+	for _, name := range names {
+		if readOnly := tools[name].Annotations.ReadOnlyHint; readOnly != (name != "ingest_text") {
+			t.Errorf("tool %s read-only %v", name, readOnly)
+		}
+	}
+
+	args := map[string]any{"corpus_id": c, "record_key": "field-notes-" + run, "text": "Field notes 🦉\nThe barn owl hunts over the heather moorland at dusk."}
+	var accepted, replayed mcpReceipt
+	decodeTool(t, agent, "ingest_text", args, &accepted)
+	decodeTool(t, agent, "ingest_text", args, &replayed)
+	if accepted.ReceiptID == "" || replayed.ReceiptID != accepted.ReceiptID {
+		t.Fatalf("retry returned Receipt %q, want the first one %q", replayed.ReceiptID, accepted.ReceiptID)
+	}
+
+	// Follow the Receipt, as the tool descriptions tell the agent to, until the text is searchable.
+	receipt := awaitMCPSearchable(t, agent, accepted.ReceiptID)
+
+	if hit := awaitMCPHit(t, agent, c, "heather moorland"); hit.RecordID != receipt.RecordID || hit.VersionID != receipt.VersionID {
+		t.Fatalf("search after searchable Receipt: %+v, want record %s version %s", hit, receipt.RecordID, receipt.VersionID)
+	}
+
+	// Another text under the same record_key corrects the Record; going back to the first text makes it current again.
+	corrected := map[string]any{"corpus_id": c, "record_key": args["record_key"], "text": "Field notes 🦉\nThe tawny owl calls from the beech woodland."}
+	var second, reverted, revertRetry mcpReceipt
+	decodeTool(t, agent, "ingest_text", corrected, &second)
+	if r := awaitMCPSearchable(t, agent, second.ReceiptID); r.RecordID != receipt.RecordID || r.VersionID == receipt.VersionID {
+		t.Fatalf("correction Receipt %+v, want a new Version of record %s", r, receipt.RecordID)
+	}
+	decodeTool(t, agent, "ingest_text", args, &reverted)
+	decodeTool(t, agent, "ingest_text", args, &revertRetry)
+	if reverted.ReceiptID == accepted.ReceiptID || revertRetry.ReceiptID != reverted.ReceiptID {
+		t.Fatalf("going back to the first text: Receipt %q then %q, want a new Receipt replayed on retry (first was %q)", reverted.ReceiptID, revertRetry.ReceiptID, accepted.ReceiptID)
+	}
+	back := awaitMCPSearchable(t, agent, reverted.ReceiptID)
+	decodeTool(t, agent, "ingest_text", args, &revertRetry)
+	if revertRetry.ReceiptID != reverted.ReceiptID {
+		t.Fatalf("retry once the reverted text is searchable returned Receipt %q, want %q", revertRetry.ReceiptID, reverted.ReceiptID)
+	}
+	if hit := awaitMCPHit(t, agent, c, "heather moorland"); hit.VersionID != back.VersionID {
+		t.Fatalf("search after going back: hit Version %s, want %s", hit.VersionID, back.VersionID)
+	}
+
+	// An explicit idempotency_key reused with other arguments is refused, not silently replayed.
+	keyed := map[string]any{"corpus_id": c, "record_key": "keyed-" + run, "text": "First keyed text.", "idempotency_key": "agent-key-" + run}
+	var first mcpReceipt
+	decodeTool(t, agent, "ingest_text", keyed, &first)
+	keyed["text"] = "Second keyed text."
+	if out, isError := callTool(t, agent, "ingest_text", keyed); !isError || !strings.HasPrefix(out, "idempotency_conflict:") {
+		t.Fatalf("reused idempotency_key with other text: error %v, %q", isError, out)
+	}
+
+	// A key that may read Corpora but not write content gets the public forbidden code, even in the ingest profile.
+	reader := connectMCP(t, bin, "ingest", os.Getenv("QUIVR_TEST_READER"))
+	if out, isError := callTool(t, reader, "ingest_text", args); !isError || !strings.HasPrefix(out, "forbidden:") {
+		t.Fatalf("ingest with a read-only key: error %v, %q", isError, out)
+	}
+}
+
+// awaitMCPSearchable follows a Receipt through read_receipt until its Record Version is searchable.
+func awaitMCPSearchable(t *testing.T, s *mcp.ClientSession, receiptID string) mcpReceipt {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var r mcpReceipt
+		decodeTool(t, s, "read_receipt", map[string]any{"receipt_id": receiptID}, &r)
+		if r.State == "resolved" && r.Availability != nil && r.Availability.Searchable {
+			if r.Outcome != "created" || r.RecordID == "" || r.VersionID == "" {
+				t.Fatalf("resolved Receipt %+v, want a created Record Version", r)
+			}
+			return r
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Receipt never made the text searchable: %+v", r)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// awaitMCPHit searches one Corpus through the search tool until the query has a hit, and returns the first one.
+func awaitMCPHit(t *testing.T, s *mcp.ClientSession, corpusID, query string) mcpHit {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var found struct {
+			Items []mcpHit `json:"items"`
+		}
+		decodeTool(t, s, "search", map[string]any{"query": query, "corpus_ids": []string{corpusID}, "mode": "lexical"}, &found)
+		if len(found.Items) > 0 {
+			return found.Items[0]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("search tool never returned a hit for %q", query)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

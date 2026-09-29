@@ -157,7 +157,7 @@ Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one p
 `quivr mcp --help` prints:
 
 ```text
-usage: quivr mcp --profile read [--api-url <url>] [--api-key <key>]
+usage: quivr mcp --profile read|ingest [--api-url <url>] [--api-key <key>]
 
 Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile.
 
@@ -167,13 +167,19 @@ Flags:
   -api-url string
     	Quivr API base URL (default $QUIVR_API_URL)
   -profile string
-    	tool profile to serve (required): read
+    	tool profile to serve (required): read|ingest
 
 Profiles:
   read  list reachable Corpora, search them and read Records; no tool changes data
     list_corpora  List reachable Corpora
     search  Search Corpora
     read_record  Read a Record
+  ingest  the read tools, plus ingest text into a Corpus and follow its Ingestion Receipt; no tool withdraws or deletes
+    list_corpora  List reachable Corpora
+    search  Search Corpora
+    read_record  Read a Record
+    ingest_text  Ingest text into a Corpus
+    read_receipt  Read an Ingestion Receipt
 
 This command needs a running Quivr server. It reads the server address from
 QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key

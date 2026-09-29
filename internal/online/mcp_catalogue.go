@@ -27,6 +27,10 @@ type MCPTool struct {
 	// ReadOnly promises the tool changes no data: it only reads through the
 	// public API. Every tool of the read profile must be read-only.
 	ReadOnly bool
+	// Idempotent promises that repeating a call with the same arguments has no
+	// further effect. No tool of any profile is destructive: none withdraws,
+	// deletes or rebuilds anything.
+	Idempotent bool
 }
 
 // MCPProfiles lists the profiles in help order.
@@ -38,6 +42,15 @@ var MCPProfiles = []MCPProfile{
 Workflow: call list_corpora to learn which Corpora this connection may search, call search with a question and those corpus_ids, then call read_record on a hit when you need its full context.
 To cite a hit, give its record_id, version_id, part_key and excerpt offsets [start,end). Offsets count Unicode code points in that Part's text, and the excerpt text is copied exactly from it.
 Access is decided by the server from the API key: a Corpus you cannot reach is refused, never silently skipped.`,
+	},
+	{
+		Name:    "ingest",
+		Summary: "the read tools, plus ingest text into a Corpus and follow its Ingestion Receipt; no tool withdraws or deletes",
+		Instructions: `Quivr stores documents as Records in Corpora and searches them with exact provenance.
+Read workflow: call list_corpora to learn which Corpora this connection may use, call search with a question and those corpus_ids, then call read_record on a hit when you need its full context.
+To cite a hit, give its record_id, version_id, part_key and excerpt offsets [start,end). Offsets count Unicode code points in that Part's text, and the excerpt text is copied exactly from it.
+Ingest workflow: call ingest_text with a corpus_id, a record_key and the text. Ingestion is asynchronous: the call returns an Ingestion Receipt once the text is accepted, not once it is searchable. Call read_receipt with its receipt_id until state is resolved and availability.searchable is true; only then does search find the text. Stop following and report the diagnostics when outcome is conflict, availability.state is quarantined, processing.state is blocked, or availability.state is retrieval_ready while is_current is false (a newer text replaced it). Retrying ingest_text with the same arguments returns the same Receipt and never creates a duplicate.
+Access is decided by the server from the API key: a Corpus you cannot reach, or an ingestion the key may not perform, is refused with a tool error, never silently skipped.`,
 	},
 }
 
@@ -55,8 +68,9 @@ Returns {"items": [{"corpus_id", "name", "effective_retrieval"}], "next_page_cur
     "page_cursor": {"type": "string", "minLength": 1, "description": "next_page_cursor from a previous list_corpora result; omit for the first page"}
   }
 }`),
-		Profiles: []string{"read"},
-		ReadOnly: true,
+		Profiles:   []string{"read", "ingest"},
+		ReadOnly:   true,
+		Idempotent: true,
 	},
 	{
 		Name:  "search",
@@ -75,8 +89,9 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "maximum number of hits; the server default is 10"}
   }
 }`),
-		Profiles: []string{"read"},
-		ReadOnly: true,
+		Profiles:   []string{"read", "ingest"},
+		ReadOnly:   true,
+		Idempotent: true,
 	},
 	{
 		Name:  "read_record",
@@ -93,8 +108,49 @@ Returns {"record": {"record_id", "source", "current_version_id", "withdrawn"}, "
     "version_id": {"type": "string", "minLength": 1, "description": "version_id to read; omit for the Record's current Version"}
   }
 }`),
-		Profiles: []string{"read"},
-		ReadOnly: true,
+		Profiles:   []string{"read", "ingest"},
+		ReadOnly:   true,
+		Idempotent: true,
+	},
+	{
+		Name:  "ingest_text",
+		Title: "Ingest text into a Corpus",
+		Description: `Add text to a Corpus as a Record, so that search can find it later. Use it to store knowledge worth keeping, such as notes or a document you were given.
+record_key is your stable name for the Record within the Corpus and namespace: sending another text with the same record_key corrects the Record with a new Record Version; earlier Versions stay readable. namespace groups your Records; it defaults to "mcp".
+Ingestion is asynchronous. The call returns an Ingestion Receipt as soon as the text is accepted: {"receipt_id", "state", "outcome", "record_id", "version_id", "availability", "processing", "diagnostics", "source"}. state is pending, then resolved with an outcome (created, duplicate or conflict). The text is searchable only once availability.searchable is true: call read_receipt with the receipt_id until then.
+Retries are safe: idempotency_key defaults to a digest of corpus_id, namespace, record_key and text, so repeating the same call returns the same Receipt instead of a duplicate. When that Receipt's Version has since been replaced by another text for the same record_key, the call ingests the text again so it becomes current once more; to go back while the replacing text is not searchable yet, pass your own idempotency_key. A key you pass controls replay yourself; reusing one with different arguments is refused with idempotency_conflict.`,
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["corpus_id", "record_key", "text"],
+  "properties": {
+    "corpus_id": {"type": "string", "minLength": 1, "description": "Corpus to add the text to, from list_corpora"},
+    "record_key": {"type": "string", "minLength": 1, "description": "your stable name for this Record; the same record_key corrects the same Record"},
+    "text": {"type": "string", "minLength": 1, "description": "the full text of the Record"},
+    "namespace": {"type": "string", "minLength": 1, "description": "source namespace the record_key belongs to; omit to use mcp"},
+    "idempotency_key": {"type": "string", "minLength": 1, "description": "retry key; omit to derive it from corpus_id, namespace, record_key and text"}
+  }
+}`),
+		Profiles:   []string{"ingest"},
+		ReadOnly:   false,
+		Idempotent: true,
+	},
+	{
+		Name:  "read_receipt",
+		Title: "Read an Ingestion Receipt",
+		Description: `Read the Ingestion Receipt that ingest_text returned, to follow its text until it is searchable.
+Returns {"receipt_id", "state", "outcome", "record_id", "version_id", "availability", "processing", "diagnostics", "source"}. state pending means the text is accepted but not yet processed. state resolved carries an outcome: created (a new Record Version), duplicate (the same text was already the Record's content) or conflict (see diagnostics). availability {"state", "is_current", "searchable"} describes the Record Version and appears once it exists: call again until availability.searchable is true, then search finds the text. Stop calling and report the diagnostics when outcome is conflict, availability.state is quarantined, processing.state is blocked (the diagnostics explain what needs attention), or availability.state is retrieval_ready while is_current is false (a newer text for the same record_key replaced this Version). A Version still building reports is_current false until it becomes current: keep following it.`,
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["receipt_id"],
+  "properties": {
+    "receipt_id": {"type": "string", "minLength": 1, "description": "receipt_id returned by ingest_text"}
+  }
+}`),
+		Profiles:   []string{"ingest"},
+		ReadOnly:   true,
+		Idempotent: true,
 	},
 }
 

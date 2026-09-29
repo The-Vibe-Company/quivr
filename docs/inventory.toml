@@ -69,7 +69,7 @@ excluded = [
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
 "docs/api-walkthrough.md" = { audience = "functional", kind = "guide", summary = "endpoint behaviour, limits, processing and search in detail" }
-"docs/connect-an-ai-agent.md" = { audience = "functional", kind = "guide", summary = "let an AI agent search Quivr and cite sources over MCP" }
+"docs/connect-an-ai-agent.md" = { audience = "functional", kind = "guide", summary = "let an AI agent search Quivr, cite sources and add text over MCP" }
 "docs/connectors/README.md" = { audience = "functional", kind = "guide", summary = "set up and operate scheduled sources of content" }
 "docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide", summary = "collect mail from a Microsoft 365 mailbox" }
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide", summary = "collect articles from RSS and Atom feeds" }
@@ -108,7 +108,7 @@ excluded = [
 "docs/agents/testing.md" = 85
 "docs/agents/triage-labels.md" = 15
 "docs/api-walkthrough.md" = 475
-"docs/connect-an-ai-agent.md" = 75
+"docs/connect-an-ai-agent.md" = 94
 "docs/connectors/README.md" = 225
 "docs/connectors/microsoft-365.md" = 230
 "docs/connectors/rss.md" = 190
