@@ -1,0 +1,36 @@
+plugins/alerts/fixtures/notation-cases.json
+  s_54b80c92daa9cb::t_0b377ef23e6e62 1-379
+quivr-search/tests/notation.spec.ts
+  s_54b80c92daa9cb::t_7a1438c7112899 1-28
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_5c6dcd3028da4d 229-230,232,237,240-241,243-246
+  s_54b80c92daa9cb::t_6fad107ba665ca 1-228,231,233-236,238-239,242,247-379
+quivr-search/tests/alerts.test.mjs
+  s_54b80c92daa9cb::t_7e5906021fafec 1-235
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_55f1cfd6df412e 44,66,70,246,307-309
+  s_54b80c92daa9cb::t_c326f9617ae557 8,33-34,37-39,46,55-65,67-69,71-73,295-297
+quivr-search/src/lib/notation.ts
+  s_54b80c92daa9cb::t_e7cc3f4f115385 1-268
+plugins/alerts/tests/test_notation.py
+  s_54b80c92daa9cb::t_3959f7d154cce3 6,91-103
+  s_54b80c92daa9cb::t_4287d00506d2a0 104-105
+quivr-search/package.json
+  s_54b80c92daa9cb::t_496d0dded1df85 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7995871fd96284a4fb58a37e92dd1cfba862ea7b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
