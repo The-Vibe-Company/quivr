@@ -1,0 +1,107 @@
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_f47156327e7dd6 2-34,37-56,58-106
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_f47156327e7dd6 183,189-197
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f47156327e7dd6 9,37
+contracts/plugins/v0/fixtures/responses/connector/push-active.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+contracts/plugins/v0/fixtures/responses/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-8
+contracts/plugins/v0/fixtures/responses/connector/push-failed-without-class.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+internal/plugins/push.go
+  s_54b80c92daa9cb::t_2a72af79f6a745 1-170
+contracts/plugins/v0/fixtures/requests/connector/receive.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-37
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted-4xx.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-with-items.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_94a344b85ec437 192-197
+contracts/plugins/v0/fixtures/requests/connector/fetch-push.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-26
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-mode.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-25
+contracts/plugins/v0/fixtures/responses/connector/receive-header-injection.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-7
+internal/plugins/runner/receive.go
+  s_54b80c92daa9cb::t_6d90885d857bac 1-157
+contracts/plugins/v0/fixtures/responses/connector/push-failed.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-12
+contracts/plugins/v0/fixtures/responses/connector/push-pending.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 554,556,1100-1355
+contracts/plugins/v0/fixtures/connectors/push-body-twice.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-17
+contracts/plugins/v0/fixtures/requests/connector/receive-uppercase-header.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-34
+contracts/plugins/v0/fixtures/responses/connector/push-active-with-error.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-12
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-2xx.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-6
+contracts/plugins/v0/fixtures/responses/connector/receive-checkpoint.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-10
+contracts/plugins/v0/fixtures/requests/connector/receive-no-request.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+contracts/plugins/v0/fixtures/responses/connector/receive-refused.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-8
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-without-pull.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-13
+contracts/plugins/v0/fixtures/responses/connector/receive-undeclared-namespace.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-21
+contracts/plugins/v0/fixtures/manifests/valid/connector-push.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-36
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_d78bb46d74b35f 35,38-40,334-337,365-369,410
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_f47156327e7dd6 5,7,30-35,57-63,144-177
+  s_54b80c92daa9cb::t_132362292dacf3 178
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_3a44b314c070e1 105-110
+  s_54b80c92daa9cb::t_79eb7d9c575df4 177
+contracts/plugins/v0/fixtures/requests/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-30
+contracts/plugins/v0/fixtures/requests/connector/receive-put.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-30
+contracts/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_9a6a9feac24b50 4,136-245
+  s_54b80c92daa9cb::t_7e6f5f03e1ef6e 246-248
+contracts/plugins/v0/fixtures/responses/connector/receive-attachments.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-32
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_79eb7d9c575df4 77
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_d78bb46d74b35f 160-161
+contracts/plugins/v0/fixtures/responses/connector/push-pending-with-interval.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+contracts/plugins/v0/fixtures/connectors/push.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-70
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_452f9d4cb8950c 149-150,189-197,200
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_a1ff8990c4e523 6,11-12,21-22,79-80,84-115,123-129,137,206,208-211,230-234,240-242,267-313
+  s_54b80c92daa9cb::t_8304d441b51620 314
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_6fdb4c34330ee1 22,28,40-43,97,628-639,643-653,683-684,702-704
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54678218a8f8831a269ec53b3af3279385fa24e2",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
