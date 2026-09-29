@@ -67,6 +67,30 @@ Optional web variables for the Sources view (see `quivr-search/README.md`):
 volume. Without a volume, removed sources come back as paused after a web restart.
 Set the real feed list in the Railway variables, never in this repository.
 
+## Keyword alerts and PDF text (optional)
+
+The core image bakes in the first-party plugins [`alerts`](../../plugins/alerts/README.md),
+which the **Alertes** tab needs, and [`pdf-text`](../../plugins/pdf-text/README.md).
+Set `QUIVR_DEMO_PLUGINS=1` on api and worker and `QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink`
+on web, then redeploy api, worker and web. `core-entrypoint.py` then:
+
+- pins both through the `plugins` list: pdf-text on `127.0.0.1:9900` (`application/pdf`),
+  alerts on `127.0.0.1:9910`. Only the worker calls plugins, so only the worker runs
+  them, as sidecar processes; the API reads the manifests and never contacts them. If
+  any worker process exits, the container stops and Railway restarts it;
+- offers [described alerts](../../docs/described-alerts.md) (the pin's `kinds`) only when
+  `TYPESAFE_API_KEY` is set, with the same value on api and worker; only the alerts
+  sidecar receives it. Without it, only keyword alerts can be created;
+- gives the demo key `monitoring:read` and `monitoring:write`;
+- declares the webhook destination `demo-alerts-sink`, which every Subscription needs.
+  The web app reads Matches through the API, so it points at `http://alerts-sink.invalid/`,
+  a reserved name that never resolves: deliveries fail inside the container, and the
+  private-address refusal stays on. Its signing secret derives from `QUIVR_CURSOR_KEY`.
+
+The worker logs `plugins pinned` with `pdf-text@0.1.0 [normalizer] alerts@0.2.0
+[subscription]` and `evaluators=1`. Without a web `DEMO_STATE_FILE` volume, paused
+alerts leave the list after a web restart; active ones are found again through the API.
+
 ## Provision and deploy
 
 Authenticate `railway login`, then create/link a dedicated project in the intended
@@ -112,7 +136,9 @@ The tokenizer and model are downloaded and checksum-verified at **build time** f
 accepted locks. TEI's image contains the complete snapshot and `HF_HUB_OFFLINE=1`;
 runtime startup does not download a model. Startup migration failure exits instead
 of exposing a partially initialized API. Logs go to service stdout/stderr; runtime
-configuration is generated privately in `/tmp`, never printed.
+configuration is generated privately in `/tmp`, never printed. The tokenizer stage
+supports x86_64 only: on an arm64 machine, build the core image locally with
+`docker build --platform linux/amd64 -f deploy/railway/core.Dockerfile .`.
 
 ## Domain and HTTPS
 

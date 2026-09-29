@@ -7,7 +7,8 @@ The local stack builds the quivr binary natively, so nothing else notices when
 a new top-level Go package is imported but not copied by
 deploy/railway/core.Dockerfile, and the hosted image then fails to build.
 This copies exactly the build stage's COPY sources into a temporary directory
-and builds ./cmd/quivr there.
+and builds ./cmd/quivr there. It also checks that every other stage's COPY
+source from the build context exists, such as the plugins the image bakes in.
 
     python3 scripts/image_context.py [Dockerfile]   # guard used by make verify
 """
@@ -28,13 +29,23 @@ WEB_ENTRY = 'quivr-search/server.mjs'
 IMPORT = re.compile(r"""(?:from\s+|import\s*\(\s*|import\s+)['"](\.{1,2}/[^'"]+)['"]""")
 
 
+def instructions(text):
+    """Yield each instruction's words, joining backslash-continued lines."""
+    pending = ''
+    for line in text.splitlines():
+        if line.rstrip().endswith('\\'):
+            pending += line.rstrip()[:-1] + ' '
+            continue
+        words = shlex.split(pending + line, comments=True)
+        pending = ''
+        if words:
+            yield words
+
+
 def build_stage_copies(text):
     """Return (source, destination) pairs copied by the first stage from the build context."""
     copies, stage = [], 0
-    for line in text.splitlines():
-        words = shlex.split(line, comments=True)
-        if not words:
-            continue
+    for words in instructions(text):
         instruction = words[0].upper()
         if instruction == 'FROM':
             stage += 1
@@ -51,8 +62,20 @@ def build_stage_copies(text):
     return copies
 
 
+def context_sources(text):
+    """Return every COPY source taken from the build context, in all stages."""
+    sources = []
+    for words in instructions(text):
+        if words[0].upper() == 'COPY' and not any(w.startswith('--from') for w in words[1:]):
+            sources += [w for w in words[1:] if not w.startswith('--')][:-1]
+    return sources
+
+
 def check(root, dockerfile, go):
     """Build ./cmd/quivr from only the build stage's copies; return the failure text or None."""
+    for source in context_sources(dockerfile.read_text()):
+        if not any(root.glob(source)):
+            return f'{dockerfile.name}: COPY source {source} does not exist'
     with tempfile.TemporaryDirectory() as tmp:
         context = pathlib.Path(tmp)
         for source, destination in build_stage_copies(dockerfile.read_text()):
@@ -76,10 +99,7 @@ def check(root, dockerfile, go):
 def runtime_stage_sources(text):
     """Return the build-context sources copied by the last stage (not --from)."""
     stages, current = [], []
-    for line in text.splitlines():
-        words = shlex.split(line, comments=True)
-        if not words:
-            continue
+    for words in instructions(text):
         if words[0].upper() == 'FROM':
             current = []
             stages.append(current)

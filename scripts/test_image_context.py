@@ -26,6 +26,12 @@ class ImageContextTest(unittest.TestCase):
         self.assertIn('example.test/app/extra', failure)
         self.assertIn('COPY every top-level Go package', failure)
 
+    def test_missing_source_in_a_later_stage_fails(self):
+        root = self.repo('FROM golang AS build\nCOPY go.mod ./\nCOPY cmd ./cmd\nCOPY extra ./extra\n'
+                         'FROM python AS plugins\nRUN python -m venv /v \\\n && /v/bin/pip install ./sdk\n'
+                         'COPY plugins/moved /app/plugins/moved\n')
+        self.assertIn('COPY source plugins/moved does not exist', image_context.check(root, root / 'Dockerfile', GO))
+
     def test_copied_package_builds(self):
         root = self.repo('FROM golang AS build\nCOPY go.mod ./\nCOPY cmd ./cmd\nCOPY extra ./extra\n')
         self.assertIsNone(image_context.check(root, root / 'Dockerfile', GO))
@@ -38,7 +44,8 @@ class WebImageContextTest(unittest.TestCase):
         (root / 'web' / 'server.mjs').write_text('import { a } from "./a.mjs";\nimport x from "node:fs";\n')
         (root / 'web' / 'a.mjs').write_text("import { b } from './b.mjs';\n")
         (root / 'web' / 'b.mjs').write_text('export const b = 1;\n')
-        (root / 'Dockerfile').write_text(f'FROM node AS build\nCOPY web ./\nFROM node\n{copy_line}\n')
+        # A continued RUN line in the runtime stage must not hide its COPY lines.
+        (root / 'Dockerfile').write_text(f'FROM node AS build\nCOPY web ./\nFROM node\nRUN true \\\n && true\n{copy_line}\n')
         return root
 
     def test_module_missing_from_runtime_stage_fails_and_names_it(self):
