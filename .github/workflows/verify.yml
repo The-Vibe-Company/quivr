@@ -1,5 +1,13 @@
 name: Text foundation
-on: [push, pull_request]
+# One run per change: pull requests run on their own event, and main runs on push
+# (Railway deploys main). A new push to a pull request cancels its outdated run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
