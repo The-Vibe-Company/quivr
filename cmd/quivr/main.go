@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/app"
 	"github.com/The-Vibe-Company/quivr-v2/internal/online"
@@ -22,11 +23,24 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if len(os.Args) != 2 {
-		slog.Error("usage: quivr api|worker|migrate|plugin|search|mcp")
+		slog.Error(usage())
 		os.Exit(2)
 	}
 	if err := app.Run(os.Args[1]); err != nil {
 		slog.Error("process failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+// usage names every command, from the engine and online command tables.
+func usage() string {
+	names := []string{}
+	for _, c := range app.Commands {
+		names = append(names, c.Name)
+	}
+	names = append(names, "plugin")
+	for _, c := range online.Commands {
+		names = append(names, c.Name)
+	}
+	return "usage: quivr " + strings.Join(names, "|")
 }

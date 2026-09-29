@@ -34,7 +34,8 @@ Most MCP clients accept a configuration like this one:
 }
 ```
 
-`--profile` is required. `quivr mcp --help` lists the profiles and their tools.
+`--profile` is required. `quivr mcp --help` lists the profiles and their tools; the
+[MCP reference](reference/mcp.md) details every tool and its arguments.
 
 ## What the agent can do
 

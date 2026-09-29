@@ -19,14 +19,44 @@ import (
 
 // Exit codes.
 const (
-	ExitOK      = 0
+	// ExitOK: the command succeeded; for test, the plugin is certified.
+	ExitOK = 0
+	// ExitInvalid: the command failed, for example on an invalid plugin or manifest; for test, the plugin is not certified.
 	ExitInvalid = 1
-	ExitUsage   = 2
+	// ExitUsage: invalid flags or arguments.
+	ExitUsage = 2
 )
 
 type command struct {
-	usage string
-	run   func(ctx context.Context, args []string, stdout, stderr io.Writer) int
+	usage   string
+	summary string
+	run     func(ctx context.Context, args []string, stdout, stderr io.Writer) int
+}
+
+// Command describes one `quivr plugin` subcommand for help and the generated
+// CLI reference.
+type Command struct {
+	Name    string
+	Usage   string
+	Summary string
+}
+
+// Commands lists the `quivr plugin` subcommands in name order.
+func Commands() []Command {
+	out := make([]Command, 0, len(commands))
+	for _, name := range commandNames() {
+		out = append(out, Command{Name: name, Usage: commands[name].usage, Summary: commands[name].summary})
+	}
+	return out
+}
+
+func commandNames() []string {
+	names := make([]string, 0, len(commands))
+	for name := range commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // commands is the `quivr plugin` subcommand table.
@@ -36,21 +66,16 @@ const inspectUsage = "quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yam
 
 func init() {
 	commands = map[string]command{
-		"inspect": {usage: inspectUsage, run: inspect},
-		"init":    {usage: initUsage, run: initCommand},
-		"dev":     {usage: devUsage, run: dev},
-		"test":    {usage: testUsage, run: test},
+		"inspect": {usage: inspectUsage, summary: "Validate a plugin manifest and print what the plugin declares.", run: inspect},
+		"init":    {usage: initUsage, summary: "Write a new Python plugin from a template: a normalizer, or an alert rule with `--kind subscription`.", run: initCommand},
+		"dev":     {usage: devUsage, summary: "Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`.", run: dev},
+		"test":    {usage: testUsage, summary: "Certify that the engine can safely invoke every Contribution the plugin declares.", run: test},
 	}
 }
 
 func usage(stderr io.Writer) int {
-	names := make([]string, 0, len(commands))
-	for name := range commands {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	fmt.Fprintln(stderr, "usage:")
-	for _, name := range names {
+	for _, name := range commandNames() {
 		fmt.Fprintln(stderr, "  "+commands[name].usage)
 	}
 	return ExitUsage

@@ -282,7 +282,8 @@ stale). Exit codes are the same for every online command:
 | 130 | Interrupted (Ctrl-C or SIGTERM) |
 
 Errors print the public code and message, for example
-`quivr: forbidden: …`, with a hint for common codes.
+`quivr: forbidden: …`, with a hint for common codes. The
+[command-line reference](reference/cli.md) lists every command with its flags.
 
 An AI agent reaches the same search through `quivr mcp --profile read`, which also
 lists reachable Corpora and reads a hit's Record Version. It reports a failed call to

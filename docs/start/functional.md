@@ -25,7 +25,9 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 ## Reference
 
+- [Command-line reference](../reference/cli.md): every `quivr` command, what it needs to run, its flags and exit codes
 - [HTTP API reference](../reference/http-api.md): every endpoint, field and example, generated from the contract
+- [MCP reference](../reference/mcp.md): every MCP profile and tool an AI agent can use, with its arguments
 
 ## More lists
 

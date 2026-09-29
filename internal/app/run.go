@@ -34,6 +34,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -110,11 +111,47 @@ func (cfg Config) connectorSealer(logger *slog.Logger) (connectors.Sealer, error
 	return connectors.NewSealer(cfg.CredentialKey)
 }
 
-func Run(command string) error {
-	if command != "api" && command != "worker" && command != "migrate" {
-		return errors.New("usage: quivr api|worker|migrate")
+// ConfigEnv names the environment variable holding the path of the JSON
+// configuration file every engine command reads.
+const ConfigEnv = "QUIVR_CONFIG"
+
+// Command is one engine process `quivr <name>` runs from the configuration
+// file. The table is the source of the generated CLI reference.
+type Command struct {
+	Name    string
+	Summary string
+}
+
+// Commands lists the engine commands in help order.
+var Commands = []Command{
+	{Name: "api", Summary: "Serve the public HTTP API until interrupted."},
+	{Name: "worker", Summary: "Run the background work that processes content, pulls connectors and delivers events, until interrupted."},
+	{Name: "migrate", Summary: "Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready."},
+}
+
+// engineUsage is the engine usage line, built from Commands.
+func engineUsage() string {
+	names := make([]string, len(Commands))
+	for i, c := range Commands {
+		names[i] = c.Name
 	}
-	b, err := os.ReadFile(os.Getenv("QUIVR_CONFIG"))
+	return "usage: quivr " + strings.Join(names, "|")
+}
+
+func isCommand(name string) bool {
+	for _, c := range Commands {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func Run(command string) error {
+	if !isCommand(command) {
+		return errors.New(engineUsage())
+	}
+	b, err := os.ReadFile(os.Getenv(ConfigEnv))
 	if err != nil {
 		return errors.New("read QUIVR_CONFIG file failed")
 	}

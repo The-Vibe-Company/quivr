@@ -81,7 +81,9 @@ excluded = [
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide", summary = "from `quivr plugin init` to a searchable, observable Record" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
+"docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
 "docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference", summary = "every endpoint, field and example, generated from the contract" }
+"docs/reference/mcp.md" = { audience = "functional", kind = "generated-reference", summary = "every MCP profile and tool an AI agent can use, with its arguments" }
 "docs/runnable-guides.md" = { audience = "contributor", kind = "guide", summary = "write guide blocks that `make verify` replays" }
 "docs/start/contributor.md" = { audience = "contributor", kind = "start-page" }
 "docs/start/functional.md" = { audience = "functional", kind = "start-page" }

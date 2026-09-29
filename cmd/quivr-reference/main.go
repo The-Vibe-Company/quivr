@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/reference/commands"
+	"github.com/The-Vibe-Company/quivr-v2/internal/reference/mcp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/reference/openapi"
 )
 
@@ -26,6 +28,16 @@ type page struct {
 var pages = []page{
 	{"docs/reference/http-api.md", func(root fs.FS) ([]byte, error) {
 		return openapi.Render(openapi.Source{FS: root, Contract: "contracts/http/v0/openapi.yaml", Examples: "contracts/http/v0/examples.json"})
+	}},
+	{"docs/reference/cli.md", func(fs.FS) ([]byte, error) {
+		src, err := cliSource()
+		if err != nil {
+			return nil, err
+		}
+		return commands.Render(src)
+	}},
+	{"docs/reference/mcp.md", func(fs.FS) ([]byte, error) {
+		return mcp.Render(mcpSource())
 	}},
 }
 
