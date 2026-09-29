@@ -83,6 +83,9 @@ type Config struct {
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
+	// ProjectionPurgeGrace delays the physical purge of dead projection
+	// objects (Go duration, default 1h; worker only).
+	ProjectionPurgeGrace string `json:"projection_purge_grace"`
 }
 
 // XConfig points the x_list connector at the X API; api_endpoint defaults to
@@ -183,6 +186,12 @@ func Run(command string) error {
 	prune, err := cfg.ChangePrune.parse(retention)
 	if err != nil {
 		return err
+	}
+	purgeGrace := retrieval.DefaultPurgeGrace
+	if cfg.ProjectionPurgeGrace != "" {
+		if purgeGrace, err = time.ParseDuration(cfg.ProjectionPurgeGrace); err != nil || purgeGrace <= 0 {
+			return errors.New("projection_purge_grace must be a positive duration")
+		}
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
@@ -304,12 +313,13 @@ func Run(command string) error {
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
 	commands := telemetry.NewCommands()
 	pruneMetrics := &telemetry.ChangePrune{}
+	purgeMetrics := retrieval.NewPurgeMetrics()
 	if command == "worker" {
 		// Delivery attempt outcomes and admissible backlog, processing outcomes and
 		// acceptance-to-searchable durations, in Prometheus text format.
 		processingMetrics := telemetry.NewProcessing()
 		processor.Observer = processingObserver{metrics: processingMetrics, store: store}
-		deliveryMetrics.Extra = func(w io.Writer) { processingMetrics.Write(w); pruneMetrics.Write(w) }
+		deliveryMetrics.Extra = func(w io.Writer) { processingMetrics.Write(w); pruneMetrics.Write(w); purgeMetrics.Write(w) }
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
@@ -374,6 +384,20 @@ func Run(command string) error {
 		go func() {
 			defer close(pruneDone)
 			changes.Pruner{Store: store, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
+		}()
+		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
+		// deletes objects no route or current Version can serve again.
+		purgeDone := make(chan struct{})
+		defer func() {
+			stop()
+			select {
+			case <-purgeDone:
+			case <-time.After(5 * time.Second):
+			}
+		}()
+		go func() {
+			defer close(purgeDone)
+			retrieval.Purger{Store: store, Projection: projection, Grace: purgeGrace, Interval: time.Minute, Batch: 100, Metrics: purgeMetrics}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)

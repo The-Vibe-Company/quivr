@@ -16,7 +16,6 @@ stay visible. The Spec 1 obligation map is in
 | --- | --- | --- |
 | Webhook destinations are not filtered against private or internal addresses | Server-side request forgery from the worker's network | [THE-695](https://linear.app/thevibecompany/issue/THE-695) |
 | No withdrawal notice for a Subscription disabled when the withdrawal is dispatched | A paused consumer keeps an alert for withdrawn content | [THE-696](https://linear.app/thevibecompany/issue/THE-696) |
-| Concurrent rebuilds of one Corpus can activate out of order; abandoned generations are never purged | Active configuration can lag the latest request; projection store growth | [THE-698](https://linear.app/thevibecompany/issue/THE-698) |
 | PostgreSQL adapter tests need the whole Linux stack | Slow feedback off Linux | [THE-699](https://linear.app/thevibecompany/issue/THE-699) |
 | Hybrid search ranks below semantic search on the FR/EN fixture | Relevance, kept separate from this list | [THE-641](https://linear.app/thevibecompany/issue/THE-641) |
 
@@ -69,12 +68,26 @@ stay visible. The Spec 1 obligation map is in
   document counts include both objects: an enriched segment's terms count twice,
   which slightly lowers their IDF against not-yet-enriched segments until
   enrichment catches up. Revisit for scale in Spec 8.
-- Objects of superseded Versions and withdrawn Records stay in the projection
-  store; hydration hides them. The projection query does not filter them, and
-  each search fetches at most 150 candidates (three per result for a page of
-  50), so a Corpus with heavy correction or withdrawal churn can return a
-  shorter page than exists. Physically purging dead objects is tracked with
-  abandoned generations in [THE-698](https://linear.app/thevibecompany/issue/THE-698).
+- Objects of superseded Versions, withdrawn Records and abandoned generations
+  are purged only after `projection_purge_grace` (default 1 h, THE-698).
+  Until then hydration hides them, but they still take some of the 150
+  candidates a search fetches, so a Corpus with heavy churn inside that window
+  can return a shorter page than exists.
+- A projection write that lands after the grace period and the purge (a
+  promotion still aimed at a replaced generation, or ingestion of an
+  already-superseded Version delayed by more than the grace period) leaves an
+  orphan object that no later sweep selects. Hydration hides it, and it holds
+  at most the lexical object: an enriched object is never created without its
+  anchor. No reconciliation sweep compares the store with coverage.
+- The purge keeps projection and embedding coverage rows as history. It relies
+  on a dead Version never becoming current again; a correction back to an
+  earlier Version's exact bytes currently leaves the newer Version current, and
+  an adapter test fails if that ever changes.
+- Physical collections left by evaluation cutover migrations (earlier default
+  generations) are not purged.
+- Each worker's purge sweep scans every Record Version once a minute to find
+  newly dead ones, and `projection_purges` rows are kept as history. Both grow
+  with the total number of Versions; revisit for scale in Spec 8.
 - Retrieval measurement ran on one 2-CPU runner with 24 documents.
   Lexical and hybrid ranks vary slightly between runs with identical pins.
 - Mapping values that cannot be projected are skipped silently. Pending

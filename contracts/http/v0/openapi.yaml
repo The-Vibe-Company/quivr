@@ -1290,7 +1290,9 @@ paths:
         request returns the same Operation, including after terminal completion; changed request conflicts.
         HTTP does not wait for reconstruction. Retries/restarts keep identity and target generation. Preserve
         other Corpora when physical storage is shared. Normal ingestion/withdrawal guards still apply.
-        Live evaluation schema migrations remain a separate mechanism.
+        Live evaluation schema migrations remain a separate mechanism. Activation follows acceptance
+        order, so a rebuild accepted before one that already activated for the same Corpus and retrieval
+        configuration fails with operation_superseded instead of replacing it.
       requestBody:
         required: true
         content:

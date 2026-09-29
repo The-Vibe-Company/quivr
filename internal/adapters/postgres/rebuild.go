@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
@@ -41,6 +42,23 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 	op, err := lockOperation(ctx, tx, org, id)
 	if err != nil {
 		return out, err
+	}
+	if op.State == operations.StateQueued || op.State == operations.StateRunning {
+		// An Operation already outranked by the routed generation can never
+		// activate; it fails before building anything.
+		rank, err := rankAgainstRoute(ctx, tx, op)
+		if err != nil {
+			return out, err
+		}
+		if rank.failure != nil {
+			if err = failOperation(ctx, tx, op, *rank.failure); err != nil {
+				return out, err
+			}
+			op.State = operations.StateFailed
+			op.Errors = []operations.Error{*rank.failure}
+			out.Operation = op
+			return out, tx.Commit(ctx)
+		}
 	}
 	if op.State == operations.StateQueued {
 		if _, err = tx.Exec(ctx, `UPDATE operations SET state='running',updated_at=now() WHERE organization=$1 AND id=$2`, org, id); err != nil {
@@ -174,12 +192,12 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	if err != nil {
 		return false, err
 	}
-	var routed string
-	if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2"), org, op.CorpusID).Scan(&routed); err != nil {
+	rank, err := rankAgainstRoute(ctx, tx, op)
+	if err != nil {
 		return false, err
 	}
 	result, _ := json.Marshal(map[string]string{"projection_generation_id": op.TargetGenerationID})
-	if routed == op.TargetGenerationID {
+	if rank.routed == op.TargetGenerationID {
 		// Recovery after activation: record the same target's outcome once.
 		if op.State != operations.StateSucceeded {
 			if err = s.succeed(ctx, tx, op, result); err != nil {
@@ -191,14 +209,10 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	if op.State != operations.StateRunning {
 		return false, operations.ErrNotRunning
 	}
-	// A generation pinned to an older retrieval configuration than the one the
-	// Corpus serves would revert it; it fails instead of activating.
-	var superseded bool
-	if err = tx.QueryRow(ctx, `SELECT t.retrieval_version<r.retrieval_version FROM projection_generations t, projection_generations r WHERE t.id=$1 AND r.id=$2`, op.TargetGenerationID, routed).Scan(&superseded); err != nil {
-		return false, err
-	}
-	if superseded {
-		if err = failOperation(ctx, tx, op, operations.Error{Code: operations.ErrSuperseded.Error(), Message: "a newer retrieval configuration is already effective"}); err != nil {
+	// An outranked generation would revert the configuration or undo a later
+	// request; it fails instead of activating.
+	if rank.failure != nil {
+		if err = failOperation(ctx, tx, op, *rank.failure); err != nil {
 			return false, err
 		}
 		if err = tx.Commit(ctx); err != nil {
@@ -213,13 +227,56 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	if gap {
 		return false, tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO corpus_projection_routes VALUES($1,$2,$3) ON CONFLICT(organization,corpus_id) DO UPDATE SET generation_id=EXCLUDED.generation_id`, org, op.CorpusID, op.TargetGenerationID); err != nil {
+	// Compare-and-set on the generation read under the journal lock: a route
+	// changed by any other writer aborts this activation instead of being
+	// overwritten.
+	tag, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id,acceptance_seq) VALUES($1,$2,$3,$4)
+ON CONFLICT(organization,corpus_id) DO UPDATE SET generation_id=EXCLUDED.generation_id,acceptance_seq=EXCLUDED.acceptance_seq WHERE corpus_projection_routes.generation_id=$5`, org, op.CorpusID, op.TargetGenerationID, rank.sequence, rank.routed)
+	if err != nil {
 		return false, err
+	}
+	if tag.RowsAffected() != 1 {
+		return false, errRouteChanged
 	}
 	if err = s.succeed(ctx, tx, op, result); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+var errRouteChanged = errors.New("projection route changed during activation")
+
+// routeRank compares an Operation with the route currently serving its Corpus.
+type routeRank struct {
+	routed   string
+	sequence int64
+	failure  *operations.Error
+}
+
+// rankAgainstRoute orders an Operation against the routed generation by
+// (retrieval configuration version, acceptance sequence): a newer
+// configuration always outranks an older one, and with the same configuration
+// the later-accepted Operation wins. Callers hold the Organization journal
+// lock, which every route writer takes, so ranking and the route switch are
+// serialized.
+func rankAgainstRoute(ctx context.Context, tx pgx.Tx, op operations.Operation) (routeRank, error) {
+	var rank routeRank
+	var olderConfig, laterAccepted bool
+	err := tx.QueryRow(ctx, `SELECT r.id,o.acceptance_seq,t.retrieval_version<r.retrieval_version,
+ t.retrieval_version=r.retrieval_version AND o.acceptance_seq<COALESCE((SELECT cr.acceptance_seq FROM corpus_projection_routes cr WHERE cr.organization=o.organization AND cr.corpus_id=o.corpus_id AND cr.generation_id=r.id),0)
+FROM operations o JOIN projection_generations t ON t.id=o.target_generation_id
+JOIN projection_generations r ON r.id=`+routedGenerationSQL("o.organization", "o.corpus_id")+`
+WHERE o.organization=$1 AND o.id=$2`, op.Organization, op.ID).Scan(&rank.routed, &rank.sequence, &olderConfig, &laterAccepted)
+	if err != nil || rank.routed == op.TargetGenerationID {
+		return rank, err
+	}
+	switch {
+	case olderConfig:
+		rank.failure = &operations.Error{Code: operations.ErrSuperseded.Error(), Message: "a newer retrieval configuration is already effective"}
+	case laterAccepted:
+		rank.failure = &operations.Error{Code: operations.ErrOperationSuperseded.Error(), Message: "a later-accepted Operation for this Corpus is already effective"}
+	}
+	return rank, nil
 }
 
 func (s ContentStore) succeed(ctx context.Context, tx pgx.Tx, op operations.Operation, result []byte) error {

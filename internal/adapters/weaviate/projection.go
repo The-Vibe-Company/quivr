@@ -304,16 +304,70 @@ func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, o
 		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": keep},
 		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": objectID(org, g.ID, segment)},
 	}}
+	_, err := s.deleteWhere(ctx, s.Client, g.Collection, where)
+	return err
+}
+
+// purgeTimeout bounds one purge delete; a large match can exceed the default
+// request timeout, and an interrupted delete is simply repeated.
+const purgeTimeout = 30 * time.Second
+
+// deleteWhere runs one batch delete by filter. Weaviate deletes at most its
+// configured maximum matches per call; the result is complete only when fewer
+// objects matched than that limit and none failed.
+func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection string, where map[string]any) (retrieval.PurgeResult, error) {
+	if !className.MatchString(collection) {
+		return retrieval.PurgeResult{}, errors.New("invalid projection collection")
+	}
 	var response struct {
 		Results struct {
-			Failed int `json:"failed"`
+			Matches    int `json:"matches"`
+			Limit      int `json:"limit"`
+			Successful int `json:"successful"`
+			Failed     int `json:"failed"`
 		} `json:"results"`
 	}
-	if _, err := s.call(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": g.Collection, "where": where}, "output": "minimal"}, &response); err != nil {
-		return err
+	scoped := *s
+	scoped.Client = client
+	if _, err := scoped.call(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "minimal"}, &response); err != nil {
+		return retrieval.PurgeResult{}, err
 	}
-	if response.Results.Failed > 0 {
-		return errors.New("projection cleanup failed")
+	r := response.Results
+	if r.Failed > 0 {
+		return retrieval.PurgeResult{Deleted: r.Successful}, errors.New("projection delete failed")
 	}
-	return nil
+	// Fail closed: without a reported limit only an empty match proves nothing is left.
+	return retrieval.PurgeResult{Deleted: r.Successful, Complete: r.Matches == 0 || (r.Limit > 0 && r.Matches < r.Limit)}, nil
 }
+
+func (s *Store) purgeClient() *http.Client {
+	c := *s.Client
+	c.Timeout = purgeTimeout
+	return &c
+}
+
+func equalText(path, value string) map[string]any {
+	return map[string]any{"path": []string{path}, "operator": "Equal", "valueText": value}
+}
+
+// PurgeGeneration deletes every object of one Corpus in one logical
+// generation, lexical and enriched, by filter.
+func (s *Store) PurgeGeneration(ctx context.Context, collection, org, corpusID, generationID string) (retrieval.PurgeResult, error) {
+	if org == "" || corpusID == "" || generationID == "" {
+		return retrieval.PurgeResult{}, errors.New("incomplete generation purge filter")
+	}
+	return s.deleteWhere(ctx, s.purgeClient(), collection, map[string]any{"operator": "And", "operands": []any{
+		equalText("organization", org), equalText("corpusId", corpusID), equalText("generationId", generationID)}})
+}
+
+// PurgeVersion deletes every object of one Record Version, lexical and
+// enriched, in every generation of the collection, by filter.
+func (s *Store) PurgeVersion(ctx context.Context, collection, org, versionID string) (retrieval.PurgeResult, error) {
+	if org == "" || versionID == "" {
+		return retrieval.PurgeResult{}, errors.New("incomplete version purge filter")
+	}
+	return s.deleteWhere(ctx, s.purgeClient(), collection, map[string]any{"operator": "And", "operands": []any{
+		equalText("organization", org), equalText("versionId", versionID)}})
+}
+
+var _ retrieval.PurgeProjection = (*Store)(nil)

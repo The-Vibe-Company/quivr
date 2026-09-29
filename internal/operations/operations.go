@@ -53,6 +53,10 @@ var (
 	// ErrSuperseded fails a generation whose pinned retrieval configuration is
 	// older than the one the Corpus already serves, so it can never revert it.
 	ErrSuperseded = errors.New("retrieval_configuration_superseded")
+	// ErrOperationSuperseded fails an Operation whose generation is outranked
+	// by the one a later-accepted Operation of the same Corpus already
+	// activated with the same retrieval configuration version.
+	ErrOperationSuperseded = errors.New("operation_superseded")
 )
 
 // commandPermissions names, per controllable Operation kind, the permission of

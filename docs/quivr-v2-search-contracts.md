@@ -99,9 +99,9 @@ evaluation schema migrations are separate from rebuilding search projections.
     the lexical index). Deduplication keeps one hit per segment, but BM25
     statistics count both objects, so lexical scores can shift slightly, most
     in a Corpus that mixes enriched and not-yet-enriched segments.
-  - Superseded and withdrawn Versions keep their objects; hydration hides them.
-    They still use candidate slots, so heavy churn in a Corpus can shorten a page
-    (see `docs/quivr-v2-remaining-limits.md`).
+  - Superseded and withdrawn Versions keep their objects until the projection
+    purge deletes them (see "Projection purge" below); hydration hides them
+    meanwhile. Until then they still use candidate slots.
 - Enrichment of a Version that is no longer its Record's current eligible
   Version (withdrawn, superseded or quarantined) ends without touching the
   projection.
@@ -126,6 +126,23 @@ evaluation schema migrations are separate from rebuilding search projections.
   concurrent promotions or enrichment, and if any remain it reconciles and tries
   again. Otherwise it installs the route, records `succeeded` with the result,
   and appends `operation.updated`.
+- Activation is ordered per Corpus (THE-698). Every Operation gets an
+  acceptance sequence inside its accepting transaction, which holds the
+  Organization journal lock, and a route records the sequence of the Operation
+  that installed it. An Operation activates only if its (retrieval
+  configuration version, acceptance sequence) is greater than the routed
+  generation's:
+  - a newer configuration version always wins, so an earlier-accepted
+    configuration still replaces a later rebuild pinned to the older one;
+  - with the same configuration version, the later-accepted Operation wins. An
+    earlier one ends `failed` with `operation_superseded` (not retryable)
+    instead of replacing it, whichever finishes first. It fails at its next
+    step, before building, if it is already outranked.
+  - Ranking and the route switch run under the journal lock, and the route is
+    written by compare-and-set on the generation read under that lock, so a
+    route changed by any other writer aborts the activation rather than being
+    overwritten.
+  - A rerun is a new acceptance and can win.
 - Transient failures leave the Operation `running` with no errors. Retries use
   capped backoff (30 s maximum) and are logged with Operation ID and attempt.
 - `operation.updated` is emitted only on state transitions. Counters (`indexed`,
@@ -158,8 +175,8 @@ Cancellation:
   returns it; otherwise activation refuses and the Corpus keeps its prior
   generation. A partially covered target is never activated.
 - Cancellation does not undo committed effects. Target-generation objects
-  already written stay in the shared collection and are never served; no purge
-  runs.
+  already written stay in the shared collection and are never served until the
+  projection purge deletes them after its grace period.
 - A terminal failure found after a cancel request settles as `canceled`.
 - Idempotency follows Operation state. The key is validated but not stored:
   repeating a cancel with any key returns the current state and appends no
@@ -184,6 +201,52 @@ Rerun:
 
 State changes (`queued`, `running`, `cancel_requested`, `canceled`,
 `succeeded`, `failed`) each append one `operation.updated` to the shared journal.
+
+### Projection purge (THE-698)
+
+The worker physically deletes projection objects that nothing can serve
+again. Purging never deletes canonical rows, projection or embedding coverage
+rows, or stored Embedding Artifacts, and never touches a routed generation or
+the target of a queued or running Operation.
+
+- What is dead, and why it stays dead:
+  - An abandoned (Organization, Corpus, generation): the target of a `failed`,
+    `canceled`, or `succeeded`-then-replaced Operation, or the shared default
+    generation of a Corpus that has an installed route. A route only switches
+    to a running Operation's target, a terminal Operation never runs again (a
+    rerun gets a new generation), and routes are never removed.
+  - A dead Version: its Record is withdrawn or tombstoned, or it is neither the
+    Record's current nor its desired Version. Withdrawal is absorbing, the
+    desired Version only moves to a newer source position, and a correction
+    back to an earlier Version's exact bytes reuses that Version's identity
+    without making it desired again.
+- Every sweep (once a minute) records up to 100 newly dead items per kind in
+  `projection_purges`, then claims up to 100 items noticed more than
+  `projection_purge_grace` ago (Go duration, default `1h`) with a lease,
+  rechecking that each is still dead. Workers on several hosts skip each
+  other's leases.
+- Deletion is by filter, never by object ID: `organization + corpusId +
+  generationId` for a generation, `organization + versionId` for a Version
+  (its lexical and enriched objects, in every generation). A delete matching
+  Weaviate's per-call maximum is incomplete; the item is released and continues
+  on the next sweep. A failed delete leaves the lease to expire.
+- An item is stamped `purged_at` with its deleted-object count once nothing
+  matches. Repeating a delete deletes nothing. The worker's `/metrics` exposes
+  `quivr_projection_purges_total{kind}` and
+  `quivr_projection_purged_objects_total{kind}`.
+- The grace period lets searches that resolved a route just before a switch,
+  and guarded writes still aimed at a replaced generation or an
+  already-superseded Version, finish before their objects go. A write landing
+  after the grace period and the purge leaves an orphan object: hydration
+  still hides it, and an enriched object cannot be recreated without its
+  lexical anchor.
+- Measured on Weaviate 1.37.15 (adapter test
+  `TestDeadVersionsCrowdCandidatesUntilPurged`): 60 Records with one live and
+  three dead enriched Versions each, the dead ones matching the query more
+  strongly. Before the purge, the 150 candidate slots of a lexical search held
+  0 of the 60 live Records and the collection held 480 objects; after purging
+  the 180 dead Versions (360 objects), all 60 live Records were candidates and
+  120 objects remained.
 
 ## Retrieval configuration (THE-660)
 
@@ -224,7 +287,9 @@ uninstalled `plugin_profile`. Corpus creation applies the same validation.
   A plain rebuild or a rerun pinned to an older configuration than the one the
   Corpus serves fails with `retrieval_configuration_superseded` instead of
   reverting it. A plain rebuild pins the effective configuration. A rerun of a
-  configuration Operation re-targets that Operation's configuration.
+  configuration Operation re-targets that Operation's configuration. Between
+  Operations pinned to the same configuration, the later-accepted one wins and
+  an earlier one fails with `operation_superseded` (see activation order above).
 
 Effect on the projection:
 

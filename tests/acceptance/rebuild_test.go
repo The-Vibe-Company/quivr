@@ -269,3 +269,38 @@ func TestRebuildCancelAndRerunTerminalOperation(t *testing.T) {
 		t.Fatalf("operation.updated counts source=%d rerun=%d, want 3 each", typed(seen, "operation.updated", sourceID), typed(seen, "operation.updated", rerunID))
 	}
 }
+
+// Two rebuilds of one Corpus accepted back to back: whichever finishes first,
+// search ends on the later request's generation. The earlier one either
+// activated first and was then replaced, or failed with operation_superseded.
+// The reverse finishing order is forced deterministically by the adapter
+// suite (TestEarlierRebuildCannotActivateOverLaterOne). Uses its own Corpus.
+func TestRebuildActivationFollowsLaterRequest(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := fmt.Sprint(time.Now().UnixNano())
+	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Rebuild order", "idempotency_key": "rebuild-order-" + run}, 201)["corpus_id"].(string)
+	version := ingestEnriched(t, c, "rebuild-order", "balise", "Balise orange du chenal")
+	_, first := postRebuild(t, admin, c, "order-first", 202)
+	_, second := postRebuild(t, admin, c, "order-second", 202)
+	earlier, later := awaitOperation(t, first), awaitOperation(t, second)
+	if later["state"] != "succeeded" {
+		t.Fatalf("later rebuild %v", later)
+	}
+	switch earlier["state"] {
+	case "succeeded":
+	case "failed":
+		errs, _ := earlier["errors"].([]any)
+		if len(errs) != 1 || errs[0].(map[string]any)["code"] != "operation_superseded" || errs[0].(map[string]any)["retryable"] != false {
+			t.Fatalf("earlier rebuild failure %v", earlier)
+		}
+	default:
+		t.Fatalf("earlier rebuild %v", earlier)
+	}
+	generation := later["result"].(map[string]any)["projection_generation_id"].(string)
+	if got := generationsByVersion(t, []string{c}, "balise"); got[version] != generation {
+		t.Fatalf("search served %v, want the later request's generation %s", got, generation)
+	}
+}
