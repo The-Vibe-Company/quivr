@@ -12,6 +12,9 @@ INVENTORY = '''
 dated = ["history/**"]
 excluded = ["vendor/**"]
 
+[budgets]
+"docs/guide.md" = 10
+
 [pages]
 "README.md" = { audience = "functional", kind = "index" }
 "docs/guide.md" = { audience = "contributor", kind = "guide" }
@@ -89,7 +92,8 @@ class Inventory(unittest.TestCase):
         with tmpdir() as tmp:
             repo = Repo(tmp, INVENTORY.replace('kind = "guide"', 'kind = "tutorial"'))
             [finding] = repo.findings()
-        self.assertEqual(finding.rule, 'invalid-entry')
+        guide_line = INVENTORY[:INVENTORY.index('"docs/guide.md" = {')].count('\n') + 1
+        self.assertEqual((finding.rule, finding.line), ('invalid-entry', guide_line))  # its [pages] line, not [budgets]
         self.assertIn('tutorial', str(finding))
         self.assertIn('guide, concept, generated-reference, index', str(finding))
 
@@ -237,7 +241,7 @@ class Paths(unittest.TestCase):
 
     def test_paths_beside_the_page_resolve(self):
         with tmpdir() as tmp:
-            repo = Repo(tmp, INVENTORY + '"pkg/README.md" = { audience = "plugin-author", kind = "guide" }\n')
+            repo = Repo(tmp, INVENTORY + '"pkg/README.md" = { audience = "plugin-author", kind = "concept" }\n')
             repo.write('pkg/README.md', '`src/mod.py` and `src/gone.py`\n')
             repo.write('pkg/src/mod.py', '\n')
             self.assertEqual(repo.rules(), [('missing-path', 'pkg/README.md', 1)])
@@ -250,6 +254,125 @@ class Paths(unittest.TestCase):
                             '160000,' + '1' * 40 + ',external'], check=True)
             repo.write('docs/guide.md', '[in sub](../external/deep/file.md) `external/deep/file.py`\n')
             self.assertEqual(repo.findings(), [])
+
+
+GLOSSARY = """\
+# Glossary
+
+## Content
+
+**Corpus**:
+A collection of records.
+_Avoid_: Index, database
+
+**Record**:
+One item in a corpus.
+_Avoid_: Document
+"""
+
+
+class Budgets(unittest.TestCase):
+    def test_page_at_its_budget_passes(self):
+        with tmpdir() as tmp:
+            repo = Repo(tmp)
+            repo.write('docs/guide.md', 'line\n' * 10)
+            self.assertEqual(repo.findings(), [])
+
+    def test_page_over_its_budget_fails_at_the_first_line_over(self):
+        with tmpdir() as tmp:
+            repo = Repo(tmp)
+            repo.write('docs/guide.md', 'line\n' * 12)
+            [finding] = repo.findings()
+        self.assertEqual((finding.rule, finding.path, finding.line), ('over-budget', 'docs/guide.md', 11))
+        text = str(finding)
+        self.assertIn('12 lines', text)
+        self.assertIn('budget of 10', text)
+        self.assertIn('Fix: shorten', text)
+        self.assertIn('signal', text)
+
+    def test_guide_agents_and_glossary_without_a_budget_fail_with_the_line_to_add(self):
+        inventory = INVENTORY.replace('"docs/guide.md" = 10\n', '') \
+            + '"AGENTS.md" = { audience = "contributor", kind = "guide" }\n' \
+            + '"CONTEXT.md" = { audience = "contributor", kind = "concept" }\n'
+        with tmpdir() as tmp:
+            repo = Repo(tmp, inventory)
+            repo.write('AGENTS.md', '# Agents\n')
+            repo.write('CONTEXT.md', GLOSSARY)
+            findings = repo.findings()
+        self.assertEqual(sorted((f.rule, f.path) for f in findings),
+                         [('missing-budget', 'docs/inventory.toml')] * 3)
+        self.assertTrue(any('`"CONTEXT.md" = 15`' in str(f) for f in findings))  # 11 lines plus headroom
+        self.assertTrue(all('under [budgets]' in str(f) for f in findings))
+
+    def test_concept_and_index_pages_need_no_budget(self):
+        with tmpdir() as tmp:
+            repo = Repo(tmp)
+            repo.write('README.md', 'line\n' * 500)
+            self.assertEqual(repo.findings(), [])
+
+    def test_invalid_budgets_fail_with_invalid_entry(self):
+        cases = {
+            'zero': ('"docs/guide.md" = 10', '"docs/guide.md" = 0'),
+            'not a number': ('"docs/guide.md" = 10', '"docs/guide.md" = "short"'),
+            'undeclared page': ('"docs/guide.md" = 10', '"docs/guide.md" = 10\n"docs/other.md" = 5'),
+        }
+        for name, (old, new) in cases.items():
+            with self.subTest(name), tmpdir() as tmp:
+                findings = Repo(tmp, INVENTORY.replace(old, new)).findings()
+                self.assertIn(('invalid-entry', 'docs/inventory.toml'), [(f.rule, f.path) for f in findings])
+
+    def test_budget_of_a_declared_page_with_an_invalid_entry_is_not_reported_as_undeclared(self):
+        with tmpdir() as tmp:
+            inventory = INVENTORY.replace('kind = "guide" }', 'kind = "guide", owner = "x" }')
+            findings = [str(f) for f in Repo(tmp, inventory).findings()]
+        self.assertTrue(any('must set exactly audience and kind' in f for f in findings))
+        self.assertFalse(any('not declared in [pages]' in f for f in findings))
+
+
+class Glossary(unittest.TestCase):
+    def repo(self, tmp, glossary):
+        repo = Repo(tmp, INVENTORY.replace('[pages]', '"CONTEXT.md" = 40\n\n[pages]')
+                    + '"CONTEXT.md" = { audience = "contributor", kind = "concept" }\n')
+        repo.write('CONTEXT.md', glossary)
+        return repo
+
+    def test_terms_with_a_definition_and_an_avoid_line_pass(self):
+        with tmpdir() as tmp:
+            self.assertEqual(self.repo(tmp, GLOSSARY).findings(), [])
+
+    def test_term_with_a_wrapped_or_inline_definition_passes(self):
+        glossary = GLOSSARY.replace('A collection of records.', 'A collection of\n**Record** items.') \
+            .replace('**Record**:\nOne item', '**Record**: One item')
+        with tmpdir() as tmp:
+            self.assertEqual(self.repo(tmp, glossary).findings(), [])
+
+    def test_incomplete_terms_fail_at_the_term_line(self):
+        cases = {
+            'no definition': (GLOSSARY.replace('One item in a corpus.\n', ''), 'has no definition'),
+            'no avoid line': (GLOSSARY.replace('_Avoid_: Document\n', ''), 'has no `_Avoid_:` line'),
+            'empty avoid line': (GLOSSARY.replace('_Avoid_: Document', '_Avoid_:'), 'has no `_Avoid_:` line'),
+            'avoid line after a blank line': (GLOSSARY.replace('\n_Avoid_: Document', '\n\n_Avoid_: Document'),
+                                              'has no `_Avoid_:` line'),
+        }
+        for name, (glossary, message) in cases.items():
+            with self.subTest(name), tmpdir() as tmp:
+                [finding] = self.repo(tmp, glossary).findings()
+                self.assertEqual((finding.rule, finding.path, finding.line), ('glossary-term', 'CONTEXT.md', 9))
+                self.assertIn('"Record"', str(finding))
+                self.assertIn(message, str(finding))
+                self.assertIn('Fix: ', str(finding))
+
+    def test_term_not_written_as_bold_then_colon_fails(self):
+        for form in ('**Record:**', '**Record** (item):', '**Record**'):
+            with self.subTest(form), tmpdir() as tmp:
+                findings = self.repo(tmp, GLOSSARY.replace('**Record**:', form)).findings()
+                self.assertIn(('glossary-term', 'CONTEXT.md', 9), [(f.rule, f.path, f.line) for f in findings])
+                self.assertTrue(any('is not written as `**Record**:`' in str(f) for f in findings))
+
+    def test_bold_text_in_fenced_code_is_not_a_term(self):
+        with tmpdir() as tmp:
+            glossary = GLOSSARY + '\n```\n**Example**:\n```\n'
+            self.assertEqual(self.repo(tmp, glossary).findings(), [])
 
 
 class Command(unittest.TestCase):

@@ -1,0 +1,48 @@
+# Documentation conventions
+
+How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets and the glossary form, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
+
+## Living and dated documents
+
+- **Living** documents describe current behaviour. They are updated in the pull request that changes that behaviour, and their links and repository paths must resolve.
+- **Dated** documents (ADRs, design specs, evidence, research) record what was decided or observed at a date. They keep their date, status and original language, and a newer document supersedes them instead of an edit.
+
+Living documentation is written in English, with neutral examples: no customer names or configurations (see the generic-repository rule in `AGENTS.md`). Contract facts such as endpoints, request shapes, limits and error codes live in their artifacts (the OpenAPI contract, the code); prose links to them instead of restating them.
+
+## The inventory
+
+`docs/inventory.toml` is the single list of living pages. Every Markdown file is either declared under `[pages]`, matched by the `dated` list, or matched by the `excluded` list (Markdown that is not Quivr documentation). A new living page is one line, in path order:
+
+```toml
+"docs/path/to/page.md" = { audience = "functional", kind = "guide" }
+```
+
+- **audience**: `functional` (integrators and non-developers), `plugin-author` (people extending Quivr with plugins) or `contributor` (people and coding agents changing this repository).
+- **kind**: `guide` (steps a reader follows), `concept` (how and why something works), `generated-reference` (generator output; edit the source) or `index` (mostly links).
+
+## Line budgets
+
+`AGENTS.md`, `CONTEXT.md` and every page of kind `guide` have a maximum number of lines under `[budgets]` in the inventory. A new budget is set about 5% above the page's size when it is added; `make docs` prints the line to paste. When a page reaches its budget, shorten it first: link to the authoritative source, remove repetition, split a guide by task. Raise a budget only in a pull request whose signal needs the extra lines, and say so in its description.
+
+## Glossary form
+
+`CONTEXT.md` is the engine glossary. Each term is one paragraph: the term in bold followed by a colon, one or two sentences of definition, then an `_Avoid_:` line listing words not to use for it.
+
+```markdown
+**Corpus**:
+A logical collection of records that share an access and retrieval boundary.
+_Avoid_: Index, database
+```
+
+Repository conventions such as living, dated, inventory and signal belong on this page, not in the glossary.
+
+## When documentation may change
+
+A living document changes only because of a **signal**:
+
+1. the same pull request changes the behaviour it documents;
+2. a bug, or an error coding agents keep making, is traced to a gap or mistake in it;
+3. a review comment asks for the change;
+4. a user question shows it is missing or wrong.
+
+Without a signal, do not rewrite, reorganise or polish documentation. Name the signal in the pull-request description so a reviewer can check it. CI does not enforce this rule.

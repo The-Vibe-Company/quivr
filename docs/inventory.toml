@@ -22,6 +22,11 @@
 #   index                 entry point that mostly links to other pages
 #
 # Globs use fnmatch: `*` also matches across folders.
+#
+# [budgets] caps the number of lines of AGENTS.md, CONTEXT.md and every guide
+# (`make docs` fails with `missing-budget` or `over-budget`). A budget is set
+# about 5% above the page's size when it is added. Shorten a page before
+# raising its budget; see docs/agents/documentation.md.
 
 # Dated documents keep their date and status and are not link-checked.
 dated = [
@@ -46,6 +51,7 @@ excluded = [
 "contracts/http/v0/README.md" = { audience = "functional", kind = "concept" }
 "contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide" }
+"docs/agents/documentation.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide" }
@@ -72,3 +78,25 @@ excluded = [
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide" }
 "third_party/README.md" = { audience = "contributor", kind = "index" }
+
+# Maximum number of lines per page, in path order.
+[budgets]
+"AGENTS.md" = 45
+"CONTEXT.md" = 315
+"deploy/railway/README.md" = 160
+"docs/agents/documentation.md" = 55
+"docs/agents/domain.md" = 45
+"docs/agents/fleet-workflow.md" = 65
+"docs/agents/issue-tracker.md" = 110
+"docs/agents/triage-labels.md" = 15
+"docs/api-walkthrough.md" = 515
+"docs/connectors/README.md" = 225
+"docs/connectors/microsoft-365.md" = 230
+"docs/connectors/rss.md" = 190
+"docs/connectors/x.md" = 190
+"docs/keyword-alerts.md" = 155
+"docs/plugins/write-a-normalizer.md" = 360
+"plugins/pdf-text/README.md" = 120
+"quivr-search/README.md" = 90
+"sdks/python/README.md" = 125
+"tests/acceptance/README.md" = 50

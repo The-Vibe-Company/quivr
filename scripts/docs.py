@@ -9,6 +9,9 @@ check fails when:
     invalid-entry   the inventory is malformed or an entry is inconsistent
     broken-link     a relative link in a living page does not resolve
     missing-path    a repository path in inline code of a living page is absent
+    over-budget     a page has more lines than its budget in [budgets]
+    missing-budget  AGENTS.md, CONTEXT.md or a guide has no budget in [budgets]
+    glossary-term   a CONTEXT.md term lacks a definition or an `_Avoid_:` line
 
     python3 scripts/docs.py               # check the repository (make docs)
     python3 scripts/docs.py --root DIR    # check another checkout
@@ -102,15 +105,6 @@ def _matches(path, patterns):
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
 
-def _entry_lines(text):
-    lines = {}
-    for number, line in enumerate(text.splitlines(), 1):
-        match = re.match(r'''\s*(?:"([^"]+)"|'([^']+)')\s*=''', line)
-        if match:
-            lines.setdefault(match.group(1) or match.group(2), number)
-    return lines
-
-
 def load_inventory(root):
     """Return (pages, dated, excluded, line numbers, findings); pages is None when unreadable."""
     path = pathlib.Path(root) / INVENTORY
@@ -124,11 +118,11 @@ def load_inventory(root):
         match = re.search(r'line (\d+)', str(error))
         return None, [], [], {}, [Finding(INVENTORY, int(match.group(1)) if match else 1, 'invalid-entry',
                                         f'the inventory is not valid TOML ({error})', 'fix the TOML syntax')]
-    lines = _entry_lines(text)
+    lines = _table_lines(text, 'pages')
     findings = []
-    for key in sorted(set(data) - {'pages', 'dated', 'excluded'}):
+    for key in sorted(set(data) - {'pages', 'dated', 'excluded', 'budgets'}):
         findings.append(Finding(INVENTORY, 1, 'invalid-entry', f'unknown top-level key "{key}"',
-                                'use only [pages], dated and excluded'))
+                                'use only [pages], [budgets], dated and excluded'))
     pages = data.get('pages', {})
     if not isinstance(pages, dict):
         findings.append(Finding(INVENTORY, 1, 'invalid-entry', '"pages" must be a table',
@@ -280,6 +274,119 @@ def check_page(tree, page):
     return findings
 
 
+BUDGETED = ('AGENTS.md', 'CONTEXT.md')
+GLOSSARY = 'CONTEXT.md'
+SIGNAL = ('a pull request that changes the documented behaviour, a bug or recurring agent error traced to a '
+          'documentation gap, a review comment, or a user question')
+_TERM = re.compile(r'^\*\*([^*\n]+)\*\*(.*)$')
+_AVOID = re.compile(r'^_Avoid_:(.*)$')
+
+
+def suggested_budget(lines):
+    """About 5% above the current size, rounded up to a multiple of 5."""
+    return max(5, -(-lines * 21 // 100) * 5)
+
+
+def _table_lines(text, table):
+    """Line numbers of the keys of one [table] in the inventory text."""
+    lines, inside = {}, False
+    for number, line in enumerate(text.splitlines(), 1):
+        header = re.match(r'\s*\[([^\]]+)\]\s*(#.*)?$', line)
+        if header:
+            inside = header.group(1).strip() == table
+            continue
+        match = re.match(r'''\s*(?:"([^"]+)"|'([^']+)')\s*=''', line)
+        if inside and match:
+            lines.setdefault(match.group(1) or match.group(2), number)
+    return lines
+
+
+def load_budgets(root, pages):
+    """Return ({page: max lines}, [pages] line numbers, findings) from the inventory."""
+    text = (pathlib.Path(root) / INVENTORY).read_text()
+    data = tomllib.loads(text)
+    budgets, declared = data.get('budgets', {}), data.get('pages', {})
+    declared = declared if isinstance(declared, dict) else {}
+    lines, page_lines = _table_lines(text, 'budgets'), _table_lines(text, 'pages')
+    if not isinstance(budgets, dict):
+        return {}, page_lines, [Finding(INVENTORY, 1, 'invalid-entry', '"budgets" must be a table',
+                            'write [budgets] followed by one "path.md" = <max lines> line per page')]
+    valid, findings = {}, []
+    for page, budget in budgets.items():
+        line = lines.get(page, 1)
+        if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+            findings.append(Finding(INVENTORY, line, 'invalid-entry',
+                                    f'the budget of "{page}" must be a positive number of lines, not {budget!r}',
+                                    f'write "{page}" = <max lines> under [budgets]'))
+        elif page not in declared:
+            findings.append(Finding(INVENTORY, line, 'invalid-entry',
+                                    f'"{page}" has a budget but is not declared in [pages]',
+                                    'declare the page in [pages], or remove its budget'))
+        elif page in pages:
+            valid[page] = budget
+    return valid, page_lines, findings
+
+
+def check_budgets(tree, pages, budgets, page_lines):
+    """AGENTS.md, CONTEXT.md and every guide have a line budget, and stay within it."""
+    findings = []
+    for page in sorted(pages):
+        if page not in tree.files:
+            continue
+        size = len((tree.root / page).read_text(encoding='utf-8', errors='replace').splitlines())
+        budget = budgets.get(page)
+        if budget is None:
+            if page in BUDGETED or pages[page]['kind'] == 'guide':
+                findings.append(Finding(INVENTORY, page_lines.get(page, 1), 'missing-budget',
+                                        f'{page} is a guide or agent-steering page without a line budget',
+                                        f'add `"{page}" = {suggested_budget(size)}` under [budgets] '
+                                        f'(its {size} lines plus about 5%)'))
+        elif size > budget:
+            findings.append(Finding(page, budget + 1, 'over-budget',
+                                    f'the page has {size} lines, over its budget of {budget} in {INVENTORY}',
+                                    'shorten it by linking to the authoritative source instead of restating it; '
+                                    f'raise the budget only in a pull request whose signal needs it ({SIGNAL})'))
+    return findings
+
+
+def check_glossary(tree):
+    """Each paragraph starting in bold in CONTEXT.md is a `**Term**:` with a definition and an `_Avoid_:` line."""
+    text = (tree.root / GLOSSARY).read_text(encoding='utf-8', errors='replace')
+    terms, current = [], None
+    for number, line in _lines_outside_fences(text):
+        term = _TERM.match(line) if current is None else None  # a term starts a paragraph
+        if term:
+            name, rest = term.group(1).strip(), term.group(2)
+            well_formed = rest.startswith(':') and not name.endswith(':')
+            current = {'name': name.rstrip(':'), 'line': number, 'well_formed': well_formed,
+                       'definition': well_formed and bool(rest[1:].strip()), 'avoid': False}
+            terms.append(current)
+        elif not line.strip() or line.lstrip().startswith('#'):
+            current = None
+        elif current is not None:
+            avoid = _AVOID.match(line.strip())
+            if avoid:
+                current['avoid'] = current['avoid'] or bool(avoid.group(1).strip())
+            else:
+                current['definition'] = True
+    findings = []
+    for term in terms:
+        if not term['well_formed']:
+            findings.append(Finding(GLOSSARY, term['line'], 'glossary-term',
+                                    f'term "{term["name"]}" is not written as `**{term["name"]}**:`',
+                                    f'write the term alone in bold followed by a colon, `**{term["name"]}**:`, '
+                                    'and put any alias in its definition'))
+        if not term['definition']:
+            findings.append(Finding(GLOSSARY, term['line'], 'glossary-term', f'term "{term["name"]}" has no definition',
+                                    'write one or two sentences defining it on the lines right after the term'))
+        if not term['avoid']:
+            findings.append(Finding(GLOSSARY, term['line'], 'glossary-term',
+                                    f'term "{term["name"]}" has no `_Avoid_:` line',
+                                    'end its paragraph with `_Avoid_: <words not to use for it>`, '
+                                    'with no blank line before it'))
+    return findings
+
+
 def check(root):
     try:
         tree = Tree(root)
@@ -301,6 +408,11 @@ def check(root):
     for page in sorted(pages):
         if page in tree.files:
             findings.extend(check_page(tree, page))
+    budgets, page_lines, budget_findings = load_budgets(root, pages)
+    findings.extend(budget_findings)
+    findings.extend(check_budgets(tree, pages, budgets, page_lines))
+    if GLOSSARY in pages and GLOSSARY in tree.files:
+        findings.extend(check_glossary(tree))
     return sorted(findings)
 
 
