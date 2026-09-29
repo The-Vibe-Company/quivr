@@ -3,6 +3,8 @@ package monitoring_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -18,6 +20,17 @@ type memoryStore struct {
 	disabled      []string
 	// writes records every edit and delete that reached the store.
 	writes []string
+	// created records the owner of every creation that reached the store.
+	created []string
+	listed  listing
+}
+
+// listing records the last Subscription listing request.
+type listing struct {
+	Owner   monitoring.OwnerFilter
+	Corpora []string
+	After   string
+	Limit   int
 }
 
 func newStore() *memoryStore {
@@ -90,7 +103,8 @@ func (m *memoryStore) SavedQuery(_ context.Context, org, id string) (monitoring.
 	return q, nil
 }
 func (m *memoryStore) CreateSubscription(_ context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
-	s := monitoring.Subscription{ID: "sub_" + in.Key, Name: in.Name, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "sub_" + in.Key, VersionID: "subv_" + in.Key, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
+	m.created = append(m.created, in.Owner)
+	s := monitoring.Subscription{ID: "sub_" + in.Key, Name: in.Name, Owner: in.Owner, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "sub_" + in.Key, VersionID: "subv_" + in.Key, Owner: in.Owner, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
 	m.subscriptions[org+"/"+s.ID] = s
 	m.versions[org+"/"+s.ID+"/"+s.Current.VersionID] = s.Current
 	return s, nil
@@ -115,6 +129,19 @@ func (m *memoryStore) EnableSubscription(_ context.Context, org, key, id string)
 	s.Enabled = true
 	m.subscriptions[org+"/"+id] = s
 	return s, nil
+}
+
+// Subscriptions lists the Organization's enabled Subscriptions of an owner,
+// ignoring the Corpus filter it records.
+func (m *memoryStore) Subscriptions(_ context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+	m.listed = listing{owner, corpora, after, limit}
+	var out []monitoring.Subscription
+	for key, s := range m.subscriptions {
+		if strings.HasPrefix(key, org+"/") && s.Enabled && !s.Deleted && s.Owner == owner.Owner && (s.Owner == "") == owner.Global {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 type corpora map[string]bool
@@ -398,5 +425,75 @@ func TestEditsAndDeletesFollowScopeRules(t *testing.T) {
 	}
 	if got, err := s.DeleteSubscription(ctx, writer, "d", sub.ID); err != nil || !got.Deleted || got.Enabled {
 		t.Fatalf("delete: %v %+v", err, got)
+	}
+}
+
+// TestSubscriptionOwner covers the Subscription Owner rules the service
+// enforces: a bounded opaque reference or none (global), and a listing
+// limited to visible Subscriptions.
+func TestSubscriptionOwner(t *testing.T) {
+	ctx := context.Background()
+	s, store := service()
+	q, _ := s.CreateSavedQuery(ctx, writer, query("q", "corpus_a"))
+	input := func(key, owner string) monitoring.SubscriptionInput {
+		return monitoring.SubscriptionInput{Key: key, Name: "n", Owner: owner, SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID, Evaluator: fixture(), DestinationID: "receiver_a"}
+	}
+	long := make([]rune, 129)
+	for i := range long {
+		long[i] = 'é'
+	}
+	for name, owner := range map[string]string{"reserved none": "none", "too long": string(long), "control character": "user\n1", "invalid UTF-8": "user\xff"} {
+		if _, err := s.CreateSubscription(ctx, writer, input("bad-"+name, owner)); !errors.Is(err, monitoring.ErrInvalidOwner) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("invalid owners reached the store: %v", store.created)
+	}
+	owned, err := s.CreateSubscription(ctx, writer, input("owned", "user-123"))
+	if err != nil || owned.Owner != "user-123" || owned.Current.Owner != "user-123" {
+		t.Fatalf("owned creation: %v %+v", err, owned)
+	}
+	if _, err = s.CreateSubscription(ctx, writer, input("max", string(long[:128]))); err != nil {
+		t.Fatalf("128-character owner: %v", err)
+	}
+	global, err := s.CreateSubscription(ctx, writer, input("global", ""))
+	if err != nil || global.Owner != "" {
+		t.Fatalf("global creation: %v %+v", err, global)
+	}
+	if want := []string{"user-123", string(long[:128]), ""}; !slices.Equal(store.created, want) {
+		t.Fatalf("owners handed to the store: %q", store.created)
+	}
+
+	page, err := s.Subscriptions(ctx, writer, monitoring.OwnerFilter{Owner: "user-123"}, "", 10)
+	if err != nil || len(page) != 1 || page[0].ID != owned.ID {
+		t.Fatalf("list by owner: %v %+v", err, page)
+	}
+	if page, err = s.Subscriptions(ctx, writer, monitoring.OwnerFilter{Global: true}, "", 10); err != nil || len(page) != 1 || page[0].ID != global.ID {
+		t.Fatalf("list global: %v %+v", err, page)
+	}
+	if store.listed.Corpora != nil || store.listed.Owner != (monitoring.OwnerFilter{Global: true}) || store.listed.Limit != 10 {
+		t.Fatalf("an all-Corpora key lists without a Corpus filter: %+v", store.listed)
+	}
+	if _, err = s.Subscriptions(ctx, narrow, monitoring.OwnerFilter{Owner: "user-123"}, "after", 5); err != nil || !slices.Equal(store.listed.Corpora, []string{"corpus_a"}) || store.listed.After != "after" {
+		t.Fatalf("a narrow key lists only within its Corpora: %v %+v", err, store.listed)
+	}
+	// A key granting no Corpus filters on none rather than listing everything,
+	// and the service conceals what a read would, whatever the store returns.
+	if _, err = s.Subscriptions(ctx, corpus.Scope{Organization: "org_a", Actions: []string{"monitoring:read"}}, monitoring.OwnerFilter{Owner: "user-123"}, "", 10); err != nil || store.listed.Corpora == nil {
+		t.Fatalf("a key without Corpora must filter: %v %+v", err, store.listed)
+	}
+	qb, _ := s.CreateSavedQuery(ctx, writer, query("qb", "corpus_b"))
+	if _, err = s.CreateSubscription(ctx, writer, monitoring.SubscriptionInput{Key: "on-b", Name: "n", Owner: "user-b", SavedQueryID: qb.ID, SavedQueryVersionID: qb.Current.VersionID, Evaluator: fixture(), DestinationID: "receiver_a"}); err != nil {
+		t.Fatal(err)
+	}
+	if page, err = s.Subscriptions(ctx, narrow, monitoring.OwnerFilter{Owner: "user-b"}, "", 10); err != nil || len(page) != 0 {
+		t.Fatalf("a narrow key never lists a Subscription on an ungranted Corpus: %v %+v", err, page)
+	}
+	if _, err = s.Subscriptions(ctx, corpus.Scope{Organization: "org_a", Actions: []string{"monitoring:write"}, Corpora: []string{"*"}}, monitoring.OwnerFilter{Global: true}, "", 10); !errors.Is(err, monitoring.ErrForbidden) {
+		t.Errorf("listing without monitoring:read: %v", err)
+	}
+	if _, err = s.Subscriptions(ctx, writer, monitoring.OwnerFilter{Owner: "none"}, "", 10); !errors.Is(err, monitoring.ErrInvalidOwner) {
+		t.Errorf("listing an invalid owner: %v", err)
 	}
 }

@@ -3,9 +3,12 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -34,6 +37,8 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, monitoring.ErrSubscriptionDeleted), errors.Is(err, monitoring.ErrSavedQueryDeleted),
 		errors.Is(err, monitoring.ErrSavedQueryInUse):
 		failure(w, 409, publicCode(err, "conflict"))
+	case errors.Is(err, monitoring.ErrInvalidOwner):
+		failure(w, 422, "invalid_owner")
 	case errors.Is(err, monitoring.ErrUnsupportedProfile), errors.Is(err, monitoring.ErrUnsupportedEvaluator),
 		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
 		errors.Is(err, monitoring.ErrTooLarge):
@@ -44,7 +49,8 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 }
 
 // monitoringRoutes serves /v0/saved-queries and /v0/subscriptions: creation,
-// reads, editing by new Version, disable, enable and deletion.
+// reads, the Subscription listing by owner, editing by new Version, disable,
+// enable and deletion.
 func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	var resource string
 	switch {
@@ -77,6 +83,10 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	default:
 		failure(w, 404, "not_found")
 		return true
+	}
+	// The Subscription collection also lists by owner.
+	if resource == "subscriptions" && len(parts) == 0 && r.Method == "GET" {
+		method = "GET"
 	}
 	if r.Method != method {
 		failure(w, 405, "method_not_allowed")
@@ -119,6 +129,8 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	case resource == "saved-queries":
 		v, err := a.Monitoring.SavedQueryVersion(ctx, scope, parts[0], parts[2])
 		respondMonitoring(w, 200, savedQueryVersionToTransport(v), err)
+	case len(parts) == 0 && method == "GET":
+		a.listSubscriptions(w, r, scope)
 	case len(parts) == 0:
 		var in monitoring.SubscriptionInput
 		if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscription, &in) {
@@ -204,9 +216,108 @@ func savedQueryToTransport(q monitoring.SavedQuery) transport.SavedQuery {
 func subscriptionVersionToTransport(v monitoring.SubscriptionVersion) transport.SubscriptionVersion {
 	return transport.SubscriptionVersion{SubscriptionId: v.SubscriptionID, VersionId: v.VersionID, SavedQueryId: v.SavedQueryID, SavedQueryVersionId: v.SavedQueryVersionID,
 		Evaluator:     transport.EvaluatorConfig{PluginId: v.Evaluator.PluginID, Version: v.Evaluator.Version, Configuration: v.Evaluator.Configuration},
-		DestinationId: v.DestinationID}
+		DestinationId: v.DestinationID, Owner: owner(v.Owner)}
 }
 
 func subscriptionToTransport(s monitoring.Subscription) transport.Subscription {
-	return transport.Subscription{SubscriptionId: s.ID, Name: s.Name, Enabled: s.Enabled, Deleted: s.Deleted, CurrentVersion: subscriptionVersionToTransport(s.Current)}
+	return transport.Subscription{SubscriptionId: s.ID, Name: s.Name, Owner: owner(s.Owner), Enabled: s.Enabled, Deleted: s.Deleted, CurrentVersion: subscriptionVersionToTransport(s.Current)}
+}
+
+// owner is the public Subscription Owner: absent for a global Subscription.
+func owner(o string) *string {
+	if o == "" {
+		return nil
+	}
+	return &o
+}
+
+// subscriptionPage is the signed payload of a Subscription listing cursor,
+// bound to the owner filter and authorization scope in its own domain.
+type subscriptionPage struct {
+	Version int    `json:"v"`
+	Owner   string `json:"o"`
+	Scope   string `json:"s"`
+	After   string `json:"a"`
+}
+
+func (a *API) encodeSubscriptionPage(p subscriptionPage) string {
+	b, _ := json.Marshal(p)
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(subscriptionPageDomain, b))
+}
+
+func (a *API) decodeSubscriptionPage(token, owner string, s corpus.Scope) (string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return "", errors.New("invalid_cursor")
+	}
+	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+	var p subscriptionPage
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(subscriptionPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After == "" {
+		return "", errors.New("invalid_cursor")
+	}
+	if p.Owner != owner || p.Scope != scopeDigest(s) {
+		return "", errPageScope
+	}
+	return p.After, nil
+}
+
+// listSubscriptions pages the active Subscriptions of one owner, or the
+// global ones with owner=none, that the key sees.
+func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	q := r.URL.Query()
+	for k, v := range q {
+		if (k != "owner" && k != "page_cursor" && k != "limit") || len(v) != 1 {
+			failure(w, 422, "invalid_query")
+			return
+		}
+	}
+	ownerRef := q.Get("owner")
+	if ownerRef == "" {
+		failure(w, 422, "invalid_query")
+		return
+	}
+	filter := monitoring.OwnerFilter{Owner: ownerRef}
+	if ownerRef == monitoring.NoOwner {
+		filter = monitoring.OwnerFilter{Global: true}
+	}
+	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
+		failure(w, 422, "invalid_cursor")
+		return
+	}
+	limit := 100
+	if q.Has("limit") {
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 100 {
+			failure(w, 422, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	var after string
+	if q.Has("page_cursor") {
+		var err error
+		if after, err = a.decodeSubscriptionPage(q.Get("page_cursor"), ownerRef, scope); errors.Is(err, errPageScope) {
+			failure(w, 409, "cursor_scope_changed")
+			return
+		} else if err != nil {
+			failure(w, 422, "invalid_cursor")
+			return
+		}
+	}
+	subs, err := a.Monitoring.Subscriptions(r.Context(), scope, filter, after, limit+1)
+	if err != nil {
+		monitoringFailure(w, err)
+		return
+	}
+	page := transport.SubscriptionPage{Items: make([]transport.Subscription, 0, min(len(subs), limit))}
+	for i, s := range subs {
+		if i == limit {
+			next := a.encodeSubscriptionPage(subscriptionPage{Version: 1, Owner: ownerRef, Scope: scopeDigest(scope), After: subs[limit-1].ID})
+			page.NextPageCursor = &next
+			break
+		}
+		page.Items = append(page.Items, subscriptionToTransport(s))
+	}
+	send(w, 200, page)
 }

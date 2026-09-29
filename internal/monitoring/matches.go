@@ -20,7 +20,10 @@ type Match struct {
 	RecordID              string
 	RecordVersionID       string
 	PreviousMatchID       string
-	Evidence              MatchEvidence
+	// Owner is the Subscription's owner ("" when global), so a client can
+	// route the Match to one of its users.
+	Owner    string
+	Evidence MatchEvidence
 	// Position is the journal position of the Match commit, used for stable paging.
 	Position int64
 }
@@ -34,6 +37,8 @@ type NoticeReferences struct {
 	SubscriptionVersionID string `json:"subscription_version_id"`
 	DeliveryID            string `json:"delivery_id"`
 	PreviousMatchID       string `json:"previous_match_id,omitempty"`
+	// Owner is the Subscription Owner; absent for a global Subscription.
+	Owner string `json:"owner,omitempty"`
 }
 
 // Notice is the immutable reference-only notification body. Its stored bytes

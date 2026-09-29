@@ -30,7 +30,7 @@ WITH head AS (
   FROM head
 )
 SELECT b.h, b.upper, b.expired, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
-  n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, n.delivery_id, coalesce(n.previous_match_id,'')
+  n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, n.delivery_id, coalesce(n.previous_match_id,''), coalesce(s.owner,'')
 FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at
@@ -40,6 +40,7 @@ LEFT JOIN LATERAL (
   LIMIT $4
 ) e ON true
 LEFT JOIN monitoring_notices n ON n.organization=$1 AND n.event_id=e.event_id
+LEFT JOIN subscriptions s ON s.organization=$1 AND s.id=n.subscription_id
 ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, retention.Seconds())
 	if err != nil {
 		return changes.Window{}, err
@@ -52,14 +53,14 @@ ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, r
 		var sequence *int64
 		var id, kind, resource, resourceID *string
 		var occurred *time.Time
-		var match, record, version, subscription, subscriptionVersion, delivery, previous *string
-		if err = rows.Scan(&w.Head, &upper, &w.Expired, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous); err != nil {
+		var match, record, version, subscription, subscriptionVersion, delivery, previous, owner *string
+		if err = rows.Scan(&w.Head, &upper, &w.Expired, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous, &owner); err != nil {
 			return changes.Window{}, err
 		}
 		if sequence != nil {
 			e := changes.Event{Position: *sequence, ID: *id, Type: *kind, CorpusID: corpusID, ResourceKind: *resource, ResourceID: *resourceID, OccurredAt: *occurred}
 			if match != nil {
-				e.Monitoring = &changes.References{MatchID: *match, RecordID: *record, RecordVersionID: *version, SubscriptionID: *subscription, SubscriptionVersionID: *subscriptionVersion, DeliveryID: *delivery, PreviousMatchID: *previous}
+				e.Monitoring = &changes.References{MatchID: *match, RecordID: *record, RecordVersionID: *version, SubscriptionID: *subscription, SubscriptionVersionID: *subscriptionVersion, DeliveryID: *delivery, PreviousMatchID: *previous, Owner: *owner}
 			}
 			visible = append(visible, e)
 		}

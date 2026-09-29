@@ -53,6 +53,8 @@ type Event struct {
 // with its webhook body. They confer no access by themselves.
 type References struct {
 	MatchID, RecordID, RecordVersionID, SubscriptionID, SubscriptionVersionID, DeliveryID, PreviousMatchID string
+	// Owner is the Subscription Owner ("" for a global Subscription).
+	Owner string
 }
 
 // Window is one consistent scan of the journal.

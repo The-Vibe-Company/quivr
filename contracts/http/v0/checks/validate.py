@@ -68,6 +68,8 @@ invalid = [
     ("WebhookEvent", {**examples["reference_webhook"], "content": "must not be embedded"}),
     ("WebhookEvent", {**examples["reference_webhook"], "type": "delivery.updated"}),
     ("SubscriptionCreate", {**examples["subscription_create"], "signing_secret": "not accepted"}),
+    ("SubscriptionCreate", {**examples["owned_subscription_create"], "owner": ""}),
+    ("SubscriptionCreate", {**examples["owned_subscription_create"], "owner": "u" * 129}),
     ("Match", {k: v for k, v in examples["positive_match"].items() if k != "evidence"}),
     ("Delivery", {**examples["delivery"], "state": "failed"}),
 ]

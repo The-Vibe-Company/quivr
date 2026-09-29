@@ -132,6 +132,7 @@ structured errors, per-route-family idempotency and opaque pagination apply.
 | POST `/v0/saved-queries/{id}/delete` | Logically delete a Saved Query no Subscription uses |
 | POST `/v0/subscriptions` | Enable a pinned query/evaluator with one destination, from now |
 | GET `/v0/subscriptions/{id}` and `/versions/{version_id}` | Inspect enabled state and immutable configuration |
+| GET `/v0/subscriptions?owner=…` | List active Subscriptions of one Subscription Owner, or `none` for global ones |
 | POST `/v0/subscriptions/{id}/disable` | Stop new evaluation commits and notification admissions |
 | POST `/v0/subscriptions/{id}/enable` | Resume evaluation from now and admission of parked notices |
 | POST `/v0/subscriptions/{id}/versions` | Edit: commit a new Subscription Version, effective from its commit |
@@ -542,6 +543,40 @@ backfilled and past Matches keep the Versions that produced them.
 - **Events:** `saved_query.updated` and `subscription.updated` are committed in
   every Corpus of the previous and new scope, `saved_query.deleted` and
   `subscription.deleted` in every Corpus of the current Version.
+
+### Implemented Subscription Owners (THE-727)
+
+A client application built on Quivr can create alerts for its own end users
+while keeping organization-wide ones. Quivr has no end-user accounts: an
+Organization authenticates with API keys, and the Subscription Owner is an
+opaque reference the client defines. Quivr stores, filters and echoes it and
+never interprets it.
+
+- **Creation:** `POST /v0/subscriptions` accepts an optional `owner`, a string
+  of 1 to 128 characters without control characters (for example
+  `user-123`). `none` is reserved for the listing filter; it and a control
+  character are refused with 422 `invalid_owner`, other malformed values with
+  422 `invalid_schema`. Without an owner the Subscription is global. The owner
+  is part of the idempotent request: a replay with another owner is 409
+  `idempotency_conflict`.
+- **Immutability:** the owner is fixed at creation. A new Subscription
+  Version keeps it and no edit accepts one.
+- **Echo:** Subscription and Subscription Version reads, Match reads, newly
+  committed notices (`references.owner` in the webhook body) and change-feed
+  monitoring references (`monitoring.owner`) carry the owner so the client can
+  route an alert. It is absent for a global Subscription, and from notice
+  bodies committed before owners existed (their bytes are immutable).
+- **Listing:** `GET /v0/subscriptions?owner=<ref>` or `?owner=none` pages the
+  active (enabled, not deleted) Subscriptions of that owner, or the global
+  ones, in Subscription ID order. `limit` is 1 to 100 (default 100) and the
+  signed `page_cursor` is bound to the owner filter and the key scope (409
+  `cursor_scope_changed` otherwise). Like every Subscription read, a
+  Subscription is listed only when the key grants every Corpus any of its
+  Versions pinned. `owner` is required; an unknown or repeated parameter is
+  422 `invalid_query`.
+- **No business rules:** Quivr is an engine. Per-user limits, quotas, billing
+  and plans belong to the application layer above it, which can count a
+  user's active Subscriptions with this listing before creating one.
 
 ## Evaluation and transactions
 

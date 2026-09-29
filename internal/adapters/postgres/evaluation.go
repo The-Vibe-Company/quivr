@@ -466,6 +466,10 @@ func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatc
 	}
 	r := &n.References
 	r.DeliveryID = content.StableID("delivery", org, r.MatchID, n.Destination, n.Kind)
+	// The Subscription Owner is fixed at creation, so the notice shares it for good.
+	if err := tx.QueryRow(ctx, `SELECT coalesce(owner,'') FROM subscriptions WHERE organization=$1 AND id=$2`, org, r.SubscriptionID).Scan(&r.Owner); err != nil {
+		return false, err
+	}
 	event := eventInput{Organization: org, CorpusID: n.CorpusID, Kind: n.Kind, Resource: "match", ResourceID: r.MatchID, MutationID: r.MatchID}
 	// The notice time is the transaction time, which is also the event's occurred_at.
 	var now time.Time
@@ -506,19 +510,23 @@ func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatc
 	return true, nil
 }
 
-const matchColumns = `id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,record_id,record_version_id,coalesce(previous_match_id,''),evidence,position`
+// matchColumns reads a Match m with its Subscription s's owner.
+const matchColumns = `m.id,m.subscription_id,m.subscription_version_id,m.saved_query_id,m.saved_query_version_id,m.record_id,m.record_version_id,coalesce(m.previous_match_id,''),coalesce(s.owner,''),m.evidence,m.position`
+
+// matchFrom joins each Match to its Subscription for the owner.
+const matchFrom = ` FROM matches m JOIN subscriptions s ON s.organization=m.organization AND s.id=m.subscription_id `
 
 func scanMatch(row pgx.Row) (monitoring.Match, error) {
 	var m monitoring.Match
 	var evidence []byte
-	if err := row.Scan(&m.ID, &m.SubscriptionID, &m.SubscriptionVersionID, &m.SavedQueryID, &m.SavedQueryVersionID, &m.RecordID, &m.RecordVersionID, &m.PreviousMatchID, &evidence, &m.Position); err != nil {
+	if err := row.Scan(&m.ID, &m.SubscriptionID, &m.SubscriptionVersionID, &m.SavedQueryID, &m.SavedQueryVersionID, &m.RecordID, &m.RecordVersionID, &m.PreviousMatchID, &m.Owner, &evidence, &m.Position); err != nil {
 		return m, err
 	}
 	return m, unmarshalNumbers(evidence, &m.Evidence)
 }
 
 func (s ContentStore) Match(ctx context.Context, org, id string) (monitoring.Match, error) {
-	m, err := scanMatch(s.Pool.QueryRow(ctx, `SELECT `+matchColumns+` FROM matches WHERE organization=$1 AND id=$2`, org, id))
+	m, err := scanMatch(s.Pool.QueryRow(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.id=$2`, org, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, monitoring.ErrNotFound
 	}
@@ -526,7 +534,7 @@ func (s ContentStore) Match(ctx context.Context, org, id string) (monitoring.Mat
 }
 
 func (s ContentStore) Matches(ctx context.Context, org, subscriptionID string, after int64, limit int) ([]monitoring.Match, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+matchColumns+` FROM matches WHERE organization=$1 AND subscription_id=$2 AND position>$3 ORDER BY position LIMIT $4`, org, subscriptionID, after, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT `+matchColumns+matchFrom+`WHERE m.organization=$1 AND m.subscription_id=$2 AND m.position>$3 ORDER BY m.position LIMIT $4`, org, subscriptionID, after, limit)
 	if err != nil {
 		return nil, err
 	}

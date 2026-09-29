@@ -669,7 +669,7 @@ type ChangeEvent struct {
 	Cursor  string `json:"cursor"`
 	EventId string `json:"event_id"`
 
-	// Monitoring match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// Monitoring owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
 	Monitoring    *MonitoringReferences `json:"monitoring,omitempty"`
 	OccurredAt    time.Time             `json:"occurred_at"`
 	Resource      ResourceReference     `json:"resource"`
@@ -1033,18 +1033,21 @@ type ManifestContent struct {
 // ManifestContentKind defines model for ManifestContent.Kind.
 type ManifestContentKind string
 
-// Match Immutable positive historical determination, not a claim of current eligibility. Unique subscription-version/record-version. Correction/withdrawal notifications reference history; no Match is fabricated for negative decisions.
+// Match Immutable positive historical determination, not a claim of current eligibility. Unique subscription-version/record-version. Correction/withdrawal notifications reference history; no Match is fabricated for negative decisions. owner is the Subscription's owner, absent when global.
 type Match struct {
 	// Evidence Immutable evidence for a positive result, including evaluator version/configuration. Details are plugin-defined, bounded to 16 KiB and schema-validated by its adapter; core checks referenced Parts. Access is rechecked on reads.
-	Evidence              MatchEvidence `json:"evidence"`
-	MatchId               string        `json:"match_id"`
-	PreviousMatchId       *string       `json:"previous_match_id,omitempty"`
-	RecordId              string        `json:"record_id"`
-	RecordVersionId       string        `json:"record_version_id"`
-	SavedQueryId          string        `json:"saved_query_id"`
-	SavedQueryVersionId   string        `json:"saved_query_version_id"`
-	SubscriptionId        string        `json:"subscription_id"`
-	SubscriptionVersionId string        `json:"subscription_version_id"`
+	Evidence MatchEvidence `json:"evidence"`
+	MatchId  string        `json:"match_id"`
+
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
+	PreviousMatchId       *string            `json:"previous_match_id,omitempty"`
+	RecordId              string             `json:"record_id"`
+	RecordVersionId       string             `json:"record_version_id"`
+	SavedQueryId          string             `json:"saved_query_id"`
+	SavedQueryVersionId   string             `json:"saved_query_version_id"`
+	SubscriptionId        string             `json:"subscription_id"`
+	SubscriptionVersionId string             `json:"subscription_version_id"`
 }
 
 // MatchEvidence Immutable evidence for a positive result, including evaluator version/configuration. Details are plugin-defined, bounded to 16 KiB and schema-validated by its adapter; core checks referenced Parts. Access is rechecked on reads.
@@ -1063,15 +1066,18 @@ type MatchPage struct {
 	NextPageCursor *string `json:"next_page_cursor,omitempty"`
 }
 
-// MonitoringReferences match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+// MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
 type MonitoringReferences struct {
-	DeliveryId            string  `json:"delivery_id"`
-	MatchId               string  `json:"match_id"`
-	PreviousMatchId       *string `json:"previous_match_id,omitempty"`
-	RecordId              string  `json:"record_id"`
-	RecordVersionId       string  `json:"record_version_id"`
-	SubscriptionId        string  `json:"subscription_id"`
-	SubscriptionVersionId string  `json:"subscription_version_id"`
+	DeliveryId string `json:"delivery_id"`
+	MatchId    string `json:"match_id"`
+
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
+	PreviousMatchId       *string            `json:"previous_match_id,omitempty"`
+	RecordId              string             `json:"record_id"`
+	RecordVersionId       string             `json:"record_version_id"`
+	SubscriptionId        string             `json:"subscription_id"`
+	SubscriptionVersionId string             `json:"subscription_version_id"`
 }
 
 // NormalizationProvenance Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.
@@ -1340,39 +1346,58 @@ type SourceIdentity struct {
 	RecordKey string `json:"record_key"`
 }
 
-// Subscription defines model for Subscription.
+// Subscription Absent owner means a global, organization-wide Subscription.
 type Subscription struct {
+	// CurrentVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
 	CurrentVersion SubscriptionVersion `json:"current_version"`
 
 	// Deleted Logically deleted for good; a deleted Subscription is also disabled and stays readable with its Versions, Matches and Deliveries.
-	Deleted        bool   `json:"deleted"`
-	Enabled        bool   `json:"enabled"`
-	Name           string `json:"name"`
-	SubscriptionId string `json:"subscription_id"`
+	Deleted bool   `json:"deleted"`
+	Enabled bool   `json:"enabled"`
+	Name    string `json:"name"`
+
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	Owner          *SubscriptionOwner `json:"owner,omitempty"`
+	SubscriptionId string             `json:"subscription_id"`
 }
 
-// SubscriptionCreate Create enabled from-now Subscription. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+// SubscriptionCreate Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 type SubscriptionCreate struct {
 	DestinationId string `json:"destination_id"`
 
 	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
-	Evaluator           EvaluatorConfig `json:"evaluator"`
-	IdempotencyKey      string          `json:"idempotency_key"`
-	Name                string          `json:"name"`
-	SavedQueryId        string          `json:"saved_query_id"`
-	SavedQueryVersionId string          `json:"saved_query_version_id"`
+	Evaluator      EvaluatorConfig `json:"evaluator"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	Name           string          `json:"name"`
+
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	Owner               *SubscriptionOwner `json:"owner,omitempty"`
+	SavedQueryId        string             `json:"saved_query_id"`
+	SavedQueryVersionId string             `json:"saved_query_version_id"`
 }
 
-// SubscriptionVersion defines model for SubscriptionVersion.
+// SubscriptionOwner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+type SubscriptionOwner = string
+
+// SubscriptionPage defines model for SubscriptionPage.
+type SubscriptionPage struct {
+	Items          []Subscription `json:"items"`
+	NextPageCursor *string        `json:"next_page_cursor,omitempty"`
+}
+
+// SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
 type SubscriptionVersion struct {
 	DestinationId string `json:"destination_id"`
 
 	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
-	Evaluator           EvaluatorConfig `json:"evaluator"`
-	SavedQueryId        string          `json:"saved_query_id"`
-	SavedQueryVersionId string          `json:"saved_query_version_id"`
-	SubscriptionId      string          `json:"subscription_id"`
-	VersionId           string          `json:"version_id"`
+	Evaluator EvaluatorConfig `json:"evaluator"`
+
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	Owner               *SubscriptionOwner `json:"owner,omitempty"`
+	SavedQueryId        string             `json:"saved_query_id"`
+	SavedQueryVersionId string             `json:"saved_query_version_id"`
+	SubscriptionId      string             `json:"subscription_id"`
+	VersionId           string             `json:"version_id"`
 }
 
 // SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
@@ -1445,7 +1470,7 @@ type WebhookEvent struct {
 	EventId    string    `json:"event_id"`
 	OccurredAt time.Time `json:"occurred_at"`
 
-	// References match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// References owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
 	References    MonitoringReferences      `json:"references"`
 	SchemaVersion WebhookEventSchemaVersion `json:"schema_version"`
 	Type          WebhookEventType          `json:"type"`
@@ -1507,6 +1532,14 @@ type ListMatchesParams struct {
 // ListRecordsParams defines parameters for ListRecords.
 type ListRecordsParams struct {
 	CorpusId   string  `form:"corpus_id" json:"corpus_id"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListSubscriptionsParams defines parameters for ListSubscriptions.
+type ListSubscriptionsParams struct {
+	// Owner A Subscription Owner, or none for global Subscriptions.
+	Owner      string  `form:"owner" json:"owner"`
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
@@ -1883,6 +1916,9 @@ type ServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/subscriptions)
+	ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams)
 
 	// (POST /v0/subscriptions)
 	CreateSubscription(w http.ResponseWriter, r *http.Request)
@@ -2978,6 +3014,65 @@ func (siw *ServerInterfaceWrapper) SearchRecords(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSubscriptionsParams
+
+	// ------------- Required query parameter "owner" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "owner", r.URL.Query(), &params.Owner, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "owner"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "owner", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSubscriptions(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateSubscription operation middleware
 func (siw *ServerInterfaceWrapper) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
@@ -3368,6 +3463,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions/{version_id}", wrapper.GetSavedQueryVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions", wrapper.CreateSavedQueryVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/delete", wrapper.DeleteSavedQuery)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions", wrapper.ListSubscriptions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions", wrapper.CreateSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}", wrapper.GetSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/versions/{version_id}", wrapper.GetSubscriptionVersion)
@@ -4807,6 +4903,45 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 	return err
 }
 
+type ListSubscriptionsRequestObject struct {
+	Params ListSubscriptionsParams
+}
+
+type ListSubscriptionsResponseObject interface {
+	VisitListSubscriptionsResponse(w http.ResponseWriter) error
+}
+
+type ListSubscriptions200JSONResponse SubscriptionPage
+
+func (response ListSubscriptions200JSONResponse) VisitListSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSubscriptionsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListSubscriptionsdefaultJSONResponse) VisitListSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateSubscriptionRequestObject struct {
 	Body *CreateSubscriptionJSONRequestBody
 }
@@ -5309,6 +5444,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(ctx context.Context, request SearchRecordsRequestObject) (SearchRecordsResponseObject, error)
+
+	// (GET /v0/subscriptions)
+	ListSubscriptions(ctx context.Context, request ListSubscriptionsRequestObject) (ListSubscriptionsResponseObject, error)
 
 	// (POST /v0/subscriptions)
 	CreateSubscription(ctx context.Context, request CreateSubscriptionRequestObject) (CreateSubscriptionResponseObject, error)
@@ -6382,6 +6520,32 @@ func (sh *strictHandler) SearchRecords(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SearchRecordsResponseObject); ok {
 		if err := validResponse.VisitSearchRecordsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSubscriptions operation middleware
+func (sh *strictHandler) ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams) {
+	var request ListSubscriptionsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSubscriptions(ctx, request.(ListSubscriptionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSubscriptions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSubscriptionsResponseObject); ok {
+		if err := validResponse.VisitListSubscriptionsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -306,6 +306,8 @@ const (
 	connectorPageDomain = "connector-page"
 	matchPageDomain     = "match-page"
 	attemptPageDomain   = "attempt-page"
+	// subscriptionPageDomain signs the Subscription listing by owner.
+	subscriptionPageDomain = "subscription-page"
 )
 
 // signCursor is the only signer for CursorKey tokens; the domain is required.

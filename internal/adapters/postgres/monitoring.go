@@ -233,6 +233,16 @@ func scopeCorpora(ctx context.Context, tx pgx.Tx, org, id string, corpusIDs []st
 	return nil
 }
 
+// nullable stores "" as NULL.
+func nullable(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+// CreateSubscription commits a new enabled Subscription with its fixed owner
+// (NULL when global).
 func (s ContentStore) CreateSubscription(ctx context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
 	evaluator, err := json.Marshal(in.Evaluator)
 	if err != nil {
@@ -244,7 +254,7 @@ func (s ContentStore) CreateSubscription(ctx context.Context, org string, in mon
 		if err := pinnableQuery(ctx, tx, org, query); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "INSERT INTO subscriptions(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO subscriptions(organization,id,name,current_version_id,owner) VALUES($1,$2,$3,$4,$5)", org, id, in.Name, versionID, nullable(in.Owner)); err != nil {
 			return err
 		}
 		if err := scopeCorpora(ctx, tx, org, id, query.Definition.CorpusIDs); err != nil {
@@ -265,30 +275,38 @@ func (s ContentStore) CreateSubscription(ctx context.Context, org string, in mon
 	return s.Subscription(ctx, org, existing)
 }
 
-const subscriptionVersionColumns = `v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids`
+// subscriptionVersionColumns reads a Version v of the Subscription s.
+const subscriptionVersionColumns = `v.id,coalesce(s.owner,''),v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids`
 
 func scanSubscriptionVersion(v *monitoring.SubscriptionVersion, evaluator *[]byte) []any {
-	return []any{&v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs}
+	return []any{&v.VersionID, &v.Owner, &v.SavedQueryID, &v.SavedQueryVersionID, evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs}
 }
 
-func (s ContentStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
-	sub := monitoring.Subscription{}
-	v := &sub.Current
-	var evaluator []byte
-	err := s.Pool.QueryRow(ctx, `SELECT s.id,s.name,s.enabled,s.deleted,
-  coalesce((SELECT array_agg(sc.corpus_id ORDER BY sc.corpus_id) FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id),'{}'),`+subscriptionVersionColumns+`
+// subscriptionSelect reads Subscriptions s with their current Version and
+// every pinned Corpus; callers append the WHERE clause.
+const subscriptionSelect = `SELECT s.id,s.name,s.enabled,s.deleted,
+  coalesce((SELECT array_agg(sc.corpus_id ORDER BY sc.corpus_id) FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id),'{}'),` + subscriptionVersionColumns + `
 FROM subscriptions s
 JOIN subscription_versions v ON v.organization=s.organization AND v.id=s.current_version_id
 JOIN saved_query_versions q ON q.organization=v.organization AND q.id=v.saved_query_version_id
-WHERE s.organization=$1 AND s.id=$2`, org, id).Scan(append([]any{&sub.ID, &sub.Name, &sub.Enabled, &sub.Deleted, &sub.PinnedCorpusIDs}, scanSubscriptionVersion(v, &evaluator)...)...)
+`
+
+func scanSubscription(row pgx.Row) (monitoring.Subscription, error) {
+	sub := monitoring.Subscription{}
+	v := &sub.Current
+	var evaluator []byte
+	if err := row.Scan(append([]any{&sub.ID, &sub.Name, &sub.Enabled, &sub.Deleted, &sub.PinnedCorpusIDs}, scanSubscriptionVersion(v, &evaluator)...)...); err != nil {
+		return sub, err
+	}
+	v.SubscriptionID, sub.Owner = sub.ID, v.Owner
+	return sub, unmarshalNumbers(evaluator, &v.Evaluator)
+}
+
+func (s ContentStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
+	sub, err := scanSubscription(s.Pool.QueryRow(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.id=$2`, org, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sub, monitoring.ErrNotFound
 	}
-	if err != nil {
-		return sub, err
-	}
-	v.SubscriptionID = sub.ID
-	err = unmarshalNumbers(evaluator, &v.Evaluator)
 	return sub, err
 }
 
@@ -297,6 +315,7 @@ func (s ContentStore) SubscriptionVersion(ctx context.Context, org, id, versionI
 	var evaluator []byte
 	err := s.Pool.QueryRow(ctx, `SELECT `+subscriptionVersionColumns+`
 FROM subscription_versions v
+JOIN subscriptions s ON s.organization=v.organization AND s.id=v.subscription_id
 JOIN saved_query_versions q ON q.organization=v.organization AND q.id=v.saved_query_version_id
 WHERE v.organization=$1 AND v.subscription_id=$2 AND v.id=$3`, org, id, versionID).Scan(scanSubscriptionVersion(&v, &evaluator)...)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -471,6 +490,30 @@ func (s ContentStore) DeleteSubscription(ctx context.Context, org, key, id strin
 		return monitoring.Subscription{}, err
 	}
 	return s.Subscription(ctx, org, id)
+}
+
+// Subscriptions pages the active Subscriptions of one owner, or the global
+// ones, by ID, in one statement so filters and rows share a snapshot. A
+// non-nil corpora keeps those whose every pinned Corpus, of any Version, it
+// contains: the rule every Subscription read applies.
+func (s ContentStore) Subscriptions(ctx context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.enabled AND NOT s.deleted AND s.id>$2
+  AND (CASE WHEN $3 THEN s.owner IS NULL ELSE s.owner=$4 END)
+  AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
+ORDER BY s.id LIMIT $6`, org, after, owner.Global, owner.Owner, corpora, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []monitoring.Subscription{}
+	for rows.Next() {
+		sub, err := scanSubscription(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sub)
+	}
+	return out, rows.Err()
 }
 
 // toggleScope reads the Corpora of a Subscription's current Version whose

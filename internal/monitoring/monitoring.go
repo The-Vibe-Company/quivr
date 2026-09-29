@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -29,6 +31,9 @@ var (
 	// ErrSavedQueryInUse refuses deleting a Saved Query that a Subscription
 	// which is not deleted still belongs to.
 	ErrSavedQueryInUse = publicerr.New("saved_query_in_use")
+	// ErrInvalidOwner refuses a Subscription Owner that is not a bounded
+	// printable reference, or the reserved "none".
+	ErrInvalidOwner = publicerr.New("invalid_owner")
 )
 
 // The deterministic fixture evaluator is the only installed evaluator. It is
@@ -43,6 +48,10 @@ const (
 	maxCorpora = 16
 	// maxPinnedBytes bounds each plugin-interpreted object pinned in a Version.
 	maxPinnedBytes = 16 << 10
+	// maxOwner bounds a Subscription Owner, in characters.
+	maxOwner = 128
+	// NoOwner is the reserved owner filter value naming global Subscriptions.
+	NoOwner = "none"
 )
 
 // Definition is the immutable Saved Query Version content.
@@ -76,8 +85,10 @@ type Evaluator struct {
 }
 
 type SubscriptionVersion struct {
-	SubscriptionID      string
-	VersionID           string
+	SubscriptionID string
+	VersionID      string
+	// Owner is the Subscription's owner, fixed for every Version ("" when global).
+	Owner               string
 	SavedQueryID        string
 	SavedQueryVersionID string
 	Evaluator           Evaluator
@@ -93,8 +104,11 @@ type SubscriptionVersion struct {
 // Subscription separates mutable enabled and deleted state from its immutable
 // Versions. A deleted Subscription is disabled for good and stays readable.
 type Subscription struct {
-	ID      string
-	Name    string
+	ID   string
+	Name string
+	// Owner is the Subscription Owner, an opaque client-defined end-user
+	// reference fixed at creation; "" for a global Subscription.
+	Owner   string
 	Enabled bool
 	Deleted bool
 	Current SubscriptionVersion
@@ -126,8 +140,10 @@ type SavedQueryVersionInput struct {
 }
 
 type SubscriptionInput struct {
-	Key                 string    `json:"idempotency_key"`
-	Name                string    `json:"name"`
+	Key  string `json:"idempotency_key"`
+	Name string `json:"name"`
+	// Owner is optional; it is part of the idempotency-canonical request.
+	Owner               string    `json:"owner,omitempty"`
 	SavedQueryID        string    `json:"saved_query_id"`
 	SavedQueryVersionID string    `json:"saved_query_version_id"`
 	Evaluator           Evaluator `json:"evaluator"`
@@ -175,6 +191,16 @@ type Store interface {
 	EnableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
 	// DeleteSubscription logically deletes and disables a Subscription.
 	DeleteSubscription(ctx context.Context, org, key, id string) (Subscription, error)
+	// Subscriptions lists up to limit active (enabled, not deleted)
+	// Subscriptions of owner with an ID after after, in ID order. A non-nil
+	// corpora keeps only those whose every pinned Corpus it contains.
+	Subscriptions(ctx context.Context, org string, owner OwnerFilter, corpora []string, after string, limit int) ([]Subscription, error)
+}
+
+// OwnerFilter selects the Subscriptions of one owner, or the global ones.
+type OwnerFilter struct {
+	Owner  string
+	Global bool
 }
 
 // CorpusAuthorizer confirms that every Corpus belongs to the Organization.
@@ -322,6 +348,9 @@ func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in 
 	if !scope.Allows("monitoring:write") {
 		return Subscription{}, ErrForbidden
 	}
+	if in.Owner != "" && !validOwner(in.Owner) {
+		return Subscription{}, ErrInvalidOwner
+	}
 	if err := s.validSubscription(scope, in.Evaluator, in.DestinationID); err != nil {
 		return Subscription{}, err
 	}
@@ -332,6 +361,52 @@ func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in 
 		return Subscription{}, err
 	}
 	return s.Store.CreateSubscription(ctx, scope.Organization, in, q)
+}
+
+// Subscriptions lists the active Subscriptions of one owner, or the global
+// ones, that the key sees: it must grant every Corpus any of their Versions
+// pinned. Paging is by Subscription ID after after. Quivr enforces no
+// per-owner rule; a layer above can use this listing to apply its own.
+func (s Service) Subscriptions(ctx context.Context, scope corpus.Scope, owner OwnerFilter, after string, limit int) ([]Subscription, error) {
+	if !scope.Allows("monitoring:read") {
+		return nil, ErrForbidden
+	}
+	if !owner.Global && !validOwner(owner.Owner) {
+		return nil, ErrInvalidOwner
+	}
+	// Only an all-Corpora key lists without a Corpus filter; any other key,
+	// even one granting no Corpus, filters (never nil: nil means unfiltered).
+	var corpora []string
+	if !scope.AllCorpora() {
+		corpora = append([]string{}, scope.Corpora...)
+	}
+	subs, err := s.Store.Subscriptions(ctx, scope.Organization, owner, corpora, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	// The store filters; the same rule as every Subscription read is applied
+	// again here so the listing can never show what a read would conceal.
+	visible := subs[:0]
+	for _, sub := range subs {
+		if covers(scope, sub.Current.CorpusIDs) && covers(scope, sub.PinnedCorpusIDs) {
+			visible = append(visible, sub)
+		}
+	}
+	return visible, nil
+}
+
+// validOwner accepts an opaque Subscription Owner of 1 to maxOwner printable
+// UTF-8 characters other than the reserved filter value NoOwner.
+func validOwner(owner string) bool {
+	if owner == "" || owner == NoOwner || !utf8.ValidString(owner) || utf8.RuneCountInString(owner) > maxOwner {
+		return false
+	}
+	for _, r := range owner {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Service) Subscription(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {

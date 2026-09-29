@@ -81,6 +81,7 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 		monitoring.ErrUnknownDestination:   "unknown_destination",
 		monitoring.ErrUnknownSavedQuery:    "unknown_saved_query",
 		monitoring.ErrTooLarge:             "definition_too_large",
+		monitoring.ErrInvalidOwner:         "invalid_owner",
 	} {
 		for style, err := range detailed(sentinel) {
 			status, code := written(t, func(w *httptest.ResponseRecorder) { monitoringFailure(w, err) })

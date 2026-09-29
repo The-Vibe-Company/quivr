@@ -161,6 +161,7 @@ func matchToTransport(m monitoring.Match) transport.Match {
 	if m.PreviousMatchID != "" {
 		out.PreviousMatchId = &m.PreviousMatchID
 	}
+	out.Owner = owner(m.Owner)
 	if len(m.Evidence.PartKeys) > 0 {
 		keys := m.Evidence.PartKeys
 		out.Evidence.PartKeys = &keys

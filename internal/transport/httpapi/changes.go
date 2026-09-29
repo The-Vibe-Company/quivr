@@ -67,6 +67,7 @@ func changeToTransport(c changes.Change) transport.ChangeEvent {
 		if m.PreviousMatchID != "" {
 			refs.PreviousMatchId = &m.PreviousMatchID
 		}
+		refs.Owner = owner(m.Owner)
 		event.Monitoring = &refs
 	}
 	return event

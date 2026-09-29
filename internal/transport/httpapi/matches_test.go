@@ -17,7 +17,7 @@ type history struct{}
 func testMatch(i int64) monitoring.Match {
 	id := "match_" + string(rune('0'+i))
 	return monitoring.Match{ID: id, SubscriptionID: "subscription_s1", SubscriptionVersionID: "subscription_version_s1", SavedQueryID: "saved_query_q1", SavedQueryVersionID: "saved_query_version_q1",
-		RecordID: "record_" + id, RecordVersionID: "version_" + id, Position: i * 10,
+		RecordID: "record_" + id, RecordVersionID: "version_" + id, Position: i * 10, Owner: map[int64]string{3: "user-123"}[i],
 		Evidence: monitoring.MatchEvidence{Evaluator: monitoring.Evaluator{PluginID: "quivr.fixture", Version: "1", Configuration: map[string]any{}}, Explanation: "fixture", PartKeys: []string{"body"}, Details: map[string]any{"marker": "default"}}}
 }
 

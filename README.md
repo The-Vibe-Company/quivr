@@ -122,6 +122,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
   Delivery. Matching uses a deterministic built-in evaluator for now.
+- **Subscription owners**: an application can create a Subscription for one of its
+  end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
+  the Subscription, its Matches, webhooks and change feed to route each alert, and list
+  a user's active Subscriptions with `GET /v0/subscriptions?owner=…`.
 - **Correction and withdrawal notices** for alerted Records: a correction that still
   matches gets a linked successor Match (`match.corrected`), one that no longer matches
   gets `match.no_longer_matches` without a new Match, and a withdrawal gets

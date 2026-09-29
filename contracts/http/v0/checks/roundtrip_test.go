@@ -54,6 +54,8 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &SubscriptionVersionCreate{}
 			case "Subscription":
 				target = &Subscription{}
+			case "SubscriptionPage":
+				target = &SubscriptionPage{}
 			case "Match":
 				target = &Match{}
 			case "WebhookEvent":

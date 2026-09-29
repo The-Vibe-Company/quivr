@@ -310,6 +310,14 @@ Operations are supported.
   through `…/versions/{version_id}`. `POST /v0/subscriptions/{id}/delete` stops
   evaluation and deliveries for good while its history stays readable;
   `POST /v0/saved-queries/{id}/delete` works once no Subscription uses the Saved Query.
+- Give a Subscription an optional `owner` at creation, an opaque reference to one of
+  your application's end users (for example `"owner": "user-123"`); without it the
+  Subscription is global to the Organization. The owner never changes and is echoed on
+  the Subscription, its Versions, its Matches, its webhooks (`references.owner`) and its
+  change-feed events (`monitoring.owner`), so you can route each alert to its user.
+  `GET /v0/subscriptions?owner=user-123` (or `?owner=none` for global ones) pages the
+  active Subscriptions your key can see; per-user limits or quotas belong in your
+  application, which can count with this listing.
 - Enabled Subscriptions evaluate Record Versions that become searchable or enriched
   after their activation boundary. Each positive evaluation creates one unique Match
   with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through

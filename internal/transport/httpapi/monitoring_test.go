@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,7 +86,7 @@ func (d *definitions) SavedQuery(_ context.Context, org, id string) (monitoring.
 	return q, nil
 }
 func (d *definitions) CreateSubscription(_ context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
-	s := monitoring.Subscription{ID: "subscription_" + in.Key, Name: in.Name, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "subscription_" + in.Key, VersionID: "subscription_version_" + in.Key, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
+	s := monitoring.Subscription{ID: "subscription_" + in.Key, Name: in.Name, Owner: in.Owner, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "subscription_" + in.Key, VersionID: "subscription_version_" + in.Key, Owner: in.Owner, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
 	d.subs[s.ID] = s
 	d.versions[s.ID+"/"+s.Current.VersionID] = s.Current
 	return s, nil
@@ -137,6 +139,27 @@ func (d *definitions) EnableSubscription(_ context.Context, org, key, id string)
 	s.Enabled = true
 	d.subs[id] = s
 	return s, nil
+}
+
+// Subscriptions pages active Subscriptions of an owner by ID, keeping those
+// whose Corpora a non-nil corpora contains.
+func (d *definitions) Subscriptions(_ context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+	ids := []string{}
+	for id, s := range d.subs {
+		visible := true
+		for _, c := range s.Current.CorpusIDs {
+			visible = visible && (corpora == nil || slices.Contains(corpora, c))
+		}
+		if org == "org_a" && id > after && s.Enabled && !s.Deleted && visible && s.Owner == owner.Owner && (s.Owner == "") == owner.Global {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	out := []monitoring.Subscription{}
+	for _, id := range ids[:min(limit, len(ids))] {
+		out = append(out, d.subs[id])
+	}
+	return out, nil
 }
 
 type allCorpora struct{}
@@ -347,5 +370,93 @@ func TestMonitoringRejectsWithPublicErrors(t *testing.T) {
 				t.Fatalf("code %v want %s", body["code"], c.code)
 			}
 		})
+	}
+}
+
+func ownedBody(key, owner string) string {
+	body := subscriptionBody(key, "quivr.fixture", "receiver_a")
+	return strings.Replace(body, `"name":"Alerts"`, `"name":"Alerts","owner":`+owner, 1)
+}
+
+// TestSubscriptionOwnerRoutes drives the Subscription Owner through the API:
+// creation with or without an owner, its echo on reads, the listing by owner
+// and of global Subscriptions with a signed page cursor bound to its filter,
+// and the public refusals.
+func TestSubscriptionOwnerRoutes(t *testing.T) {
+	server := monitoringServer(t)
+	call(t, server, "POST", "/v0/saved-queries", monitor, savedQueryBody, 201)
+	for _, key := range []string{"s3", "s1", "s2"} {
+		created, _ := call(t, server, "POST", "/v0/subscriptions", monitor, ownedBody(key, `"user-123"`), 201)
+		if created["owner"] != "user-123" || created["current_version"].(map[string]any)["owner"] != "user-123" {
+			t.Fatalf("owner on creation: %v", created)
+		}
+	}
+	global, _ := call(t, server, "POST", "/v0/subscriptions", monitor, subscriptionBody("g1", "quivr.fixture", "receiver_a"), 201)
+	if _, has := global["owner"]; has {
+		t.Fatalf("a global Subscription has no owner: %v", global)
+	}
+	call(t, server, "POST", "/v0/subscriptions", monitor, ownedBody("other", `"user-456"`), 201)
+	call(t, server, "POST", "/v0/subscriptions/subscription_s3/disable", monitor, `{"idempotency_key":"d3"}`, 200)
+	if read, _ := call(t, server, "GET", "/v0/subscriptions/subscription_s1", monitorReader, "", 200); read["owner"] != "user-123" {
+		t.Fatalf("owner on read: %v", read)
+	}
+
+	list := func(query string) (map[string]any, []string) {
+		page, _ := call(t, server, "GET", "/v0/subscriptions?"+query, monitorReader, "", 200)
+		ids := []string{}
+		for _, item := range page["items"].([]any) {
+			ids = append(ids, item.(map[string]any)["subscription_id"].(string))
+		}
+		return page, ids
+	}
+	first, ids := list("owner=user-123&limit=1")
+	if !slices.Equal(ids, []string{"subscription_s1"}) || first["next_page_cursor"] == nil {
+		t.Fatalf("first page: %v %v", ids, first)
+	}
+	cursor := url.QueryEscape(first["next_page_cursor"].(string))
+	if last, ids := list("owner=user-123&limit=1&page_cursor=" + cursor); !slices.Equal(ids, []string{"subscription_s2"}) || last["next_page_cursor"] != nil {
+		t.Fatalf("last page (the disabled one is not active): %v %v", ids, last)
+	}
+	if _, ids = list("owner=none"); !slices.Equal(ids, []string{"subscription_g1"}) {
+		t.Fatalf("global listing: %v", ids)
+	}
+	if _, ids = list("owner=user-789"); len(ids) != 0 {
+		t.Fatalf("unknown owner: %v", ids)
+	}
+	refusals := []struct {
+		method, path, token, body string
+		status                    int
+		code                      string
+	}{
+		{"GET", "/v0/subscriptions?owner=none&page_cursor=" + cursor, monitorReader, "", 409, "cursor_scope_changed"},
+		{"GET", "/v0/subscriptions?owner=user-123&page_cursor=" + cursor, monitorNarrow, "", 409, "cursor_scope_changed"},
+		{"GET", "/v0/subscriptions?owner=user-123&page_cursor=forged", monitorReader, "", 422, "invalid_cursor"},
+		{"GET", "/v0/subscriptions", monitorReader, "", 422, "invalid_query"},
+		{"GET", "/v0/subscriptions?owner=", monitorReader, "", 422, "invalid_query"},
+		{"GET", "/v0/subscriptions?owner=a&owner=b", monitorReader, "", 422, "invalid_query"},
+		{"GET", "/v0/subscriptions?owner=user-123&corpus_id=c", monitorReader, "", 422, "invalid_query"},
+		{"GET", "/v0/subscriptions?owner=user-123&limit=101", monitorReader, "", 422, "invalid_limit"},
+		{"GET", "/v0/subscriptions?owner=" + strings.Repeat("u", 129), monitorReader, "", 422, "invalid_owner"},
+		{"GET", "/v0/subscriptions?owner=user%0A1", monitorReader, "", 422, "invalid_owner"},
+		{"GET", "/v0/subscriptions?owner=user-123", noMonitoring, "", 403, "forbidden"},
+		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-none", `"none"`), 422, "invalid_owner"},
+		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-control", `"user\u0007"`), 422, "invalid_owner"},
+		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-empty", `""`), 422, "invalid_schema"},
+		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-long", `"`+strings.Repeat("u", 129)+`"`), 422, "invalid_schema"},
+		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-type", `42`), 422, "invalid_schema"},
+		{"POST", "/v0/subscriptions/subscription_s1/versions", monitor, `{"idempotency_key":"e","owner":"user-456","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{}},"destination_id":"receiver_a"}`, 422, "invalid_schema"},
+	}
+	for _, r := range refusals {
+		if got, _ := call(t, server, r.method, r.path, r.token, r.body, r.status); got["code"] != r.code {
+			t.Errorf("%s %s: %v, want %s", r.method, r.path, got, r.code)
+		}
+	}
+
+	// A Match carries its Subscription's owner, a global one none.
+	if m, _ := call(t, server, "GET", "/v0/matches/match_3", monitorReader, "", 200); m["owner"] != "user-123" {
+		t.Fatalf("owned Match: %v", m)
+	}
+	if m, _ := call(t, server, "GET", "/v0/matches/match_1", monitorReader, "", 200); m["owner"] != nil {
+		t.Fatalf("global Match: %v", m)
 	}
 }

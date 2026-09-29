@@ -98,6 +98,10 @@ _Avoid_: Mutable saved query, subscription version
 A stable, organization-owned instruction to evaluate a saved query continuously.
 _Avoid_: Saved query, notification channel
 
+**Subscription Owner**:
+An opaque reference to one end user of a client application, attached to a subscription when it is created and fixed for its life; Quivr stores and echoes it without interpreting it. A subscription without one is global to its organization.
+_Avoid_: User account, API key
+
 **Subscription Version**:
 An immutable subscription configuration that pins one saved query version and its evaluation and delivery policy.
 _Avoid_: Match, delivery attempt

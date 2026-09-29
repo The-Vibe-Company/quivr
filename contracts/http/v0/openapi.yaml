@@ -835,6 +835,50 @@ paths:
             schema:
               $ref: '#/components/schemas/ActionRequest'
   /v0/subscriptions:
+    get:
+      operationId: listSubscriptions
+      description: Active (enabled, not deleted) Subscriptions of one Subscription Owner, or the global
+        ones with owner=none, in stable Subscription ID order. Lists only Subscriptions the key sees,
+        like every Subscription read. Stable keyset page cursor bound to the owner filter and key scope,
+        not a Change Cursor. Quivr applies no per-owner rule; a layer above can use this listing to enforce
+        its own.
+      x-required-permissions:
+      - monitoring:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPage'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: owner
+        in: query
+        required: true
+        description: A Subscription Owner, or none for global Subscriptions.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: page_cursor
+        in: query
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
     post:
       operationId: createSubscription
       description: Atomically create enabled Subscription/Version and activation boundary in commit-ordered
@@ -2770,6 +2814,8 @@ components:
         destination_id:
           type: string
           minLength: 1
+        owner:
+          $ref: '#/components/schemas/SubscriptionOwner'
       required:
       - idempotency_key
       - name
@@ -2777,7 +2823,9 @@ components:
       - saved_query_version_id
       - evaluator
       - destination_id
-      description: Create enabled from-now Subscription. One deployment-configured destination per version;
+      description: Create enabled from-now Subscription. An optional owner makes it the Subscription of
+        one end user of the client application; without one it is global to the Organization. The owner
+        is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version;
         destination belongs to this Organization. URL and signing key are provisioned outside this API
         and not returned. No inline secret or dynamic destination registry in the tracer.
     SubscriptionVersionCreate:
@@ -2823,6 +2871,8 @@ components:
         destination_id:
           type: string
           minLength: 1
+        owner:
+          $ref: '#/components/schemas/SubscriptionOwner'
       required:
       - subscription_id
       - version_id
@@ -2830,6 +2880,8 @@ components:
       - saved_query_version_id
       - evaluator
       - destination_id
+      description: Immutable Subscription configuration. Every Version keeps the Subscription's owner,
+        absent for a global Subscription.
     Subscription:
       type: object
       additionalProperties: false
@@ -2848,12 +2900,35 @@ components:
             readable with its Versions, Matches and Deliveries.
         current_version:
           $ref: '#/components/schemas/SubscriptionVersion'
+        owner:
+          $ref: '#/components/schemas/SubscriptionOwner'
       required:
       - subscription_id
       - name
       - enabled
       - deleted
       - current_version
+      description: Absent owner means a global, organization-wide Subscription.
+    SubscriptionOwner:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Subscription Owner, an opaque end-user reference defined by the client application
+        (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128
+        characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+    SubscriptionPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscription'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
     MatchEvidence:
       type: object
       additionalProperties: false
@@ -2906,6 +2981,8 @@ components:
         previous_match_id:
           type: string
           minLength: 1
+        owner:
+          $ref: '#/components/schemas/SubscriptionOwner'
         evidence:
           $ref: '#/components/schemas/MatchEvidence'
       required:
@@ -2919,7 +2996,7 @@ components:
       - evidence
       description: Immutable positive historical determination, not a claim of current eligibility. Unique
         subscription-version/record-version. Correction/withdrawal notifications reference history; no
-        Match is fabricated for negative decisions.
+        Match is fabricated for negative decisions. owner is the Subscription's owner, absent when global.
     MatchPage:
       type: object
       additionalProperties: false
@@ -2958,6 +3035,8 @@ components:
         previous_match_id:
           type: string
           minLength: 1
+        owner:
+          $ref: '#/components/schemas/SubscriptionOwner'
       required:
       - match_id
       - record_id
@@ -2965,7 +3044,8 @@ components:
       - subscription_id
       - subscription_version_id
       - delivery_id
-      description: match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn.
+      description: owner is the Subscription Owner, so a client routes the notice to its user; absent
+        for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn.
         record_version_id is the causal correction version for corrected/no_longer_matches, otherwise
         the matched version. References alone confer no access.
     WebhookEvent:

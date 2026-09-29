@@ -1063,5 +1063,80 @@
         }
       ]
     }
+  },
+  {
+    "name": "owned_subscription_create",
+    "schema": "SubscriptionCreate",
+    "value": {
+      "idempotency_key": "create-subscription-user-123",
+      "name": "Alert for one end user",
+      "saved_query_id": "query_1",
+      "saved_query_version_id": "query_version_1",
+      "evaluator": {
+        "plugin_id": "fixture-evaluator",
+        "version": "1",
+        "configuration": {
+          "scenario": "positive",
+          "parameters": {
+            "sample": true
+          }
+        }
+      },
+      "destination_id": "fixture_webhook",
+      "owner": "user-123"
+    }
+  },
+  {
+    "name": "owned_subscription_page",
+    "schema": "SubscriptionPage",
+    "value": {
+      "items": [
+        {
+          "subscription_id": "subscription_2",
+          "name": "Alert for one end user",
+          "enabled": true,
+          "deleted": false,
+          "current_version": {
+            "subscription_id": "subscription_2",
+            "version_id": "subscription_version_2",
+            "saved_query_id": "query_1",
+            "saved_query_version_id": "query_version_1",
+            "evaluator": {
+              "plugin_id": "fixture-evaluator",
+              "version": "1",
+              "configuration": {
+                "scenario": "positive",
+                "parameters": {
+                  "sample": true
+                }
+              }
+            },
+            "destination_id": "fixture_webhook",
+            "owner": "user-123"
+          },
+          "owner": "user-123"
+        }
+      ],
+      "next_page_cursor": "opaque_page_cursor"
+    }
+  },
+  {
+    "name": "owned_reference_webhook",
+    "schema": "WebhookEvent",
+    "value": {
+      "event_id": "event_match_2",
+      "type": "match.created",
+      "schema_version": "1",
+      "occurred_at": "2026-09-14T12:00:00Z",
+      "references": {
+        "match_id": "match_2",
+        "record_id": "record_1",
+        "record_version_id": "version_1",
+        "subscription_id": "subscription_2",
+        "subscription_version_id": "subscription_version_2",
+        "delivery_id": "delivery_2",
+        "owner": "user-123"
+      }
+    }
   }
 ]
