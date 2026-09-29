@@ -1,0 +1,46 @@
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_665c8c08a1f325 126-137
+  s_54b80c92daa9cb::t_562ad501b17718 117-119
+  s_54b80c92daa9cb::t_dd5e8714463454 16-19
+plugins/alerts/alerts/__main__.py
+  s_54b80c92daa9cb::t_47bda72d901943 2,4-7
+plugins/alerts/alerts/fake_system_one.py
+  s_54b80c92daa9cb::t_986d3e435ce073 34
+  s_54b80c92daa9cb::t_3120c1bc3beacd 1-33,35-132
+plugins/alerts/calibration/set.json
+  s_54b80c92daa9cb::t_32a1d396890f70 1-26
+plugins/alerts/alerts/rule.py
+  s_54b80c92daa9cb::t_47bda72d901943 6-7,12,16-17,25-29,40-45,50-71
+plugins/alerts/pyproject.toml
+  s_54b80c92daa9cb::t_9135975116799b 7-8
+plugins/alerts/tests/test_described.py
+  s_54b80c92daa9cb::t_009aad4ff369b0 41
+  s_54b80c92daa9cb::t_4605dc4c800773 1-40,42-199
+plugins/alerts/calibration/calibrate.py
+  s_54b80c92daa9cb::t_32a1d396890f70 1-50
+plugins/alerts/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_9135975116799b 5-6,13-14,27-39,191-196,198-199,227-240
+plugins/alerts/alerts/jev.py
+  s_54b80c92daa9cb::t_d6dedc7d96508c 1-120
+plugins/alerts/tests/data/described.json
+  s_54b80c92daa9cb::t_05b42a58580386 15
+  s_54b80c92daa9cb::t_b03fdea7c83fef 1-14,16-17
+plugins/alerts/alerts/described.py
+  s_54b80c92daa9cb::t_1ea3f073e64d15 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad562eb9ce41b015356ba3e37f0acd91ad649430",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
