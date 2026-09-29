@@ -1,0 +1,39 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_4af880d14a56c4 13-14,16-17,19,33-36,42,49,56,63,65,69-145,162,187,189,191,193-205
+Makefile
+  s_54b80c92daa9cb::t_c282eadfb4d160 2,12-18
+README.md
+  s_54b80c92daa9cb::t_8e5fcef922023b 66-67,251-252
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_3dc1159357dfd5 34-35,293-330,343-345,358,362-373
+scripts/ci_summary.py
+  s_54b80c92daa9cb::t_0b31e925e61e54 1-81
+scripts/demo.py
+  s_54b80c92daa9cb::t_220ca7010caff0 14,16,33-34,78-79,81-88,111,113-114
+scripts/gotest.py
+  s_54b80c92daa9cb::t_0992718b730399 1-142
+scripts/local.py
+  s_54b80c92daa9cb::t_42967cf7c5c6ee 6,11,232-240,381,409-434,442-512,539-540,545-547,552-554,556-558,561,563,568,570-571,577-592
+scripts/test_ci_output.py
+  s_54b80c92daa9cb::t_c49ba75f45b2ad 1-167
+scripts/test_local.py
+  s_54b80c92daa9cb::t_2ff813aa446074 193
+scripts/verify_report.py
+  s_54b80c92daa9cb::t_9c4e3ca03b96fe 9-10,25-27,29,31,36,40,46-48,52-54,57-61,70-133,168-169,184-186,198-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "89119be380600d329df376a2b6b472f909961ab6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
