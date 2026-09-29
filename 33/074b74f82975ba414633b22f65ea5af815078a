@@ -9,9 +9,12 @@ quivr-search/tests/feed.spec.ts
 quivr-search/server.mjs
   s_54b80c92daa9cb::t_ab512f9d786c19 8,51,269-270,276,284-291
   s_54b80c92daa9cb::t_88fc4e1ce83984 292-293
+  s_54b80c92daa9cb::t_08b8ba416a9476 273-275
 quivr-search/src/App.tsx
   s_54b80c92daa9cb::t_e5f374d000e25f 132-133
   s_54b80c92daa9cb::t_26d65c4fde09ff 17,22,129-131,142,200-203,279,303-313,341-347
+  s_54b80c92daa9cb::t_cb52e107881fde 26-30
+  s_54b80c92daa9cb::t_129c006d2a3d24 114
 quivr-search/src/components/DocumentPanel.tsx
   s_54b80c92daa9cb::t_26d65c4fde09ff 56-59
   s_54b80c92daa9cb::t_e5f374d000e25f 60-67
@@ -22,6 +25,7 @@ quivr-search/src/styles.css
   s_54b80c92daa9cb::t_765239941cc786 1550-1744
 quivr-search/README.md
   s_54b80c92daa9cb::t_e323bb9b4c1150 45-68
+  s_54b80c92daa9cb::t_04ee9d0d8c3a43 87
 quivr-search/feed.mjs
   s_54b80c92daa9cb::t_f400d023b84f3e 109-111,116
   s_54b80c92daa9cb::t_e5f374d000e25f 112-115,170,178,187,198,233-234,308-310
@@ -31,6 +35,8 @@ quivr-search/tests/server.test.mjs
   s_54b80c92daa9cb::t_e5f374d000e25f 577-581
 README.md
   s_54b80c92daa9cb::t_4fb0b0fe6bd960 168-171
+deploy/railway/web.Dockerfile
+  s_54b80c92daa9cb::t_08b8ba416a9476 11
 ---
 {
   "schema_version": "authorship/3.0.0",
