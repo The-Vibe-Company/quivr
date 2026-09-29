@@ -132,9 +132,10 @@ test("les refus de validation désignent le champ fautif, au clavier", async ({
   page,
 }) => {
   await openConnectors(page);
+  // Unique per repetition, so this test can run with `--repeat-each`.
   const dialog = await startFixture(
     page,
-    `invalid-${run}`,
+    `invalid-${run}-${test.info().repeatEachIndex}`,
     '[{"items":"not a list"}]',
   );
   await dialog.getByRole("button", { name: "Créer le connecteur" }).focus();

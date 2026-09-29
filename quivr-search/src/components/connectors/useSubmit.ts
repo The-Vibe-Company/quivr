@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { APIError } from "../../lib/search";
 import { connectorMessage } from "../../lib/connectors";
 import { fieldForPointer, type FieldErrors } from "./SchemaForm";
@@ -17,10 +17,13 @@ export function useSubmit(minInterval: number) {
   const summary = useRef<HTMLDivElement>(null);
   const busyRef = useRef(false);
 
-  function fail(next: Failure) {
-    setFailure(next);
-    requestAnimationFrame(() => summary.current?.focus());
-  }
+  // Focus once React has committed the summary. A frame callback scheduled at
+  // failure time can run before that commit, when the summary does not exist
+  // yet, and leave focus on the body. Each failure is a new object, so a
+  // repeated refusal focuses the summary again.
+  useEffect(() => {
+    if (failure) summary.current?.focus();
+  }, [failure]);
 
   async function run(
     event: FormEvent<HTMLFormElement>,
@@ -48,7 +51,7 @@ export function useSubmit(minInterval: number) {
         errors[el.name] = el.validationMessage;
     const send = build(form, errors);
     if (Object.keys(errors).length || !send) {
-      fail({ message: "Corrigez les champs signalés.", fields: errors });
+      setFailure({ message: "Corrigez les champs signalés.", fields: errors });
       return;
     }
     busyRef.current = true;
@@ -63,7 +66,7 @@ export function useSubmit(minInterval: number) {
         const name = fieldForPointer(form, error.field, options.rebase);
         if (name) fields[name] = message;
       }
-      fail({ message, fields });
+      setFailure({ message, fields });
     } finally {
       options.after?.(form);
       busyRef.current = false;
