@@ -1,0 +1,28 @@
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_ac11185e168d55 141-142
+  s_54b80c92daa9cb::t_b37d25b12dd430 22
+scripts/ports.py
+  s_54b80c92daa9cb::t_d7d0417084c877 1-92
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_1023fed91ec667 50-58
+scripts/test_ports.py
+  s_54b80c92daa9cb::t_f90b1bc91c394c 1-87
+scripts/local.py
+  s_54b80c92daa9cb::t_ac11185e168d55 7,25-28,40-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1dc016e7bbdafa704deea734b719a58ec3ab23e4",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

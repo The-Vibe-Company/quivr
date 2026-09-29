@@ -1,0 +1,23 @@
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_4080764c213de7 54-62
+scripts/ports.py
+  s_54b80c92daa9cb::t_3d0ae53ad815ba 19-23,25,27-31,33,35-37,59,67-72,74-120,144
+scripts/test_ports.py
+  s_54b80c92daa9cb::t_1a8a03126f769e 8,17-27,36-37,59-92,101,103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "99745460ec23cb0423aba80241b6d7447b014ebf",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
