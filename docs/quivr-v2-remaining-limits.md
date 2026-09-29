@@ -101,8 +101,13 @@ stay visible. The Spec 1 obligation map is in
 
 - Evaluation and delivery run as PostgreSQL-leased loops rather than Temporal
   workflows. This is a documented deviation from the blueprint.
-- Matching uses the deterministic fixture evaluator. Production match criteria
-  belong to a future plugin.
+- Match criteria come from pinned `subscription` plugins; the only rule shipped
+  in this repository is the `quivr plugin init --kind subscription` template
+  (a phrase or a metadata field). Keyword and plain-language alert plugins are
+  later slices of Spec 3.
+- A pin names one plugin version at startup. Changing it restarts the api and
+  worker; Subscription Versions pinned to a version no longer installed stay
+  pending with `evaluator_unavailable`.
 - Delivery is at least once: a crash after sending can resend the same
   event id and bytes.
 - Deliveries exhausted by the retry migration emitted no `delivery.updated`.

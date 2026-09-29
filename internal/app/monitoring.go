@@ -8,20 +8,27 @@ import (
 	"os"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
-// versionParts reads a Record Version's canonical text Parts for evaluation,
-// with a worker scope limited to the Version's own Corpus.
-type versionParts struct{ content content.Service }
+// versionParts reads the evaluated Record Version: its canonical text Parts,
+// with a worker scope limited to the Version's own Corpus, and its metadata.
+type versionParts struct {
+	content  content.Service
+	metadata interface {
+		RecordMetadata(ctx context.Context, org, recordID, versionID string) (monitoring.RecordMetadata, error)
+	}
+}
 
-func (v versionParts) Parts(ctx context.Context, org, corpusID, recordID, versionID string) ([]monitoring.Part, error) {
+func (v versionParts) Article(ctx context.Context, org, corpusID, recordID, versionID string) (monitoring.Article, error) {
 	version, err := v.content.Version(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{corpusID}}, recordID, versionID)
 	if err != nil {
-		return nil, err
+		return monitoring.Article{}, err
 	}
 	parts := make([]monitoring.Part, 0, len(version.Manifest.Parts))
 	for _, p := range version.Manifest.Parts {
@@ -29,7 +36,38 @@ func (v versionParts) Parts(ctx context.Context, org, corpusID, recordID, versio
 			parts = append(parts, monitoring.Part{Key: p.Key, Role: p.Role, Text: p.Content.Text})
 		}
 	}
-	return parts, nil
+	metadata, err := v.metadata.RecordMetadata(ctx, org, recordID, versionID)
+	if err != nil {
+		return monitoring.Article{}, err
+	}
+	return monitoring.Article{Parts: parts, Metadata: metadata}, nil
+}
+
+// loadPins validates every startup pin: `plugin` first, then `plugins`.
+// migrate pins nothing.
+func (cfg Config) loadPins(command string) (*plugins.PinSet, error) {
+	var configs []plugins.PinConfig
+	if cfg.Plugin != nil {
+		configs = append(configs, *cfg.Plugin)
+	}
+	configs = append(configs, cfg.Plugins...)
+	if len(configs) == 0 || command == "migrate" {
+		return nil, nil
+	}
+	return plugins.LoadPins(configs)
+}
+
+// evaluators installs the subscription evaluator of every pinned plugin, and
+// the fixture evaluator only where the deployment enables it for tests.
+func (cfg Config) evaluators(pins *plugins.PinSet) monitoring.Evaluators {
+	installed := monitoring.Evaluators{}
+	if cfg.MonitoringFixtureEvaluator {
+		installed = monitoring.FixtureEvaluators()
+	}
+	for _, pin := range pins.Evaluators() {
+		installed[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
+	}
+	return installed
 }
 
 // DeliveryConfig overrides the webhook delivery policy with Go durations.

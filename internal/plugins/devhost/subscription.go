@@ -41,8 +41,12 @@ type SubscriptionBatch struct {
 type subscriptionFixture struct {
 	Configuration json.RawMessage `json:"configuration,omitempty"`
 	Record        struct {
-		Enriched bool               `json:"enriched"`
-		Parts    []subscriptionPart `json:"parts"`
+		Enriched   bool               `json:"enriched"`
+		Parts      []subscriptionPart `json:"parts"`
+		Source     json.RawMessage    `json:"source,omitempty"`
+		AcceptedAt string             `json:"accepted_at,omitempty"`
+		Provenance json.RawMessage    `json:"provenance,omitempty"`
+		Extensions json.RawMessage    `json:"extensions,omitempty"`
 	} `json:"record"`
 	Evaluations []struct {
 		Expression    json.RawMessage `json:"expression"`
@@ -77,7 +81,15 @@ type subscriptionRecord struct {
 	RecordVersionID string             `json:"record_version_id"`
 	Enriched        bool               `json:"enriched"`
 	Parts           []subscriptionPart `json:"parts"`
+	Source          json.RawMessage    `json:"source"`
+	AcceptedAt      string             `json:"accepted_at"`
+	Provenance      json.RawMessage    `json:"provenance"`
+	Extensions      json.RawMessage    `json:"extensions,omitempty"`
 }
+
+// DevAcceptedAt is the acceptance time of a subscription fixture that does
+// not set one.
+const DevAcceptedAt = "2026-01-01T00:00:00Z"
 
 type subscriptionRequest struct {
 	InvocationID   string                   `json:"invocation_id"`
@@ -95,7 +107,8 @@ type subscriptionRequest struct {
 // dev-subscription-n (Version dev-subscription-version-n) of Saved Query
 // dev-saved-query-n (Version dev-saved-query-version-n), and the Record
 // Version ids derive from the first 16 hex digits of the SHA-256 of the
-// fixture bytes. Evaluations are split into batches of the manifest's
+// fixture bytes. Record metadata the fixture omits defaults to source
+// dev-namespace/dev-record-<digest>, origin client and DevAcceptedAt. Evaluations are split into batches of the manifest's
 // max_batch_size; batch i has invocation id dev-invocation-<digest>-i and
 // idempotency key dev:<sha256>:i. Issues report an invalid fixture, a
 // configuration, expression or Subscription configuration the manifest
@@ -166,7 +179,18 @@ func BuildSubscriptionRequests(path string, m *plugins.Manifest) ([]Subscription
 		parts = []subscriptionPart{}
 	}
 	record := subscriptionRecord{CorpusID: "dev-corpus", RecordID: "dev-record-" + short, RecordVersionID: "dev-version-" + short,
-		Enriched: f.Record.Enriched, Parts: parts}
+		Enriched: f.Record.Enriched, Parts: parts, Source: f.Record.Source, AcceptedAt: f.Record.AcceptedAt, Provenance: f.Record.Provenance, Extensions: f.Record.Extensions}
+	// Metadata the fixture omits takes development defaults, as the core
+	// always sends it.
+	if len(record.Source) == 0 {
+		record.Source, _ = json.Marshal(map[string]string{"namespace": "dev-namespace", "record_key": "dev-record-" + short})
+	}
+	if record.AcceptedAt == "" {
+		record.AcceptedAt = DevAcceptedAt
+	}
+	if len(record.Provenance) == 0 {
+		record.Provenance = json.RawMessage(`{"origin":"client"}`)
+	}
 	size := m.Contributions.Subscription.MaxBatchSize
 	if size <= 0 {
 		size = plugins.DefaultMaxBatchSize

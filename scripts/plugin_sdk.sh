@@ -89,10 +89,10 @@ python3 - <<'EOF'
 import json
 response = json.load(open("response.json"))
 decisions = [(d["id"], d["decision"]) for d in response["decisions"]]
-assert decisions == [("e1", "match"), ("e2", "no_match"), ("e3", "match")], decisions
+assert decisions == [("e1", "match"), ("e2", "no_match"), ("e3", "match"), ("e4", "match"), ("e5", "no_match")], decisions
 assert response["decisions"][0]["evidence"]["part_keys"] == ["title", "body"], response["decisions"][0]
 log = open("dev.log").read()
-assert "3 decisions in 1 batches (2 match, 1 no_match, 0 not_ready)" in log, log
+assert "5 decisions in 1 batches (3 match, 2 no_match, 0 not_ready)" in log, log
 print("plugin dev replayed the scaffolded subscription fixture:", decisions)
 EOF
 "$quivr" plugin test --report "$work/subscription-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }

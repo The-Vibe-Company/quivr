@@ -188,6 +188,7 @@ func monitoringServer(t *testing.T) *httptest.Server {
 		Corpora:      allCorpora{},
 		Destinations: map[string]monitoring.Destination{"receiver_a": {Organization: "org_a", URL: "http://receiver.invalid/hook", Secret: "whsec_dGVzdC1zZWNyZXQtbmV2ZXItcmV0dXJuZWQ="}},
 		MatchStore:   history{},
+		Evaluators:   monitoring.FixtureEvaluators(),
 	}
 	key := []byte("cursor-key-0123456789abcdef0123456789")
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithMonitoring(service))

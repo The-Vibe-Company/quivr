@@ -5,6 +5,7 @@ from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
 import normalizer_plugin
 import ports
+import subscription_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -89,7 +90,10 @@ class Stack:
             delivery=DELIVERY_OVERRIDES,
             # The pinned external normalizer: pdf-text for application/pdf (make dev default), the
             # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
-            plugin=normalizer_plugin.pin(self))
+            plugin=normalizer_plugin.pin(self),
+            # The alert-rule template pinned beside it (scripts/subscription_plugin.py). The fixture
+            # evaluator stays installed for the notification-mechanics acceptance tests.
+            plugins=subscription_plugin.pins(self),monitoring_fixture_evaluator=True)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -189,8 +193,8 @@ class Stack:
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
         self.start_dependencies()
-        normalizer_plugin.prepare(self)
-        self.migrate();self.migrate();normalizer_plugin.start(self);self.start_processes()
+        normalizer_plugin.prepare(self);subscription_plugin.prepare(self)
+        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);self.start_processes()
     def start_dependencies(self,attempts=2):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
@@ -321,7 +325,7 @@ class Stack:
         """Stop this project's processes and containers. reset also deletes its volumes and the
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
-        normalizer_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
             self.save()
@@ -413,6 +417,11 @@ def verify(stack,steps):
     # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
     steps.run('pdf_normalizer_pin',normalizer_plugin.switch,stack,'pdf-text')
     steps.run('pdf_normalizer',stack.tests,'TestPDF')
+    # Alerts decided by the pinned alert-rule template, next to pdf-text: one webhook per match,
+    # none for a non-match, 422 for an invalid expression, metadata rules; then a rule-plugin outage
+    # delays evaluation, which completes after the restart.
+    steps.run('alert_plugin',subscription_plugin.verify,stack)
+    steps.run('alert_plugin_outage',subscription_plugin.outage,stack)
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
     steps.run('connectors',connectors,stack)

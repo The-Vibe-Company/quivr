@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
@@ -76,10 +75,17 @@ type Config struct {
 	ConnectorRSSAllowPrivateAddresses bool `json:"connector_rss_allow_private_addresses"`
 	// X configures the x_list connector kind.
 	X XConfig `json:"x"`
-	// Plugin pins one external plugin and routes Blob media types to its
-	// normalizer. API and worker refuse to start on an invalid pin; an
-	// unreachable plugin never prevents startup.
+	// Plugin pins one external plugin; it is shorthand for a one-item
+	// Plugins list and may be combined with it (it comes first).
 	Plugin *plugins.PinConfig `json:"plugin"`
+	// Plugins pins external plugins together: normalizers are routed by Blob
+	// media type, subscription evaluators by plugin id and version. API and
+	// worker refuse to start on an invalid pin or a conflict between pins; an
+	// unreachable plugin never prevents startup.
+	Plugins []plugins.PinConfig `json:"plugins"`
+	// MonitoringFixtureEvaluator installs the deterministic fixture evaluator
+	// quivr.fixture@1 (local and CI test deployments only).
+	MonitoringFixtureEvaluator bool `json:"monitoring_fixture_evaluator"`
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
@@ -116,19 +122,18 @@ func Run(command string) error {
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		return errors.New("invalid configuration JSON")
 	}
-	// Validate the pin before logs move to files, so a refusal is reported on stderr.
-	var pin *plugins.Pin
-	if cfg.Plugin != nil && command != "migrate" {
-		if pin, err = plugins.LoadPin(*cfg.Plugin); err != nil {
-			return err
-		}
-	}
-	// The pinned plugin owns its declared extension namespaces beside the
-	// built-in ones: clients cannot write them, retrieval mappings may read them.
-	extensions, err := plugins.ExtensionRegistry(pin)
+	// Validate the pins before logs move to files, so a refusal is reported on stderr.
+	pins, err := cfg.loadPins(command)
 	if err != nil {
 		return err
 	}
+	// Pinned plugins own their declared extension namespaces beside the
+	// built-in ones: clients cannot write them, retrieval mappings may read them.
+	extensions, err := plugins.PinsExtensionRegistry(pins)
+	if err != nil {
+		return err
+	}
+	evaluators := cfg.evaluators(pins)
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
 	}
@@ -210,8 +215,8 @@ func Run(command string) error {
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
 	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: extensions, Normalizations: store, Supersession: store}
-	if pin != nil {
-		contents.Routes = pin
+	if pins != nil {
+		contents.Routes = pins
 	}
 	uploadService := uploads.Service{Store: store, Transfer: blobs, Writer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
@@ -222,7 +227,7 @@ func Run(command string) error {
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
 	// External normalization runs in the worker only, before publication.
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Plugin: pluginhttp.Client{Pin: pin}, Pin: pin}
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: pins}
 	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search, Normalizer: normalizer}
 	// Rebuilds reuse stored vectors; the TEI encoder only names the pinned space and producer.
 	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Artifacts: embedding, Segment: func(ctx context.Context, org string, v content.Version) (content.Segmentation, error) {
@@ -310,14 +315,21 @@ func Run(command string) error {
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
 	commands := telemetry.NewCommands()
 	pruneMetrics := &telemetry.ChangePrune{}
+	evaluationMetrics := &monitoring.EvaluationMetrics{}
 	purgeMetrics := retrieval.NewPurgeMetrics()
 	if command == "worker" {
 		// Delivery attempt outcomes and admissible backlog, processing outcomes and
 		// acceptance-to-searchable durations, in Prometheus text format.
 		processingMetrics := telemetry.NewProcessing()
 		processor.Observer = processingObserver{metrics: processingMetrics, store: store}
-		deliveryMetrics.Extra = func(w io.Writer) { processingMetrics.Write(w); pruneMetrics.Write(w); purgeMetrics.Write(w) }
+		deliveryMetrics.Extra = func(w io.Writer) {
+			processingMetrics.Write(w)
+			pruneMetrics.Write(w)
+			purgeMetrics.Write(w)
+			evaluationMetrics.Write(w)
+		}
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
+		slog.Info("plugins pinned", "plugins", pins.Describe(), "evaluators", len(evaluators))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
@@ -325,7 +337,7 @@ func Run(command string) error {
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store}), httpapi.WithOperations(operations.Service{Store: store}),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval}), httpapi.WithCommands(commands))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
@@ -352,7 +364,8 @@ func Run(command string) error {
 		// independently of Temporal availability.
 		go func() {
 			defer close(evaluationDone)
-			monitoring.Engine{Store: postgres.EvaluationStore{ContentStore: store}, Versions: versionParts{contents}, Evaluators: map[string]monitoring.EvaluationPort{monitoring.EvaluatorKey(monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion}): monitoring.Fixture{}}, Workers: 4, Lease: time.Minute}.Run(ctx)
+			evaluation := postgres.EvaluationStore{ContentStore: store}
+			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics}.Run(ctx)
 		}()
 		deliveryDone := make(chan struct{})
 		defer func() {

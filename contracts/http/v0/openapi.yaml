@@ -883,7 +883,11 @@ paths:
       operationId: createSubscription
       description: Atomically create enabled Subscription/Version and activation boundary in commit-ordered
         journal. Evaluate future eligible transitions, not existing history. Replay same key/request returns
-        same identity and does not reactivate a disabled Subscription.
+        same identity and does not reactivate a disabled Subscription. The evaluator must be installed (422
+        unsupported_evaluator); the pinned Saved Query Version expression and the evaluator configuration
+        must satisfy the evaluator's declared schemas (422 invalid_expression with field /saved_query_version_id,
+        or invalid_subscription_configuration with field /evaluator/configuration/...; message names the
+        first schema issue).
       x-required-permissions:
       - monitoring:write
       responses:
@@ -978,7 +982,8 @@ paths:
         activation position with subscription.updated in every Corpus of the previous and new scope.
         Each later change is judged by the new Version, each earlier one by the Version effective
         before it. Nothing is backfilled and Matches keep the Version that produced them. Enabled
-        state is unchanged. Replay of the same key and request returns the same Version; a changed
+        state is unchanged. The evaluator, expression and configuration are checked as on creation
+        (422 unsupported_evaluator, invalid_expression or invalid_subscription_configuration). Replay of the same key and request returns the same Version; a changed
         request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
       x-required-permissions:
       - monitoring:write
@@ -2790,9 +2795,10 @@ components:
       - plugin_id
       - version
       - configuration
-      description: Pins an installed evaluator implementation/version and its configuration. Production
-        algorithm and native plugin execution contract are deferred. The foundation uses a deterministic
-        fixture adapter behind the same logical port.
+      description: Pins an installed evaluator by plugin id and version, and its configuration. Evaluators
+        are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test
+        deployments may also install the deterministic fixture quivr.fixture@1. The configuration must
+        satisfy the evaluator's declared configuration schema.
     SubscriptionCreate:
       type: object
       additionalProperties: false

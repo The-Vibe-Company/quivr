@@ -57,7 +57,7 @@ func (c *Counter) Write(w io.Writer) {
 	}
 }
 
-// Histogram observes durations in fixed buckets, in seconds.
+// Histogram observes durations (in seconds) or counts in fixed buckets.
 type Histogram struct {
 	name, help string
 	bounds     []float64
@@ -78,7 +78,15 @@ func (h *Histogram) Observe(d time.Duration) {
 	if h == nil || d < 0 {
 		return
 	}
-	s := d.Seconds()
+	h.ObserveValue(d.Seconds())
+}
+
+// ObserveValue records one non-negative value, such as a count per call; a
+// nil histogram or a negative value is ignored.
+func (h *Histogram) ObserveValue(s float64) {
+	if h == nil || s < 0 {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i, b := range h.bounds {

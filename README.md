@@ -121,7 +121,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   cursor expiry.
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
-  Delivery. Matching uses a deterministic built-in evaluator for now.
+  Delivery. Matching is decided by a pinned alert-rule plugin (the
+  `subscription` Contribution), batched per article.
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list

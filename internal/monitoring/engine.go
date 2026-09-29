@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand/v2"
-	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -89,6 +88,10 @@ type EvaluationStore interface {
 	FanOut(ctx context.Context) (int, error)
 	// Claim leases one due pending intent or returns ErrNoWork.
 	Claim(ctx context.Context, lease time.Duration) (Intent, error)
+	// ClaimRelated leases up to limit more due pending evaluation intents of
+	// first's Record Version whose Subscription Version pins the same
+	// evaluator plugin id and version, so one step can batch them.
+	ClaimRelated(ctx context.Context, first Intent, evaluator Evaluator, limit int, lease time.Duration) ([]Intent, error)
 	Target(ctx context.Context, in Intent) (Target, error)
 	Complete(ctx context.Context, in Intent, outcome string) error
 	// Retry keeps the intent pending with a bounded error code and a delay.
@@ -108,167 +111,6 @@ type EvaluationStore interface {
 	// enabled (admission parks it while disabled). It completes the intent.
 	CommitWithdrawal(ctx context.Context, in Intent) (string, error)
 	Backlog(ctx context.Context) (Backlog, error)
-}
-
-// VersionReader reads the canonical text Parts of a Record Version.
-type VersionReader interface {
-	Parts(ctx context.Context, org, corpusID, recordID, versionID string) ([]Part, error)
-}
-
-// Engine runs evaluation with bounded concurrency. Durable state lives in the
-// store; a crash loses at most a lease, after which work is reclaimed and
-// converges on the same Match identity.
-type Engine struct {
-	Store      EvaluationStore
-	Versions   VersionReader
-	Evaluators map[string]EvaluationPort
-	Workers    int
-	Lease      time.Duration
-	Poll       time.Duration
-}
-
-// EvaluatorKey identifies an installed evaluator implementation.
-func EvaluatorKey(e Evaluator) string { return e.PluginID + "@" + e.Version }
-
-const (
-	maxExplanation = 4096
-	maxPartKeys    = 100
-	maxBackoff     = 5 * time.Minute
-)
-
-// Run dispatches and evaluates until ctx ends.
-func (e Engine) Run(ctx context.Context) {
-	workers, poll := max(e.Workers, 1), e.Poll
-	if poll <= 0 {
-		poll = 200 * time.Millisecond
-	}
-	var wg sync.WaitGroup
-	wg.Add(workers + 1)
-	go func() {
-		defer wg.Done()
-		e.loop(ctx, poll, func(ctx context.Context) (bool, error) {
-			n, err := e.Store.FanOut(ctx)
-			return n > 0, err
-		}, "evaluation dispatch unavailable")
-	}()
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
-			e.loop(ctx, poll, e.Step, "evaluation worker unavailable")
-		}()
-	}
-	e.report(ctx)
-	wg.Wait()
-}
-
-func (e Engine) loop(ctx context.Context, poll time.Duration, step func(context.Context) (bool, error), warning string) {
-	for ctx.Err() == nil {
-		attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
-		progressed, err := step(attempt)
-		cancel()
-		if err != nil && ctx.Err() == nil {
-			slog.Warn(warning, "error", boundedError(err))
-		}
-		if progressed && err == nil {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(poll):
-		}
-	}
-}
-
-// report logs bounded backlog diagnostics periodically.
-func (e Engine) report(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		read, cancel := context.WithTimeout(ctx, 5*time.Second)
-		b, err := e.Store.Backlog(read)
-		cancel()
-		if err == nil {
-			slog.Info("evaluation backlog", "pending_intents", b.Pending, "erroring_intents", b.Erroring)
-		}
-	}
-}
-
-// Step claims and processes one intent. It returns false when no work was due.
-func (e Engine) Step(ctx context.Context) (bool, error) {
-	in, err := e.Store.Claim(ctx, e.lease())
-	if errors.Is(err, ErrNoWork) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if in.Kind == IntentWithdrawal {
-		outcome, err := e.Store.CommitWithdrawal(ctx, in)
-		if err != nil {
-			return true, e.retry(ctx, in, "storage_unavailable")
-		}
-		slog.Info("withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
-		return true, nil
-	}
-	target, err := e.Store.Target(ctx, in)
-	if errors.Is(err, ErrNotFound) {
-		return true, e.Store.Complete(ctx, in, OutcomeIneligible)
-	}
-	if err != nil {
-		return true, e.retry(ctx, in, "storage_unavailable")
-	}
-	if !target.Enabled {
-		return true, e.Store.Complete(ctx, in, OutcomeSubscriptionDisabled)
-	}
-	if target.Superseded {
-		return true, e.Store.Complete(ctx, in, OutcomeVersionSuperseded)
-	}
-	evaluator, ok := e.Evaluators[EvaluatorKey(target.Subscription.Evaluator)]
-	if !ok {
-		return true, e.retry(ctx, in, "evaluator_unavailable")
-	}
-	parts, err := e.Versions.Parts(ctx, in.Organization, in.CorpusID, in.RecordID, in.VersionID)
-	if err != nil {
-		return true, e.retry(ctx, in, "content_unavailable")
-	}
-	result, err := evaluator.Evaluate(ctx, EvaluationInput{Definition: target.Definition, Evaluator: target.Subscription.Evaluator, RecordID: in.RecordID, VersionID: in.VersionID, Parts: parts, Enriched: target.Enriched})
-	if err != nil {
-		code := "evaluator_error"
-		if errors.Is(err, ErrEvaluatorConfiguration) {
-			code = "evaluator_configuration_invalid"
-		}
-		return true, e.retry(ctx, in, code)
-	}
-	switch result.Decision {
-	case DecisionNoMatch:
-		outcome, err := e.Store.CommitNoMatch(ctx, in)
-		if err != nil {
-			return true, e.retry(ctx, in, "storage_unavailable")
-		}
-		slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
-		return true, nil
-	case DecisionNotReady:
-		// A later trigger (for example enrichment) creates a new intent.
-		return true, e.Store.Complete(ctx, in, OutcomeNotReady)
-	case DecisionMatch:
-	default:
-		return true, e.retry(ctx, in, "evaluation_invalid")
-	}
-	evidence := MatchEvidence{Evaluator: target.Subscription.Evaluator, Explanation: result.Explanation, PartKeys: result.PartKeys, Details: result.Details}
-	if !validEvidence(evidence, parts) {
-		return true, e.retry(ctx, in, "evaluation_invalid")
-	}
-	outcome, err := e.Store.CommitMatch(ctx, in, evidence)
-	if err != nil {
-		return true, e.retry(ctx, in, "storage_unavailable")
-	}
-	slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
-	return true, nil
 }
 
 func (e Engine) lease() time.Duration {

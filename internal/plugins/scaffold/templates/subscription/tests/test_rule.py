@@ -25,11 +25,14 @@ class MatchingParts(unittest.TestCase):
 class Rule(unittest.TestCase):
     def test_sample_fixture(self):
         response = invoke_subscription_fixture(plugin, FIXTURES / "sample.json")
-        first, second, third = response.decisions
+        first, second, third, producer, namespace = response.decisions
         self.assertEqual(first.decision, "match")
         self.assertEqual(first.evidence.part_keys, ["title", "body"])
         self.assertEqual(second.decision, "no_match")
         self.assertEqual(third.evidence.part_keys, ["body"])
+        self.assertEqual(producer.decision, "match")
+        self.assertEqual(producer.evidence.explanation, "/provenance/producer is 'newsdesk'.")
+        self.assertEqual(namespace.decision, "no_match")
 
     def test_invalid_expression_is_rejected(self):
         request = build_subscription_requests(FIXTURES / "sample.json")[0].to_dict()

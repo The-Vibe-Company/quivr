@@ -298,6 +298,44 @@ class RecordPart(Model):
 
 
 @dataclass(kw_only=True)
+class RecordSource(Model):
+    "Where the Record comes from: its Source Namespace and Record Key, and the Source Position of the accepted revision when the producer sent one. Always sent by the core since Plugin API 0.2."
+
+    namespace: str
+    record_key: str
+    position: str | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorOrigin(Model):
+    "Present when origin is connector."
+
+    instance_id: str
+    kind: str
+
+
+@dataclass(kw_only=True)
+class NormalizationOrigin(Model):
+    "Present when an external normalizer produced the published Manifest."
+
+    plugin_id: str
+    plugin_version: str
+    contribution: Literal["normalizer"] = "normalizer"
+    fallback: bool | None = None
+
+
+@dataclass(kw_only=True)
+class RecordProvenance(Model):
+    "Who produced the Version. Always sent by the core since Plugin API 0.2."
+
+    origin: Literal["client", "connector"]
+    producer: str | None = None
+    producer_version: str | None = None
+    connector: ConnectorOrigin | None = None
+    normalization: NormalizationOrigin | None = None
+
+
+@dataclass(kw_only=True)
 class EvaluatedRecord(Model):
     "The evaluated Record Version."
 
@@ -306,6 +344,10 @@ class EvaluatedRecord(Model):
     record_version_id: str
     enriched: bool
     parts: list[RecordPart]
+    source: RecordSource | None = None
+    accepted_at: str | None = None
+    provenance: RecordProvenance | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
 
 
 @dataclass(kw_only=True)
@@ -314,6 +356,7 @@ class SubscriptionRef(Model):
     subscription_version_id: str
     saved_query_id: str
     saved_query_version_id: str
+    owner: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -326,7 +369,7 @@ class Evaluation(Model):
 
 @dataclass(kw_only=True)
 class SubscriptionRequest(Model):
-    "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size."
+    "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and metadata (source identity, acceptance time, provenance, extensions) and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size."
 
     invocation_id: str
     idempotency_key: str
@@ -364,6 +407,10 @@ class SubscriptionResponse(Model):
 class FixtureRecord(Model):
     enriched: bool | None = None
     parts: list[RecordPart]
+    source: RecordSource | None = None
+    accepted_at: str | None = None
+    provenance: RecordProvenance | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
 
 
 @dataclass(kw_only=True)
@@ -376,7 +423,7 @@ class FixtureEvaluation(Model):
 
 @dataclass(kw_only=True)
 class SubscriptionFixture(Model):
-    "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property."
+    "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, default the record metadata (source dev-namespace/dev-record-<digest>, origin client, accepted_at 2026-01-01T00:00:00Z) when the fixture omits it, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property."
 
     description: str | None = None
     configuration: dict[str, Any] | None = None
@@ -389,6 +436,7 @@ Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
     "BlobContent",
+    "ConnectorOrigin",
     "Decision",
     "Discovery",
     "ErrorEnvelope",
@@ -408,6 +456,7 @@ __all__ = [
     "ManifestConfiguration",
     "ManifestContent",
     "ManifestContributions",
+    "NormalizationOrigin",
     "NormalizationProvenance",
     "NormalizationProvenanceFallback",
     "NormalizerContribution",
@@ -419,6 +468,8 @@ __all__ = [
     "PluginManifest",
     "Provenance",
     "RecordPart",
+    "RecordProvenance",
+    "RecordSource",
     "RelationInput",
     "ResponseWarning",
     "RetryIntent",

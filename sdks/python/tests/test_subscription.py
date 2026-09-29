@@ -12,6 +12,7 @@ from quivr_plugin import (
     match,
     no_match,
     not_ready,
+    record_field,
 )
 from quivr_plugin.testing import build_subscription_requests, expected_decisions, invoke_subscription_fixture
 
@@ -139,6 +140,34 @@ class SubscriptionTest(unittest.TestCase):
         # The plugin declares max_batch_size 1: two batches, merged decisions.
         response = invoke_subscription_fixture(self.plugin, STRIKE)
         self.assertEqual([d.decision for d in response.decisions], ["match", "no_match"])
+        # Metadata a fixture omits takes the development defaults of quivr plugin dev.
+        record = batches[0].record
+        self.assertEqual((record.source.namespace, record.source.record_key), ("dev-namespace", f"dev-record-{digest[:16]}"))
+        self.assertEqual((record.accepted_at, record.provenance.origin), ("2026-01-01T00:00:00Z", "client"))
+
+    def test_record_metadata_reaches_the_handler(self) -> None:
+        body = request()
+        body["record"].update({
+            "source": {"namespace": "wire", "record_key": "story-42", "position": "7"},
+            "accepted_at": "2026-09-29T08:00:03Z",
+            "provenance": {"origin": "connector", "producer": "connector-7", "producer_version": "rss/1",
+                           "connector": {"instance_id": "connector-7", "kind": "rss"}},
+            "extensions": {"example.editorial": {"schema_version": "1", "data": {"author": "Jane Doe"}}},
+        })
+        invocation = SubscriptionInvocation(request=SubscriptionRequest.from_dict(body), manifest=self.plugin.manifest)
+        self.assertEqual(invocation.source.record_key, "story-42")
+        self.assertEqual(invocation.provenance.connector.kind, "rss")
+        self.assertEqual(invocation.accepted_at, "2026-09-29T08:00:03Z")
+        self.assertEqual(invocation.field("/provenance/origin"), "connector")
+        self.assertEqual(invocation.field("/extensions/example.editorial/data/author"), "Jane Doe")
+        self.assertIsNone(invocation.field("/provenance/normalization/plugin_id"))
+        self.assertEqual(record_field({"a/b": {"~": 1}}, "/a~1b/~0"), 1)
+        # The handler accepts the request with metadata and still decides.
+        reply = self.plugin.evaluate(body)
+        self.assertEqual(reply.status, 200, reply.body)
+        # An origin other than client or connector is refused as an invalid request.
+        body["record"]["provenance"]["origin"] = "robot"
+        self.assertEqual(self.plugin.evaluate(body).status, 400)
 
 
 if __name__ == "__main__":

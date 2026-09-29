@@ -36,8 +36,9 @@ var (
 	ErrInvalidOwner = publicerr.New("invalid_owner")
 )
 
-// The deterministic fixture evaluator is the only installed evaluator. It is
-// a test double for notification mechanics, not a relevance algorithm.
+// The deterministic fixture evaluator is a test double for notification
+// mechanics, not a relevance algorithm. It is installed only where a
+// deployment enables it for tests; real evaluators are pinned plugins.
 const (
 	FixtureEvaluator        = "quivr.fixture"
 	FixtureEvaluatorVersion = "1"
@@ -214,6 +215,8 @@ type Service struct {
 	Destinations map[string]Destination
 	// MatchStore reads Match history and Deliveries.
 	MatchStore MatchStore
+	// Evaluators are the installed evaluators a Subscription Version may pin.
+	Evaluators Evaluators
 }
 
 func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in SavedQueryInput) (SavedQuery, error) {
@@ -316,7 +319,7 @@ func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, 
 
 // validSubscription checks the evaluator and destination of a Subscription Version.
 func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, destination string) error {
-	if evaluator.PluginID != FixtureEvaluator || evaluator.Version != FixtureEvaluatorVersion {
+	if _, ok := s.Evaluators[EvaluatorKey(evaluator)]; !ok {
 		return ErrUnsupportedEvaluator
 	}
 	if tooLarge(evaluator.Configuration) {
@@ -326,6 +329,19 @@ func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, dest
 		return ErrUnknownDestination
 	}
 	return nil
+}
+
+// validPair checks the Saved Query Version expression and the evaluator
+// configuration against the schemas the installed evaluator declares.
+func (s Service) validPair(evaluator Evaluator, q SavedQueryVersion) error {
+	expression, configuration := q.Definition.Expression, evaluator.Configuration
+	if expression == nil {
+		expression = map[string]any{}
+	}
+	if configuration == nil {
+		configuration = map[string]any{}
+	}
+	return s.Evaluators[EvaluatorKey(evaluator)].Validate(expression, configuration)
 }
 
 // pinnable reads the Saved Query Version a Subscription Version would pin and
@@ -358,6 +374,9 @@ func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in 
 	// store requires the current Version only for a new Subscription.
 	q, err := s.pinnable(ctx, scope, in.SavedQueryID, in.SavedQueryVersionID)
 	if err != nil {
+		return Subscription{}, err
+	}
+	if err = s.validPair(in.Evaluator, q); err != nil {
 		return Subscription{}, err
 	}
 	return s.Store.CreateSubscription(ctx, scope.Organization, in, q)
@@ -450,6 +469,9 @@ func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Sco
 	}
 	q, err := s.pinnable(ctx, scope, sub.Current.SavedQueryID, in.SavedQueryVersionID)
 	if err != nil {
+		return SubscriptionVersion{}, err
+	}
+	if err = s.validPair(in.Evaluator, q); err != nil {
 		return SubscriptionVersion{}, err
 	}
 	return s.Store.CreateSubscriptionVersion(ctx, scope.Organization, id, in, q)

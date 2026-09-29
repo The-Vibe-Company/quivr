@@ -19,9 +19,9 @@ from .manifest import (
 from .models import *  # noqa: F403
 from .models import __all__ as _models
 from .server import Invocation, Plugin, Reply
-from .subscription import SubscriptionInvocation, match, no_match, not_ready
+from .subscription import SubscriptionInvocation, match, no_match, not_ready, record_field
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Library logging stays silent unless the plugin configures handlers (Plugin.serve does).
 _logging.getLogger("quivr_plugin").addHandler(_logging.NullHandler())
@@ -49,5 +49,6 @@ __all__ = [
     "no_match",
     "not_ready",
     "read_input",
+    "record_field",
     "validate_configuration",
 ]

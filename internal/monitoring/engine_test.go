@@ -13,15 +13,22 @@ import (
 // fakeEvaluation records what the engine asked the store to do; the real
 // claim/commit semantics are proven against PostgreSQL.
 type fakeEvaluation struct {
-	intents   []monitoring.Intent
+	intents []monitoring.Intent
+	// related is what ClaimRelated leases, once.
+	related   []monitoring.Intent
 	target    monitoring.Target
+	targets   map[string]monitoring.Target
 	completed []string
 	retried   []string
 	committed []monitoring.MatchEvidence
+	// matched and negatives name the Subscription Versions committed.
+	matched   []string
+	negatives []string
 	negative  int
 	withdrawn int
 	targeted  int
 	failing   bool
+	limit     int
 }
 
 func (f *fakeEvaluation) FanOut(context.Context) (int, error) { return 0, nil }
@@ -33,8 +40,20 @@ func (f *fakeEvaluation) Claim(context.Context, time.Duration) (monitoring.Inten
 	f.intents = f.intents[1:]
 	return in, nil
 }
-func (f *fakeEvaluation) Target(context.Context, monitoring.Intent) (monitoring.Target, error) {
+func (f *fakeEvaluation) ClaimRelated(_ context.Context, _ monitoring.Intent, _ monitoring.Evaluator, limit int, _ time.Duration) ([]monitoring.Intent, error) {
+	f.limit = limit
+	related := f.related
+	if len(related) > limit {
+		related = related[:limit]
+	}
+	f.related = nil
+	return related, nil
+}
+func (f *fakeEvaluation) Target(_ context.Context, in monitoring.Intent) (monitoring.Target, error) {
 	f.targeted++
+	if t, ok := f.targets[in.SubscriptionVersionID]; ok {
+		return t, nil
+	}
 	return f.target, nil
 }
 func (f *fakeEvaluation) Complete(_ context.Context, _ monitoring.Intent, outcome string) error {
@@ -48,12 +67,14 @@ func (f *fakeEvaluation) Retry(_ context.Context, _ monitoring.Intent, code stri
 	f.retried = append(f.retried, code)
 	return nil
 }
-func (f *fakeEvaluation) CommitMatch(_ context.Context, _ monitoring.Intent, ev monitoring.MatchEvidence) (string, error) {
+func (f *fakeEvaluation) CommitMatch(_ context.Context, in monitoring.Intent, ev monitoring.MatchEvidence) (string, error) {
 	f.committed = append(f.committed, ev)
+	f.matched = append(f.matched, in.SubscriptionVersionID)
 	return monitoring.OutcomeMatched, nil
 }
-func (f *fakeEvaluation) CommitNoMatch(context.Context, monitoring.Intent) (string, error) {
+func (f *fakeEvaluation) CommitNoMatch(_ context.Context, in monitoring.Intent) (string, error) {
 	f.negative++
+	f.negatives = append(f.negatives, in.SubscriptionVersionID)
 	return monitoring.OutcomeNoLongerMatches, nil
 }
 func (f *fakeEvaluation) CommitWithdrawal(context.Context, monitoring.Intent) (string, error) {
@@ -69,20 +90,27 @@ func (f *fakeEvaluation) Backlog(context.Context) (monitoring.Backlog, error) {
 
 type parts []monitoring.Part
 
-func (p parts) Parts(context.Context, string, string, string, string) ([]monitoring.Part, error) {
-	return p, nil
+func (p parts) Article(context.Context, string, string, string, string) (monitoring.Article, error) {
+	return monitoring.Article{Parts: p}, nil
 }
 
+// badEvaluator answers every item with the same evaluation.
 type badEvaluator struct{ out monitoring.Evaluation }
 
-func (b badEvaluator) Evaluate(context.Context, monitoring.EvaluationInput) (monitoring.Evaluation, error) {
-	return b.out, nil
+func (badEvaluator) MaxBatch() int                                 { return 8 }
+func (badEvaluator) Validate(map[string]any, map[string]any) error { return nil }
+func (b badEvaluator) Evaluate(_ context.Context, batch monitoring.Batch) ([]monitoring.Outcome, error) {
+	out := make([]monitoring.Outcome, len(batch.Items))
+	for i := range out {
+		out[i] = monitoring.Outcome{Evaluation: b.out}
+	}
+	return out, nil
 }
 
 func engineFor(store *fakeEvaluation, decisions map[string]any, enabled bool) monitoring.Engine {
 	store.intents = []monitoring.Intent{{Organization: "org", SubscriptionID: "sub", SubscriptionVersionID: "subv", Sequence: 7, CorpusID: "c", RecordID: "r", VersionID: "v"}}
 	store.target = monitoring.Target{Enabled: enabled, Subscription: monitoring.SubscriptionVersion{Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": decisions}}}}
-	return monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "Dépêche ALERTE PANNE"}}, Evaluators: map[string]monitoring.EvaluationPort{monitoring.FixtureEvaluator + "@" + monitoring.FixtureEvaluatorVersion: monitoring.Fixture{}}}
+	return monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "Dépêche ALERTE PANNE"}}, Evaluators: monitoring.FixtureEvaluators()}
 }
 
 func TestEngineStepOutcomes(t *testing.T) {
@@ -216,7 +244,7 @@ func TestEngineRejectsUnboundedEvidence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &fakeEvaluation{}
 			engine := engineFor(store, nil, true)
-			engine.Evaluators = map[string]monitoring.EvaluationPort{monitoring.FixtureEvaluator + "@" + monitoring.FixtureEvaluatorVersion: badEvaluator{out}}
+			engine.Evaluators = monitoring.Evaluators{monitoring.FixtureEvaluator + "@" + monitoring.FixtureEvaluatorVersion: badEvaluator{out}}
 			if _, err := engine.Step(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -256,7 +284,7 @@ func TestMatchReadsRequireReadScopeAndVisibleSubscription(t *testing.T) {
 	ctx := context.Background()
 	store := newStore()
 	store.subscriptions["org/sub"] = monitoring.Subscription{ID: "sub", Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "sub", CorpusIDs: []string{"a", "b"}}}
-	service := monitoring.Service{Store: store, MatchStore: matchStore{match: monitoring.Match{ID: "m", SubscriptionID: "sub"}, delivery: monitoring.Delivery{ID: "d", SubscriptionID: "sub"}}}
+	service := monitoring.Service{Store: store, Evaluators: monitoring.FixtureEvaluators(), MatchStore: matchStore{match: monitoring.Match{ID: "m", SubscriptionID: "sub"}, delivery: monitoring.Delivery{ID: "d", SubscriptionID: "sub"}}}
 	full := corpus.Scope{Organization: "org", Actions: []string{"monitoring:read"}, Corpora: []string{"a", "b"}}
 	if _, err := service.Match(ctx, full, "m"); err != nil {
 		t.Fatal(err)

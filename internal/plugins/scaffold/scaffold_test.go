@@ -65,7 +65,7 @@ func TestSubscriptionTemplatePassesInspect(t *testing.T) {
 		t.Fatalf("manifest %+v, compatibility %+v", m.Contributions, report.Compatibility)
 	}
 	batches, issues, err := devhost.BuildSubscriptionRequests(filepath.Join(dir, "fixtures", "sample.json"), m)
-	if err != nil || len(issues) != 0 || len(batches) != 1 || len(batches[0].Expect) != 3 {
+	if err != nil || len(issues) != 0 || len(batches) != 1 || len(batches[0].Expect) != 5 {
 		t.Fatalf("sample fixture: %d batches, %+v %v", len(batches), issues, err)
 	}
 	// The expression schema discriminates alert kinds on "kind".

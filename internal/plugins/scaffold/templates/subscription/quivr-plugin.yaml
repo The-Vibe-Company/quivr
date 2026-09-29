@@ -24,6 +24,20 @@ contributions:
               minLength: 1
               maxLength: 256
               description: Phrase that must appear in a text Part.
+        - type: object
+          additionalProperties: false
+          required: [kind, pointer, equals]
+          properties:
+            kind:
+              const: metadata
+            pointer:
+              type: string
+              pattern: "^/(source|provenance|extensions|accepted_at)(/.*)?$"
+              maxLength: 256
+              description: JSON Pointer into the article's metadata, for example /provenance/producer, /source/namespace or /extensions/<namespace>/data/author.
+            equals:
+              type: [string, number, boolean]
+              description: Value the metadata field must equal.
     # Per-Subscription settings, validated by the core when a Subscription is created.
     configuration_schema:
       type: object

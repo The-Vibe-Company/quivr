@@ -185,13 +185,13 @@ func (s EvaluationStore) Target(ctx context.Context, in monitoring.Intent) (moni
 	var t monitoring.Target
 	v := &t.Subscription
 	var evaluator, definition []byte
-	err := s.Pool.QueryRow(ctx, `SELECT s.enabled,`+supersededSQL("v", "$5")+`,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,
+	err := s.Pool.QueryRow(ctx, `SELECT s.enabled,`+supersededSQL("v", "$5")+`,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,coalesce(s.owner,''),
   EXISTS(SELECT 1 FROM segments sg JOIN embedding_coverage ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`)
 FROM subscription_versions v
 JOIN subscriptions s ON (s.organization,s.id)=(v.organization,v.subscription_id)
 JOIN saved_query_versions q ON (q.organization,q.id)=(v.organization,v.saved_query_version_id)
 WHERE v.organization=$1 AND v.id=$2`, in.Organization, in.SubscriptionVersionID, in.VersionID, in.CorpusID, in.Sequence).Scan(
-		&t.Enabled, &t.Superseded, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &t.Enriched)
+		&t.Enabled, &t.Superseded, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &v.Owner, &t.Enriched)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, monitoring.ErrNotFound
 	}

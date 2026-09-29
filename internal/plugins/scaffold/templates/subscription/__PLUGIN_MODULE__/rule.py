@@ -1,6 +1,8 @@
-"""An alert rule: an article matches when a phrase appears in one of its text Parts.
+"""An alert rule: an article matches when a phrase appears in one of its text
+Parts, or when one of its metadata fields has a given value.
 
-Quivr sends one article (a Record Version's text Parts) with a batch of
+Quivr sends one article (a Record Version's text Parts and metadata: source,
+acceptance time, provenance and extensions) with a batch of
 distinct evaluations, each a saved search's expression and a Subscription's
 configuration, and expects one decision per evaluation. A match carries
 evidence: an explanation, the keys of the Parts that support it and small
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from quivr_plugin import Decision, Evaluation, Plugin, RecordPart, SubscriptionInvocation, TerminalError, match, no_match
+from quivr_plugin import Decision, Evaluation, Plugin, RecordPart, SubscriptionInvocation, TerminalError, match, no_match, record_field
 
 MANIFEST = Path(__file__).resolve().parent.parent / "quivr-plugin.yaml"
 
@@ -30,11 +32,22 @@ def matching_parts(parts: list[RecordPart], text: str, *, case_sensitive: bool =
     return [p.key for p in parts if needle in p.text.casefold()]
 
 
-def decide(parts: list[RecordPart], evaluation: Evaluation) -> Decision:
+def decide_metadata(record: dict, evaluation: Evaluation) -> Decision:
+    """A metadata field of the article equals a value, for example the producer of its provenance."""
+    pointer, wanted = evaluation.expression["pointer"], evaluation.expression["equals"]
+    value = record_field(record, pointer)
+    if value != wanted:
+        return no_match(evaluation)
+    return match(evaluation, f"{pointer} is {wanted!r}.", details={"kind": "metadata", "pointer": pointer, "equals": wanted})
+
+
+def decide(parts: list[RecordPart], evaluation: Evaluation, record: dict | None = None) -> Decision:
     """Decide one evaluation for one article."""
     expression = evaluation.expression
+    if expression.get("kind") == "metadata":
+        return decide_metadata(record or {}, evaluation)
     if expression.get("kind") != "substring":
-        # The expression schema only admits substring; a new kind needs a new branch here.
+        # The expression schema admits substring and metadata; a new kind needs a new branch here.
         raise TerminalError("unsupported_kind", f"evaluation {evaluation.id} has the unsupported kind {expression.get('kind')!r}")
     text = expression["text"]
     case_sensitive = evaluation.configuration.get("case_sensitive", False)
@@ -51,6 +64,7 @@ def decide(parts: list[RecordPart], evaluation: Evaluation) -> Decision:
 
 @plugin.subscription
 def evaluate(invocation: SubscriptionInvocation) -> list[Decision]:
-    decisions = [decide(invocation.parts, evaluation) for evaluation in invocation.evaluations]
+    record = invocation.record.to_dict()
+    decisions = [decide(invocation.parts, evaluation, record) for evaluation in invocation.evaluations]
     invocation.logger.info("evaluated", extra={"evaluations": len(decisions), "matches": sum(d.decision == "match" for d in decisions)})
     return decisions

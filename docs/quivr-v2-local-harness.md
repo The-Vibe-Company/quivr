@@ -22,8 +22,9 @@ provides recovery scenarios and operational evidence. Its tests also inspect
 PostgreSQL, Temporal and Weaviate, so they are not the public acceptance suite.
 Its fake embeddings and external fake normalizer are not the reference baseline.
 Use THE-553's [pinned local E5/TEI profile and CC0 fixture](https://github.com/The-Vibe-Company/quivr-v2/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md).
-The monitoring predicate remains a deterministic fixture adapter; production
-matching belongs to a future plugin.
+Monitoring matches through a pinned alert-rule plugin (the `subscription`
+template, see below); the deterministic fixture evaluator stays installed for
+the notification-mechanics tests.
 
 ## Commands and isolation
 
@@ -433,8 +434,9 @@ The Plugin Contract Runner separately checks plugin input/result schemas and
 timeouts. Do not build a plugin registry or force local calls over HTTP for the
 harness. Private customer fixtures are not prerequisites for the public CC0 journey.
 
-The harness pins one external normalizer, because Plugin API v0 pins a single
-plugin. `scripts/normalizer_plugin.py` pins it in the stack configuration and,
+The harness pins one external normalizer and one alert rule together.
+`scripts/normalizer_plugin.py` pins the normalizer in the stack configuration's
+single `plugin` entry and,
 for pdf-text and the template, runs it as its own process with the repository
 SDK. `QUIVR_NORMALIZER` chooses it for `make dev`:
 
@@ -478,7 +480,22 @@ Verification starts on the template and runs these steps in order:
    `normalizer_failed` diagnostic naming pdf-text and a `record.quarantined`
    change event, and a Record ingested afterwards is still searchable.
 
+10. Next to pdf-text, the alert-rule template (`scripts/subscription_plugin.py`)
+    decides alerts: a matching article gives exactly one signed webhook with the
+    plugin's evidence, a non-matching one gives none, an invalid expression or
+    configuration is 422 at Subscription creation, and a rule on the
+    provenance producer matches only that producer's article.
+11. With the alert-rule plugin stopped, a matching article becomes searchable
+    and no Match appears; after the restart the delayed evaluation completes
+    with one Match and one acknowledged webhook.
+
 Later steps keep the pdf-text pin.
+
+Every stack also pins the `quivr plugin init --kind subscription` template,
+scaffolded once as `alert-rules` in `.scratch/<project>/subscription-plugin`,
+through the configuration's `plugins` list (`scripts/subscription_plugin.py`).
+Its log is `.scratch/<project>/subscription-plugin.log`, and Subscriptions pin
+it as `{"plugin_id": "alert-rules", "version": "0.1.0"}`.
 
 The PostgreSQL adapter suite also kills the test plugin process in the middle of an
 invocation, restarts it, and checks that the Version ends with exactly one published

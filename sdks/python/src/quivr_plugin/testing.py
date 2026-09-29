@@ -27,6 +27,8 @@ from .models import (
     InvocationFixture,
     NormalizerRequest,
     NormalizerResponse,
+    RecordProvenance,
+    RecordSource,
     SourceIdentity,
     SubscriptionFixture,
     SubscriptionRef,
@@ -35,6 +37,9 @@ from .models import (
 )
 from .schema import protocol_errors
 from .server import Plugin, Reply
+
+# Acceptance time of a subscription fixture that does not set one (as quivr plugin dev).
+DEV_ACCEPTED_AT = "2026-01-01T00:00:00Z"
 
 
 def load_fixture(path: str | Path) -> InvocationFixture:
@@ -107,13 +112,20 @@ def build_subscription_requests(fixture_path: str | Path, *, max_batch_size: int
     Evaluations are numbered e1, e2, ... and evaluation n stands for Subscription
     dev-subscription-n; the Record Version ids and idempotency keys derive from the
     SHA-256 of the fixture bytes, exactly like quivr plugin dev and the Contract Runner.
+    Record metadata the fixture omits defaults to source dev-namespace/dev-record-<digest>,
+    origin client and DEV_ACCEPTED_AT.
     """
     raw = Path(fixture_path).read_bytes()
     fixture = load_subscription_fixture(fixture_path)
     digest = hashlib.sha256(raw).hexdigest()
     short = digest[:16]
+    # Metadata the fixture omits takes the same development defaults as quivr plugin dev.
     record = EvaluatedRecord(corpus_id="dev-corpus", record_id=f"dev-record-{short}", record_version_id=f"dev-version-{short}",
-                             enriched=bool(fixture.record.enriched), parts=fixture.record.parts)
+                             enriched=bool(fixture.record.enriched), parts=fixture.record.parts,
+                             source=fixture.record.source or RecordSource(namespace="dev-namespace", record_key=f"dev-record-{short}"),
+                             accepted_at=fixture.record.accepted_at or DEV_ACCEPTED_AT,
+                             provenance=fixture.record.provenance or RecordProvenance(origin="client"),
+                             extensions=fixture.record.extensions)
     evaluations = [
         Evaluation(
             id=f"e{n}",

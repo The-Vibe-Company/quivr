@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .manifest import LoadedManifest
-from .models import Decision, EvaluatedRecord, Evaluation, Evidence, RecordPart, SubscriptionRequest, SubscriptionResponse
+from .models import Decision, EvaluatedRecord, Evaluation, Evidence, RecordPart, RecordProvenance, RecordSource, SubscriptionRequest, SubscriptionResponse
 
 # Evidence bounds, mirroring the monitoring engine's Match evidence bounds.
 MAX_EXPLANATION_CHARACTERS = 4096
@@ -58,6 +58,27 @@ class SubscriptionInvocation:
         return self.request.record.enriched
 
     @property
+    def source(self) -> RecordSource | None:
+        """Source Namespace, Record Key and Source Position of the evaluated Version."""
+        return self.request.record.source
+
+    @property
+    def provenance(self) -> RecordProvenance | None:
+        """Who produced the Version: origin client or connector, producer, connector kind, normalization."""
+        return self.request.record.provenance
+
+    @property
+    def accepted_at(self) -> str | None:
+        """When Quivr accepted the revision (RFC 3339, UTC)."""
+        return self.request.record.accepted_at
+
+    def field(self, pointer: str, default: Any = None) -> Any:
+        """Read a value of the evaluated record by JSON Pointer, for example
+        ``/provenance/producer``, ``/source/namespace`` or
+        ``/extensions/example.editorial/data/author``; ``default`` when absent."""
+        return record_field(self.request.record.to_dict(), pointer, default)
+
+    @property
     def evaluations(self) -> list[Evaluation]:
         """The distinct evaluations to decide; answer each exactly once."""
         return self.request.evaluations
@@ -66,6 +87,24 @@ class SubscriptionInvocation:
     def configuration(self) -> dict[str, Any]:
         """Plugin (installer) configuration, already validated against the manifest configuration schema."""
         return self.request.configuration
+
+
+def record_field(document: dict[str, Any], pointer: str, default: Any = None) -> Any:
+    """Resolve an RFC 6901 JSON Pointer in a record document; ``default`` when a step is missing."""
+    if pointer == "":
+        return document
+    if not pointer.startswith("/"):
+        raise ValueError(f"{pointer!r} is not a JSON Pointer; start it with /")
+    value: Any = document
+    for token in pointer[1:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and token in value:
+            value = value[token]
+        elif isinstance(value, list) and token.isdigit() and int(token) < len(value):
+            value = value[int(token)]
+        else:
+            return default
+    return value
 
 
 def _id(evaluation: Evaluation | str) -> str:

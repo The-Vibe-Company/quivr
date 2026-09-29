@@ -358,7 +358,7 @@
       "schema": "subscription-request.schema.json",
       "valid": true,
       "schema_valid": true,
-      "description": "One Record Version and two distinct evaluations; the first stands for two Subscriptions."
+      "description": "One Record Version with its metadata (source, acceptance time, connector provenance, extensions) and two distinct evaluations; the first stands for two Subscriptions."
     },
     {
       "file": "requests/subscription/missing-record.json",
@@ -380,6 +380,13 @@
       "valid": false,
       "schema_valid": false,
       "description": "Part vectors are reserved and never sent in Plugin API 0.2."
+    },
+    {
+      "file": "requests/subscription/unknown-origin.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Provenance origin is client or connector."
     },
     {
       "file": "responses/subscription/valid.json",
@@ -515,6 +522,13 @@
       "valid": true,
       "schema_valid": true,
       "description": "Subscription fixture: record Parts and two evaluations with expected decisions."
+    },
+    {
+      "file": "subscriptions/metadata.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A subscription fixture carrying record metadata: source, acceptance time, provenance and extensions."
     },
     {
       "file": "subscriptions/missing-expression.json",

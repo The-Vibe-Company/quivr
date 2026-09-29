@@ -108,7 +108,7 @@ a new Match for them.
 
 The reference journey stays small: create a Saved Query and an enabled
 Subscription with one webhook destination; ingest text; observe an eligible
-version; obtain a fixture evaluator's decision; record a Match and receive its
+version; obtain the pinned evaluator's decision; record a Match and receive its
 signed reference-only notification. A temporary webhook failure exercises retry
 without repeating evaluation or creating another logical Delivery.
 
@@ -161,12 +161,19 @@ Current authorization is checked again before exposing explanations or content.
 
 ### Implemented definitions (THE-653)
 
-- **Evaluator:** the only installed evaluator is the deterministic fixture,
-  `plugin_id: "quivr.fixture"`, `version: "1"`. Any other identity is rejected
-  with 422 `unsupported_evaluator`. Its `configuration` is pinned verbatim
-  (at most 16 KiB, like the Saved Query `expression`) and echoed on every
-  Subscription and Subscription Version read; its semantics belong to the
-  evaluation slice.
+- **Evaluator:** a Subscription Version pins an installed evaluator by
+  `plugin_id` and `version`: the `subscription` Contribution of a plugin
+  pinned at startup (THE-722), or the deterministic fixture
+  `quivr.fixture@1` where a test deployment sets
+  `monitoring_fixture_evaluator`. Any other identity is rejected with 422
+  `unsupported_evaluator`. The pinned Saved Query Version `expression` and the
+  evaluator `configuration` are validated against the plugin's declared
+  `expression_schema` and `configuration_schema` when the Subscription or a
+  new Subscription Version is created: 422 `invalid_expression` (field
+  `/saved_query_version_id`) or `invalid_subscription_configuration` (field
+  `/evaluator/configuration/...`), with the first schema issue as the message.
+  The `configuration` is pinned verbatim (at most 16 KiB, like the Saved Query
+  `expression`) and echoed on every Subscription and Subscription Version read.
 - **Destinations:** the deployment configuration's `destinations` map binds each
   `destination_id` to one Organization, URL and signing secret. Real deployments
   set `secret_env` to the name of an environment variable holding the secret;
@@ -217,20 +224,52 @@ Current authorization is checked again before exposing explanations or content.
   restart neither loses nor duplicates work. A later enrichment trigger is new
   work for the same Version.
 - **Runtime:** evaluation runs in the `worker` process as a PostgreSQL claim
-  loop with four concurrent evaluators, separate from future webhook
-  delivery. This deliberately departs from "Temporal executes durable work":
+  loop with four concurrent workers, separate from webhook delivery. This deliberately departs from "Temporal executes durable work":
   the durable state (checkpoints and intents) lives in PostgreSQL, one-minute
   leases recover work from crashed claims, the commit is idempotent on the
   unique Match identity, and a short in-process evaluator call needs no
   Temporal history. Monitoring therefore keeps evaluating during a Temporal
-  outage. The evaluator sits behind `monitoring.EvaluationPort`; a later remote
-  evaluator can run as a Temporal activity behind that port without changing
-  the commit path.
+  outage. The evaluator sits behind `monitoring.EvaluationPort`; the plugin
+  evaluator (`pluginhttp.Evaluator`) speaks Plugin Protocol v0 behind it
+  without changing the commit path.
+- **Batching (THE-722):** a worker claims one due intent, then leases the other
+  due intents of the same Record Version whose Subscription Version pins the
+  same evaluator (at most 64, and at most four times the plugin's
+  `max_batch_size`), across Subscriptions and owners. Intents whose Saved
+  Query expression and evaluator configuration are identical become one
+  evaluation, sent once; its decision fans back out to every intent, and each
+  intent then commits exactly as a single evaluation would (Match uniqueness,
+  corrections, evidence bounds). Evaluations are sent in calls of at most
+  `max_batch_size`, at most four at a time; a request over the protocol's
+  16 MiB bound is halved before it is sent. Because the protocol reports an
+  error per call, a call that fails with a terminal plugin error or an
+  invalid answer is halved until the failing evaluation fails alone (within 18
+  calls per batch), so it keeps only its own Subscriptions pending. An
+  unavailable or timed-out plugin, or a `retryable` error envelope, fails the
+  whole batch, which is retried as one. The call deadline is the declared
+  `timeout_ms`, capped at 30 seconds, and a step never outlives its lease.
+  The worker's `/metrics` reports `quivr_evaluation_calls_per_record_version`,
+  `quivr_evaluation_expressions_per_call` and
+  `quivr_evaluation_subscriptions_per_call`.
+- **What a rule sees:** the Version's text Parts, whether it is enriched, and
+  its metadata: Source Namespace, Record Key and Source Position, acceptance
+  time, provenance (origin `client` or `connector`, producer, connector
+  instance and kind, normalization) and extensions. The origin is `connector`
+  only for revisions accepted under the idempotency-key family reserved to
+  Connector Instances.
+- **When rules run:** when the Version becomes searchable
+  (`record.retrieval_ready`), and again on `record.enrichment_available`. A
+  rule that needs enrichment answers `not_ready` until `enriched` is true;
+  nothing is evaluated at acceptance time, before the Version is searchable.
 - **Decisions:** `no_match` and `not_ready` complete the intent without a Match;
   a `not_ready` Version is evaluated again by its next trigger. An evaluator
   error keeps the intent pending with a bounded error code and jittered
   exponential backoff from one second to five minutes; it never becomes a
-  negative decision. The worker logs `pending_intents` and `erroring_intents`
+  negative decision. A plugin that cannot be reached, times out or serves
+  another manifest is `evaluator_unavailable`; a declared plugin error is
+  `evaluator_error`; an answer `CheckSubscriptionOutput` refuses (a missing
+  or extra decision, evidence out of bounds) is `evaluation_invalid`. A plugin
+  outage therefore delays alerts; it never loses or skips them. The worker logs `pending_intents` and `erroring_intents`
   every 30 seconds.
 - **Fixture semantics:** the pinned `configuration` is
   `{"decisions": {"<marker>": "<decision>", …, "default": "<decision>"}}`.
@@ -582,9 +621,9 @@ never interprets it.
 
 The initial adapter consumes pinned query/subscription/evaluator configuration,
 an eligible Record Version and authorized input references. It returns `match`
-with evidence, `no_match`, or `not_ready`; execution errors remain errors. This
-logical seam is sufficient for the fixture evaluator. It does not freeze the
-production plugin's wire protocol or matching algorithm.
+with evidence, `no_match`, or `not_ready`; execution errors remain errors. The
+plugin wire protocol behind this seam is the `subscription` Contribution of
+Plugin Protocol v0 (`contracts/plugins/v0/README.md`).
 
 On a `record.searchable`, `record.corrected` or relevant
 `record.enrichment_available` event, enumerate active scoped Subscriptions in

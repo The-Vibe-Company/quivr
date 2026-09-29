@@ -263,3 +263,7 @@ func validateObject(name, code string, value []byte, schemaRaw json.RawMessage) 
 	}
 	return nil
 }
+
+// SubscriptionMaxRequestBytes bounds a subscription request: the core never
+// sends a larger one and splits a batch that would exceed it.
+const SubscriptionMaxRequestBytes = 16 << 20

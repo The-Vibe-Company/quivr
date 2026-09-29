@@ -275,7 +275,7 @@ A contribution that turns one accepted blob of a routed media type into the part
 _Avoid_: Parser, converter, enricher
 
 **Alert Rule**:
-A subscription contribution: it decides, for one record version and a batch of distinct saved query expressions and subscription configurations, whether each one is a match, no match or not ready yet, with bounded evidence for a match. It declares the schemas of the expressions and configurations it interprets.
+A subscription contribution: it decides, for one record version and a batch of distinct saved query expressions and subscription configurations, whether each one is a match, no match or not ready yet, with bounded evidence for a match. It declares the schemas of the expressions and configurations it interprets. It sees the record version's text parts and metadata (source identity, acceptance time, provenance, extensions); several installed plugins can each provide one, and a subscription version names the one it uses by plugin id and version.
 _Avoid_: Evaluator plugin, matcher, filter
 
 **Normalizer Route**:

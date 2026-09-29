@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "subscription invocation request, v0",
-  "description": "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size.",
+  "description": "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and metadata (source identity, acceptance time, provenance, extensions) and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -88,6 +88,112 @@
               "vector": false
             }
           }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "namespace",
+            "record_key"
+          ],
+          "description": "Where the Record comes from: its Source Namespace and Record Key, and the Source Position of the accepted revision when the producer sent one. Always sent by the core since Plugin API 0.2.",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "record_key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "position": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Opaque source ordering value (for example a feed timestamp or a mail change key)."
+            }
+          }
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When Quivr accepted the revision this Version publishes (RFC 3339, UTC). Always sent by the core since Plugin API 0.2."
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "origin"
+          ],
+          "description": "Who produced the Version. Always sent by the core since Plugin API 0.2.",
+          "properties": {
+            "origin": {
+              "enum": [
+                "client",
+                "connector"
+              ],
+              "description": "connector for a revision a Connector Instance acquired, client for one an API client submitted. A client cannot claim connector."
+            },
+            "producer": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The producer the client declared, or the Connector Instance id."
+            },
+            "producer_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "connector": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "instance_id",
+                "kind"
+              ],
+              "description": "Present when origin is connector.",
+              "properties": {
+                "instance_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Connector kind, for example rss."
+                }
+              }
+            },
+            "normalization": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plugin_id",
+                "plugin_version",
+                "contribution"
+              ],
+              "description": "Present when an external normalizer produced the published Manifest.",
+              "properties": {
+                "plugin_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "plugin_version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "contribution": {
+                  "const": "normalizer"
+                },
+                "fallback": {
+                  "type": "boolean",
+                  "description": "True when an optional route fell back to the built-in text path."
+                }
+              }
+            }
+          }
+        },
+        "extensions": {
+          "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+          "description": "The Version's structured metadata by namespace (for example author, section or categories when the source provides them). Absent when the Version has none."
         }
       }
     },
@@ -149,6 +255,12 @@
                 "saved_query_version_id": {
                   "type": "string",
                   "minLength": 1
+                },
+                "owner": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "description": "The Subscription Owner (an opaque end-user reference of the client application); absent for a global Subscription. Informational like the ids."
                 }
               }
             }

@@ -976,7 +976,7 @@ type Error struct {
 	Retryable bool    `json:"retryable"`
 }
 
-// EvaluatorConfig Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+// EvaluatorConfig Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 type EvaluatorConfig struct {
 	Configuration map[string]interface{} `json:"configuration"`
 	PluginId      string                 `json:"plugin_id"`
@@ -1054,7 +1054,7 @@ type Match struct {
 type MatchEvidence struct {
 	Details *map[string]interface{} `json:"details,omitempty"`
 
-	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator   EvaluatorConfig `json:"evaluator"`
 	Explanation string          `json:"explanation"`
 	PartKeys    *[]string       `json:"part_keys,omitempty"`
@@ -1365,7 +1365,7 @@ type Subscription struct {
 type SubscriptionCreate struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator      EvaluatorConfig `json:"evaluator"`
 	IdempotencyKey string          `json:"idempotency_key"`
 	Name           string          `json:"name"`
@@ -1389,7 +1389,7 @@ type SubscriptionPage struct {
 type SubscriptionVersion struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
 
 	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
@@ -1404,7 +1404,7 @@ type SubscriptionVersion struct {
 type SubscriptionVersionCreate struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator           EvaluatorConfig `json:"evaluator"`
 	IdempotencyKey      string          `json:"idempotency_key"`
 	SavedQueryVersionId string          `json:"saved_query_version_id"`

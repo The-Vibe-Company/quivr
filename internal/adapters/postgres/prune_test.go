@@ -162,7 +162,7 @@ func TestPruneWaitsForTheEvaluationCheckpoint(t *testing.T) {
 	defer cancel()
 	f := newPruneFixture(t, ctx, "checkpoint")
 	f.accept("before")
-	service := monitoring.Service{Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: f.scope.Organization}}}
+	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: f.scope.Organization}}}
 	q, err := service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{f.corpus}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)

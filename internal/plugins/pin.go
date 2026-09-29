@@ -27,9 +27,10 @@ const (
 	RouteOptional = "optional"
 )
 
-// PinConfig is the startup configuration (`plugin` in QUIVR_CONFIG) that pins
-// one external plugin: its manifest file, its endpoint, its configuration and
-// the media types routed to its normalizer.
+// PinConfig is the startup configuration that pins one external plugin (an
+// item of `plugins` in QUIVR_CONFIG, or the single `plugin`): its manifest
+// file, its endpoint, its configuration and the media types routed to its
+// normalizer. A plugin that contributes only an alert rule has no routes.
 type PinConfig struct {
 	Manifest      string          `json:"manifest"`
 	Endpoint      string          `json:"endpoint"`
@@ -92,10 +93,12 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	if u, err := url.Parse(c.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/endpoint", Message: fmt.Sprintf("endpoint %q must be an http(s) base URL such as http://127.0.0.1:9900", c.Endpoint)})
 	}
-	if m.Contributions.Normalizer == nil {
-		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/contributions", Message: "the manifest declares no normalizer Contribution to route to"})
-	}
-	if len(c.Routes) == 0 {
+	// Routes feed the normalizer. A plugin that also, or only, contributes an
+	// alert rule (subscription) is useful without routes.
+	switch {
+	case m.Contributions.Normalizer == nil && len(c.Routes) > 0:
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "the manifest declares no normalizer Contribution to route to; remove the routes of this pin"})
+	case m.Contributions.Normalizer != nil && m.Contributions.Subscription == nil && len(c.Routes) == 0:
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "a pin needs at least one media type route"})
 	}
 	for _, namespace := range namespacesOf(m) {
@@ -222,4 +225,14 @@ func (p *Pin) PluginAPI() string {
 func (p *Pin) Report() Report {
 	m := p.Manifest
 	return Report{Valid: true, Path: p.Path, ManifestDigest: p.ManifestDigest, Manifest: &m}
+}
+
+// Normalizer returns this pin and the route of a media type routed to it, so
+// a single pin serves where a PinSet is expected.
+func (p *Pin) Normalizer(mediaType string) (*Pin, RouteConfig, bool) {
+	r, ok := p.Route(mediaType)
+	if !ok {
+		return nil, RouteConfig{}, false
+	}
+	return p, r, true
 }

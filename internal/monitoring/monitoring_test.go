@@ -162,11 +162,38 @@ var (
 	outside = corpus.Scope{Organization: "org_b", Actions: []string{"monitoring:read", "monitoring:write"}, Corpora: []string{"*"}}
 )
 
+// schemaEvaluator stands for a pinned plugin whose declared schemas require
+// an expression text and allow only a boolean case_sensitive configuration.
+type schemaEvaluator struct{}
+
+func (schemaEvaluator) MaxBatch() int { return 4 }
+func (schemaEvaluator) Validate(expression, configuration map[string]any) error {
+	if text, ok := expression["text"].(string); !ok || text == "" {
+		return monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", "/expression: missing property 'text'")
+	}
+	for key, value := range configuration {
+		if _, ok := value.(bool); key != "case_sensitive" || !ok {
+			return monitoring.Invalid(monitoring.ErrInvalidEvaluatorConfiguration, "/evaluator/configuration/"+key, "not allowed")
+		}
+	}
+	return nil
+}
+func (schemaEvaluator) Evaluate(context.Context, monitoring.Batch) ([]monitoring.Outcome, error) {
+	return nil, monitoring.ErrEvaluatorUnavailable
+}
+
+func evaluators() monitoring.Evaluators {
+	installed := monitoring.FixtureEvaluators()
+	installed["acme.alerts@0.1.0"] = schemaEvaluator{}
+	return installed
+}
+
 func service() (monitoring.Service, *memoryStore) {
 	store := newStore()
 	return monitoring.Service{
-		Store:   store,
-		Corpora: corpora{"corpus_a": true, "corpus_b": true},
+		Store:      store,
+		Evaluators: evaluators(),
+		Corpora:    corpora{"corpus_a": true, "corpus_b": true},
 		Destinations: map[string]monitoring.Destination{
 			"receiver_a": {Organization: "org_a", URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"},
 			"receiver_b": {Organization: "org_b", URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"},
@@ -281,6 +308,52 @@ func TestSubscriptionPinsOnlyTheInstalledFixtureAndAnOwnedDestination(t *testing
 	}
 	if !sub.Enabled || sub.Current.Evaluator.PluginID != "quivr.fixture" || sub.Current.Evaluator.Version != "1" || sub.Current.DestinationID != "receiver_a" {
 		t.Fatalf("pinned subscription: %+v", sub)
+	}
+}
+
+// A Subscription Version pins only an installed evaluator, and the evaluator's
+// declared schemas judge the pinned expression and configuration at creation
+// and at every new Version.
+func TestSubscriptionValidatesExpressionAndConfiguration(t *testing.T) {
+	ctx := context.Background()
+	s, _ := service()
+	plain, err := s.CreateSavedQuery(ctx, writer, query("plain", "corpus_a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withText := query("text", "corpus_a")
+	withText.Definition.Expression = map[string]any{"text": "harbour"}
+	text, err := s.CreateSavedQuery(ctx, writer, withText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerts := func(key string, q monitoring.SavedQuery, configuration map[string]any) monitoring.SubscriptionInput {
+		return monitoring.SubscriptionInput{Key: key, Name: key, SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID, DestinationID: "receiver_a",
+			Evaluator: monitoring.Evaluator{PluginID: "acme.alerts", Version: "0.1.0", Configuration: configuration}}
+	}
+	_, err = s.CreateSubscription(ctx, writer, alerts("bad-expression", plain, nil))
+	if field, message := monitoring.Field(err); !errors.Is(err, monitoring.ErrInvalidExpression) || field != "/saved_query_version_id" || !strings.Contains(message, "text") {
+		t.Fatalf("invalid expression: %v", err)
+	}
+	_, err = s.CreateSubscription(ctx, writer, alerts("bad-configuration", text, map[string]any{"fuzzy": true}))
+	if field, _ := monitoring.Field(err); !errors.Is(err, monitoring.ErrInvalidEvaluatorConfiguration) || field != "/evaluator/configuration/fuzzy" {
+		t.Fatalf("invalid configuration: %v", err)
+	}
+	sub, err := s.CreateSubscription(ctx, writer, alerts("ok", text, map[string]any{"case_sensitive": true}))
+	if err != nil || sub.Current.Evaluator.PluginID != "acme.alerts" {
+		t.Fatalf("valid plugin subscription: %v %+v", err, sub)
+	}
+	edit := monitoring.SubscriptionVersionInput{Key: "edit", SavedQueryVersionID: text.Current.VersionID, DestinationID: "receiver_a",
+		Evaluator: monitoring.Evaluator{PluginID: "acme.alerts", Version: "0.1.0", Configuration: map[string]any{"case_sensitive": "yes"}}}
+	if _, err = s.CreateSubscriptionVersion(ctx, writer, sub.ID, edit); !errors.Is(err, monitoring.ErrInvalidEvaluatorConfiguration) {
+		t.Fatalf("invalid configuration on edit: %v", err)
+	}
+	// Without an installed fixture, the fixture is an unsupported evaluator.
+	s.Evaluators = monitoring.Evaluators{"acme.alerts@0.1.0": schemaEvaluator{}}
+	fixtureInput := alerts("fixture", text, nil)
+	fixtureInput.Evaluator = fixture()
+	if _, err = s.CreateSubscription(ctx, writer, fixtureInput); !errors.Is(err, monitoring.ErrUnsupportedEvaluator) {
+		t.Fatalf("fixture without installation: %v", err)
 	}
 }
 

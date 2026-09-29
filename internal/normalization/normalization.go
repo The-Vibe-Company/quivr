@@ -94,9 +94,24 @@ type Service struct {
 	Content content.Service
 	Store   Store
 	Signer  Signer
-	Plugin  Plugin
-	// Pin is the startup-pinned plugin; nil pins none.
-	Pin *plugins.Pin
+	// Plugin, when set, is the protocol client for every resolved pin
+	// (tests); nil talks to each resolved pin with pluginhttp.
+	Plugin Plugin
+	// Pin routes a media type to its startup-pinned normalizer: a
+	// *plugins.PinSet (several plugins) or a single *plugins.Pin. nil pins none.
+	Pin Router
+}
+
+// Router resolves the pinned normalizer of an accepted Blob media type.
+type Router interface {
+	Normalizer(mediaType string) (*plugins.Pin, plugins.RouteConfig, bool)
+}
+
+func (s Service) client(pin *plugins.Pin) Plugin {
+	if s.Plugin != nil {
+		return s.Plugin
+	}
+	return pluginhttp.Client{Pin: pin}
 }
 
 // IdempotencyKey is the stable key of one logical invocation: the Plugin
@@ -159,14 +174,18 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 			return nil
 		}
 	}
-	route, routed := s.Pin.Route(c.Content.MediaType)
+	if s.Pin == nil {
+		return nil
+	}
+	pin, route, routed := s.Pin.Normalizer(c.Content.MediaType)
 	if !routed {
 		return nil
 	}
-	normalizer := s.Pin.Manifest.Contributions.Normalizer
+	plugin := s.client(pin)
+	normalizer := pin.Manifest.Contributions.Normalizer
 	inv := invocation{org: org, receiptID: receiptID, work: work, optional: route.Mode == plugins.RouteOptional, budget: MaxAttempts(normalizer),
-		provenance: content.Normalization{PluginID: s.Pin.Manifest.ID, PluginVersion: s.Pin.Manifest.Version, PluginAPI: s.Pin.PluginAPI(), Contribution: Contribution, InvocationID: invocationID(),
-			IdempotencyKey: IdempotencyKey(s.Pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
+		provenance: content.Normalization{PluginID: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, PluginAPI: pin.PluginAPI(), Contribution: Contribution, InvocationID: invocationID(),
+			IdempotencyKey: IdempotencyKey(pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
 	input, err := s.Content.BlobSource.VerifiedBlob(ctx, org, c.Content.BlobID)
 	if errors.Is(err, content.ErrUnverifiedBlob) || (err == nil && (input.Blob.SHA256 != c.Content.BlobSHA256 || input.MediaType != c.Content.MediaType)) {
 		return s.fail(ctx, inv, CodeInputUnverified, "The input Blob is no longer the verified accepted input.", false)
@@ -174,7 +193,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	if err != nil {
 		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", err)
 	}
-	if err := s.Plugin.CheckDiscovery(ctx); err != nil {
+	if err := plugin.CheckDiscovery(ctx); err != nil {
 		return s.retry(ctx, org, receiptID, codeUnavailable, err)
 	}
 	// Running only once the plugin answers: an outage keeps the receipt's
@@ -190,7 +209,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	if err != nil {
 		return s.retry(ctx, org, receiptID, "blob_reference_unavailable", err)
 	}
-	request, err := buildRequest(work, input, inv.provenance, signed, expires, s.Pin.Configuration)
+	request, err := buildRequest(work, input, inv.provenance, signed, expires, pin.Configuration)
 	if err != nil {
 		return s.fail(ctx, inv, CodeRequestInvalid, err.Error(), false)
 	}
@@ -198,7 +217,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	// bound, schema, kind "manifest" rules, max_parts and input-only Blob Parts.
 	// A verification outage is not a verdict on the output: it retries.
 	var outage error
-	oc := plugins.OutputContext{Manifest: &s.Pin.Manifest, Input: plugins.InputBlob{BlobID: input.ID, MediaType: input.MediaType, SHA256: input.Blob.SHA256},
+	oc := plugins.OutputContext{Manifest: &pin.Manifest, Input: plugins.InputBlob{BlobID: input.ID, MediaType: input.MediaType, SHA256: input.Blob.SHA256},
 		VerifyBlob: func(ctx context.Context, id string) (plugins.VerifiedBlob, error) {
 			v, err := s.Content.BlobSource.VerifiedBlob(ctx, org, id)
 			if err != nil && !errors.Is(err, content.ErrUnverifiedBlob) {
@@ -207,7 +226,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 			return plugins.VerifiedBlob{ID: v.ID, MediaType: v.MediaType, SHA256: v.Blob.SHA256}, err
 		}}
 	invoke, cancel := context.WithTimeout(ctx, timeout)
-	response, err := s.Plugin.Normalize(invoke, request, oc)
+	response, err := plugin.Normalize(invoke, request, oc)
 	timedOut := errors.Is(invoke.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	cancel()
 	if outage != nil {
@@ -259,7 +278,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	// which is the one the Version publishes, and it is recorded so that the
 	// Version read shows it.
 	if stored.Provenance.IdempotencyKey == inv.provenance.IdempotencyKey && stored.Outcome == content.OutcomeNormalized && (stored.Manifest.SHA256 != blob.SHA256 || !sameExtensions(stored.Extensions, response.Extensions)) {
-		slog.Warn("normalizer_conflict: divergent output for one idempotency key; the recorded Manifest is kept", "receipt_id", receiptID, "version_id", work.VersionID, "plugin_id", s.Pin.Manifest.ID, "invocation_id", inv.provenance.InvocationID)
+		slog.Warn("normalizer_conflict: divergent output for one idempotency key; the recorded Manifest is kept", "receipt_id", receiptID, "version_id", work.VersionID, "plugin_id", inv.provenance.PluginID, "invocation_id", inv.provenance.InvocationID)
 		if err := s.Store.RecordConflict(ctx, org, work.VersionID, content.NormalizationConflict{InvocationID: inv.provenance.InvocationID, ManifestSHA256: blob.SHA256}); err != nil {
 			return s.retry(ctx, org, receiptID, "normalization_store_unavailable", err)
 		}

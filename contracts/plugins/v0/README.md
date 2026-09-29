@@ -197,7 +197,18 @@ A response with more Parts than the declared `max_parts` is also invalid
 
 An alert rule (since Plugin API 0.2). The core sends one Record Version and a
 batch of distinct evaluations; the plugin answers one decision per
-evaluation. The core has not called it yet; the Contract Runner certifies it.
+evaluation. A plugin pinned at startup (`plugins` in the core configuration,
+beside the normalizers) is installed as the evaluator `<id>@<version>`, and
+Subscriptions pin it by `plugin_id` and `version`.
+
+**When the core asks.** When a Record Version becomes searchable
+(`record.retrieval_ready`), and again once its embeddings are attached
+(`record.enrichment_available`) for every Subscription that answered
+`not_ready`. A rule that needs enrichment answers `not_ready` while `enriched`
+is false. Nothing is evaluated at acceptance time, before the Version is
+searchable. The core batches every due Subscription of one Record Version
+pinned to the plugin, across Subscriptions and owners, into as few requests as
+`max_batch_size` allows.
 
 **Request** (`subscription-request.schema.json`):
 
@@ -206,17 +217,38 @@ evaluation. The core has not called it yet; the Contract Runner certifies it.
 - `record`: the Corpus, Record and Record Version ids, `enriched` (embedding
   coverage in the active generation) and the canonical text `parts`
   (`key`, `role`, `text`; at most 256, unique keys, Blob Parts are not sent);
+- the record's metadata, which rules may test besides the text. They are
+  optional in the schema and the core always sends them (the extensions when
+  the Version has some):
+  - `source`: the Source `namespace`, `record_key` and, when the producer sent
+    one, the Source `position` of the accepted revision;
+  - `accepted_at`: when Quivr accepted the revision (RFC 3339, UTC);
+  - `provenance`: `origin` (`connector` for a revision a Connector Instance
+    acquired, `client` otherwise; a client cannot claim `connector`), the
+    `producer` and `producer_version`, the `connector` (`instance_id`,
+    `kind`) and the external `normalization` (`plugin_id`, `plugin_version`,
+    `contribution`, `fallback`);
+  - `extensions`: the Version's structured metadata by namespace, such as an
+    author, a section or categories when the source provides them.
+
+  These fields were added to Plugin API 0.2 before the core first called
+  subscription plugins. A plugin that validates requests against an earlier
+  copy of the 0.2 schemas (Python SDK 0.2.0) refuses them: rebuild it with the
+  current SDK (0.2.1 or later);
 - `evaluations`: 1 to `max_batch_size` items, each with an `id` unique in the
   request, the pinned Saved Query Version `expression`, the pinned Subscription
   evaluator `configuration`, and the `subscriptions` (Subscription, Subscription
-  Version, Saved Query and Saved Query Version ids) it stands for.
+  Version, Saved Query and Saved Query Version ids, and the Subscription
+  `owner` when it has one) it stands for.
 
 The core **deduplicates**: Subscriptions that share the same expression and
 configuration become one evaluation. The ids are informational (logs,
 tracing). A decision must depend only on the record, the expression and the
 configurations, never on the ids, the position in the batch or the other
 evaluations, because the core batches freely. The same idempotency key must
-yield the same decisions and evidence. Requests stay within 16 MiB.
+yield the same decisions and evidence. Requests stay within 16 MiB: the core
+splits a batch whose request would be larger. The call deadline is
+`timeout_ms`, capped by the core at 30 seconds.
 
 Per-Part `vector` and per-evaluation `query_vector` are **reserved** for
 local-vector matching; Plugin API 0.2 never sends them and the schemas reject
@@ -232,8 +264,15 @@ per requested evaluation id.
 | `not_ready` | It cannot be decided yet, for example before enrichment. The core evaluates again on a later trigger |
 
 A rule that cannot decide at all (a backend down) answers with the error
-envelope. `retryable: true` makes the core retry, and plugin unavailability
-never becomes a negative decision. A request the schemas reject is refused
+envelope. The core keeps every evaluation of the batch pending and retries it
+with backoff (from one second up to five minutes) until it is decided; a
+plugin that is down, times out, serves another manifest or answers outside
+these rules is treated the same way. Plugin unavailability never becomes a
+negative decision: alerts are delayed, never lost or skipped. An error
+envelope applies to the whole request. A `retryable: true` envelope (a backend
+down) retries the batch as one; after a terminal envelope or an invalid answer
+the core halves the batch until the evaluation that fails is alone, so the
+other evaluations are decided. A request the schemas reject is refused
 with `retryable: false`.
 
 **Evidence bounds.** They mirror the bounds the monitoring engine applies to
@@ -254,7 +293,10 @@ Match evidence (`internal/monitoring`), and `CheckSubscriptionOutput` in
 expressions against `expression_schema` and Subscription configurations
 against `configuration_schema` when it pins them, so a rule receives only
 values its schemas accept (`ValidateSubscriptionItem`, codes
-`invalid_expression` and `invalid_subscription_configuration`). To offer
+`invalid_expression` and `invalid_subscription_configuration`). Creating a
+Subscription or a Subscription Version whose expression or configuration the
+schemas refuse is 422 with that code, the request member at fault in `field`
+and the first schema issue in `message`. To offer
 several kinds of alert, discriminate them with a `oneOf` over a constant
 `kind` property; `quivr plugin inspect` lists the kinds.
 
@@ -307,7 +349,8 @@ request:
 `fixtures/invocations/markdown.json` is a normative example.
 
 **Subscription fixtures** (`subscription-fixture.schema.json`) hold the
-record's text Parts (and `enriched`), optional plugin `configuration`, and the
+record's text Parts (and `enriched`), its optional metadata (`source`,
+`accepted_at`, `provenance`, `extensions`), optional plugin `configuration`, and the
 evaluations, each with an `expression`, an optional `configuration` and an
 optional `expect`ed decision. A file is a subscription fixture when it has a
 top-level `evaluations` property. A tool turns one into requests:
@@ -318,12 +361,16 @@ top-level `evaluations` property. A tool turns one into requests:
 - the Record Version ids derive from the first 16 hex digits of the SHA-256
   of the fixture bytes: `dev-record-…`, `dev-version-…`, Corpus `dev-corpus`,
   Organization `dev-organization`;
+- metadata the fixture omits defaults to `source` `dev-namespace` /
+  `dev-record-…`, `provenance` `{"origin": "client"}` and `accepted_at`
+  `2026-01-01T00:00:00Z`;
 - evaluations are split into batches of `max_batch_size`; batch *i* has
   invocation id `dev-invocation-…-i` and idempotency key `dev:<sha256>:i`;
 - the configuration, every expression and every evaluation configuration are
   validated against the manifest schemas, and Part keys must be unique.
 
-`fixtures/subscriptions/strike.json` is a normative example.
+`fixtures/subscriptions/strike.json` and `fixtures/subscriptions/metadata.json`
+are normative examples.
 
 ## Try it
 

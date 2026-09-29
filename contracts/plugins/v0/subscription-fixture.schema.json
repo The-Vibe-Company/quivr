@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Subscription fixture, v0",
-  "description": "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property.",
+  "description": "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, default the record metadata (source dev-namespace/dev-record-<digest>, origin client, accepted_at 2026-01-01T00:00:00Z) when the fixture omits it, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -31,6 +31,18 @@
         },
         "parts": {
           "$ref": "subscription-request.schema.json#/properties/record/properties/parts"
+        },
+        "source": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/source"
+        },
+        "accepted_at": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/accepted_at"
+        },
+        "provenance": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/provenance"
+        },
+        "extensions": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/extensions"
         }
       }
     },

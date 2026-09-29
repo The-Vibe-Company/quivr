@@ -76,12 +76,14 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 
 func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 	for sentinel, want := range map[error]string{
-		monitoring.ErrUnsupportedProfile:   "unsupported_profile",
-		monitoring.ErrUnsupportedEvaluator: "unsupported_evaluator",
-		monitoring.ErrUnknownDestination:   "unknown_destination",
-		monitoring.ErrUnknownSavedQuery:    "unknown_saved_query",
-		monitoring.ErrTooLarge:             "definition_too_large",
-		monitoring.ErrInvalidOwner:         "invalid_owner",
+		monitoring.ErrUnsupportedProfile:            "unsupported_profile",
+		monitoring.ErrUnsupportedEvaluator:          "unsupported_evaluator",
+		monitoring.ErrUnknownDestination:            "unknown_destination",
+		monitoring.ErrUnknownSavedQuery:             "unknown_saved_query",
+		monitoring.ErrTooLarge:                      "definition_too_large",
+		monitoring.ErrInvalidOwner:                  "invalid_owner",
+		monitoring.ErrInvalidExpression:             "invalid_expression",
+		monitoring.ErrInvalidEvaluatorConfiguration: "invalid_subscription_configuration",
 	} {
 		for style, err := range detailed(sentinel) {
 			status, code := written(t, func(w *httptest.ResponseRecorder) { monitoringFailure(w, err) })
@@ -89,6 +91,20 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 				t.Errorf("%v (%s): %d %q, want 422 %q", sentinel, style, status, code, want)
 			}
 		}
+	}
+}
+
+// A schema refusal of a pinned expression or configuration names the request
+// member and the first schema issue.
+func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	monitoringFailure(rec, monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", "/expression/text: minLength: got 0, want 1"))
+	var body struct{ Code, Message, Field string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 422 || body.Code != "invalid_expression" || body.Field != "/saved_query_version_id" || body.Message != "/expression/text: minLength: got 0, want 1" {
+		t.Fatalf("%d %+v", rec.Code, body)
 	}
 }
 

@@ -40,3 +40,41 @@ func TestInvalidPluginPinRefusesStartup(t *testing.T) {
 		})
 	}
 }
+
+// Several plugins are pinned together through `plugins`, beside the single
+// `plugin` form; a conflict between pins refuses api and worker startup.
+func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const normalizer = "compatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
+	markdown := write("markdown.yaml", "id: acme.markdown\nversion: 1.0.0\n"+normalizer)
+	other := write("other.yaml", "id: acme.other\nversion: 1.0.0\n"+normalizer)
+	route := []any{map[string]any{"media_type": "text/markdown"}}
+	pin := func(manifest string) map[string]any {
+		return map[string]any{"manifest": manifest, "endpoint": "http://127.0.0.1:1", "routes": route}
+	}
+	for name, tc := range map[string]struct {
+		config map[string]any
+		code   string
+	}{
+		"same plugin twice":  {map[string]any{"plugin": pin(markdown), "plugins": []any{pin(markdown)}}, "plugin_conflict"},
+		"media type twice":   {map[string]any{"plugins": []any{pin(markdown), pin(other)}}, "route_conflict"},
+		"invalid second pin": {map[string]any{"plugins": []any{pin(markdown), map[string]any{"manifest": other, "endpoint": "ftp://x", "routes": route}}}, "invalid_pin"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.config)
+			t.Setenv("QUIVR_CONFIG", write("config.json", string(raw)))
+			for _, command := range []string{"api", "worker"} {
+				if err := Run(command); err == nil || !strings.Contains(err.Error(), tc.code) {
+					t.Fatalf("%s started with conflicting pins: %v", command, err)
+				}
+			}
+		})
+	}
+}

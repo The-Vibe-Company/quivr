@@ -426,7 +426,7 @@ func newCorrectionFixture(t *testing.T, ctx context.Context, prefix string) *cor
 		_, _ = pool.Exec(bg, `UPDATE evaluation_intents SET state='done',outcome='test_cleanup' WHERE organization=$1 AND state='pending'`, org)
 		_, _ = pool.Exec(bg, `UPDATE delivery_outbox SET available_at='infinity' WHERE organization=$1`, org)
 	})
-	f.service = monitoring.Service{Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: f.store}
+	f.service = monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: f.store}
 	if f.query, err = f.service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}}); err != nil {
 		t.Fatal(err)
 	}

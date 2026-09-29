@@ -94,7 +94,7 @@ func TestSubscriptionActivationBoundaryAndDisable(t *testing.T) {
 		return 0
 	}
 
-	service := monitoring.Service{Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
+	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
 	definition := monitoring.Definition{CorpusIDs: []string{a.ID, b.ID}, Expression: map[string]any{"fixture": map[string]any{"decision": "match"}}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}
 	query, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: definition})
 	if err != nil {
@@ -193,7 +193,7 @@ func TestConcurrentMonitoringReplaysConverge(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.ContentStore{Pool: pool}
-	service := monitoring.Service{Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
+	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
 	race := func(n int, run func() (string, bool, error)) string {
 		t.Helper()
 		type outcome struct {

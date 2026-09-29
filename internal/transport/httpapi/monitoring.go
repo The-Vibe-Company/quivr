@@ -43,6 +43,17 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
 		errors.Is(err, monitoring.ErrTooLarge):
 		failure(w, 422, publicCode(err, "invalid_input"))
+	case errors.Is(err, monitoring.ErrInvalidExpression), errors.Is(err, monitoring.ErrInvalidEvaluatorConfiguration):
+		// The evaluator's declared schema refused the pinned expression or
+		// configuration: name the request member and the first schema issue.
+		e := apiError(422, publicCode(err, "invalid_input"))
+		if field, message := monitoring.Field(err); field != "" {
+			e.Field = &field
+			if message != "" {
+				e.Message = message
+			}
+		}
+		send(w, 422, e)
 	default:
 		failure(w, 503, "storage_unavailable")
 	}

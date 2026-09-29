@@ -90,3 +90,47 @@ func (m *DeliveryMetrics) Handler(backlog func(context.Context) (DeliveryBacklog
 		fmt.Fprintf(w, "quivr_delivery_oldest_pending_age_seconds %g\n", b.OldestAge.Seconds())
 	})
 }
+
+// EvaluationMetrics observes how evaluation reaches evaluators: calls per
+// evaluated Record Version (per step group), and distinct evaluations and
+// Subscriptions per call, which shows batching and deduplication. A nil
+// receiver ignores observations.
+type EvaluationMetrics struct {
+	once                                             sync.Once
+	callsPerVersion, expressionsPerCall, subsPerCall *telemetry.Histogram
+}
+
+func (m *EvaluationMetrics) init() {
+	m.once.Do(func() {
+		counts := []float64{0, 1, 2, 4, 8, 16, 32, 64, 128, 256}
+		m.callsPerVersion = telemetry.NewHistogram("quivr_evaluation_calls_per_record_version", "Evaluator calls made to decide the due evaluations of one Record Version and evaluator.", counts...)
+		m.expressionsPerCall = telemetry.NewHistogram("quivr_evaluation_expressions_per_call", "Distinct evaluations (expression and configuration) sent in one evaluator call.", counts[1:]...)
+		m.subsPerCall = telemetry.NewHistogram("quivr_evaluation_subscriptions_per_call", "Subscription Versions decided by one evaluator call after deduplication.", counts[1:]...)
+	})
+}
+
+func (m *EvaluationMetrics) observeRecordVersion(calls int) {
+	if m != nil {
+		m.init()
+		m.callsPerVersion.ObserveValue(float64(calls))
+	}
+}
+
+func (m *EvaluationMetrics) observeCall(expressions, subscriptions int) {
+	if m != nil {
+		m.init()
+		m.expressionsPerCall.ObserveValue(float64(expressions))
+		m.subsPerCall.ObserveValue(float64(subscriptions))
+	}
+}
+
+// Write renders the histograms in the Prometheus text format.
+func (m *EvaluationMetrics) Write(w io.Writer) {
+	if m == nil {
+		return
+	}
+	m.init()
+	m.callsPerVersion.Write(w)
+	m.expressionsPerCall.Write(w)
+	m.subsPerCall.Write(w)
+}

@@ -322,8 +322,10 @@ Operations are supported.
   after their activation boundary. Each positive evaluation creates one unique Match
   with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through
   `GET /v0/matches`, `GET /v0/matches/{match_id}` and `GET /v0/deliveries/{delivery_id}`.
-  The evaluator is a deterministic fixture for now; plugin-owned criteria are not
-  implemented yet.
+  The evaluator is the `subscription` Contribution of a plugin pinned at startup
+  (`plugins` in the configuration), named by `plugin_id` and `version`; a Saved Query
+  expression or evaluator configuration its schemas refuse is 422 `invalid_expression`
+  or `invalid_subscription_configuration`. A plugin outage delays alerts, never skips them.
 - The worker POSTs each notice to the Subscription's destination, signed with
   Standard Webhooks headers (`webhook-id` is the notice `event_id`). A 2xx response
   marks the Delivery `delivered`. Network errors, timeouts, 408, 429 and 5xx are

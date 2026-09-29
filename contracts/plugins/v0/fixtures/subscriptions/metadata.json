@@ -1,0 +1,39 @@
+{
+  "description": "An article with metadata: rules may test its source, provenance and extensions besides its text.",
+  "record": {
+    "enriched": true,
+    "parts": [
+      {
+        "key": "title",
+        "role": "title",
+        "text": "Port authority publishes quarterly figures"
+      }
+    ],
+    "source": {
+      "namespace": "wire",
+      "record_key": "story-43"
+    },
+    "accepted_at": "2026-09-29T09:15:00Z",
+    "provenance": {
+      "origin": "client",
+      "producer": "newsdesk"
+    },
+    "extensions": {
+      "example.editorial": {
+        "schema_version": "1",
+        "data": {
+          "author": "Jane Doe"
+        }
+      }
+    }
+  },
+  "evaluations": [
+    {
+      "expression": {
+        "kind": "metadata",
+        "pointer": "/provenance/producer",
+        "equals": "newsdesk"
+      }
+    }
+  ]
+}
