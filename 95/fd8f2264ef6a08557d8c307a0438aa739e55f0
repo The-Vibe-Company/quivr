@@ -1,0 +1,27 @@
+AGENTS.md
+  s_54b80c92daa9cb::t_34d943427e73ec 6
+README.md
+  s_54b80c92daa9cb::t_88bb2e9108f552 258
+docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md
+  s_54b80c92daa9cb::t_6549b4a62f5183 11
+scripts/docs.py
+  s_54b80c92daa9cb::t_b717e6c37da717 331-333
+scripts/test_docs.py
+  s_54b80c92daa9cb::t_1783642d19172b 348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "95fd8f2264ef6a08557d8c307a0438aa739e55f0",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
