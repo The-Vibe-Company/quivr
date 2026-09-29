@@ -1,0 +1,22 @@
+quivr-search/src/components/connectors/useSubmit.ts
+  s_54b80c92daa9cb::t_2122ad9a1d28c7 1,54,69
+  s_54b80c92daa9cb::t_283dcf4282d9ed 20-26
+quivr-search/tests/connectors.spec.ts
+  s_54b80c92daa9cb::t_2155fca4f51b67 135,138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54e5431c0e029a494967caf316b5ae4827f7f790",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
