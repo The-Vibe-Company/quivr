@@ -10,6 +10,7 @@ quivr-search/tests/alerts.test.mjs
 quivr-search/server.mjs
   s_54b80c92daa9cb::t_55f1cfd6df412e 45,68,72,251,324-326
   s_54b80c92daa9cb::t_c326f9617ae557 9,34-35,38-40,47,57-67,69-71,73-75,300,303-304
+  s_54b80c92daa9cb::t_02085b6f39c4e6 302
 quivr-search/src/lib/notation.ts
   s_54b80c92daa9cb::t_e7cc3f4f115385 1-268
 plugins/alerts/tests/test_notation.py
