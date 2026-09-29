@@ -1,0 +1,20 @@
+tests/acceptance/described_alerts_test.go
+  s_54b80c92daa9cb::t_873dec1cdb9a73 173,201-205
+  s_54b80c92daa9cb::t_43be8460eba37e 206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81f1efa7f90e60961f6a7fda9f55edeaeaa8ddce",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
