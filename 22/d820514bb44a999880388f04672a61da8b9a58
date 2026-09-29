@@ -1,0 +1,25 @@
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_7c250c52348445 52,121,142
+docs/connect-an-ai-agent.md
+  s_54b80c92daa9cb::t_7c250c52348445 73-75,80-82
+internal/online/mcp.go
+  s_54b80c92daa9cb::t_7c250c52348445 252,255-257,272-274,277
+tests/acceptance/search_mcp_test.go
+  s_54b80c92daa9cb::t_7c250c52348445 265-268,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "22d820514bb44a999880388f04672a61da8b9a58",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
