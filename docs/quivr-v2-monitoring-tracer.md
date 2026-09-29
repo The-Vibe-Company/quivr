@@ -128,19 +128,23 @@ structured errors, per-route-family idempotency and opaque pagination apply.
 | --- | --- |
 | POST `/v0/saved-queries` | Save a definition and its first immutable version |
 | GET `/v0/saved-queries/{id}` and `/versions/{version_id}` | Inspect current and pinned definitions |
+| POST `/v0/saved-queries/{id}/versions` | Edit: commit a new immutable Saved Query Version |
+| POST `/v0/saved-queries/{id}/delete` | Logically delete a Saved Query no Subscription uses |
 | POST `/v0/subscriptions` | Enable a pinned query/evaluator with one destination, from now |
 | GET `/v0/subscriptions/{id}` and `/versions/{version_id}` | Inspect enabled state and immutable configuration |
 | POST `/v0/subscriptions/{id}/disable` | Stop new evaluation commits and notification admissions |
 | POST `/v0/subscriptions/{id}/enable` | Resume evaluation from now and admission of parked notices |
+| POST `/v0/subscriptions/{id}/versions` | Edit: commit a new Subscription Version, effective from its commit |
+| POST `/v0/subscriptions/{id}/delete` | Logically delete a Subscription for good; history stays readable |
 | GET `/v0/matches?subscription_id=…` and `/v0/matches/{id}` | Read positive Match history and explanation |
 | GET `/v0/deliveries/{id}` and `/attempts` | Observe notification state and transport outcomes |
 
 The first tracer references a deployment-configured `destination_id`, bound to
 one Organization, URL and signing secret. The local harness configures its one
 receiver there. No secret is accepted or returned through these monitoring
-resources. A destination registry, editing subscriptions and changing recipient
-routes are later product features, not required to prove this flow. Re-enabling a
-disabled Subscription on its same Version is implemented (THE-696).
+resources. A destination registry is a later product feature. Re-enabling a
+disabled Subscription on its same Version is implemented (THE-696), and so are
+editing by new Versions and logical deletion (THE-724, below).
 
 A Saved Query Version contains Corpus IDs, a plugin-interpreted expression,
 retrieval profile and `from_activation` temporal policy. A Subscription Version
@@ -176,7 +180,7 @@ Current authorization is checked again before exposing explanations or content.
   (422 `unsupported_profile`); an unknown Saved Query Version is 422
   `unknown_saved_query`.
 - **Idempotency:** route families are Saved Query creation, Subscription
-  creation, disable and enable. The same key and canonical request return the same
+  creation, disable and enable, and, since THE-724, each edit and delete route. The same key and canonical request return the same
   resource in its current state; changed input is 409 `idempotency_conflict`.
   Names are immutable. Replaying Subscription creation after disable returns
   `enabled: false`. Disabling an already disabled Subscription succeeds without
@@ -332,8 +336,8 @@ Current authorization is checked again before exposing explanations or content.
 - **Admission per retry:** every retry is claimed and admitted through the
   same canonical checks as the first attempt, under the journal lock that
   disable and withdrawal also take. Work refused because the Subscription is
-  disabled, the Record withdrawn or the destination unavailable makes no
-  attempt, stays `pending` and is parked; the admission view says why. An
+  disabled or deleted, the Record withdrawn or the destination unavailable
+  makes no attempt, stays `pending` and is parked; the admission view says why. An
   attempt admitted before a disable finishes and records its outcome; its
   retry is then refused. A refused Delivery whose window passes stays
   `pending` (disabling fabricates no transport outcome). The window is never
@@ -342,7 +346,7 @@ Current authorization is checked again before exposing explanations or content.
   `window_elapsed` without an attempt. The one exception is a withdrawal
   notice committed while its Subscription is disabled, whose window starts at
   the re-enable (see THE-696 below). `access_denied` has no producer yet:
-  there is no Subscription reconfiguration or destination rights revocation.
+  there is no destination rights revocation.
   `superseded` is described under "Implemented corrections and withdrawal".
 - **Reads:** `GET /v0/deliveries/{id}` adds `next_attempt_at` while the
   Delivery is `pending`, admission is allowed and a retry is scheduled. No
@@ -466,6 +470,79 @@ for content withdrawn during the pause. So:
   disable: after a long pause it ends `exhausted` with `window_elapsed`
   without an attempt.
 
+### Implemented editing and deletion (THE-724)
+
+Saved Queries and Subscriptions are edited by committing new immutable
+Versions, never by changing one. Editing applies from now on: nothing is
+backfilled and past Matches keep the Versions that produced them.
+
+- **Saved Query edit:** `POST /v0/saved-queries/{id}/versions` with an
+  `idempotency_key` and a full `definition` commits a new Saved Query Version
+  (same checks as creation, and the key must grant every Corpus of the current
+  and new definitions) and makes it current. The name is unchanged. It moves
+  **no** Subscription.
+- **Pinning:** a Subscription pins a Saved Query Version explicitly. It moves
+  to a newer one only through a new Subscription Version, so an edit of a Saved
+  Query never silently changes what a Subscription alerts on.
+- **Subscription edit:** `POST /v0/subscriptions/{id}/versions` with an
+  `idempotency_key`, the `saved_query_version_id` (the current Version of the
+  Subscription's own Saved Query, else 422 `unknown_saved_query`), an
+  `evaluator` and a `destination_id` commits a new Subscription Version and
+  makes it current. Enabled state is unchanged.
+- **Effective position:** like creation, the new Version records the journal
+  position of its commit as its `activation_position`. A trigger is judged by
+  the Version effective at its position: the latest one activated before it.
+  Dispatch picks that Version, so a change committed before the edit but
+  dispatched after it is still judged by the earlier Version, and every later
+  change by the new one. The commit guard refuses an intent whose Version was
+  superseded at the trigger's position (outcome
+  `subscription_version_superseded`). A correction notice for a Match of an
+  earlier Version (`match.corrected`, `match.no_longer_matches`) is decided by
+  the Version effective at the correction and references the prior Match with
+  its own Version and destination.
+- **Scope across Versions:** candidate enumeration and withdrawal scope cover
+  every Corpus any Version of the Subscription pinned; the eligibility guard
+  checks the Corpora of the Version that judges the change. A key sees a
+  Subscription, its Matches and Deliveries only when it grants every Corpus
+  any of its Versions pinned, so narrowing the scope never exposes earlier
+  Matches to a narrower key.
+- **One alert per content:** a Record Version matched by one Version of a
+  Subscription is not matched again by a later one (for example when its
+  enrichment trigger arrives after the edit); the commit reports `duplicate`.
+- **Version reads:** `GET …/versions/{version_id}` serves every Version of the
+  resource, current or earlier. A Saved Query Version read needs the Corpora of
+  the current and requested Versions; a Subscription Version read, like every
+  Subscription read, needs every Corpus any of its Versions pinned.
+- **Subscription delete:** `POST /v0/subscriptions/{id}/delete` (an
+  `ActionRequest`) sets `deleted: true` and disables the Subscription in one
+  row update under the journal lock, with `subscription.deleted` per Corpus of
+  its current Version. Every disable guarantee applies: no new evaluation
+  commit, no new Delivery Attempt admission (admission reason
+  `subscription_deleted`, parked for good), an attempt already admitted
+  finishes. Deletion is permanent: enable and edit then return 409
+  `subscription_deleted`; disable is a no-op. The Subscription, its Versions,
+  Matches, Deliveries and attempts stay readable.
+- **Withdrawal after delete:** a deleted Subscription follows the disabled
+  rule of THE-696. The `match.withdrawn` notice for one of its Matches, its
+  Delivery and feed event are still committed once, so polling consumers see
+  it; as a deleted Subscription is never re-enabled, its window never opens and
+  it is never attempted. It stays `pending` with reason `subscription_deleted`
+  and does not count as stuck backlog.
+- **Saved Query delete:** `POST /v0/saved-queries/{id}/delete` sets
+  `deleted: true` with `saved_query.deleted` per Corpus, only when no
+  Subscription that is not deleted belongs to it (409 `saved_query_in_use`
+  otherwise). A deleted Saved Query gets no new Version (409
+  `saved_query_deleted`) and no new Subscription (422 `unknown_saved_query`,
+  checked again under the journal lock). Its Versions stay readable.
+- **Idempotency:** replaying an edit with the same key and request returns the
+  same Version, even after later edits or a deletion; a changed request is 409
+  `idempotency_conflict`. Repeating a delete, under any key, commits nothing
+  more. Replaying a creation still returns its resource after its Saved Query
+  moved on; a new Subscription may only pin the current Saved Query Version.
+- **Events:** `saved_query.updated` and `subscription.updated` are committed in
+  every Corpus of the previous and new scope, `saved_query.deleted` and
+  `subscription.deleted` in every Corpus of the current Version.
+
 ## Evaluation and transactions
 
 The initial adapter consumes pinned query/subscription/evaluator configuration,
@@ -488,7 +565,7 @@ restarts. Repeated evaluation work does not change the unique Match identity.
 
 | Boundary | Facts committed together |
 | --- | --- |
-| Subscription creation/disable/enable | Configuration or enabled-state change, activation boundary when created, public event; commits serialize with Match creation and Delivery admission |
+| Subscription creation/edit/disable/enable/delete | Configuration, enabled or deleted state change, activation boundary when created or edited, public event; commits serialize with Match creation and Delivery admission |
 | Positive evaluation | Core eligibility guard, Match or existing Match, logical Delivery, immutable notice/event and outbox work |
 | Ordinary correction no longer matching | Core guard on the current correction and enabled Subscription, recorded negative outcome, notice linked to the prior positive Match, unique Delivery and outbox/event; no new Match |
 | Withdrawal | Content commits Tombstone, fence, Record event and withdrawal-notification intent; a worker idempotently creates the linked notice/Delivery with its event afterward |
@@ -519,7 +596,9 @@ Public feed events also cover committed `corpus.created`,
 `corpus.retrieval_changed`, `receipt.pending`, `receipt.resolved`,
 `record.materialized`, `record.searchable`, `record.corrected`,
 `record.enrichment_available`, `record.withdrawn`, `saved_query.created`,
-`subscription.created`, `subscription.disabled`, `subscription.enabled`,
+`saved_query.updated`, `saved_query.deleted`, `subscription.created`,
+`subscription.updated`, `subscription.disabled`, `subscription.enabled`,
+`subscription.deleted`,
 `operation.updated` and
 `delivery.updated` transitions. A replay or duplicate no-op emits no new fact.
 Delivery status events are feed-only; they never trigger another webhook.

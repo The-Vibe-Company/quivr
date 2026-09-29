@@ -176,6 +176,7 @@ const (
 	AccessDenied           DeliveryAdmissionReason = "access_denied"
 	DestinationUnavailable DeliveryAdmissionReason = "destination_unavailable"
 	RecordWithdrawn        DeliveryAdmissionReason = "record_withdrawn"
+	SubscriptionDeleted    DeliveryAdmissionReason = "subscription_deleted"
 	SubscriptionDisabled   DeliveryAdmissionReason = "subscription_disabled"
 	Superseded             DeliveryAdmissionReason = "superseded"
 	Terminal               DeliveryAdmissionReason = "terminal"
@@ -189,6 +190,8 @@ func (e DeliveryAdmissionReason) Valid() bool {
 	case DestinationUnavailable:
 		return true
 	case RecordWithdrawn:
+		return true
+	case SubscriptionDeleted:
 		return true
 	case SubscriptionDisabled:
 		return true
@@ -874,7 +877,7 @@ type CredentialReplace struct {
 
 // Delivery defines model for Delivery.
 type Delivery struct {
-	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
+	// Admission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. subscription_disabled lasts until a re-enable; subscription_deleted is permanent. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
 	Admission     DeliveryAdmission `json:"admission"`
 	AttemptCount  int               `json:"attempt_count"`
 	DeliveryId    string            `json:"delivery_id"`
@@ -893,7 +896,7 @@ type Delivery struct {
 // DeliveryState defines model for Delivery.State.
 type DeliveryState string
 
-// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
+// DeliveryAdmission Current derived admission view, separate from durable Delivery state. A disallowed pending Delivery makes no new network attempt; it does not become a new lifecycle state. destination_unavailable means its destination is no longer configured for the Organization. subscription_disabled lasts until a re-enable; subscription_deleted is permanent. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn is admitted for a withdrawn Record. superseded refuses an undelivered match.created or match.corrected once a later match.corrected or match.no_longer_matches exists for the same Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected exists; match.withdrawn is never superseded.
 type DeliveryAdmission struct {
 	Allowed bool                     `json:"allowed"`
 	Reason  *DeliveryAdmissionReason `json:"reason,omitempty"`
@@ -1226,8 +1229,11 @@ type RetrievalConfig struct {
 // SavedQuery defines model for SavedQuery.
 type SavedQuery struct {
 	CurrentVersion SavedQueryVersion `json:"current_version"`
-	Name           string            `json:"name"`
-	SavedQueryId   string            `json:"saved_query_id"`
+
+	// Deleted Logically deleted; the Saved Query and its Versions stay readable.
+	Deleted      bool   `json:"deleted"`
+	Name         string `json:"name"`
+	SavedQueryId string `json:"saved_query_id"`
 }
 
 // SavedQueryCreate defines model for SavedQueryCreate.
@@ -1255,6 +1261,13 @@ type SavedQueryVersion struct {
 	Definition   SavedQueryDefinition `json:"definition"`
 	SavedQueryId string               `json:"saved_query_id"`
 	VersionId    string               `json:"version_id"`
+}
+
+// SavedQueryVersionCreate New immutable definition of an existing Saved Query. The name is unchanged.
+type SavedQueryVersionCreate struct {
+	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
+	Definition     SavedQueryDefinition `json:"definition"`
+	IdempotencyKey string               `json:"idempotency_key"`
 }
 
 // ScheduleChange defines model for ScheduleChange.
@@ -1330,9 +1343,12 @@ type SourceIdentity struct {
 // Subscription defines model for Subscription.
 type Subscription struct {
 	CurrentVersion SubscriptionVersion `json:"current_version"`
-	Enabled        bool                `json:"enabled"`
-	Name           string              `json:"name"`
-	SubscriptionId string              `json:"subscription_id"`
+
+	// Deleted Logically deleted for good; a deleted Subscription is also disabled and stays readable with its Versions, Matches and Deliveries.
+	Deleted        bool   `json:"deleted"`
+	Enabled        bool   `json:"enabled"`
+	Name           string `json:"name"`
+	SubscriptionId string `json:"subscription_id"`
 }
 
 // SubscriptionCreate Create enabled from-now Subscription. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
@@ -1357,6 +1373,16 @@ type SubscriptionVersion struct {
 	SavedQueryVersionId string          `json:"saved_query_version_id"`
 	SubscriptionId      string          `json:"subscription_id"`
 	VersionId           string          `json:"version_id"`
+}
+
+// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
+type SubscriptionVersionCreate struct {
+	DestinationId string `json:"destination_id"`
+
+	// Evaluator Pins an installed evaluator implementation/version and its configuration. Production algorithm and native plugin execution contract are deferred. The foundation uses a deterministic fixture adapter behind the same logical port.
+	Evaluator           EvaluatorConfig `json:"evaluator"`
+	IdempotencyKey      string          `json:"idempotency_key"`
+	SavedQueryVersionId string          `json:"saved_query_version_id"`
 }
 
 // TextContent defines model for TextContent.
@@ -1524,17 +1550,29 @@ type WithdrawRecordJSONRequestBody = WithdrawalCommand
 // CreateSavedQueryJSONRequestBody defines body for CreateSavedQuery for application/json ContentType.
 type CreateSavedQueryJSONRequestBody = SavedQueryCreate
 
+// DeleteSavedQueryJSONRequestBody defines body for DeleteSavedQuery for application/json ContentType.
+type DeleteSavedQueryJSONRequestBody = ActionRequest
+
+// CreateSavedQueryVersionJSONRequestBody defines body for CreateSavedQueryVersion for application/json ContentType.
+type CreateSavedQueryVersionJSONRequestBody = SavedQueryVersionCreate
+
 // SearchRecordsJSONRequestBody defines body for SearchRecords for application/json ContentType.
 type SearchRecordsJSONRequestBody = SearchRequest
 
 // CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
 type CreateSubscriptionJSONRequestBody = SubscriptionCreate
 
+// DeleteSubscriptionJSONRequestBody defines body for DeleteSubscription for application/json ContentType.
+type DeleteSubscriptionJSONRequestBody = ActionRequest
+
 // DisableSubscriptionJSONRequestBody defines body for DisableSubscription for application/json ContentType.
 type DisableSubscriptionJSONRequestBody = ActionRequest
 
 // EnableSubscriptionJSONRequestBody defines body for EnableSubscription for application/json ContentType.
 type EnableSubscriptionJSONRequestBody = ActionRequest
+
+// CreateSubscriptionVersionJSONRequestBody defines body for CreateSubscriptionVersion for application/json ContentType.
+type CreateSubscriptionVersionJSONRequestBody = SubscriptionVersionCreate
 
 // CreateUploadJSONRequestBody defines body for CreateUpload for application/json ContentType.
 type CreateUploadJSONRequestBody = UploadRequest
@@ -1834,6 +1872,12 @@ type ServerInterface interface {
 	// (GET /v0/saved-queries/{saved_query_id})
 	GetSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string)
 
+	// (POST /v0/saved-queries/{saved_query_id}/delete)
+	DeleteSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string)
+
+	// (POST /v0/saved-queries/{saved_query_id}/versions)
+	CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string)
+
 	// (GET /v0/saved-queries/{saved_query_id}/versions/{version_id})
 	GetSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string, versionId string)
 
@@ -1846,11 +1890,17 @@ type ServerInterface interface {
 	// (GET /v0/subscriptions/{subscription_id})
 	GetSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
 
+	// (POST /v0/subscriptions/{subscription_id}/delete)
+	DeleteSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
+
 	// (POST /v0/subscriptions/{subscription_id}/disable)
 	DisableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
 
 	// (POST /v0/subscriptions/{subscription_id}/enable)
 	EnableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
+
+	// (POST /v0/subscriptions/{subscription_id}/versions)
+	CreateSubscriptionVersion(w http.ResponseWriter, r *http.Request, subscriptionId string)
 
 	// (GET /v0/subscriptions/{subscription_id}/versions/{version_id})
 	GetSubscriptionVersion(w http.ResponseWriter, r *http.Request, subscriptionId string, versionId string)
@@ -2827,6 +2877,58 @@ func (siw *ServerInterfaceWrapper) GetSavedQuery(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteSavedQuery operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSavedQuery(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "saved_query_id" -------------
+	var savedQueryId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSavedQuery(w, r, savedQueryId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSavedQueryVersion operation middleware
+func (siw *ServerInterfaceWrapper) CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "saved_query_id" -------------
+	var savedQueryId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSavedQueryVersion(w, r, savedQueryId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSavedQueryVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetSavedQueryVersion(w http.ResponseWriter, r *http.Request) {
 
@@ -2916,6 +3018,32 @@ func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteSubscription operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscription_id" -------------
+	var subscriptionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSubscription(w, r, subscriptionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DisableSubscription operation middleware
 func (siw *ServerInterfaceWrapper) DisableSubscription(w http.ResponseWriter, r *http.Request) {
 
@@ -2959,6 +3087,32 @@ func (siw *ServerInterfaceWrapper) EnableSubscription(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.EnableSubscription(w, r, subscriptionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSubscriptionVersion operation middleware
+func (siw *ServerInterfaceWrapper) CreateSubscriptionVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscription_id" -------------
+	var subscriptionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSubscriptionVersion(w, r, subscriptionId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3212,9 +3366,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries", wrapper.CreateSavedQuery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}", wrapper.GetSavedQuery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions/{version_id}", wrapper.GetSavedQueryVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions", wrapper.CreateSavedQueryVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/delete", wrapper.DeleteSavedQuery)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions", wrapper.CreateSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}", wrapper.GetSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/versions/{version_id}", wrapper.GetSubscriptionVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/versions", wrapper.CreateSubscriptionVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/delete", wrapper.DeleteSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/disable", wrapper.DisableSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/enable", wrapper.EnableSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches", wrapper.ListMatches)
@@ -4490,6 +4648,86 @@ func (response GetSavedQuerydefaultJSONResponse) VisitGetSavedQueryResponse(w ht
 	return err
 }
 
+type DeleteSavedQueryRequestObject struct {
+	SavedQueryId string `json:"saved_query_id"`
+	Body         *DeleteSavedQueryJSONRequestBody
+}
+
+type DeleteSavedQueryResponseObject interface {
+	VisitDeleteSavedQueryResponse(w http.ResponseWriter) error
+}
+
+type DeleteSavedQuery200JSONResponse SavedQuery
+
+func (response DeleteSavedQuery200JSONResponse) VisitDeleteSavedQueryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSavedQuerydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteSavedQuerydefaultJSONResponse) VisitDeleteSavedQueryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSavedQueryVersionRequestObject struct {
+	SavedQueryId string `json:"saved_query_id"`
+	Body         *CreateSavedQueryVersionJSONRequestBody
+}
+
+type CreateSavedQueryVersionResponseObject interface {
+	VisitCreateSavedQueryVersionResponse(w http.ResponseWriter) error
+}
+
+type CreateSavedQueryVersion201JSONResponse SavedQueryVersion
+
+func (response CreateSavedQueryVersion201JSONResponse) VisitCreateSavedQueryVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSavedQueryVersiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateSavedQueryVersiondefaultJSONResponse) VisitCreateSavedQueryVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSavedQueryVersionRequestObject struct {
 	SavedQueryId string `json:"saved_query_id"`
 	VersionId    string `json:"version_id"`
@@ -4647,6 +4885,46 @@ func (response GetSubscriptiondefaultJSONResponse) VisitGetSubscriptionResponse(
 	return err
 }
 
+type DeleteSubscriptionRequestObject struct {
+	SubscriptionId string `json:"subscription_id"`
+	Body           *DeleteSubscriptionJSONRequestBody
+}
+
+type DeleteSubscriptionResponseObject interface {
+	VisitDeleteSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type DeleteSubscription200JSONResponse Subscription
+
+func (response DeleteSubscription200JSONResponse) VisitDeleteSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSubscriptiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteSubscriptiondefaultJSONResponse) VisitDeleteSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DisableSubscriptionRequestObject struct {
 	SubscriptionId string `json:"subscription_id"`
 	Body           *DisableSubscriptionJSONRequestBody
@@ -4716,6 +4994,46 @@ type EnableSubscriptiondefaultJSONResponse struct {
 }
 
 func (response EnableSubscriptiondefaultJSONResponse) VisitEnableSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSubscriptionVersionRequestObject struct {
+	SubscriptionId string `json:"subscription_id"`
+	Body           *CreateSubscriptionVersionJSONRequestBody
+}
+
+type CreateSubscriptionVersionResponseObject interface {
+	VisitCreateSubscriptionVersionResponse(w http.ResponseWriter) error
+}
+
+type CreateSubscriptionVersion201JSONResponse SubscriptionVersion
+
+func (response CreateSubscriptionVersion201JSONResponse) VisitCreateSubscriptionVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSubscriptionVersiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateSubscriptionVersiondefaultJSONResponse) VisitCreateSubscriptionVersionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4980,6 +5298,12 @@ type StrictServerInterface interface {
 	// (GET /v0/saved-queries/{saved_query_id})
 	GetSavedQuery(ctx context.Context, request GetSavedQueryRequestObject) (GetSavedQueryResponseObject, error)
 
+	// (POST /v0/saved-queries/{saved_query_id}/delete)
+	DeleteSavedQuery(ctx context.Context, request DeleteSavedQueryRequestObject) (DeleteSavedQueryResponseObject, error)
+
+	// (POST /v0/saved-queries/{saved_query_id}/versions)
+	CreateSavedQueryVersion(ctx context.Context, request CreateSavedQueryVersionRequestObject) (CreateSavedQueryVersionResponseObject, error)
+
 	// (GET /v0/saved-queries/{saved_query_id}/versions/{version_id})
 	GetSavedQueryVersion(ctx context.Context, request GetSavedQueryVersionRequestObject) (GetSavedQueryVersionResponseObject, error)
 
@@ -4992,11 +5316,17 @@ type StrictServerInterface interface {
 	// (GET /v0/subscriptions/{subscription_id})
 	GetSubscription(ctx context.Context, request GetSubscriptionRequestObject) (GetSubscriptionResponseObject, error)
 
+	// (POST /v0/subscriptions/{subscription_id}/delete)
+	DeleteSubscription(ctx context.Context, request DeleteSubscriptionRequestObject) (DeleteSubscriptionResponseObject, error)
+
 	// (POST /v0/subscriptions/{subscription_id}/disable)
 	DisableSubscription(ctx context.Context, request DisableSubscriptionRequestObject) (DisableSubscriptionResponseObject, error)
 
 	// (POST /v0/subscriptions/{subscription_id}/enable)
 	EnableSubscription(ctx context.Context, request EnableSubscriptionRequestObject) (EnableSubscriptionResponseObject, error)
+
+	// (POST /v0/subscriptions/{subscription_id}/versions)
+	CreateSubscriptionVersion(ctx context.Context, request CreateSubscriptionVersionRequestObject) (CreateSubscriptionVersionResponseObject, error)
 
 	// (GET /v0/subscriptions/{subscription_id}/versions/{version_id})
 	GetSubscriptionVersion(ctx context.Context, request GetSubscriptionVersionRequestObject) (GetSubscriptionVersionResponseObject, error)
@@ -5935,6 +6265,72 @@ func (sh *strictHandler) GetSavedQuery(w http.ResponseWriter, r *http.Request, s
 	}
 }
 
+// DeleteSavedQuery operation middleware
+func (sh *strictHandler) DeleteSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string) {
+	var request DeleteSavedQueryRequestObject
+
+	request.SavedQueryId = savedQueryId
+
+	var body DeleteSavedQueryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSavedQuery(ctx, request.(DeleteSavedQueryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSavedQuery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSavedQueryResponseObject); ok {
+		if err := validResponse.VisitDeleteSavedQueryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSavedQueryVersion operation middleware
+func (sh *strictHandler) CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string) {
+	var request CreateSavedQueryVersionRequestObject
+
+	request.SavedQueryId = savedQueryId
+
+	var body CreateSavedQueryVersionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSavedQueryVersion(ctx, request.(CreateSavedQueryVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSavedQueryVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSavedQueryVersionResponseObject); ok {
+		if err := validResponse.VisitCreateSavedQueryVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetSavedQueryVersion operation middleware
 func (sh *strictHandler) GetSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string, versionId string) {
 	var request GetSavedQueryVersionRequestObject
@@ -6050,6 +6446,39 @@ func (sh *strictHandler) GetSubscription(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// DeleteSubscription operation middleware
+func (sh *strictHandler) DeleteSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string) {
+	var request DeleteSubscriptionRequestObject
+
+	request.SubscriptionId = subscriptionId
+
+	var body DeleteSubscriptionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSubscription(ctx, request.(DeleteSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSubscriptionResponseObject); ok {
+		if err := validResponse.VisitDeleteSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // DisableSubscription operation middleware
 func (sh *strictHandler) DisableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string) {
 	var request DisableSubscriptionRequestObject
@@ -6109,6 +6538,39 @@ func (sh *strictHandler) EnableSubscription(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnableSubscriptionResponseObject); ok {
 		if err := validResponse.VisitEnableSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSubscriptionVersion operation middleware
+func (sh *strictHandler) CreateSubscriptionVersion(w http.ResponseWriter, r *http.Request, subscriptionId string) {
+	var request CreateSubscriptionVersionRequestObject
+
+	request.SubscriptionId = subscriptionId
+
+	var body CreateSubscriptionVersionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSubscriptionVersion(ctx, request.(CreateSubscriptionVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSubscriptionVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSubscriptionVersionResponseObject); ok {
+		if err := validResponse.VisitCreateSubscriptionVersionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

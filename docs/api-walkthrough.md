@@ -302,6 +302,14 @@ Operations are supported.
 - `/v0/saved-queries` and `/v0/subscriptions` create pinned, versioned Saved Queries and
   activate, disable or re-enable Subscriptions. Re-enabling resumes evaluation from
   that point, with no backfill of the pause.
+- Edit a Saved Query or a Subscription by committing a new Version:
+  `POST /v0/saved-queries/{id}/versions` (a new definition; Subscriptions keep the
+  Version they pin) and `POST /v0/subscriptions/{id}/versions` (pin the Saved Query's
+  current Version, an evaluator and a destination). A new Subscription Version judges
+  only changes committed after it; earlier Matches keep their Versions, all readable
+  through `…/versions/{version_id}`. `POST /v0/subscriptions/{id}/delete` stops
+  evaluation and deliveries for good while its history stays readable;
+  `POST /v0/saved-queries/{id}/delete` works once no Subscription uses the Saved Query.
 - Enabled Subscriptions evaluate Record Versions that become searchable or enriched
   after their activation boundary. Each positive evaluation creates one unique Match
   with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through

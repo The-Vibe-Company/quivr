@@ -124,12 +124,19 @@ JOIN subscriptions s ON s.organization=$1 AND s.id=alerted.subscription_id
 JOIN LATERAL (SELECT m.record_version_id FROM matches m WHERE m.organization=$1 AND m.record_id=$2 AND m.subscription_id=s.id ORDER BY m.position DESC LIMIT 1) latest ON true
 ORDER BY s.id LIMIT $5`, org, recordID, sequence, after, s.page())
 		} else {
-			// A re-enabled Subscription evaluates only triggers after its
-			// re-enable: the pause is never backfilled.
+			// A trigger is judged by the Subscription Version effective at
+			// its position: the latest one activated before it. An edit
+			// therefore applies from its commit on, and a checkpoint lagging
+			// behind it still judges earlier changes with the earlier
+			// Version. A re-enabled Subscription evaluates only triggers
+			// after its re-enable: the pause is never backfilled.
 			rows, err = tx.Query(ctx, `SELECT s.id,v.id,$6::text FROM subscription_corpora sc
 JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
-JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,s.current_version_id)
-WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND v.activation_position<$3 AND coalesce(s.enabled_position,0)<$3 AND s.id>$4
+JOIN LATERAL (SELECT e.id,e.saved_query_version_id FROM subscription_versions e
+  WHERE e.organization=s.organization AND e.subscription_id=s.id AND e.activation_position<$3
+  ORDER BY e.activation_position DESC LIMIT 1) v ON true
+JOIN saved_query_versions q ON (q.organization,q.id)=(s.organization,v.saved_query_version_id)
+WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND $2=ANY(q.corpus_ids) AND coalesce(s.enabled_position,0)<$3 AND s.id>$4
 ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID)
 		}
 		if err != nil {
@@ -178,13 +185,13 @@ func (s EvaluationStore) Target(ctx context.Context, in monitoring.Intent) (moni
 	var t monitoring.Target
 	v := &t.Subscription
 	var evaluator, definition []byte
-	err := s.Pool.QueryRow(ctx, `SELECT s.enabled AND s.current_version_id=v.id,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,
+	err := s.Pool.QueryRow(ctx, `SELECT s.enabled,`+supersededSQL("v", "$5")+`,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,
   EXISTS(SELECT 1 FROM segments sg JOIN embedding_coverage ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`)
 FROM subscription_versions v
 JOIN subscriptions s ON (s.organization,s.id)=(v.organization,v.subscription_id)
 JOIN saved_query_versions q ON (q.organization,q.id)=(v.organization,v.saved_query_version_id)
-WHERE v.organization=$1 AND v.id=$2`, in.Organization, in.SubscriptionVersionID, in.VersionID, in.CorpusID).Scan(
-		&t.Enabled, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &t.Enriched)
+WHERE v.organization=$1 AND v.id=$2`, in.Organization, in.SubscriptionVersionID, in.VersionID, in.CorpusID, in.Sequence).Scan(
+		&t.Enabled, &t.Superseded, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &t.Enriched)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, monitoring.ErrNotFound
 	}
@@ -274,31 +281,45 @@ func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decid
 
 type subscriptionPin struct{ queryID, queryVersionID, destination string }
 
+// supersededSQL reports whether a later Version of the Subscription of the
+// subscription_versions row v was activated before the trigger position.
+func supersededSQL(v, position string) string {
+	return `EXISTS(SELECT 1 FROM subscription_versions later WHERE later.organization=` + v + `.organization AND later.subscription_id=` + v + `.subscription_id
+  AND later.activation_position>` + v + `.activation_position AND later.activation_position<` + position + `)`
+}
+
 // guardEvaluation is the core eligibility guard of an evaluated Version: the
-// Subscription is enabled on the pinned Version (and the trigger is later than
-// its latest re-enable), the Version is the Record's current eligible Version
-// and its Corpus is in the Subscription's scope. A refusal is returned as an
-// outcome.
+// Subscription is enabled (and the trigger is later than its latest
+// re-enable), the pinned Subscription Version is the one effective at the
+// trigger's position, the Record Version is the Record's current eligible
+// Version and its Corpus is in that Subscription Version's scope. A refusal is
+// returned as an outcome.
 func guardEvaluation(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (pinned subscriptionPin, corpusID, refused string, err error) {
 	org := in.Organization
-	var enabled bool
-	var current string
+	var enabled, superseded bool
 	var resumed int64
-	err = tx.QueryRow(ctx, `SELECT s.enabled,coalesce(s.enabled_position,0),s.current_version_id,v.saved_query_id,v.saved_query_version_id,v.destination_id FROM subscriptions s JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID).Scan(&enabled, &resumed, &current, &pinned.queryID, &pinned.queryVersionID, &pinned.destination)
+	var scope []string
+	err = tx.QueryRow(ctx, `SELECT s.enabled,coalesce(s.enabled_position,0),`+supersededSQL("v", "$4")+`,v.saved_query_id,v.saved_query_version_id,v.destination_id,q.corpus_ids
+FROM subscriptions s
+JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) AND v.subscription_id=s.id
+JOIN saved_query_versions q ON (q.organization,q.id)=(v.organization,v.saved_query_version_id)
+WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID, in.Sequence).Scan(&enabled, &resumed, &superseded, &pinned.queryID, &pinned.queryVersionID, &pinned.destination, &scope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pinned, "", monitoring.OutcomeIneligible, nil
 	}
 	if err != nil {
 		return pinned, "", "", err
 	}
-	if !enabled || current != in.SubscriptionVersionID || in.Sequence <= resumed {
+	if !enabled || in.Sequence <= resumed {
 		return pinned, "", monitoring.OutcomeSubscriptionDisabled, nil
 	}
+	if superseded {
+		return pinned, "", monitoring.OutcomeVersionSuperseded, nil
+	}
 	var eligible bool
-	err = tx.QueryRow(ctx, `SELECT r.corpus_id, r.current_version_id IS NOT DISTINCT FROM v.id AND `+eligibleVersionSQL+`
-  AND EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=r.organization AND sc.corpus_id=r.corpus_id AND sc.subscription_id=$4)
+	err = tx.QueryRow(ctx, `SELECT r.corpus_id, r.current_version_id IS NOT DISTINCT FROM v.id AND `+eligibleVersionSQL+` AND r.corpus_id=ANY($4::text[])
 FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
-WHERE v.organization=$1 AND v.id=$2 AND r.id=$3`, org, in.VersionID, in.RecordID, in.SubscriptionID).Scan(&corpusID, &eligible)
+WHERE v.organization=$1 AND v.id=$2 AND r.id=$3`, org, in.VersionID, in.RecordID, scope).Scan(&corpusID, &eligible)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !eligible) {
 		return pinned, "", monitoring.OutcomeIneligible, nil
 	}
@@ -329,8 +350,11 @@ func commitMatch(ctx context.Context, tx pgx.Tx, in monitoring.Intent, evidence 
 	if err != nil || refused != "" {
 		return refused, err
 	}
+	// A Record Version matched by any Version of the Subscription is not
+	// matched again: an edit between its retrieval and enrichment triggers
+	// neither repeats the alert nor links a Match to one on the same content.
 	var exists bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND subscription_version_id=$2 AND record_version_id=$3)`, org, in.SubscriptionVersionID, in.VersionID).Scan(&exists); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND record_id=$4 AND subscription_id=$2 AND record_version_id=$3)`, org, in.SubscriptionID, in.VersionID, in.RecordID).Scan(&exists); err != nil {
 		return "", err
 	}
 	if exists {
@@ -371,7 +395,7 @@ func commitNoMatch(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (string
 	}
 	// A Version that matched is never invalidated by a later decision about itself.
 	var matched bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND subscription_id=$2 AND record_version_id=$3)`, org, in.SubscriptionID, in.VersionID).Scan(&matched); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM matches WHERE organization=$1 AND record_id=$4 AND subscription_id=$2 AND record_version_id=$3)`, org, in.SubscriptionID, in.VersionID, in.RecordID).Scan(&matched); err != nil {
 		return "", err
 	}
 	if matched {
@@ -522,11 +546,11 @@ func (s ContentStore) Matches(ctx context.Context, org, subscriptionID string, a
 // current admission view derived from canonical state.
 func (s ContentStore) Delivery(ctx context.Context, org, id string) (monitoring.Delivery, error) {
 	var d monitoring.Delivery
-	var enabled, withdrawn bool
+	var enabled, deleted, withdrawn bool
 	var later monitoring.Later
 	var kind string
 	var next *time.Time
-	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,n.kind,s.enabled,
+	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,n.kind,s.enabled,s.deleted,
   r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),`+laterNoticesSQL+`,
   d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,''),
   (SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id AND o.available_at<'infinity')
@@ -538,7 +562,7 @@ JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &kind, &enabled, &withdrawn, &later.Corrected, &later.NoLongerMatches,
+WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.SubscriptionID, &d.DestinationID, &d.State, &d.AttemptCount, &d.Event, &kind, &enabled, &deleted, &withdrawn, &later.Corrected, &later.NoLongerMatches,
 		&d.LastOutcome, &d.LastErrorCode, &d.LastErrorMessage, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, monitoring.ErrNotFound
@@ -549,8 +573,8 @@ WHERE d.organization=$1 AND d.id=$2`, org, id).Scan(&d.ID, &d.MatchID, &d.Subscr
 	switch {
 	case d.State == "delivered" || d.State == "exhausted":
 		d.Admission = monitoring.Admission{Reason: "terminal"}
-	case monitoring.AdmissionReason(kind, enabled, withdrawn, later) != "":
-		d.Admission = monitoring.Admission{Reason: monitoring.AdmissionReason(kind, enabled, withdrawn, later)}
+	case monitoring.AdmissionReason(kind, enabled, deleted, withdrawn, later) != "":
+		d.Admission = monitoring.Admission{Reason: monitoring.AdmissionReason(kind, enabled, deleted, withdrawn, later)}
 	default:
 		d.Admission = monitoring.Admission{Allowed: true}
 		// Scheduled work of an admissible pending Delivery; a claimed or

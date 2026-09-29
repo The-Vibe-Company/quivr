@@ -556,6 +556,7 @@
     "value": {
       "saved_query_id": "query_1",
       "name": "Example query",
+      "deleted": false,
       "current_version": {
         "saved_query_id": "query_1",
         "version_id": "query_version_1",
@@ -569,6 +570,23 @@
           "retrieval_profile": "balanced",
           "temporal_policy": "from_activation"
         }
+      }
+    }
+  },
+  {
+    "name": "saved_query_version_create",
+    "schema": "SavedQueryVersionCreate",
+    "value": {
+      "idempotency_key": "edit-query-1",
+      "definition": {
+        "corpus_ids": [
+          "corpus_news"
+        ],
+        "expression": {
+          "fixture": "negative"
+        },
+        "retrieval_profile": "balanced",
+        "temporal_policy": "from_activation"
       }
     }
   },
@@ -600,6 +618,7 @@
       "subscription_id": "subscription_1",
       "name": "Example subscription",
       "enabled": true,
+      "deleted": false,
       "current_version": {
         "subscription_id": "subscription_1",
         "version_id": "subscription_version_1",
@@ -617,6 +636,22 @@
         },
         "destination_id": "fixture_webhook"
       }
+    }
+  },
+  {
+    "name": "subscription_version_create",
+    "schema": "SubscriptionVersionCreate",
+    "value": {
+      "idempotency_key": "edit-subscription-1",
+      "saved_query_version_id": "query_version_2",
+      "evaluator": {
+        "plugin_id": "fixture-evaluator",
+        "version": "1",
+        "configuration": {
+          "scenario": "negative"
+        }
+      },
+      "destination_id": "fixture_webhook"
     }
   },
   {

@@ -8,8 +8,9 @@ import (
 )
 
 // Match is an immutable positive historical determination. It is unique per
-// Subscription Version and Record Version and does not assert that the
-// Record is still current or searchable.
+// Subscription Version and Record Version, and a Record Version matched by one
+// Version of a Subscription is not matched again by a later one. It does not
+// assert that the Record is still current or searchable.
 type Match struct {
 	ID                    string
 	SubscriptionID        string
@@ -55,15 +56,18 @@ const (
 
 // AdmissionReason is the canonical admission rule shared by the delivery
 // worker and Delivery reads, after the destination check. It returns "" when
-// the notice may be attempted. A withdrawn Record refuses every ordinary
+// the notice may be attempted. A deleted Subscription refuses every notice for
+// good, a disabled one until it is re-enabled. A withdrawn Record refuses every ordinary
 // notice, while match.withdrawn has its own eligibility. later reports the
 // correction notices committed after this one for the same Subscription and
 // Record. Any of them supersedes match.created and match.corrected, so a stale
 // positive never lands after its correction; a later match.corrected
 // supersedes match.no_longer_matches, so a stale invalidation never lands
 // after the Record matches again. match.withdrawn is never superseded.
-func AdmissionReason(kind string, enabled, withdrawn bool, later Later) string {
+func AdmissionReason(kind string, enabled, deleted, withdrawn bool, later Later) string {
 	switch {
+	case deleted:
+		return "subscription_deleted"
 	case !enabled:
 		return "subscription_disabled"
 	case withdrawn && kind != NoticeWithdrawn:

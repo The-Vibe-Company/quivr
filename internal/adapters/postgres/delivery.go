@@ -97,9 +97,9 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, win
 	var state, destination, eventID, corpusID, kind string
 	var count int
 	var body []byte
-	var enabled, withdrawn, elapsed bool
+	var enabled, deleted, withdrawn, elapsed bool
 	var later monitoring.Later
-	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,n.kind,s.enabled,
+	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,n.kind,s.enabled,s.deleted,
   r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
   `+laterNoticesSQL+`,
   coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>coalesce(d.window_start,d.created_at)+make_interval(secs => $3::double precision),false)
@@ -108,7 +108,7 @@ JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
 JOIN subscriptions s ON (s.organization,s.id)=(m.organization,m.subscription_id)
 JOIN records r ON (r.organization,r.id)=(m.organization,m.record_id)
-WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.Seconds()).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &kind, &enabled, &withdrawn, &later.Corrected, &later.NoLongerMatches, &elapsed)
+WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.Seconds()).Scan(&state, &count, &destination, &eventID, &body, &corpusID, &kind, &enabled, &deleted, &withdrawn, &later.Corrected, &later.NoLongerMatches, &elapsed)
 	if err != nil {
 		return monitoring.AdmittedAttempt{}, "", err
 	}
@@ -138,7 +138,7 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.
 			}
 		}
 	}
-	reason := monitoring.AdmissionReason(kind, enabled, withdrawn, later)
+	reason := monitoring.AdmissionReason(kind, enabled, deleted, withdrawn, later)
 	switch {
 	case !configured(org, destination):
 		return refuse("destination_unavailable")

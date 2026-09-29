@@ -14,16 +14,72 @@ import (
 type memoryStore struct {
 	queries       map[string]monitoring.SavedQuery
 	subscriptions map[string]monitoring.Subscription
+	versions      map[string]any // org/resource/version
 	disabled      []string
+	// writes records every edit and delete that reached the store.
+	writes []string
 }
 
 func newStore() *memoryStore {
-	return &memoryStore{queries: map[string]monitoring.SavedQuery{}, subscriptions: map[string]monitoring.Subscription{}}
+	return &memoryStore{queries: map[string]monitoring.SavedQuery{}, subscriptions: map[string]monitoring.Subscription{}, versions: map[string]any{}}
+}
+
+func (m *memoryStore) version(org, id, versionID string) (any, error) {
+	v, ok := m.versions[org+"/"+id+"/"+versionID]
+	if !ok {
+		return nil, monitoring.ErrNotFound
+	}
+	return v, nil
+}
+func (m *memoryStore) SavedQueryVersion(_ context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
+	v, err := m.version(org, id, versionID)
+	if err != nil {
+		return monitoring.SavedQueryVersion{}, err
+	}
+	return v.(monitoring.SavedQueryVersion), nil
+}
+func (m *memoryStore) CreateSavedQueryVersion(_ context.Context, org, id string, in monitoring.SavedQueryVersionInput) (monitoring.SavedQueryVersion, error) {
+	m.writes = append(m.writes, "query version "+id)
+	q := m.queries[org+"/"+id]
+	q.Current = monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: "sqv_" + in.Key, Definition: in.Definition}
+	m.queries[org+"/"+id] = q
+	m.versions[org+"/"+id+"/"+q.Current.VersionID] = q.Current
+	return q.Current, nil
+}
+func (m *memoryStore) DeleteSavedQuery(_ context.Context, org, key, id string) (monitoring.SavedQuery, error) {
+	m.writes = append(m.writes, "query delete "+id)
+	q := m.queries[org+"/"+id]
+	q.Deleted = true
+	m.queries[org+"/"+id] = q
+	return q, nil
+}
+func (m *memoryStore) SubscriptionVersion(_ context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
+	v, err := m.version(org, id, versionID)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	return v.(monitoring.SubscriptionVersion), nil
+}
+func (m *memoryStore) CreateSubscriptionVersion(_ context.Context, org, id string, in monitoring.SubscriptionVersionInput, query monitoring.SavedQueryVersion) (monitoring.SubscriptionVersion, error) {
+	m.writes = append(m.writes, "subscription version "+id)
+	s := m.subscriptions[org+"/"+id]
+	s.Current = monitoring.SubscriptionVersion{SubscriptionID: id, VersionID: "subv_" + in.Key, SavedQueryID: query.SavedQueryID, SavedQueryVersionID: query.VersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}
+	m.subscriptions[org+"/"+id] = s
+	m.versions[org+"/"+id+"/"+s.Current.VersionID] = s.Current
+	return s.Current, nil
+}
+func (m *memoryStore) DeleteSubscription(_ context.Context, org, key, id string) (monitoring.Subscription, error) {
+	m.writes = append(m.writes, "subscription delete "+id)
+	s := m.subscriptions[org+"/"+id]
+	s.Enabled, s.Deleted = false, true
+	m.subscriptions[org+"/"+id] = s
+	return s, nil
 }
 
 func (m *memoryStore) CreateSavedQuery(_ context.Context, org string, in monitoring.SavedQueryInput) (monitoring.SavedQuery, error) {
 	q := monitoring.SavedQuery{ID: "sq_" + in.Key, Name: in.Name, Current: monitoring.SavedQueryVersion{SavedQueryID: "sq_" + in.Key, VersionID: "sqv_" + in.Key, Definition: in.Definition}}
 	m.queries[org+"/"+q.ID] = q
+	m.versions[org+"/"+q.ID+"/"+q.Current.VersionID] = q.Current
 	return q, nil
 }
 func (m *memoryStore) SavedQuery(_ context.Context, org, id string) (monitoring.SavedQuery, error) {
@@ -36,6 +92,7 @@ func (m *memoryStore) SavedQuery(_ context.Context, org, id string) (monitoring.
 func (m *memoryStore) CreateSubscription(_ context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
 	s := monitoring.Subscription{ID: "sub_" + in.Key, Name: in.Name, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "sub_" + in.Key, VersionID: "subv_" + in.Key, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
 	m.subscriptions[org+"/"+s.ID] = s
+	m.versions[org+"/"+s.ID+"/"+s.Current.VersionID] = s.Current
 	return s, nil
 }
 func (m *memoryStore) Subscription(_ context.Context, org, id string) (monitoring.Subscription, error) {
@@ -253,5 +310,93 @@ func TestDisableConcealsOutsideScope(t *testing.T) {
 	}
 	if got, err = s.EnableSubscription(ctx, writer, "e", sub.ID); err != nil || !got.Enabled || got.Current.VersionID != sub.Current.VersionID {
 		t.Fatalf("enable: %v %+v", err, got)
+	}
+}
+
+// TestEditsAndDeletesFollowScopeRules applies creation's rules to edits: the
+// key must grant the edited resource and every Corpus of the new Version, a
+// Subscription pins only a Version of its own Saved Query, and a Version read
+// needs its own Corpora granted. Refused commands never reach the store.
+func TestEditsAndDeletesFollowScopeRules(t *testing.T) {
+	ctx := context.Background()
+	s, store := service()
+	q, _ := s.CreateSavedQuery(ctx, writer, query("q", "corpus_a"))
+	otherQuery, _ := s.CreateSavedQuery(ctx, writer, query("other", "corpus_a"))
+	sub, err := s.CreateSubscription(ctx, writer, monitoring.SubscriptionInput{Key: "k", Name: "n", SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID, Evaluator: fixture(), DestinationID: "receiver_a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wide := monitoring.SavedQueryVersionInput{Key: "wide", Definition: query("", "corpus_a", "corpus_b").Definition}
+	subEdit := func(versionID string) monitoring.SubscriptionVersionInput {
+		return monitoring.SubscriptionVersionInput{Key: "e-" + versionID, SavedQueryVersionID: versionID, Evaluator: fixture(), DestinationID: "receiver_a"}
+	}
+	foreign := subEdit(q.Current.VersionID)
+	foreign.DestinationID = "receiver_b"
+	checks := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"read-only query edit", func() error { _, err := s.CreateSavedQueryVersion(ctx, reader, q.ID, wide); return err }(), monitoring.ErrForbidden},
+		{"query edit to an ungranted Corpus", func() error { _, err := s.CreateSavedQueryVersion(ctx, narrow, q.ID, wide); return err }(), monitoring.ErrForbidden},
+		{"query edit in another Organization", func() error { _, err := s.CreateSavedQueryVersion(ctx, outside, q.ID, wide); return err }(), monitoring.ErrNotFound},
+		{"query delete in another Organization", func() error { _, err := s.DeleteSavedQuery(ctx, outside, "d", q.ID); return err }(), monitoring.ErrNotFound},
+		{"subscription edit pinning another Saved Query", func() error {
+			_, err := s.CreateSubscriptionVersion(ctx, writer, sub.ID, subEdit(otherQuery.Current.VersionID))
+			return err
+		}(), monitoring.ErrUnknownSavedQuery},
+		{"subscription edit to a foreign destination", func() error { _, err := s.CreateSubscriptionVersion(ctx, writer, sub.ID, foreign); return err }(), monitoring.ErrUnknownDestination},
+		{"read-only subscription delete", func() error { _, err := s.DeleteSubscription(ctx, reader, "d", sub.ID); return err }(), monitoring.ErrForbidden},
+		{"subscription delete in another Organization", func() error { _, err := s.DeleteSubscription(ctx, outside, "d", sub.ID); return err }(), monitoring.ErrNotFound},
+	}
+	for _, c := range checks {
+		if !errors.Is(c.err, c.want) {
+			t.Errorf("%s: got %v want %v", c.name, c.err, c.want)
+		}
+	}
+	if len(store.writes) != 0 {
+		t.Fatalf("refused commands reached the store: %v", store.writes)
+	}
+
+	v2, err := s.CreateSavedQueryVersion(ctx, writer, q.ID, wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The new Version covers a Corpus the narrow key lacks: the Saved Query
+	// is concealed from it, while the first Version is not what it reads.
+	if _, err = s.SavedQuery(ctx, narrow, q.ID); !errors.Is(err, monitoring.ErrNotFound) {
+		t.Errorf("narrow read after widening: %v", err)
+	}
+	if _, err = s.SavedQueryVersion(ctx, writer, q.ID, q.Current.VersionID); err != nil {
+		t.Errorf("earlier Version read: %v", err)
+	}
+	if _, err = s.SubscriptionVersion(ctx, writer, sub.ID, sub.Current.VersionID); err != nil {
+		t.Errorf("Subscription Version read: %v", err)
+	}
+	moved, err := s.CreateSubscriptionVersion(ctx, writer, sub.ID, subEdit(v2.VersionID))
+	if err != nil || moved.SavedQueryVersionID != v2.VersionID {
+		t.Fatalf("subscription edit: %v %+v", err, moved)
+	}
+	if _, err = s.SubscriptionVersion(ctx, narrow, sub.ID, sub.Current.VersionID); !errors.Is(err, monitoring.ErrNotFound) {
+		t.Errorf("narrow Version read of a widened Subscription: %v", err)
+	}
+	if _, err = s.SubscriptionVersion(ctx, writer, sub.ID, "subv_missing"); !errors.Is(err, monitoring.ErrNotFound) {
+		t.Errorf("unknown Subscription Version: %v", err)
+	}
+	// A key must grant every Corpus any Version pinned, so narrowing the
+	// scope never exposes earlier Matches.
+	narrowed := store.subscriptions["org_a/"+sub.ID]
+	narrowed.Current.CorpusIDs, narrowed.PinnedCorpusIDs = []string{"corpus_a"}, []string{"corpus_a", "corpus_b"}
+	store.subscriptions["org_a/"+sub.ID] = narrowed
+	if _, err = s.Subscription(ctx, narrow, sub.ID); !errors.Is(err, monitoring.ErrNotFound) {
+		t.Errorf("narrow read after narrowing: %v", err)
+	}
+	// Saved Query commands need monitoring:write only.
+	writeOnly := corpus.Scope{Organization: "org_a", Actions: []string{"monitoring:write"}, Corpora: []string{"*"}}
+	if _, err = s.CreateSavedQueryVersion(ctx, writeOnly, q.ID, monitoring.SavedQueryVersionInput{Key: "w", Definition: query("", "corpus_a").Definition}); err != nil {
+		t.Errorf("write-only query edit: %v", err)
+	}
+	if got, err := s.DeleteSubscription(ctx, writer, "d", sub.ID); err != nil || !got.Deleted || got.Enabled {
+		t.Fatalf("delete: %v %+v", err, got)
 	}
 }

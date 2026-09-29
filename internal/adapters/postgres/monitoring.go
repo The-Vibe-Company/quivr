@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -32,6 +33,35 @@ func claimRequest(ctx context.Context, tx pgx.Tx, org, family, key string, canon
 	return "", err
 }
 
+// monitoringCommand runs one idempotent monitoring command under the
+// Organization journal lock. apply runs only for a new command; any error
+// rolls the claim back with it. It returns the claimed resource ID.
+func (s ContentStore) monitoringCommand(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
+	request, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return "", err
+	}
+	existing, err := claimRequest(ctx, tx, org, family, key, request, resourceID)
+	if err != nil {
+		return "", err
+	}
+	if existing == "" {
+		if err = apply(tx); err != nil {
+			return "", err
+		}
+		existing = resourceID
+	}
+	return existing, tx.Commit(ctx)
+}
+
 // appendScopedEvents appends one public event per pinned Corpus, because the
 // change feed is read per Corpus. They share the resource and differ only in
 // their stable per-Corpus event ID, derived from mutation. It returns the last position.
@@ -47,42 +77,32 @@ func appendScopedEvents(ctx context.Context, tx pgx.Tx, org, kind, resource, id,
 	return last, nil
 }
 
+// union returns the sorted distinct Corpus IDs of both scopes: an edit is
+// announced in every Corpus it leaves or enters.
+func union(a, b []string) []string {
+	out := slices.Concat(a, b)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monitoring.SavedQueryInput) (monitoring.SavedQuery, error) {
-	canonical, err := json.Marshal(in)
-	if err != nil {
-		return monitoring.SavedQuery{}, err
-	}
 	definition, err := json.Marshal(in.Definition)
 	if err != nil {
 		return monitoring.SavedQuery{}, err
 	}
 	id := content.StableID("saved_query", org, in.Key)
 	versionID := content.StableID("saved_query_version", org, id, "1")
-	tx, err := s.Pool.Begin(ctx)
+	existing, err := s.monitoringCommand(ctx, org, "saved_queries", in.Key, in, id, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "INSERT INTO saved_queries(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
+			return err
+		}
+		_, err := appendScopedEvents(ctx, tx, org, "saved_query.created", "saved_query", id, id, in.Definition.CorpusIDs)
+		return err
+	})
 	if err != nil {
-		return monitoring.SavedQuery{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return monitoring.SavedQuery{}, err
-	}
-	existing, err := claimRequest(ctx, tx, org, "saved_queries", in.Key, canonical, id)
-	if err != nil {
-		return monitoring.SavedQuery{}, err
-	}
-	if existing == "" {
-		if _, err = tx.Exec(ctx, "INSERT INTO saved_queries(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
-			return monitoring.SavedQuery{}, err
-		}
-		if _, err = tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
-			return monitoring.SavedQuery{}, err
-		}
-		if _, err = appendScopedEvents(ctx, tx, org, "saved_query.created", "saved_query", id, id, in.Definition.CorpusIDs); err != nil {
-			return monitoring.SavedQuery{}, err
-		}
-		existing = id
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return monitoring.SavedQuery{}, err
 	}
 	return s.SavedQuery(ctx, org, existing)
@@ -91,7 +111,7 @@ func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monit
 func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitoring.SavedQuery, error) {
 	q := monitoring.SavedQuery{}
 	var definition []byte
-	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,v.id,v.definition FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Current.VersionID, &definition)
+	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return q, monitoring.ErrNotFound
 	}
@@ -103,64 +123,164 @@ func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitorin
 	return q, err
 }
 
-func (s ContentStore) CreateSubscription(ctx context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
-	canonical, err := json.Marshal(in)
-	if err != nil {
-		return monitoring.Subscription{}, err
+func (s ContentStore) SavedQueryVersion(ctx context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
+	v := monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: versionID}
+	var definition []byte
+	err := s.Pool.QueryRow(ctx, `SELECT definition FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, monitoring.ErrNotFound
 	}
+	if err != nil {
+		return v, err
+	}
+	return v, unmarshalNumbers(definition, &v.Definition)
+}
+
+// CreateSavedQueryVersion commits a new immutable Version, makes it current
+// and announces saved_query.updated in every Corpus of the previous and new
+// scope. Subscriptions keep the Version they pin.
+func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id string, in monitoring.SavedQueryVersionInput) (monitoring.SavedQueryVersion, error) {
+	definition, err := json.Marshal(in.Definition)
+	if err != nil {
+		return monitoring.SavedQueryVersion{}, err
+	}
+	versionID := content.StableID("saved_query_version", org, id, "edit", in.Key)
+	canonical := struct {
+		SavedQueryID string `json:"saved_query_id"`
+		monitoring.SavedQueryVersionInput
+	}{id, in}
+	existing, err := s.monitoringCommand(ctx, org, "saved_query_versions", in.Key, canonical, versionID, func(tx pgx.Tx) error {
+		var deleted bool
+		var previous []string
+		err := tx.QueryRow(ctx, `SELECT q.deleted,v.corpus_ids FROM saved_queries q JOIN saved_query_versions v ON (v.organization,v.id)=(q.organization,q.current_version_id) WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&deleted, &previous)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return monitoring.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return monitoring.ErrSavedQueryDeleted
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, "UPDATE saved_queries SET current_version_id=$3 WHERE organization=$1 AND id=$2", org, id, versionID); err != nil {
+			return err
+		}
+		_, err = appendScopedEvents(ctx, tx, org, "saved_query.updated", "saved_query", id, versionID, union(previous, in.Definition.CorpusIDs))
+		return err
+	})
+	if err != nil {
+		return monitoring.SavedQueryVersion{}, err
+	}
+	return s.SavedQueryVersion(ctx, org, id, existing)
+}
+
+// DeleteSavedQuery logically deletes a Saved Query once, when no Subscription
+// that is not deleted belongs to it. Subscription creation and editing take
+// the same journal lock, so none can pin it concurrently.
+func (s ContentStore) DeleteSavedQuery(ctx context.Context, org, key, id string) (monitoring.SavedQuery, error) {
+	existing, err := s.monitoringCommand(ctx, org, "saved_query_delete", key, map[string]string{"saved_query_id": id}, id, func(tx pgx.Tx) error {
+		var deleted, used bool
+		var corpora []string
+		err := tx.QueryRow(ctx, `SELECT q.deleted,v.corpus_ids,
+  EXISTS(SELECT 1 FROM subscriptions s JOIN subscription_versions sv ON (sv.organization,sv.id)=(s.organization,s.current_version_id) WHERE s.organization=q.organization AND sv.saved_query_id=q.id AND NOT s.deleted)
+FROM saved_queries q JOIN saved_query_versions v ON (v.organization,v.id)=(q.organization,q.current_version_id) WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&deleted, &corpora, &used)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return monitoring.ErrNotFound
+		}
+		if err != nil || deleted {
+			return err
+		}
+		if used {
+			return monitoring.ErrSavedQueryInUse
+		}
+		if _, err = tx.Exec(ctx, "UPDATE saved_queries SET deleted=true WHERE organization=$1 AND id=$2", org, id); err != nil {
+			return err
+		}
+		_, err = appendScopedEvents(ctx, tx, org, "saved_query.deleted", "saved_query", id, id, corpora)
+		return err
+	})
+	if err != nil {
+		return monitoring.SavedQuery{}, err
+	}
+	return s.SavedQuery(ctx, org, existing)
+}
+
+// pinnableQuery checks, under the journal lock, that a new Subscription
+// Version may pin query: its Saved Query is not deleted and query is current.
+func pinnableQuery(ctx context.Context, tx pgx.Tx, org string, query monitoring.SavedQueryVersion) error {
+	var deleted bool
+	var current string
+	err := tx.QueryRow(ctx, `SELECT deleted,current_version_id FROM saved_queries WHERE organization=$1 AND id=$2`, org, query.SavedQueryID).Scan(&deleted, &current)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (deleted || current != query.VersionID)) {
+		return monitoring.ErrUnknownSavedQuery
+	}
+	return err
+}
+
+// scopeCorpora records Corpora pinned by a Subscription Version. The rows are
+// never removed: they cover every Corpus of every Version, so dispatch finds
+// triggers that an earlier Version still judges and withdrawals of Records it
+// alerted about.
+func scopeCorpora(ctx context.Context, tx pgx.Tx, org, id string, corpusIDs []string) error {
+	for _, corpusID := range corpusIDs {
+		if _, err := tx.Exec(ctx, "INSERT INTO subscription_corpora(organization,corpus_id,subscription_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", org, corpusID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s ContentStore) CreateSubscription(ctx context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
 	evaluator, err := json.Marshal(in.Evaluator)
 	if err != nil {
 		return monitoring.Subscription{}, err
 	}
 	id := content.StableID("subscription", org, in.Key)
 	versionID := content.StableID("subscription_version", org, id, "1")
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return monitoring.Subscription{}, err
-	}
-	existing, err := claimRequest(ctx, tx, org, "subscriptions", in.Key, canonical, id)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	if existing == "" {
-		if _, err = tx.Exec(ctx, "INSERT INTO subscriptions(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
-			return monitoring.Subscription{}, err
+	existing, err := s.monitoringCommand(ctx, org, "subscriptions", in.Key, in, id, func(tx pgx.Tx) error {
+		if err := pinnableQuery(ctx, tx, org, query); err != nil {
+			return err
 		}
-		for _, corpusID := range query.Definition.CorpusIDs {
-			if _, err = tx.Exec(ctx, "INSERT INTO subscription_corpora(organization,corpus_id,subscription_id) VALUES($1,$2,$3)", org, corpusID, id); err != nil {
-				return monitoring.Subscription{}, err
-			}
+		if _, err := tx.Exec(ctx, "INSERT INTO subscriptions(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
+			return err
+		}
+		if err := scopeCorpora(ctx, tx, org, id, query.Definition.CorpusIDs); err != nil {
+			return err
 		}
 		// Activation commits its public event and boundary together; the journal
 		// lock orders every earlier change below it and every later one above it.
 		boundary, err := appendScopedEvents(ctx, tx, org, "subscription.created", "subscription", id, id, query.Definition.CorpusIDs)
 		if err != nil {
-			return monitoring.Subscription{}, err
+			return err
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO subscription_versions(organization,subscription_id,id,saved_query_id,saved_query_version_id,evaluator,destination_id,activation_position) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", org, id, versionID, query.SavedQueryID, query.VersionID, evaluator, in.DestinationID, boundary); err != nil {
-			return monitoring.Subscription{}, err
-		}
-		existing = id
-	}
-	if err = tx.Commit(ctx); err != nil {
+		_, err = tx.Exec(ctx, "INSERT INTO subscription_versions(organization,subscription_id,id,saved_query_id,saved_query_version_id,evaluator,destination_id,activation_position) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", org, id, versionID, query.SavedQueryID, query.VersionID, evaluator, in.DestinationID, boundary)
+		return err
+	})
+	if err != nil {
 		return monitoring.Subscription{}, err
 	}
 	return s.Subscription(ctx, org, existing)
+}
+
+const subscriptionVersionColumns = `v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids`
+
+func scanSubscriptionVersion(v *monitoring.SubscriptionVersion, evaluator *[]byte) []any {
+	return []any{&v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs}
 }
 
 func (s ContentStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
 	sub := monitoring.Subscription{}
 	v := &sub.Current
 	var evaluator []byte
-	err := s.Pool.QueryRow(ctx, `SELECT s.id,s.name,s.enabled,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids
+	err := s.Pool.QueryRow(ctx, `SELECT s.id,s.name,s.enabled,s.deleted,
+  coalesce((SELECT array_agg(sc.corpus_id ORDER BY sc.corpus_id) FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id),'{}'),`+subscriptionVersionColumns+`
 FROM subscriptions s
 JOIN subscription_versions v ON v.organization=s.organization AND v.id=s.current_version_id
 JOIN saved_query_versions q ON q.organization=v.organization AND q.id=v.saved_query_version_id
-WHERE s.organization=$1 AND s.id=$2`, org, id).Scan(&sub.ID, &sub.Name, &sub.Enabled, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs)
+WHERE s.organization=$1 AND s.id=$2`, org, id).Scan(append([]any{&sub.ID, &sub.Name, &sub.Enabled, &sub.Deleted, &sub.PinnedCorpusIDs}, scanSubscriptionVersion(v, &evaluator)...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sub, monitoring.ErrNotFound
 	}
@@ -172,47 +292,106 @@ WHERE s.organization=$1 AND s.id=$2`, org, id).Scan(&sub.ID, &sub.Name, &sub.Ena
 	return sub, err
 }
 
+func (s ContentStore) SubscriptionVersion(ctx context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
+	v := monitoring.SubscriptionVersion{SubscriptionID: id}
+	var evaluator []byte
+	err := s.Pool.QueryRow(ctx, `SELECT `+subscriptionVersionColumns+`
+FROM subscription_versions v
+JOIN saved_query_versions q ON q.organization=v.organization AND q.id=v.saved_query_version_id
+WHERE v.organization=$1 AND v.subscription_id=$2 AND v.id=$3`, org, id, versionID).Scan(scanSubscriptionVersion(&v, &evaluator)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, monitoring.ErrNotFound
+	}
+	if err != nil {
+		return v, err
+	}
+	return v, unmarshalNumbers(evaluator, &v.Evaluator)
+}
+
+// CreateSubscriptionVersion commits a new immutable Version and makes it
+// current, with subscription.updated in every Corpus of the previous and new
+// scope. Like creation, the Version records the journal position of that
+// commit as its activation: every later change is judged by it, every earlier
+// one by the Version effective before. Nothing is backfilled and Matches keep
+// the Version that produced them. Enabled state is unchanged.
+func (s ContentStore) CreateSubscriptionVersion(ctx context.Context, org, id string, in monitoring.SubscriptionVersionInput, query monitoring.SavedQueryVersion) (monitoring.SubscriptionVersion, error) {
+	evaluator, err := json.Marshal(in.Evaluator)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	versionID := content.StableID("subscription_version", org, id, "edit", in.Key)
+	canonical := struct {
+		SubscriptionID string `json:"subscription_id"`
+		monitoring.SubscriptionVersionInput
+	}{id, in}
+	existing, err := s.monitoringCommand(ctx, org, "subscription_versions", in.Key, canonical, versionID, func(tx pgx.Tx) error {
+		deleted, previous, err := subscriptionScope(ctx, tx, org, id)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return monitoring.ErrSubscriptionDeleted
+		}
+		if err = pinnableQuery(ctx, tx, org, query); err != nil {
+			return err
+		}
+		if err = scopeCorpora(ctx, tx, org, id, query.Definition.CorpusIDs); err != nil {
+			return err
+		}
+		boundary, err := appendScopedEvents(ctx, tx, org, "subscription.updated", "subscription", id, versionID, union(previous, query.Definition.CorpusIDs))
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO subscription_versions(organization,subscription_id,id,saved_query_id,saved_query_version_id,evaluator,destination_id,activation_position) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", org, id, versionID, query.SavedQueryID, query.VersionID, evaluator, in.DestinationID, boundary); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "UPDATE subscriptions SET current_version_id=$3 WHERE organization=$1 AND id=$2", org, id, versionID)
+		return err
+	})
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	return s.SubscriptionVersion(ctx, org, id, existing)
+}
+
+// subscriptionScope locks a Subscription row and reads whether it is deleted
+// and the sorted Corpora of its current Version.
+func subscriptionScope(ctx context.Context, tx pgx.Tx, org, id string) (bool, []string, error) {
+	var deleted bool
+	var corpora []string
+	err := tx.QueryRow(ctx, `SELECT s.deleted,q.corpus_ids FROM subscriptions s
+JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,s.current_version_id)
+JOIN saved_query_versions q ON (q.organization,q.id)=(v.organization,v.saved_query_version_id)
+WHERE s.organization=$1 AND s.id=$2 FOR UPDATE OF s`, org, id).Scan(&deleted, &corpora)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, monitoring.ErrNotFound
+	}
+	slices.Sort(corpora)
+	return deleted, corpora, err
+}
+
 // DisableSubscription commits the enabled-state change and its public event
 // once. The row update serializes with later Match and Delivery admission.
 func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
-	canonical, err := json.Marshal(map[string]string{"subscription_id": id})
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return monitoring.Subscription{}, err
-	}
-	existing, err := claimRequest(ctx, tx, org, "subscription_disable", key, canonical, id)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	if existing == "" {
+	_, err := s.monitoringCommand(ctx, org, "subscription_disable", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
 		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET enabled=false WHERE organization=$1 AND id=$2 AND enabled", org, id)
+		if err != nil || changed.RowsAffected() != 1 {
+			return err
+		}
+		// A disable after a re-enable is a distinct fact: its event
+		// identity names the re-enable it follows. The first keeps its own.
+		corpora, mutation, err := toggleScope(ctx, tx, org, id, "enabled_position")
 		if err != nil {
-			return monitoring.Subscription{}, err
+			return err
 		}
-		if changed.RowsAffected() == 1 {
-			// A disable after a re-enable is a distinct fact: its event
-			// identity names the re-enable it follows. The first keeps its own.
-			corpora, mutation, err := toggleScope(ctx, tx, org, id, "enabled_position")
-			if err != nil {
-				return monitoring.Subscription{}, err
-			}
-			position, err := appendScopedEvents(ctx, tx, org, "subscription.disabled", "subscription", id, mutation, corpora)
-			if err != nil {
-				return monitoring.Subscription{}, err
-			}
-			if _, err = tx.Exec(ctx, "UPDATE subscriptions SET disabled_position=$3 WHERE organization=$1 AND id=$2", org, id, position); err != nil {
-				return monitoring.Subscription{}, err
-			}
+		position, err := appendScopedEvents(ctx, tx, org, "subscription.disabled", "subscription", id, mutation, corpora)
+		if err != nil {
+			return err
 		}
-	}
-	if err = tx.Commit(ctx); err != nil {
+		_, err = tx.Exec(ctx, "UPDATE subscriptions SET disabled_position=$3 WHERE organization=$1 AND id=$2", org, id, position)
+		return err
+	})
+	if err != nil {
 		return monitoring.Subscription{}, err
 	}
 	return s.Subscription(ctx, org, id)
@@ -225,69 +404,86 @@ func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id stri
 // Subscription's parked Delivery work due now: every claim is admitted again
 // through the unchanged canonical checks and delivery window, so refused work
 // (superseded, withdrawn Record) parks again and elapsed work ends exhausted.
+// A deleted Subscription is never re-enabled.
 func (s ContentStore) EnableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
-	canonical, err := json.Marshal(map[string]string{"subscription_id": id})
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return monitoring.Subscription{}, err
-	}
-	existing, err := claimRequest(ctx, tx, org, "subscription_enable", key, canonical, id)
-	if err != nil {
-		return monitoring.Subscription{}, err
-	}
-	if existing == "" {
-		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET enabled=true WHERE organization=$1 AND id=$2 AND NOT enabled", org, id)
+	_, err := s.monitoringCommand(ctx, org, "subscription_enable", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
+		deleted, _, err := subscriptionScope(ctx, tx, org, id)
 		if err != nil {
-			return monitoring.Subscription{}, err
+			return err
 		}
-		if changed.RowsAffected() == 1 {
-			// Each re-enable is a distinct fact: its event identity names the
-			// disable it follows.
-			corpora, mutation, err := toggleScope(ctx, tx, org, id, "disabled_position")
-			if err != nil {
-				return monitoring.Subscription{}, err
-			}
-			position, err := appendScopedEvents(ctx, tx, org, "subscription.enabled", "subscription", id, mutation, corpora)
-			if err != nil {
-				return monitoring.Subscription{}, err
-			}
-			if _, err = tx.Exec(ctx, "UPDATE subscriptions SET enabled_position=$3 WHERE organization=$1 AND id=$2", org, id, position); err != nil {
-				return monitoring.Subscription{}, err
-			}
-			// Notices committed during the pause (withdrawals) open their
-			// window now; work parked by the disable keeps its window.
-			if _, err = tx.Exec(ctx, `UPDATE deliveries d SET window_start=now() FROM matches m
+		if deleted {
+			return monitoring.ErrSubscriptionDeleted
+		}
+		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET enabled=true WHERE organization=$1 AND id=$2 AND NOT enabled", org, id)
+		if err != nil || changed.RowsAffected() != 1 {
+			return err
+		}
+		// Each re-enable is a distinct fact: its event identity names the
+		// disable it follows.
+		corpora, mutation, err := toggleScope(ctx, tx, org, id, "disabled_position")
+		if err != nil {
+			return err
+		}
+		position, err := appendScopedEvents(ctx, tx, org, "subscription.enabled", "subscription", id, mutation, corpora)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, "UPDATE subscriptions SET enabled_position=$3 WHERE organization=$1 AND id=$2", org, id, position); err != nil {
+			return err
+		}
+		// Notices committed during the pause (withdrawals) open their
+		// window now; work parked by the disable keeps its window.
+		if _, err = tx.Exec(ctx, `UPDATE deliveries d SET window_start=now() FROM matches m
 WHERE d.organization=$1 AND d.window_start='infinity' AND (m.organization,m.id)=(d.organization,d.match_id) AND m.subscription_id=$2`, org, id); err != nil {
-				return monitoring.Subscription{}, err
-			}
-			if _, err = tx.Exec(ctx, `UPDATE delivery_outbox o SET available_at=now(),lease_until='-infinity'
-FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
-WHERE o.organization=$1 AND o.available_at='infinity' AND (d.organization,d.id)=(o.organization,o.delivery_id) AND m.subscription_id=$2`, org, id); err != nil {
-				return monitoring.Subscription{}, err
-			}
+			return err
 		}
-	}
-	if err = tx.Commit(ctx); err != nil {
+		_, err = tx.Exec(ctx, `UPDATE delivery_outbox o SET available_at=now(),lease_until='-infinity'
+FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
+WHERE o.organization=$1 AND o.available_at='infinity' AND (d.organization,d.id)=(o.organization,o.delivery_id) AND m.subscription_id=$2`, org, id)
+		return err
+	})
+	if err != nil {
 		return monitoring.Subscription{}, err
 	}
 	return s.Subscription(ctx, org, id)
 }
 
-// toggleScope reads the pinned Corpora of a Subscription whose enabled state
-// changes and the event identity of that change: the Subscription ID, suffixed
-// with the position of the previous opposite change (column) when there is one.
+// DeleteSubscription logically deletes a Subscription once: it is disabled
+// for good in the same row update, which serializes with Match commits and
+// Delivery admission under the journal lock, and subscription.deleted is
+// committed per Corpus of its current Version. A withdrawal notice for one of
+// its Matches is still committed, as for a disabled Subscription (THE-696),
+// but admission never attempts it. Versions, Matches and Deliveries remain.
+func (s ContentStore) DeleteSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
+	_, err := s.monitoringCommand(ctx, org, "subscription_delete", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
+		deleted, corpora, err := subscriptionScope(ctx, tx, org, id)
+		if err != nil || deleted {
+			return err
+		}
+		position, err := appendScopedEvents(ctx, tx, org, "subscription.deleted", "subscription", id, id, corpora)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "UPDATE subscriptions SET deleted=true,enabled=false,deleted_position=$3 WHERE organization=$1 AND id=$2", org, id, position)
+		return err
+	})
+	if err != nil {
+		return monitoring.Subscription{}, err
+	}
+	return s.Subscription(ctx, org, id)
+}
+
+// toggleScope reads the Corpora of a Subscription's current Version whose
+// enabled state changes and the event identity of that change: the
+// Subscription ID, suffixed with the position of the previous opposite change
+// (column) when there is one.
 func toggleScope(ctx context.Context, tx pgx.Tx, org, id, column string) ([]string, string, error) {
-	var corpora []string
+	_, corpora, err := subscriptionScope(ctx, tx, org, id)
+	if err != nil {
+		return nil, "", err
+	}
 	var previous *int64
-	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT array_agg(corpus_id ORDER BY corpus_id) FROM subscription_corpora WHERE organization=$1 AND subscription_id=$2),'{}'),`+column+` FROM subscriptions WHERE organization=$1 AND id=$2`, org, id).Scan(&corpora, &previous)
-	if err != nil || previous == nil {
+	if err = tx.QueryRow(ctx, `SELECT `+column+` FROM subscriptions WHERE organization=$1 AND id=$2`, org, id).Scan(&previous); err != nil || previous == nil {
 		return corpora, id, err
 	}
 	return corpora, fmt.Sprint(id, "@", *previous), nil

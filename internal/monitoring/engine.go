@@ -22,6 +22,9 @@ const (
 	OutcomeNotReady             = "not_ready"
 	OutcomeIneligible           = "ineligible"
 	OutcomeSubscriptionDisabled = "subscription_disabled"
+	// OutcomeVersionSuperseded: a later Subscription Version was already
+	// effective at the trigger's position, so this Version does not judge it.
+	OutcomeVersionSuperseded = "subscription_version_superseded"
 	// OutcomeNoLongerMatches: a negative decision on a correction committed a
 	// match.no_longer_matches notice for the prior positive Match.
 	OutcomeNoLongerMatches = "no_longer_matches"
@@ -58,7 +61,10 @@ type Target struct {
 	Subscription SubscriptionVersion
 	Definition   Definition
 	Enabled      bool
-	Enriched     bool
+	// Superseded reports a later Subscription Version effective at the
+	// intent's trigger position.
+	Superseded bool
+	Enriched   bool
 }
 
 // MatchEvidence is the immutable, bounded evidence stored with a Match.
@@ -218,6 +224,9 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	}
 	if !target.Enabled {
 		return true, e.Store.Complete(ctx, in, OutcomeSubscriptionDisabled)
+	}
+	if target.Superseded {
+		return true, e.Store.Complete(ctx, in, OutcomeVersionSuperseded)
 	}
 	evaluator, ok := e.Evaluators[EvaluatorKey(target.Subscription.Evaluator)]
 	if !ok {

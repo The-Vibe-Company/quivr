@@ -19,8 +19,17 @@ import (
 
 // definitions is a minimal in-memory monitoring store for transport tests.
 type definitions struct {
-	queries map[string]monitoring.SavedQuery
-	subs    map[string]monitoring.Subscription
+	queries  map[string]monitoring.SavedQuery
+	subs     map[string]monitoring.Subscription
+	versions map[string]any // saved query or subscription ID + "/" + version ID
+}
+
+func (d *definitions) version(id, versionID string) (any, error) {
+	v, ok := d.versions[id+"/"+versionID]
+	if !ok {
+		return nil, monitoring.ErrNotFound
+	}
+	return v, nil
 }
 
 func (d *definitions) CreateSavedQuery(_ context.Context, org string, in monitoring.SavedQueryInput) (monitoring.SavedQuery, error) {
@@ -33,6 +42,38 @@ func (d *definitions) CreateSavedQuery(_ context.Context, org string, in monitor
 	q := monitoring.SavedQuery{ID: "saved_query_" + in.Key, Name: in.Name, Current: monitoring.SavedQueryVersion{SavedQueryID: "saved_query_" + in.Key, VersionID: "saved_query_version_" + in.Key, Definition: in.Definition}}
 	d.queries[in.Key] = q
 	d.queries[q.ID] = q
+	d.versions[q.ID+"/"+q.Current.VersionID] = q.Current
+	return q, nil
+}
+func (d *definitions) SavedQueryVersion(_ context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
+	v, err := d.version(id, versionID)
+	if err != nil {
+		return monitoring.SavedQueryVersion{}, err
+	}
+	return v.(monitoring.SavedQueryVersion), nil
+}
+func (d *definitions) CreateSavedQueryVersion(_ context.Context, org, id string, in monitoring.SavedQueryVersionInput) (monitoring.SavedQueryVersion, error) {
+	if v, err := d.version(id, "saved_query_version_"+in.Key); err == nil {
+		return v.(monitoring.SavedQueryVersion), nil
+	}
+	q := d.queries[id]
+	if q.Deleted {
+		return monitoring.SavedQueryVersion{}, monitoring.ErrSavedQueryDeleted
+	}
+	q.Current = monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: "saved_query_version_" + in.Key, Definition: in.Definition}
+	d.queries[id] = q
+	d.versions[id+"/"+q.Current.VersionID] = q.Current
+	return q.Current, nil
+}
+func (d *definitions) DeleteSavedQuery(_ context.Context, org, key, id string) (monitoring.SavedQuery, error) {
+	q := d.queries[id]
+	for _, s := range d.subs {
+		if s.Current.SavedQueryID == id && !s.Deleted && !q.Deleted {
+			return q, monitoring.ErrSavedQueryInUse
+		}
+	}
+	q.Deleted = true
+	d.queries[id] = q
 	return q, nil
 }
 func (d *definitions) SavedQuery(_ context.Context, org, id string) (monitoring.SavedQuery, error) {
@@ -45,6 +86,33 @@ func (d *definitions) SavedQuery(_ context.Context, org, id string) (monitoring.
 func (d *definitions) CreateSubscription(_ context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
 	s := monitoring.Subscription{ID: "subscription_" + in.Key, Name: in.Name, Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "subscription_" + in.Key, VersionID: "subscription_version_" + in.Key, SavedQueryID: in.SavedQueryID, SavedQueryVersionID: in.SavedQueryVersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}}
 	d.subs[s.ID] = s
+	d.versions[s.ID+"/"+s.Current.VersionID] = s.Current
+	return s, nil
+}
+func (d *definitions) SubscriptionVersion(_ context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
+	v, err := d.version(id, versionID)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	return v.(monitoring.SubscriptionVersion), nil
+}
+func (d *definitions) CreateSubscriptionVersion(_ context.Context, org, id string, in monitoring.SubscriptionVersionInput, query monitoring.SavedQueryVersion) (monitoring.SubscriptionVersion, error) {
+	if v, err := d.version(id, "subscription_version_"+in.Key); err == nil {
+		return v.(monitoring.SubscriptionVersion), nil
+	}
+	s := d.subs[id]
+	if s.Deleted {
+		return monitoring.SubscriptionVersion{}, monitoring.ErrSubscriptionDeleted
+	}
+	s.Current = monitoring.SubscriptionVersion{SubscriptionID: id, VersionID: "subscription_version_" + in.Key, SavedQueryID: query.SavedQueryID, SavedQueryVersionID: query.VersionID, Evaluator: in.Evaluator, DestinationID: in.DestinationID, CorpusIDs: query.Definition.CorpusIDs}
+	d.subs[id] = s
+	d.versions[id+"/"+s.Current.VersionID] = s.Current
+	return s.Current, nil
+}
+func (d *definitions) DeleteSubscription(_ context.Context, org, key, id string) (monitoring.Subscription, error) {
+	s := d.subs[id]
+	s.Enabled, s.Deleted = false, true
+	d.subs[id] = s
 	return s, nil
 }
 func (d *definitions) Subscription(_ context.Context, org, id string) (monitoring.Subscription, error) {
@@ -63,6 +131,9 @@ func (d *definitions) DisableSubscription(_ context.Context, org, key, id string
 
 func (d *definitions) EnableSubscription(_ context.Context, org, key, id string) (monitoring.Subscription, error) {
 	s := d.subs[id]
+	if s.Deleted {
+		return s, monitoring.ErrSubscriptionDeleted
+	}
 	s.Enabled = true
 	d.subs[id] = s
 	return s, nil
@@ -90,7 +161,7 @@ func monitoringServer(t *testing.T) *httptest.Server {
 		noMonitoring:  {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 	}
 	service := monitoring.Service{
-		Store:        &definitions{queries: map[string]monitoring.SavedQuery{}, subs: map[string]monitoring.Subscription{}},
+		Store:        &definitions{queries: map[string]monitoring.SavedQuery{}, subs: map[string]monitoring.Subscription{}, versions: map[string]any{}},
 		Corpora:      allCorpora{},
 		Destinations: map[string]monitoring.Destination{"receiver_a": {Organization: "org_a", URL: "http://receiver.invalid/hook", Secret: "whsec_dGVzdC1zZWNyZXQtbmV2ZXItcmV0dXJuZWQ="}},
 		MatchStore:   history{},
@@ -175,6 +246,72 @@ func TestMonitoringDefinitionsRoundTripPinnedConfiguration(t *testing.T) {
 		t.Fatalf("enable keeps the same Version: %v", enabled)
 	}
 	call(t, server, "GET", "/v0/subscriptions/subscription_s1/enable", monitorReader, "", 405)
+}
+
+// TestMonitoringEditAndDelete drives the edit and delete routes: a new Saved
+// Query Version does not move the Subscription, a new Subscription Version
+// does, every Version stays readable, and deletion is visible, permanent and
+// guarded by use.
+func TestMonitoringEditAndDelete(t *testing.T) {
+	server := monitoringServer(t)
+	call(t, server, "POST", "/v0/saved-queries", monitor, savedQueryBody, 201)
+	sub, _ := call(t, server, "POST", "/v0/subscriptions", monitor, subscriptionBody("s1", "quivr.fixture", "receiver_a"), 201)
+	first := sub["current_version"].(map[string]any)["version_id"].(string)
+
+	edit := `{"idempotency_key":"q-edit","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"no_match"}},"retrieval_profile":"balanced","temporal_policy":"from_activation"}}`
+	v2, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/versions", monitor, edit, 201)
+	if v2["version_id"] != "saved_query_version_q-edit" || v2["saved_query_id"] != "saved_query_q1" {
+		t.Fatalf("new Saved Query Version: %v", v2)
+	}
+	query, _ := call(t, server, "GET", "/v0/saved-queries/saved_query_q1", monitorReader, "", 200)
+	if query["current_version"].(map[string]any)["version_id"] != "saved_query_version_q-edit" || query["deleted"] != false {
+		t.Fatalf("edited Saved Query: %v", query)
+	}
+	call(t, server, "GET", "/v0/saved-queries/saved_query_q1/versions/saved_query_version_q1", monitorReader, "", 200)
+	still, _ := call(t, server, "GET", "/v0/subscriptions/subscription_s1", monitorReader, "", 200)
+	if still["current_version"].(map[string]any)["saved_query_version_id"] != "saved_query_version_q1" {
+		t.Fatalf("a Saved Query edit moved the Subscription: %v", still)
+	}
+
+	subEdit := `{"idempotency_key":"s-edit","saved_query_version_id":"saved_query_version_q-edit","evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{}},"destination_id":"receiver_a"}`
+	sv2, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/versions", monitor, subEdit, 201)
+	if sv2["saved_query_version_id"] != "saved_query_version_q-edit" || sv2["version_id"] == first {
+		t.Fatalf("new Subscription Version: %v", sv2)
+	}
+	replayed, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/versions", monitor, subEdit, 201)
+	if replayed["version_id"] != sv2["version_id"] {
+		t.Fatalf("replayed edit: %v", replayed)
+	}
+	call(t, server, "GET", "/v0/subscriptions/subscription_s1/versions/"+first, monitorReader, "", 200)
+	call(t, server, "GET", "/v0/subscriptions/subscription_s1/versions", monitorReader, "", 405)
+
+	inUse, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/delete", monitor, `{"idempotency_key":"qd"}`, 409)
+	if inUse["code"] != "saved_query_in_use" {
+		t.Fatalf("delete of a used Saved Query: %v", inUse)
+	}
+	deleted, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/delete", monitor, `{"idempotency_key":"sd"}`, 200)
+	if deleted["deleted"] != true || deleted["enabled"] != false {
+		t.Fatalf("deleted Subscription: %v", deleted)
+	}
+	call(t, server, "GET", "/v0/subscriptions/subscription_s1", monitorReader, "", 200)
+	for path, body := range map[string]string{
+		"/v0/subscriptions/subscription_s1/enable":   `{"idempotency_key":"se"}`,
+		"/v0/subscriptions/subscription_s1/versions": strings.Replace(subEdit, "s-edit", "s-edit-2", 1),
+	} {
+		if got, _ := call(t, server, "POST", path, monitor, body, 409); got["code"] != "subscription_deleted" {
+			t.Fatalf("%s after delete: %v", path, got)
+		}
+	}
+	query, _ = call(t, server, "POST", "/v0/saved-queries/saved_query_q1/delete", monitor, `{"idempotency_key":"qd"}`, 200)
+	if query["deleted"] != true {
+		t.Fatalf("deleted Saved Query: %v", query)
+	}
+	if got, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/versions", monitor, strings.Replace(edit, "q-edit", "q-edit-2", 1), 409); got["code"] != "saved_query_deleted" {
+		t.Fatalf("edit after delete: %v", got)
+	}
+	call(t, server, "POST", "/v0/saved-queries/saved_query_q1/delete", monitorReader, `{"idempotency_key":"qd"}`, 403)
+	call(t, server, "POST", "/v0/saved-queries/missing/delete", monitor, `{"idempotency_key":"qm"}`, 404)
+	call(t, server, "POST", "/v0/saved-queries/saved_query_q1/disable", monitor, `{"idempotency_key":"x"}`, 404)
 }
 
 func TestMonitoringRejectsWithPublicErrors(t *testing.T) {

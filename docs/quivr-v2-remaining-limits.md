@@ -112,6 +112,11 @@ stay visible. The Spec 1 obligation map is in
   notice committed while the Subscription was disabled gets a window that starts
   at the re-enable (THE-696). Changes made during the pause are never
   evaluated; there is no backfill command.
+- Editing a Saved Query or Subscription applies from its commit on; there is
+  no re-evaluation of earlier content under the new Version. Names are
+  immutable, a Subscription keeps its Saved Query, and deletion is permanent
+  (no undelete). Pending notices of a deleted Subscription, including a
+  `match.withdrawn` committed after the deletion, are never sent (THE-724).
 - Delivery refuses private and internal receiver addresses after DNS
   resolution ([THE-695](https://linear.app/thevibecompany/issue/THE-695)), but
   a public hostname the operator configures is trusted: there is no egress

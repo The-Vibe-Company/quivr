@@ -159,7 +159,8 @@ func TestEngineWithdrawalIntents(t *testing.T) {
 	}
 }
 
-// TestAdmissionReason pins which notice kinds each refusal applies to:
+// TestAdmissionReason pins which notice kinds each refusal applies to: a
+// deleted or disabled Subscription refuses every kind;
 // match.withdrawn has its own eligibility and is never superseded; a positive
 // notice is superseded by any later correction notice, and
 // match.no_longer_matches only by a later match.corrected.
@@ -168,17 +169,21 @@ func TestAdmissionReason(t *testing.T) {
 	all := monitoring.Later{Corrected: true, NoLongerMatches: true}
 	kinds := []string{monitoring.NoticeCreated, monitoring.NoticeCorrected, monitoring.NoticeNoLongerMatches, monitoring.NoticeWithdrawn}
 	for _, kind := range kinds {
-		if got := monitoring.AdmissionReason(kind, true, false, none); got != "" {
+		if got := monitoring.AdmissionReason(kind, true, false, false, none); got != "" {
 			t.Fatal(kind, got)
 		}
-		if got := monitoring.AdmissionReason(kind, false, true, all); got != "subscription_disabled" {
+		if got := monitoring.AdmissionReason(kind, false, false, true, all); got != "subscription_disabled" {
+			t.Fatal(kind, got)
+		}
+		// A deleted Subscription (also disabled) refuses every notice for good.
+		if got := monitoring.AdmissionReason(kind, false, true, true, all); got != "subscription_deleted" {
 			t.Fatal(kind, got)
 		}
 		want := "record_withdrawn"
 		if kind == monitoring.NoticeWithdrawn {
 			want = ""
 		}
-		if got := monitoring.AdmissionReason(kind, true, true, none); got != want {
+		if got := monitoring.AdmissionReason(kind, true, false, true, none); got != want {
 			t.Fatal(kind, got)
 		}
 	}
@@ -195,7 +200,7 @@ func TestAdmissionReason(t *testing.T) {
 			{NoLongerMatches: true}: superseded(positive),
 			all:                     superseded(kind != monitoring.NoticeWithdrawn),
 		} {
-			if got := monitoring.AdmissionReason(kind, true, false, later); got != want {
+			if got := monitoring.AdmissionReason(kind, true, false, false, later); got != want {
 				t.Fatalf("%s after %+v: %q, want %q", kind, later, got, want)
 			}
 		}

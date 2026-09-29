@@ -729,7 +729,9 @@ paths:
   /v0/saved-queries/{saved_query_id}/versions/{version_id}:
     get:
       operationId: getSavedQueryVersion
-      description: Read pinned immutable query definition.
+      description: Read any immutable Version of the Saved Query, current or earlier, such as the one
+        a Subscription Version or Match pins. The key must grant the Corpora of the Saved Query's current
+        Version and of this Version. A deleted Saved Query's Versions stay readable.
       x-required-permissions:
       - monitoring:read
       responses:
@@ -759,6 +761,79 @@ paths:
         schema:
           type: string
           minLength: 1
+  /v0/saved-queries/{saved_query_id}/versions:
+    post:
+      operationId: createSavedQueryVersion
+      description: Edit a Saved Query by committing a new immutable Version that becomes its current
+        Version, with saved_query.updated in every Corpus of the previous and new scope. Subscriptions
+        keep the Version they pin; a new Subscription Version moves one. The key must grant every Corpus
+        of the current and new definitions. Replay of the same key and request returns the same Version;
+        a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQueryVersion'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: saved_query_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavedQueryVersionCreate'
+  /v0/saved-queries/{saved_query_id}/delete:
+    post:
+      operationId: deleteSavedQuery
+      description: Logically delete a Saved Query that no Subscription which is not deleted belongs
+        to (409 saved_query_in_use otherwise), with saved_query.deleted per Corpus. It and its Versions
+        stay readable with deleted true; it gets no new Version or Subscription. Repeat is idempotent
+        and commits no event.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: saved_query_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
   /v0/subscriptions:
     post:
       operationId: createSubscription
@@ -817,7 +892,10 @@ paths:
   /v0/subscriptions/{subscription_id}/versions/{version_id}:
     get:
       operationId: getSubscriptionVersion
-      description: Read immutable configuration used by historical Matches.
+      description: Read any immutable Version of the Subscription, current or earlier, such as the one
+        a historical Match names. As for every read of a Subscription, its Matches and Deliveries, the
+        key must grant every Corpus any of its Versions pinned. A deleted Subscription's Versions stay
+        readable.
       x-required-permissions:
       - monitoring:read
       responses:
@@ -847,13 +925,92 @@ paths:
         schema:
           type: string
           minLength: 1
+  /v0/subscriptions/{subscription_id}/versions:
+    post:
+      operationId: createSubscriptionVersion
+      description: Edit a Subscription by committing a new immutable Version that becomes current. It
+        pins the current Version of the Subscription's own Saved Query (422 unknown_saved_query
+        otherwise), an evaluator and a destination. It takes effect from its commit, recorded as its
+        activation position with subscription.updated in every Corpus of the previous and new scope.
+        Each later change is judged by the new Version, each earlier one by the Version effective
+        before it. Nothing is backfilled and Matches keep the Version that produced them. Enabled
+        state is unchanged. Replay of the same key and request returns the same Version; a changed
+        request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionVersion'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionVersionCreate'
+  /v0/subscriptions/{subscription_id}/delete:
+    post:
+      operationId: deleteSubscription
+      description: Logically delete a Subscription for good, with subscription.deleted per Corpus.
+        It is also disabled, with every disable guarantee - no new evaluation commit and no new
+        Delivery Attempt admission (reason subscription_deleted); an in-flight attempt may complete.
+        As for a disabled Subscription, a match.withdrawn notice for one of its Matches is still
+        committed with its pending Delivery, which is never attempted. The Subscription, its Versions,
+        Matches and Deliveries stay readable with deleted true. Enable or edit is then 409
+        subscription_deleted. Repeat is idempotent and commits no event.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
   /v0/subscriptions/{subscription_id}/disable:
     post:
       operationId: disableSubscription
       description: Commit disable. Block new evaluation commits and new Delivery Attempt admissions, including
         queued retries and update notices. In-flight attempts may complete. A match.withdrawn notice for
         a Match of this Subscription is still committed with its pending Delivery, which makes no attempt
-        until re-enable. Repeat is idempotent; history remains. Reconfiguration is outside the tracer.
+        until re-enable. Repeat is idempotent; history remains.
       x-required-permissions:
       - monitoring:write
       responses:
@@ -891,7 +1048,7 @@ paths:
         parked by the disable become eligible again under the usual admission checks and keep their
         delivery window, except a match.withdrawn notice committed while disabled, whose window starts
         at this re-enable. Enabling an enabled Subscription, or repeating the request, is idempotent and
-        commits no event.
+        commits no event. A deleted Subscription is 409 subscription_deleted.
       x-required-permissions:
       - monitoring:write
       responses:
@@ -2523,6 +2680,19 @@ components:
       - idempotency_key
       - name
       - definition
+    SavedQueryVersionCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        definition:
+          $ref: '#/components/schemas/SavedQueryDefinition'
+      required:
+      - idempotency_key
+      - definition
+      description: New immutable definition of an existing Saved Query. The name is unchanged.
     SavedQueryVersion:
       type: object
       additionalProperties: false
@@ -2549,11 +2719,15 @@ components:
         name:
           type: string
           minLength: 1
+        deleted:
+          type: boolean
+          description: Logically deleted; the Saved Query and its Versions stay readable.
         current_version:
           $ref: '#/components/schemas/SavedQueryVersion'
       required:
       - saved_query_id
       - name
+      - deleted
       - current_version
     EvaluatorConfig:
       type: object
@@ -2606,6 +2780,28 @@ components:
       description: Create enabled from-now Subscription. One deployment-configured destination per version;
         destination belongs to this Organization. URL and signing key are provisioned outside this API
         and not returned. No inline secret or dynamic destination registry in the tracer.
+    SubscriptionVersionCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        saved_query_version_id:
+          type: string
+          minLength: 1
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorConfig'
+        destination_id:
+          type: string
+          minLength: 1
+      required:
+      - idempotency_key
+      - saved_query_version_id
+      - evaluator
+      - destination_id
+      description: New immutable configuration of an existing Subscription. The Saved Query and name
+        are unchanged; saved_query_version_id is the current Version of that Saved Query.
     SubscriptionVersion:
       type: object
       additionalProperties: false
@@ -2646,12 +2842,17 @@ components:
           minLength: 1
         enabled:
           type: boolean
+        deleted:
+          type: boolean
+          description: Logically deleted for good; a deleted Subscription is also disabled and stays
+            readable with its Versions, Matches and Deliveries.
         current_version:
           $ref: '#/components/schemas/SubscriptionVersion'
       required:
       - subscription_id
       - name
       - enabled
+      - deleted
       - current_version
     MatchEvidence:
       type: object
@@ -2809,6 +3010,7 @@ components:
           type: string
           enum:
           - subscription_disabled
+          - subscription_deleted
           - record_withdrawn
           - superseded
           - access_denied
@@ -2819,7 +3021,7 @@ components:
       description: Current derived admission view, separate from durable Delivery state. A disallowed
         pending Delivery makes no new network attempt; it does not become a new lifecycle state.
         destination_unavailable means its destination is no longer configured for the Organization.
-        record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn
+        subscription_disabled lasts until a re-enable; subscription_deleted is permanent. record_withdrawn refuses match.created, match.corrected and match.no_longer_matches; match.withdrawn
         is admitted for a withdrawn Record. superseded refuses an undelivered match.created or
         match.corrected once a later match.corrected or match.no_longer_matches exists for the same
         Subscription and Record, and an undelivered match.no_longer_matches once a later match.corrected

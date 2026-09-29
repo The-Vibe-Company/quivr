@@ -1,7 +1,7 @@
 // Package monitoring owns immutable Saved Query and Subscription Versions,
-// Subscription activation from a committed journal boundary, and disabling.
-// Evaluation turns later eligible Versions into unique Matches with their
-// pending logical Deliveries; network delivery is a later slice.
+// Subscription activation from a committed journal boundary, editing by new
+// Versions, disabling and logical deletion. Evaluation turns later eligible
+// Versions into unique Matches with their pending logical Deliveries.
 package monitoring
 
 import (
@@ -22,6 +22,13 @@ var (
 	ErrUnknownDestination   = publicerr.New("unknown_destination")
 	ErrUnknownSavedQuery    = publicerr.New("unknown_saved_query")
 	ErrTooLarge             = publicerr.New("definition_too_large")
+	// ErrSubscriptionDeleted and ErrSavedQueryDeleted refuse commands that
+	// would change a logically deleted resource; deletion is never undone.
+	ErrSubscriptionDeleted = publicerr.New("subscription_deleted")
+	ErrSavedQueryDeleted   = publicerr.New("saved_query_deleted")
+	// ErrSavedQueryInUse refuses deleting a Saved Query that a Subscription
+	// which is not deleted still belongs to.
+	ErrSavedQueryInUse = publicerr.New("saved_query_in_use")
 )
 
 // The deterministic fixture evaluator is the only installed evaluator. It is
@@ -52,9 +59,12 @@ type SavedQueryVersion struct {
 	Definition   Definition
 }
 
+// SavedQuery is a stable query identity whose current Version changes only
+// by publishing a new immutable Version. A deleted one stays readable.
 type SavedQuery struct {
 	ID      string
 	Name    string
+	Deleted bool
 	Current SavedQueryVersion
 }
 
@@ -74,17 +84,24 @@ type SubscriptionVersion struct {
 	DestinationID       string
 	// CorpusIDs is the pinned Saved Query scope, used for authorization.
 	CorpusIDs []string
-	// ActivationPosition is the journal position of the activation commit.
-	// Only later eligible changes are evaluated; nothing earlier is scanned.
+	// ActivationPosition is the journal position of the commit that created
+	// this Version. It judges the changes after it, until a later Version's
+	// activation; nothing earlier is scanned.
 	ActivationPosition int64
 }
 
-// Subscription separates mutable enabled state from its immutable Version.
+// Subscription separates mutable enabled and deleted state from its immutable
+// Versions. A deleted Subscription is disabled for good and stays readable.
 type Subscription struct {
 	ID      string
 	Name    string
 	Enabled bool
+	Deleted bool
 	Current SubscriptionVersion
+	// PinnedCorpusIDs are the Corpora of every Version, current or earlier.
+	// Its Match history can concern any of them, so a key sees the
+	// Subscription only when it grants them all.
+	PinnedCorpusIDs []string
 }
 
 // Destination is one deployment-configured webhook receiver bound to an
@@ -102,6 +119,12 @@ type SavedQueryInput struct {
 	Definition Definition `json:"definition"`
 }
 
+// SavedQueryVersionInput publishes a new Version of an existing Saved Query.
+type SavedQueryVersionInput struct {
+	Key        string     `json:"idempotency_key"`
+	Definition Definition `json:"definition"`
+}
+
 type SubscriptionInput struct {
 	Key                 string    `json:"idempotency_key"`
 	Name                string    `json:"name"`
@@ -111,17 +134,47 @@ type SubscriptionInput struct {
 	DestinationID       string    `json:"destination_id"`
 }
 
-// Store persists definitions. Creation, disable and enable are idempotent per
-// Organization, route family and key: the same canonical input returns the
-// same resource in its current state, changed input returns ErrConflict.
-// Each commit appends its public events to the Organization journal.
+// SubscriptionVersionInput publishes a new Version of an existing
+// Subscription. It may pin a newer Version of the same Saved Query.
+type SubscriptionVersionInput struct {
+	Key                 string    `json:"idempotency_key"`
+	SavedQueryVersionID string    `json:"saved_query_version_id"`
+	Evaluator           Evaluator `json:"evaluator"`
+	DestinationID       string    `json:"destination_id"`
+}
+
+// Store persists definitions. Every command is idempotent per Organization,
+// route family and key: the same canonical input returns the same result
+// (the resource in its current state, or the Version it created), changed
+// input returns ErrConflict. Each commit appends its public events to the
+// Organization journal.
 type Store interface {
 	CreateSavedQuery(ctx context.Context, org string, in SavedQueryInput) (SavedQuery, error)
 	SavedQuery(ctx context.Context, org, id string) (SavedQuery, error)
+	// SavedQueryVersion reads any Version of a Saved Query.
+	SavedQueryVersion(ctx context.Context, org, id, versionID string) (SavedQueryVersion, error)
+	// CreateSavedQueryVersion makes a new Version current. It moves no
+	// Subscription. A deleted Saved Query returns ErrSavedQueryDeleted.
+	CreateSavedQueryVersion(ctx context.Context, org, id string, in SavedQueryVersionInput) (SavedQueryVersion, error)
+	// DeleteSavedQuery logically deletes a Saved Query that no Subscription
+	// which is not deleted belongs to, else returns ErrSavedQueryInUse.
+	DeleteSavedQuery(ctx context.Context, org, key, id string) (SavedQuery, error)
+	// CreateSubscription pins query, which must still be its Saved Query's
+	// current Version for a new Subscription (ErrUnknownSavedQuery otherwise).
 	CreateSubscription(ctx context.Context, org string, in SubscriptionInput, query SavedQueryVersion) (Subscription, error)
 	Subscription(ctx context.Context, org, id string) (Subscription, error)
+	// SubscriptionVersion reads any Version of a Subscription.
+	SubscriptionVersion(ctx context.Context, org, id, versionID string) (SubscriptionVersion, error)
+	// CreateSubscriptionVersion makes a new Version current from its commit:
+	// it judges only later changes. query must be the current Version of the
+	// Subscription's Saved Query. A deleted Subscription returns
+	// ErrSubscriptionDeleted.
+	CreateSubscriptionVersion(ctx context.Context, org, id string, in SubscriptionVersionInput, query SavedQueryVersion) (SubscriptionVersion, error)
 	DisableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
+	// EnableSubscription returns ErrSubscriptionDeleted for a deleted Subscription.
 	EnableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
+	// DeleteSubscription logically deletes and disables a Subscription.
+	DeleteSubscription(ctx context.Context, org, key, id string) (Subscription, error)
 }
 
 // CorpusAuthorizer confirms that every Corpus belongs to the Organization.
@@ -141,35 +194,45 @@ func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in Sa
 	if !scope.Allows("monitoring:write") {
 		return SavedQuery{}, ErrForbidden
 	}
-	d := in.Definition
-	if len(d.CorpusIDs) == 0 || len(d.CorpusIDs) > maxCorpora {
-		return SavedQuery{}, ErrTooLarge
-	}
-	// The whole requested scope must be granted; a Corpus is never silently dropped.
-	for _, id := range d.CorpusIDs {
-		if !scope.Contains(id) {
-			return SavedQuery{}, ErrForbidden
-		}
-	}
-	if d.RetrievalProfile != "balanced" {
-		return SavedQuery{}, ErrUnsupportedProfile
-	}
-	if tooLarge(d.Expression) {
-		return SavedQuery{}, ErrTooLarge
-	}
-	if err := s.Corpora.Authorize(ctx, scope, d.CorpusIDs); err != nil {
-		if errors.Is(err, corpus.ErrForbidden) {
-			return SavedQuery{}, ErrForbidden
-		}
+	if err := s.validDefinition(ctx, scope, in.Definition); err != nil {
 		return SavedQuery{}, err
 	}
 	return s.Store.CreateSavedQuery(ctx, scope.Organization, in)
+}
+
+// validDefinition checks a Saved Query Version definition written by scope.
+func (s Service) validDefinition(ctx context.Context, scope corpus.Scope, d Definition) error {
+	if len(d.CorpusIDs) == 0 || len(d.CorpusIDs) > maxCorpora {
+		return ErrTooLarge
+	}
+	// The whole requested scope must be granted; a Corpus is never silently dropped.
+	if !covers(scope, d.CorpusIDs) {
+		return ErrForbidden
+	}
+	if d.RetrievalProfile != "balanced" {
+		return ErrUnsupportedProfile
+	}
+	if tooLarge(d.Expression) {
+		return ErrTooLarge
+	}
+	if err := s.Corpora.Authorize(ctx, scope, d.CorpusIDs); err != nil {
+		if errors.Is(err, corpus.ErrForbidden) {
+			return ErrForbidden
+		}
+		return err
+	}
+	return nil
 }
 
 func (s Service) SavedQuery(ctx context.Context, scope corpus.Scope, id string) (SavedQuery, error) {
 	if !scope.Allows("monitoring:read") {
 		return SavedQuery{}, ErrForbidden
 	}
+	return s.visibleQuery(ctx, scope, id)
+}
+
+// visibleQuery reads a Saved Query whose current Corpora the key all grants.
+func (s Service) visibleQuery(ctx context.Context, scope corpus.Scope, id string) (SavedQuery, error) {
 	q, err := s.Store.SavedQuery(ctx, scope.Organization, id)
 	if err != nil {
 		return SavedQuery{}, err
@@ -180,45 +243,95 @@ func (s Service) SavedQuery(ctx context.Context, scope corpus.Scope, id string) 
 	return q, nil
 }
 
-// SavedQueryVersion reads a pinned definition. Versions are immutable and a
-// Saved Query has exactly one Version until an editing flow exists.
+// SavedQueryVersion reads any immutable Version of a visible Saved Query whose
+// own Corpora the key also grants.
 func (s Service) SavedQueryVersion(ctx context.Context, scope corpus.Scope, id, versionID string) (SavedQueryVersion, error) {
-	q, err := s.SavedQuery(ctx, scope, id)
+	if _, err := s.SavedQuery(ctx, scope, id); err != nil {
+		return SavedQueryVersion{}, err
+	}
+	v, err := s.Store.SavedQueryVersion(ctx, scope.Organization, id, versionID)
 	if err != nil {
 		return SavedQueryVersion{}, err
 	}
-	if q.Current.VersionID != versionID {
+	if !covers(scope, v.Definition.CorpusIDs) {
 		return SavedQueryVersion{}, ErrNotFound
 	}
-	return q.Current, nil
+	return v, nil
+}
+
+// CreateSavedQueryVersion edits a Saved Query by publishing a new immutable
+// Version that becomes current. Subscriptions keep the Version they pin until
+// a new Subscription Version moves them. Replaying the same request returns
+// the same Version.
+func (s Service) CreateSavedQueryVersion(ctx context.Context, scope corpus.Scope, id string, in SavedQueryVersionInput) (SavedQueryVersion, error) {
+	if !scope.Allows("monitoring:write") {
+		return SavedQueryVersion{}, ErrForbidden
+	}
+	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
+		return SavedQueryVersion{}, err
+	}
+	if err := s.validDefinition(ctx, scope, in.Definition); err != nil {
+		return SavedQueryVersion{}, err
+	}
+	return s.Store.CreateSavedQueryVersion(ctx, scope.Organization, id, in)
+}
+
+// DeleteSavedQuery logically deletes a Saved Query no Subscription uses any
+// more. Its Versions stay readable. Repeating it is idempotent.
+func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, id string) (SavedQuery, error) {
+	if !scope.Allows("monitoring:write") {
+		return SavedQuery{}, ErrForbidden
+	}
+	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
+		return SavedQuery{}, err
+	}
+	return s.Store.DeleteSavedQuery(ctx, scope.Organization, key, id)
+}
+
+// validSubscription checks the evaluator and destination of a Subscription Version.
+func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, destination string) error {
+	if evaluator.PluginID != FixtureEvaluator || evaluator.Version != FixtureEvaluatorVersion {
+		return ErrUnsupportedEvaluator
+	}
+	if tooLarge(evaluator.Configuration) {
+		return ErrTooLarge
+	}
+	if d, ok := s.Destinations[destination]; !ok || d.Organization != scope.Organization {
+		return ErrUnknownDestination
+	}
+	return nil
+}
+
+// pinnable reads the Saved Query Version a Subscription Version would pin and
+// checks that the key grants its whole scope.
+func (s Service) pinnable(ctx context.Context, scope corpus.Scope, queryID, versionID string) (SavedQueryVersion, error) {
+	v, err := s.Store.SavedQueryVersion(ctx, scope.Organization, queryID, versionID)
+	if errors.Is(err, ErrNotFound) {
+		return SavedQueryVersion{}, ErrUnknownSavedQuery
+	}
+	if err != nil {
+		return SavedQueryVersion{}, err
+	}
+	if !covers(scope, v.Definition.CorpusIDs) {
+		return SavedQueryVersion{}, ErrForbidden
+	}
+	return v, nil
 }
 
 func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in SubscriptionInput) (Subscription, error) {
 	if !scope.Allows("monitoring:write") {
 		return Subscription{}, ErrForbidden
 	}
-	if in.Evaluator.PluginID != FixtureEvaluator || in.Evaluator.Version != FixtureEvaluatorVersion {
-		return Subscription{}, ErrUnsupportedEvaluator
+	if err := s.validSubscription(scope, in.Evaluator, in.DestinationID); err != nil {
+		return Subscription{}, err
 	}
-	if tooLarge(in.Evaluator.Configuration) {
-		return Subscription{}, ErrTooLarge
-	}
-	if d, ok := s.Destinations[in.DestinationID]; !ok || d.Organization != scope.Organization {
-		return Subscription{}, ErrUnknownDestination
-	}
-	q, err := s.Store.SavedQuery(ctx, scope.Organization, in.SavedQueryID)
-	if errors.Is(err, ErrNotFound) || (err == nil && q.Current.VersionID != in.SavedQueryVersionID) {
-		return Subscription{}, ErrUnknownSavedQuery
-	}
+	// Replaying a creation stays valid after its Saved Query moved on; the
+	// store requires the current Version only for a new Subscription.
+	q, err := s.pinnable(ctx, scope, in.SavedQueryID, in.SavedQueryVersionID)
 	if err != nil {
 		return Subscription{}, err
 	}
-	for _, id := range q.Current.Definition.CorpusIDs {
-		if !scope.Contains(id) {
-			return Subscription{}, ErrForbidden
-		}
-	}
-	return s.Store.CreateSubscription(ctx, scope.Organization, in, q.Current)
+	return s.Store.CreateSubscription(ctx, scope.Organization, in, q)
 }
 
 func (s Service) Subscription(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {
@@ -228,16 +341,43 @@ func (s Service) Subscription(ctx context.Context, scope corpus.Scope, id string
 	return s.visible(ctx, scope, id)
 }
 
-// SubscriptionVersion reads the immutable configuration used by historical Matches.
+// SubscriptionVersion reads any immutable Version of a visible Subscription,
+// such as the one a historical Match names, when the key grants its scope.
 func (s Service) SubscriptionVersion(ctx context.Context, scope corpus.Scope, id, versionID string) (SubscriptionVersion, error) {
-	sub, err := s.Subscription(ctx, scope, id)
+	if _, err := s.Subscription(ctx, scope, id); err != nil {
+		return SubscriptionVersion{}, err
+	}
+	v, err := s.Store.SubscriptionVersion(ctx, scope.Organization, id, versionID)
 	if err != nil {
 		return SubscriptionVersion{}, err
 	}
-	if sub.Current.VersionID != versionID {
+	if !covers(scope, v.CorpusIDs) {
 		return SubscriptionVersion{}, ErrNotFound
 	}
-	return sub.Current, nil
+	return v, nil
+}
+
+// CreateSubscriptionVersion edits a Subscription by publishing a new immutable
+// Version pinning the current Version of its Saved Query. The new Version
+// judges only changes committed after it; earlier changes, and the Matches
+// they produced, keep the Version that was effective. Replaying the same
+// request returns the same Version.
+func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Scope, id string, in SubscriptionVersionInput) (SubscriptionVersion, error) {
+	if !scope.Allows("monitoring:write") {
+		return SubscriptionVersion{}, ErrForbidden
+	}
+	sub, err := s.visible(ctx, scope, id)
+	if err != nil {
+		return SubscriptionVersion{}, err
+	}
+	if err = s.validSubscription(scope, in.Evaluator, in.DestinationID); err != nil {
+		return SubscriptionVersion{}, err
+	}
+	q, err := s.pinnable(ctx, scope, sub.Current.SavedQueryID, in.SavedQueryVersionID)
+	if err != nil {
+		return SubscriptionVersion{}, err
+	}
+	return s.Store.CreateSubscriptionVersion(ctx, scope.Organization, id, in, q)
 }
 
 // DisableSubscription stops future activity. Repeating it is idempotent and
@@ -256,7 +396,7 @@ func (s Service) DisableSubscription(ctx context.Context, scope corpus.Scope, ke
 // resumes after the re-enable, without backfilling the pause, and its parked
 // Deliveries become claimable again under the unchanged admission rules and
 // delivery window. Repeating it, or enabling an enabled Subscription, is
-// idempotent and commits no event.
+// idempotent and commits no event. A deleted Subscription is never re-enabled.
 func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
 	if !scope.Allows("monitoring:write") {
 		return Subscription{}, ErrForbidden
@@ -267,12 +407,28 @@ func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key
 	return s.Store.EnableSubscription(ctx, scope.Organization, key, id)
 }
 
+// DeleteSubscription logically deletes a Subscription with every disable
+// guarantee, for good: no new evaluation commit and no new Delivery Attempt
+// admission. Its Versions, Matches and Deliveries stay readable. Repeating it
+// is idempotent.
+func (s Service) DeleteSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
+	if !scope.Allows("monitoring:write") {
+		return Subscription{}, ErrForbidden
+	}
+	if _, err := s.visible(ctx, scope, id); err != nil {
+		return Subscription{}, err
+	}
+	return s.Store.DeleteSubscription(ctx, scope.Organization, key, id)
+}
+
 func (s Service) visible(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {
 	sub, err := s.Store.Subscription(ctx, scope.Organization, id)
 	if err != nil {
 		return Subscription{}, err
 	}
-	if !covers(scope, sub.Current.CorpusIDs) {
+	// An edit that narrows the scope must not expose Matches and Deliveries
+	// on Corpora only an earlier Version pinned.
+	if !covers(scope, sub.Current.CorpusIDs) || !covers(scope, sub.PinnedCorpusIDs) {
 		return Subscription{}, ErrNotFound
 	}
 	return sub, nil

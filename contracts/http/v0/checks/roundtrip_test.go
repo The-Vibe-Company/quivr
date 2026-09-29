@@ -46,8 +46,12 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &SavedQueryCreate{}
 			case "SavedQuery":
 				target = &SavedQuery{}
+			case "SavedQueryVersionCreate":
+				target = &SavedQueryVersionCreate{}
 			case "SubscriptionCreate":
 				target = &SubscriptionCreate{}
+			case "SubscriptionVersionCreate":
+				target = &SubscriptionVersionCreate{}
 			case "Subscription":
 				target = &Subscription{}
 			case "Match":

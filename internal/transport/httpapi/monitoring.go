@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,7 +20,7 @@ func WithMonitoring(service monitoring.Service) Option {
 }
 
 type monitoringSchemas struct {
-	savedQuery, subscription, action *jsonschema.Schema
+	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action *jsonschema.Schema
 }
 
 func monitoringFailure(w http.ResponseWriter, err error) {
@@ -30,6 +31,9 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 		failure(w, 404, "not_found")
 	case errors.Is(err, monitoring.ErrConflict):
 		failure(w, 409, "idempotency_conflict")
+	case errors.Is(err, monitoring.ErrSubscriptionDeleted), errors.Is(err, monitoring.ErrSavedQueryDeleted),
+		errors.Is(err, monitoring.ErrSavedQueryInUse):
+		failure(w, 409, publicCode(err, "conflict"))
 	case errors.Is(err, monitoring.ErrUnsupportedProfile), errors.Is(err, monitoring.ErrUnsupportedEvaluator),
 		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
 		errors.Is(err, monitoring.ErrTooLarge):
@@ -39,7 +43,8 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 	}
 }
 
-// monitoringRoutes serves /v0/saved-queries and /v0/subscriptions.
+// monitoringRoutes serves /v0/saved-queries and /v0/subscriptions: creation,
+// reads, editing by new Version, disable, enable and deletion.
 func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	var resource string
 	switch {
@@ -64,7 +69,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	}
 	method := "GET"
 	switch {
-	case len(parts) == 0:
+	case len(parts) == 0, len(parts) == 2 && (parts[1] == "versions" || parts[1] == "delete"):
 		method = "POST"
 	case resource == "subscriptions" && len(parts) == 2 && (parts[1] == "disable" || parts[1] == "enable"):
 		method = "POST"
@@ -97,6 +102,20 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	case resource == "saved-queries" && len(parts) == 1:
 		q, err := a.Monitoring.SavedQuery(ctx, scope, parts[0])
 		respondMonitoring(w, 200, savedQueryToTransport(q), err)
+	case resource == "saved-queries" && parts[1] == "versions" && len(parts) == 2:
+		var in monitoring.SavedQueryVersionInput
+		if !a.decodeMonitoring(w, r, a.monitoringSchemas.savedQueryVersion, &in) {
+			return true
+		}
+		v, err := a.Monitoring.CreateSavedQueryVersion(ctx, scope, parts[0], in)
+		respondMonitoring(w, 201, savedQueryVersionToTransport(v), err)
+	case resource == "saved-queries" && parts[1] == "delete":
+		key, ok := a.decodeAction(w, r)
+		if !ok {
+			return true
+		}
+		q, err := a.Monitoring.DeleteSavedQuery(ctx, scope, key, parts[0])
+		respondMonitoring(w, 200, savedQueryToTransport(q), err)
 	case resource == "saved-queries":
 		v, err := a.Monitoring.SavedQueryVersion(ctx, scope, parts[0], parts[2])
 		respondMonitoring(w, 200, savedQueryVersionToTransport(v), err)
@@ -110,24 +129,37 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	case len(parts) == 1:
 		s, err := a.Monitoring.Subscription(ctx, scope, parts[0])
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
-	case parts[1] == "disable" || parts[1] == "enable":
-		var in struct {
-			Key string `json:"idempotency_key"`
-		}
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.action, &in) {
+	case parts[1] == "versions" && len(parts) == 2:
+		var in monitoring.SubscriptionVersionInput
+		if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscriptionVersion, &in) {
 			return true
 		}
-		toggle := a.Monitoring.DisableSubscription
-		if parts[1] == "enable" {
-			toggle = a.Monitoring.EnableSubscription
+		v, err := a.Monitoring.CreateSubscriptionVersion(ctx, scope, parts[0], in)
+		respondMonitoring(w, 201, subscriptionVersionToTransport(v), err)
+	case parts[1] == "disable" || parts[1] == "enable" || parts[1] == "delete":
+		key, ok := a.decodeAction(w, r)
+		if !ok {
+			return true
 		}
-		s, err := toggle(ctx, scope, in.Key, parts[0])
+		command := map[string]func(context.Context, corpus.Scope, string, string) (monitoring.Subscription, error){
+			"disable": a.Monitoring.DisableSubscription, "enable": a.Monitoring.EnableSubscription, "delete": a.Monitoring.DeleteSubscription,
+		}[parts[1]]
+		s, err := command(ctx, scope, key, parts[0])
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	default:
 		v, err := a.Monitoring.SubscriptionVersion(ctx, scope, parts[0], parts[2])
 		respondMonitoring(w, 200, subscriptionVersionToTransport(v), err)
 	}
 	return true
+}
+
+// decodeAction decodes an idempotent action request and returns its key.
+func (a *API) decodeAction(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var in struct {
+		Key string `json:"idempotency_key"`
+	}
+	ok := a.decodeMonitoring(w, r, a.monitoringSchemas.action, &in)
+	return in.Key, ok
 }
 
 // decodeMonitoring validates the body against its public schema and decodes
@@ -166,7 +198,7 @@ func savedQueryVersionToTransport(v monitoring.SavedQueryVersion) transport.Save
 }
 
 func savedQueryToTransport(q monitoring.SavedQuery) transport.SavedQuery {
-	return transport.SavedQuery{SavedQueryId: q.ID, Name: q.Name, CurrentVersion: savedQueryVersionToTransport(q.Current)}
+	return transport.SavedQuery{SavedQueryId: q.ID, Name: q.Name, Deleted: q.Deleted, CurrentVersion: savedQueryVersionToTransport(q.Current)}
 }
 
 func subscriptionVersionToTransport(v monitoring.SubscriptionVersion) transport.SubscriptionVersion {
@@ -176,5 +208,5 @@ func subscriptionVersionToTransport(v monitoring.SubscriptionVersion) transport.
 }
 
 func subscriptionToTransport(s monitoring.Subscription) transport.Subscription {
-	return transport.Subscription{SubscriptionId: s.ID, Name: s.Name, Enabled: s.Enabled, CurrentVersion: subscriptionVersionToTransport(s.Current)}
+	return transport.Subscription{SubscriptionId: s.ID, Name: s.Name, Enabled: s.Enabled, Deleted: s.Deleted, CurrentVersion: subscriptionVersionToTransport(s.Current)}
 }
