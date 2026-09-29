@@ -47,6 +47,20 @@ concurrent projects. On success or failure, collect artifacts before cleaning up
 only that run's containers and volumes. Interrupt handling follows the same rule.
 An explicit keep-on-failure option may preserve that isolated run for inspection.
 
+Every loopback port a host service uses (API, probes, worker probe, fake
+servers, receivers, normalizer plugins, demo server) comes from one allocator,
+`scripts/ports.py`. It never hands out a port twice in a harness process and
+never re-hands a port a reloaded stack already owns. It picks from a band below
+the kernel's ephemeral range and Docker's published ports (from 15000 up to
+32768, or to where the kernel range starts if lower), so `bind(0)`, outgoing
+connections and Docker cannot take a chosen port before its service binds it.
+Harness processes running side by side on one host lease their ports through
+files in a private per-user directory under the system temporary directory
+(`quivr-harness-ports-<uid>/`), so they
+skip each other's ports; a lease whose process has exited is reclaimed. Asking
+the kernel for port 0 and releasing it was racy and occasionally gave two
+services one port (THE-728).
+
 The initial build may need network access to fetch pinned tools/images/model
 weights. Once materialized, the test path uses local services and requires no
 hosted model API key. Cache misses fail clearly; never silently replace the real

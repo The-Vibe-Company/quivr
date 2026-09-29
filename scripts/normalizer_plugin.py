@@ -19,6 +19,7 @@ and worker healthy, then switches the pin to pdf-text. Every oracle is a
 process exit status or a public HTTP read.
 """
 import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request
+import ports
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NAME = 'markdown-sections'
@@ -137,10 +138,8 @@ def prepare(stack):
 
 
 def stack_port():
-    import socket
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
+    """A plugin port no other harness service can be given (scripts/ports.py)."""
+    return ports.allocate()
 
 
 def healthy(stack):

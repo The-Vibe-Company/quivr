@@ -4,6 +4,7 @@ from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
 import normalizer_plugin
+import ports
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -21,10 +22,10 @@ DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'5s','window':'60s','allow_
 # The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
 # short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
 PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}
-def port():
-    import socket
-    with socket.socket() as s:
-        s.bind(('127.0.0.1',0)); return s.getsockname()[1]
+# Every harness service port comes from one allocator that never hands a port out twice and stays
+# outside the kernel's ephemeral range, so two services cannot end up on one port (THE-728).
+port=ports.allocate
+PORT_KEYS=['api_port','probe_port','worker_probe_port','short_api_port','short_probe_port','receiver_port','graph_port','fake_x_port']
 
 class Stack:
     def __init__(self, name):
@@ -36,10 +37,11 @@ class Stack:
         self.readiness={}
         if self.statefile.exists(): self.state=json.loads(self.statefile.read_text())
         else:
-            self.state={'password':secrets.token_hex(24),'cursor_key':secrets.token_hex(32), 'admin':secrets.token_hex(32),'other':secrets.token_hex(32),'reader':secrets.token_hex(32),'scoped':secrets.token_hex(32),'denied':secrets.token_hex(32),'pids':[], 'api_port':port(),'probe_port':port(),'worker_probe_port':port()}
-            self.save()
-        for key,value in [('short_api_port',port()),('short_probe_port',port()),('receiver_port',port()),('graph_port',port()),('fake_x_port',port())]:
-            self.state.setdefault(key,value)
+            self.state={'password':secrets.token_hex(24),'cursor_key':secrets.token_hex(32), 'admin':secrets.token_hex(32),'other':secrets.token_hex(32),'reader':secrets.token_hex(32),'scoped':secrets.token_hex(32),'denied':secrets.token_hex(32),'pids':[]}
+        # Ports this stack already owns (a reloaded dev stack) are never handed to another service.
+        ports.reserve([v for k,v in self.state.items() if k.endswith('_port')]+[self.state.get('custom_plugin',{}).get('port')])
+        for key in PORT_KEYS:
+            if key not in self.state:self.state[key]=port()
         for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
