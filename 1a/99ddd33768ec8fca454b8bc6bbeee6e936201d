@@ -1,0 +1,23 @@
+internal/plugins/output.go
+  s_54b80c92daa9cb::t_7076d244182d98 9,245,268-287
+  s_54b80c92daa9cb::t_a6a34cb5db688e 243-244,246-248
+  s_54b80c92daa9cb::t_853cc20e1d1c90 288-289
+internal/plugins/output_test.go
+  s_54b80c92daa9cb::t_4753ec25c67e08 115-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a99ddd33768ec8fca454b8bc6bbeee6e936201d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

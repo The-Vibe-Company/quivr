@@ -1,0 +1,38 @@
+internal/plugins/scaffold/template/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_9e813d994ba3bc 65-67
+  s_54b80c92daa9cb::t_bcf2651ce719bc 9
+  s_54b80c92daa9cb::t_9236585ec40806 34-42
+internal/plugins/scaffold/template/README.md
+  s_54b80c92daa9cb::t_abe1a5b5db7f01 8-14
+tests/acceptance/normalizer_test.go
+  s_54b80c92daa9cb::t_9e0a6034358da5 142-202
+  s_54b80c92daa9cb::t_9110596e2d7214 7
+scripts/local.py
+  s_54b80c92daa9cb::t_cb117be025215d 401,403
+  s_54b80c92daa9cb::t_26345e553ebd3a 402
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_bbae0f7e2826e8 44
+internal/plugins/scaffold/template/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_1e5bc86d2245f2 25-44
+internal/plugins/scaffold/template/__PLUGIN_MODULE__/normalizer.py
+  s_54b80c92daa9cb::t_ceab305b880e7b 7-11,16,20,40-54,69,81-86,109-113
+  s_54b80c92daa9cb::t_b37c316d357a14 39
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_e2f9201c490e54 137-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d77cc66650032a77b06c4fe9d1ecbb21a610e50",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

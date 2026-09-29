@@ -1,0 +1,35 @@
+internal/normalization/normalization_test.go
+  s_54b80c92daa9cb::t_a23f2ca288015c 40-47,240-265,321-327,349,354-368
+  s_54b80c92daa9cb::t_ed1705f023a8d4 391-396
+  s_54b80c92daa9cb::t_57983ac5e875bd 397
+internal/content/content.go
+  s_54b80c92daa9cb::t_c3127443cc0c09 810-812,816
+  s_54b80c92daa9cb::t_1656e03c1ab75c 863-874
+internal/content/normalized_test.go
+  s_54b80c92daa9cb::t_87173035df9a4c 201-225
+internal/adapters/postgres/normalizations.go
+  s_54b80c92daa9cb::t_106b714a02514a 5,15,17-18,22-24,32-41
+internal/adapters/postgres/normalizations_test.go
+  s_54b80c92daa9cb::t_fb7de41edef4bd 79,95,170-176
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_188109dced6780 198
+  s_54b80c92daa9cb::t_e46d5f685909a7 175-178
+migrations/20260929T0559Z_normalization_extensions.sql
+  s_54b80c92daa9cb::t_92fa18a4b78072 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "939e46ff9534de691c12db45680f3b795317fd42",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
