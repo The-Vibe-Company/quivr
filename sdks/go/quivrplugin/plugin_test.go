@@ -82,7 +82,7 @@ func TestDiscoveryServesTheNegotiatedVersionAndDigest(t *testing.T) {
 		Contributions  []string `json:"contributions"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
-	if doc.PluginAPI != "0.4.0" || doc.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) || fmt.Sprint(doc.Contributions) != "[connector]" {
+	if doc.PluginAPI != "0.5.0" || doc.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) || fmt.Sprint(doc.Contributions) != "[connector]" {
 		t.Fatalf("discovery %+v", doc)
 	}
 }
@@ -171,7 +171,10 @@ func TestAnOptionalCredentialMayBeNull(t *testing.T) {
 		return &Page{Checkpoint: map[string]any{}}, nil
 	})
 	optional := func(credential any) []byte {
-		return fetchBody(func(b map[string]any) { b["connector"].(map[string]any)["kind"] = "optional"; b["credential"] = credential })
+		return fetchBody(func(b map[string]any) {
+			b["connector"].(map[string]any)["kind"] = "optional"
+			b["credential"] = credential
+		})
 	}
 	if status, _, raw := call(h, "/v0/contributions/connector/fetch", optional(nil)); status != 200 {
 		t.Fatalf("a null optional credential: HTTP %d %s", status, raw)

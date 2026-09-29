@@ -1,0 +1,21 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200
+  },
+  "items": [
+    {
+      "record_key": "alert-9",
+      "content": {
+        "kind": "text",
+        "text": "Road closed."
+      },
+      "extensions": {
+        "other.namespace": {
+          "schema_version": "1",
+          "data": {}
+        }
+      }
+    }
+  ]
+}

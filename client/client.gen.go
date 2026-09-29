@@ -59,25 +59,25 @@ func (e BlobContentKind) Valid() bool {
 
 // Defines values for ConnectorHealthState.
 const (
-	AccessError        ConnectorHealthState = "access_error"
-	Active             ConnectorHealthState = "active"
-	CredentialExpiring ConnectorHealthState = "credential_expiring"
-	Disabled           ConnectorHealthState = "disabled"
-	Silent             ConnectorHealthState = "silent"
+	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
+	ConnectorHealthStateActive             ConnectorHealthState = "active"
+	ConnectorHealthStateCredentialExpiring ConnectorHealthState = "credential_expiring"
+	ConnectorHealthStateDisabled           ConnectorHealthState = "disabled"
+	ConnectorHealthStateSilent             ConnectorHealthState = "silent"
 )
 
 // Valid indicates whether the value is a known member of the ConnectorHealthState enum.
 func (e ConnectorHealthState) Valid() bool {
 	switch e {
-	case AccessError:
+	case ConnectorHealthStateAccessError:
 		return true
-	case Active:
+	case ConnectorHealthStateActive:
 		return true
-	case CredentialExpiring:
+	case ConnectorHealthStateCredentialExpiring:
 		return true
-	case Disabled:
+	case ConnectorHealthStateDisabled:
 		return true
-	case Silent:
+	case ConnectorHealthStateSilent:
 		return true
 	default:
 		return false
@@ -117,6 +117,48 @@ func (e ConnectorKindDescriptionCredential) Valid() bool {
 	case Optional:
 		return true
 	case Required:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorPushState.
+const (
+	ConnectorPushStateActive   ConnectorPushState = "active"
+	ConnectorPushStateDegraded ConnectorPushState = "degraded"
+	ConnectorPushStatePending  ConnectorPushState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushState enum.
+func (e ConnectorPushState) Valid() bool {
+	switch e {
+	case ConnectorPushStateActive:
+		return true
+	case ConnectorPushStateDegraded:
+		return true
+	case ConnectorPushStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorPushErrorClass.
+const (
+	Access    ConnectorPushErrorClass = "access"
+	Source    ConnectorPushErrorClass = "source"
+	Transient ConnectorPushErrorClass = "transient"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushErrorClass enum.
+func (e ConnectorPushErrorClass) Valid() bool {
+	switch e {
+	case Access:
+		return true
+	case Source:
+		return true
+	case Transient:
 		return true
 	default:
 		return false
@@ -680,7 +722,7 @@ type Connector struct {
 	DisabledAt *time.Time          `json:"disabled_at,omitempty"`
 	Enabled    bool                `json:"enabled"`
 
-	// Health Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+	// Health Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
 	Health       ConnectorHealth `json:"health"`
 	HealthPolicy struct {
 		CredentialWarningSeconds int `json:"credential_warning_seconds"`
@@ -693,6 +735,9 @@ type Connector struct {
 		IntervalSeconds int `json:"interval_seconds"`
 	} `json:"schedule"`
 	SourceNamespace string `json:"source_namespace"`
+
+	// WebhookUrl Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source.
+	WebhookUrl *string `json:"webhook_url,omitempty"`
 }
 
 // ConnectorCreate defines model for ConnectorCreate.
@@ -716,7 +761,7 @@ type ConnectorError struct {
 	Code string    `json:"code"`
 }
 
-// ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+// ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
 type ConnectorHealth struct {
 	// Diagnostics Kind-defined diagnostics from the latest acquisition page, documented on the kind's operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a secret or source content.
 	Diagnostics   *map[string]interface{} `json:"diagnostics,omitempty"`
@@ -724,7 +769,10 @@ type ConnectorHealth struct {
 	LastError     *ConnectorError         `json:"last_error,omitempty"`
 	LastItemAt    *time.Time              `json:"last_item_at,omitempty"`
 	LastSuccessAt *time.Time              `json:"last_success_at,omitempty"`
-	State         ConnectorHealthState    `json:"state"`
+
+	// Push Push delivery health, present once a kind that declares the push mode reports its push channel.
+	Push  *ConnectorPush       `json:"push,omitempty"`
+	State ConnectorHealthState `json:"state"`
 
 	// Usage Per-UTC-day source read counters, present only for kinds that report reads.
 	Usage *ConnectorUsage `json:"usage,omitempty"`
@@ -788,6 +836,35 @@ type ConnectorPage struct {
 	Items          []Connector `json:"items"`
 	NextPageCursor *string     `json:"next_page_cursor,omitempty"`
 }
+
+// ConnectorPush Push delivery health, present once a kind that declares the push mode reports its push channel.
+type ConnectorPush struct {
+	Error *ConnectorPushError `json:"error,omitempty"`
+
+	// LastDeliveryAt Last delivery the connector plugin accepted.
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+
+	// PollIntervalSeconds While push is active, polling runs at most this often, as a safety net.
+	PollIntervalSeconds *int `json:"poll_interval_seconds,omitempty"`
+
+	// State active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection.
+	State ConnectorPushState `json:"state"`
+}
+
+// ConnectorPushState active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection.
+type ConnectorPushState string
+
+// ConnectorPushError defines model for ConnectorPushError.
+type ConnectorPushError struct {
+	At    time.Time               `json:"at"`
+	Class ConnectorPushErrorClass `json:"class"`
+
+	// Code For example webhook_invalid (the source invalidated the webhook), plugin_unavailable (a delivery found the plugin down) or missed_deliveries (polling found items no delivery brought).
+	Code string `json:"code"`
+}
+
+// ConnectorPushErrorClass defines model for ConnectorPushError.Class.
+type ConnectorPushErrorClass string
 
 // ConnectorSchedule defines model for ConnectorSchedule.
 type ConnectorSchedule struct {
@@ -1879,6 +1956,16 @@ type ClientInterface interface {
 	// Connector kinds enabled in this deployment, with the JSON Schemas that validate their config and credential secret, so clients can render configuration forms without knowing the kinds. credential_deposits tells whether this deployment accepts Deposited Credentials at all; when unavailable, any create carrying a credential and every rotation is 503 credentials_unavailable.
 	ListConnectorKinds(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RelayConnectorChallenge performs a GET /v0/connector-webhooks/{connector_id} (the `RelayConnectorChallenge` operationId) request.
+	//
+	// Public webhook route of one Connector Instance whose kind declares the push mode; the address is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge) with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the plugin like a delivery.
+	RelayConnectorChallenge(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RelayConnectorDelivery performs a POST /v0/connector-webhooks/{connector_id} (the `RelayConnectorDelivery` operationId) request.
+	//
+	// Relay one delivery the source sends to the Connector Instance. The core passes the raw request (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update health.push.
+	RelayConnectorDelivery(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListConnectors performs a GET /v0/connectors (the `ListConnectors` operationId) request.
 	//
 	// Connector Instances of authorized Corpora, optionally filtered to one Corpus, in stable identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor or another list page cursor (422 invalid_cursor).
@@ -2294,6 +2381,36 @@ func (c *Client) StreamChanges(ctx context.Context, params *StreamChangesParams,
 // Connector kinds enabled in this deployment, with the JSON Schemas that validate their config and credential secret, so clients can render configuration forms without knowing the kinds. credential_deposits tells whether this deployment accepts Deposited Credentials at all; when unavailable, any create carrying a credential and every rotation is 503 credentials_unavailable.
 func (c *Client) ListConnectorKinds(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListConnectorKindsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RelayConnectorChallenge performs a GET /v0/connector-webhooks/{connector_id} (the `RelayConnectorChallenge` operationId) request.
+//
+// Public webhook route of one Connector Instance whose kind declares the push mode; the address is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge) with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the plugin like a delivery.
+func (c *Client) RelayConnectorChallenge(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRelayConnectorChallengeRequest(c.Server, connectorId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RelayConnectorDelivery performs a POST /v0/connector-webhooks/{connector_id} (the `RelayConnectorDelivery` operationId) request.
+//
+// Relay one delivery the source sends to the Connector Instance. The core passes the raw request (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update health.push.
+func (c *Client) RelayConnectorDelivery(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRelayConnectorDeliveryRequest(c.Server, connectorId)
 	if err != nil {
 		return nil, err
 	}
@@ -3513,6 +3630,74 @@ func NewListConnectorKindsRequest(server string) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRelayConnectorChallengeRequest constructs an http.Request for the RelayConnectorChallenge method
+func NewRelayConnectorChallengeRequest(server string, connectorId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connector-webhooks/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRelayConnectorDeliveryRequest constructs an http.Request for the RelayConnectorDelivery method
+func NewRelayConnectorDeliveryRequest(server string, connectorId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connector-webhooks/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5499,6 +5684,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	ListConnectorKindsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListConnectorKindsResponse, error)
 
+	// RelayConnectorChallengeWithResponse performs a GET /v0/connector-webhooks/{connector_id} (the `RelayConnectorChallenge` operationId) request.
+	//
+	// Public webhook route of one Connector Instance whose kind declares the push mode; the address is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge) with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the plugin like a delivery.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RelayConnectorChallengeWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*RelayConnectorChallengeResponse, error)
+
+	// RelayConnectorDeliveryWithResponse performs a POST /v0/connector-webhooks/{connector_id} (the `RelayConnectorDelivery` operationId) request.
+	//
+	// Relay one delivery the source sends to the Connector Instance. The core passes the raw request (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update health.push.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RelayConnectorDeliveryWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*RelayConnectorDeliveryResponse, error)
+
 	// ListConnectorsWithResponse performs a GET /v0/connectors (the `ListConnectors` operationId) request.
 	//
 	// Connector Instances of authorized Corpora, optionally filtered to one Corpus, in stable identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor or another list page cursor (422 invalid_cursor).
@@ -6127,6 +6326,74 @@ func (r ListConnectorKindsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListConnectorKindsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RelayConnectorChallengeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r RelayConnectorChallengeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RelayConnectorChallengeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RelayConnectorChallengeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RelayConnectorChallengeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RelayConnectorDeliveryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r RelayConnectorDeliveryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RelayConnectorDeliveryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RelayConnectorDeliveryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RelayConnectorDeliveryResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8208,6 +8475,32 @@ func (c *ClientWithResponses) ListConnectorKindsWithResponse(ctx context.Context
 	return ParseListConnectorKindsResponse(rsp)
 }
 
+// RelayConnectorChallengeWithResponse performs a GET /v0/connector-webhooks/{connector_id} (the `RelayConnectorChallenge` operationId) request.
+//
+// Public webhook route of one Connector Instance whose kind declares the push mode; the address is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge) with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the plugin like a delivery.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RelayConnectorChallengeWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*RelayConnectorChallengeResponse, error) {
+	rsp, err := c.RelayConnectorChallenge(ctx, connectorId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRelayConnectorChallengeResponse(rsp)
+}
+
+// RelayConnectorDeliveryWithResponse performs a POST /v0/connector-webhooks/{connector_id} (the `RelayConnectorDelivery` operationId) request.
+//
+// Relay one delivery the source sends to the Connector Instance. The core passes the raw request (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update health.push.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RelayConnectorDeliveryWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*RelayConnectorDeliveryResponse, error) {
+	rsp, err := c.RelayConnectorDelivery(ctx, connectorId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRelayConnectorDeliveryResponse(rsp)
+}
+
 // ListConnectorsWithResponse performs a GET /v0/connectors (the `ListConnectors` operationId) request.
 //
 // Connector Instances of authorized Corpora, optionally filtered to one Corpus, in stable identifier order. Opaque page cursor bound to filter and scope; not a Change Cursor or another list page cursor (422 invalid_cursor).
@@ -9160,6 +9453,38 @@ func ParseListConnectorKindsResponse(rsp *http.Response) (*ListConnectorKindsRes
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseRelayConnectorChallengeResponse parses an HTTP response from a RelayConnectorChallengeWithResponse call
+func ParseRelayConnectorChallengeResponse(rsp *http.Response) (*RelayConnectorChallengeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RelayConnectorChallengeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseRelayConnectorDeliveryResponse parses an HTTP response from a RelayConnectorDeliveryWithResponse call
+func ParseRelayConnectorDeliveryResponse(rsp *http.Response) (*RelayConnectorDeliveryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RelayConnectorDeliveryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil

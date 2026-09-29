@@ -114,7 +114,7 @@ already scheduled. The interval must be between the deployment floor and 24 hour
 | --- | --- | --- |
 | `active` | Collecting normally | none |
 | `silent` | No new item for `silent_after_seconds` (default 24 h) | Check whether the source still publishes |
-| `access_error` | The source refused access. This lasts until a later successful poll | Fix permissions or rotate the credential |
+| `access_error` | The source refused access. This lasts until a later successful poll, or until push recovers when it is push that was refused | Fix permissions or rotate the credential |
 | `credential_expiring` | The credential expires within the warning window | Rotate before expiry |
 | `disabled` | The instance was disabled | none |
 
@@ -126,6 +126,9 @@ already scheduled. The interval must be between the deployment floor and 24 hour
   show `health.usage` (`items_read` today and `previous_day_items_read`, UTC
   days). `health.diagnostics` holds kind-specific details described on the
   kind's page.
+- **Push.** Kinds that also receive deliveries (X lists in
+  [webhook mode](x-webhooks.md)) show `health.push`: `state` (`pending`,
+  `active` or `degraded`), its `error`, and `last_delivery_at`.
 - **Freshness.** `evaluated_at` shows when health was last committed. If it
   stops advancing, check the worker.
 - **Alerting.** Subscribe to `connector.health_changed`, `connector.created`,

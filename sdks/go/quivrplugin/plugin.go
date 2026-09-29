@@ -126,6 +126,11 @@ func (p *Plugin) checkRegistered() error {
 		sort.Strings(missing)
 		return fmt.Errorf("no implementation registered for declared kinds %v", missing)
 	}
+	for name, k := range p.kinds {
+		if _, ok := k.impl.(Receiver); p.m.Connector.Kinds[name].Pushes() && !ok {
+			return fmt.Errorf("kind %q declares the push mode, so its implementation must implement Receiver", name)
+		}
+	}
 	if p.m.Connector.Attachments != nil {
 		for name, k := range p.kinds {
 			if _, ok := k.impl.(AttachmentSource); !ok {
@@ -156,6 +161,9 @@ func (p *Plugin) Handler() (http.Handler, error) {
 	})
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
+	if p.pushes() {
+		mux.HandleFunc("POST /v0/contributions/connector/receive", p.serveReceive)
+	}
 	if p.m.Connector.Attachments != nil {
 		mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", p.serveDescribeAttachment)
 		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
@@ -344,7 +352,7 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	if err != nil {
 		return nil, "the checkpoint is not JSON-encodable: " + err.Error()
 	}
-	out := pageJSON{Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
+	out := pageJSON{Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice, Push: page.Push}
 	if out.Items == nil {
 		out.Items = []Item{}
 	}
@@ -365,6 +373,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 		return nil, fmt.Sprintf("the response is %d bytes; max_response_bytes is %d", len(body), p.m.maxBytes)
 	case compactLen(checkpoint) > p.m.maxCheckpt:
 		return nil, fmt.Sprintf("the checkpoint encodes to %d bytes; max_checkpoint_bytes is %d", compactLen(checkpoint), p.m.maxCheckpt)
+	case p.pushProblem(page.Push) != "":
+		return nil, p.pushProblem(page.Push)
 	case page.Diagnostics != nil && len(diagnostics) > MaxDiagnosticsBytes:
 		return nil, fmt.Sprintf("diagnostics encode to %d bytes; the core stores at most %d", len(diagnostics), MaxDiagnosticsBytes)
 	}

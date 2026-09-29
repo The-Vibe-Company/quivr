@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "connector fixture, v0",
-  "description": "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, and checks the credential. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs.",
+  "description": "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, checks the credential and, for a push kind, relays each receive case. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -129,6 +129,119 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$",
               "maxLength": 64
+            }
+          }
+        }
+      }
+    },
+    "receive": {
+      "type": "array",
+      "maxItems": 32,
+      "description": "Since Plugin API 0.5, for a push kind: deliveries the Contract Runner relays to receive, in order, with the fixture's config, credential and checkpoint. Signatures in headers are computed by the fixture author over the exact body.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method"
+            ],
+            "not": {
+              "required": [
+                "body",
+                "body_base64"
+              ]
+            },
+            "properties": {
+              "method": {
+                "enum": [
+                  "GET",
+                  "POST"
+                ]
+              },
+              "query": {
+                "type": "string",
+                "maxLength": 8192,
+                "description": "Raw query string, without the leading ?."
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Header values by name; names are lowercased when relayed."
+              },
+              "body": {
+                "type": "string",
+                "description": "A UTF-8 body."
+              },
+              "body_base64": {
+                "type": "string",
+                "contentEncoding": "base64",
+                "description": "A binary body, standard base64."
+              }
+            }
+          },
+          "expect": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "accepted",
+                  "refused"
+                ]
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 200,
+                "maximum": 499
+              },
+              "record_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The Record Keys of the items, in order."
+              },
+              "body_contains": {
+                "type": "string",
+                "description": "A substring of the answer body, such as a challenge response."
+              },
+              "error": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "error_class"
+                ],
+                "properties": {
+                  "error_class": {
+                    "enum": [
+                      "access",
+                      "transient",
+                      "source"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                  }
+                },
+                "description": "The delivery is expected to fail with this error class instead of a verdict."
+              }
             }
           }
         }

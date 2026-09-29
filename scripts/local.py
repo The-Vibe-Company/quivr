@@ -92,6 +92,8 @@ class Stack:
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
+            # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
+            public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
@@ -469,6 +471,7 @@ def parts():
     from connector_restart import verify as verify_connector_restart
     from m365_restart import verify as verify_m365_restart
     from connector_x_restart import verify as verify_connector_x_restart
+    from connector_x_push import verify as verify_connector_x_push
     from lifecycle import verify as verify_lifecycle
     # Every part first restarts PostgreSQL under load and grants the scoped key its Corpus.
     setup=[step('persistence_across_restart',persistence)]
@@ -536,6 +539,8 @@ def parts():
             step('connector_restart',verify_connector_restart),
             step('m365_restart',verify_m365_restart),
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
+            # X webhook deliveries while the x-list plugin is down: 503 to X, then polling catches up.
+            step('x_push_outage',lambda stack:verify_connector_x_push(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
             step('validate_captures',validate_captures)],
     }
 

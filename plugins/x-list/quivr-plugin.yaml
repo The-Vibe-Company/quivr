@@ -1,13 +1,15 @@
 # First-party connector plugin: polls the posts of one X list through the X
 # API v2 with an app-only bearer token, and withdraws posts deleted or made
-# private at the source. The id and extension namespace keep the names of the
+# private at the source. With webhook mode on, posts of the list members also
+# arrive in near real time through X Filtered Stream webhooks, which the core
+# relays to receive; polling stays the fallback. The id and extension namespace keep the names of the
 # former built-in x_list kind, so existing instances and Records carry over.
 id: connector.x_list
 version: 1.0.0
 description: Polls the posts of an X list and withdraws posts deleted at the source.
 compatibility:
   engine: ">=0.1.0 <0.2.0"
-  plugin_api: ">=0.3.1 <0.4.0"
+  plugin_api: ">=0.5.0 <0.6.0"
 contributions:
   connector:
     kinds:
@@ -48,6 +50,37 @@ contributions:
               minimum: 60
               maximum: 86400
               title: Deletion recheck interval (seconds)
+            webhook:
+              type: object
+              additionalProperties: false
+              title: Real-time delivery
+              description: Receive the posts of the list members through X Filtered Stream webhooks, with polling as the fallback. Needs the consumer_secret credential and a deployment public_url.
+              properties:
+                enabled: {type: boolean, default: false, title: Enabled}
+                resync_interval_seconds:
+                  type: integer
+                  minimum: 5
+                  maximum: 86400
+                  default: 900
+                  title: Member and webhook resync interval (seconds)
+                poll_interval_seconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 86400
+                  default: 900
+                  title: Polling interval while webhooks work (seconds)
+                max_rules:
+                  type: integer
+                  minimum: 1
+                  maximum: 25000
+                  default: 1000
+                  title: Most Filtered Stream rules for this list
+                max_rule_length:
+                  type: integer
+                  minimum: 64
+                  maximum: 4096
+                  default: 512
+                  title: Longest Filtered Stream rule (characters)
         credential_schema:
           title: X API credential
           type: object
@@ -57,12 +90,13 @@ contributions:
             bearer_token: {type: string, minLength: 1, title: Bearer token, writeOnly: true}
             consumer_secret: {type: string, minLength: 1, title: Consumer secret, writeOnly: true}
         default_interval_seconds: 120
-        modes: [pull]
+        modes: [pull, push]
     timeout_ms: 25000
     limits:
       max_items: 100
-      # The deletion recheck set tracks up to 2000 posts (about 210 KB).
-      max_checkpoint_bytes: 262144
+      # The deletion recheck set tracks up to 2000 posts (about 210 KB), and a
+      # webhook resync in progress the list members (about 100 KB for 5000).
+      max_checkpoint_bytes: 524288
 configuration:
   schema:
     type: object

@@ -30,6 +30,11 @@ type Instance struct {
 	// Relation target to them with the target's Record Key.
 	CorpusID        string `json:"corpus_id,omitempty"`
 	SourceNamespace string `json:"source_namespace,omitempty"`
+	// WebhookURL is the public address where the source delivers to this
+	// instance (fetch requests of a push kind, since Plugin API 0.5, when the
+	// deployment has a public URL). Register it with the source; the core
+	// relays each delivery to Receive.
+	WebhookURL string `json:"webhook_url,omitempty"`
 	// Config is the instance configuration, already valid against the
 	// kind's config_schema.
 	Config json.RawMessage `json:"config"`
@@ -115,6 +120,44 @@ type Page struct {
 	// Notice reports a condition that ends a run that otherwise completed,
 	// such as a spend cap (a code: lowercase, digits, underscores).
 	Notice string
+	// Push reports a push kind's push channel (Plugin API 0.5); nil reports
+	// nothing and the core keeps the previous report.
+	Push *PushStatus
+}
+
+// Push states.
+const (
+	PushActive  = "active"
+	PushPending = "pending"
+	PushFailed  = "failed"
+)
+
+// PushStatus is a push kind's view of the push channel it sets up at the
+// source (a registered webhook and its subscriptions). Build it with
+// PushIsActive, PushIsPending or PushHasFailed.
+type PushStatus struct {
+	State      string `json:"state"`
+	ErrorClass string `json:"error_class,omitempty"`
+	Code       string `json:"code,omitempty"`
+	// PollIntervalSeconds, only while active, relaxes pull to a safety net:
+	// the core runs fetch at most this often.
+	PollIntervalSeconds int `json:"poll_interval_seconds,omitempty"`
+}
+
+// PushIsActive reports that deliveries are expected; pollEvery (0 for no
+// change, else at least a minute) relaxes pull while they arrive.
+func PushIsActive(pollEvery time.Duration) *PushStatus {
+	return &PushStatus{State: PushActive, PollIntervalSeconds: int(pollEvery / time.Second)}
+}
+
+// PushIsPending reports a channel not set up yet; reason is an optional code.
+func PushIsPending(reason string) *PushStatus { return &PushStatus{State: PushPending, Code: reason} }
+
+// PushHasFailed reports a channel the source refused or broke. An access
+// failure shows as the access_error Connector Health state; polling carries
+// the collection meanwhile.
+func PushHasFailed(class Class, code string) *PushStatus {
+	return &PushStatus{State: PushFailed, ErrorClass: string(class), Code: code}
 }
 
 // Item is one source item that is new or changed since the checkpoint.
@@ -209,6 +252,7 @@ type pageJSON struct {
 	Diagnostics map[string]any  `json:"diagnostics,omitempty"`
 	Notice      string          `json:"notice,omitempty"`
 	NotDue      bool            `json:"not_due,omitempty"`
+	Push        *PushStatus     `json:"push,omitempty"`
 }
 
 type credentialJSON struct {

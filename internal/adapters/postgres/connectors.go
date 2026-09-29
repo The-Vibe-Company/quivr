@@ -28,7 +28,8 @@ k.version,k.deposited_at,k.expires_at,
 CASE WHEN c.usage_day IS NULL THEN NULL ELSE ` + utcToday + ` END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_items ELSE 0 END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_previous_items WHEN c.usage_day=` + utcToday + `-1 THEN c.usage_items ELSE 0 END,
-c.diagnostics`
+c.diagnostics,
+c.push_state,c.push_setup_class,c.push_setup_code,c.push_setup_at,c.push_poll_interval_seconds,c.push_error_class,c.push_error_code,c.push_error_at,c.push_last_delivery_at`
 
 // utcToday is the current UTC calendar day, the window of usage counters.
 const utcToday = `(now() AT TIME ZONE 'UTC')::date`
@@ -46,9 +47,13 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	var deposited, expires, usageDay *time.Time
 	var usageToday, usagePrevious int64
 	var diagnostics []byte
+	var pushState, setupClass, setupCode, pushClass, pushCode *string
+	var setupAt, pushAt, lastDelivery *time.Time
+	var pollInterval *int64
 	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt,
 		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires,
-		&usageDay, &usageToday, &usagePrevious, &diagnostics)
+		&usageDay, &usageToday, &usagePrevious, &diagnostics,
+		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, corpus.ErrNotFound
 	}
@@ -71,6 +76,22 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	if len(diagnostics) > 0 {
 		in.Health.Diagnostics = diagnostics
 	}
+	if pushState != nil {
+		push := &connectors.PushHealth{Setup: *pushState, LastDeliveryAt: lastDelivery}
+		if setupCode != nil && setupAt != nil {
+			push.SetupError = &connectors.RunError{Code: *setupCode, At: *setupAt}
+			if setupClass != nil {
+				push.SetupError.Class = connectors.ErrorClass(*setupClass)
+			}
+		}
+		if pollInterval != nil {
+			push.PollInterval = time.Duration(*pollInterval) * time.Second
+		}
+		if pushCode != nil && pushAt != nil && pushClass != nil {
+			push.DeliveryError = &connectors.RunError{Class: connectors.ErrorClass(*pushClass), Code: *pushCode, At: *pushAt}
+		}
+		in.Health.Push = push
+	}
 	return in, nil
 }
 
@@ -89,6 +110,7 @@ func healthInput(in connectors.Instance) connectors.HealthInput {
 	if in.Credential != nil {
 		h.CredentialExpiresAt = in.Credential.ExpiresAt
 	}
+	h.PushAccessRefused = in.Health.Push != nil && in.Health.Push.AccessRefused()
 	return h
 }
 
@@ -373,7 +395,40 @@ func (s ConnectorStore) LoadRun(ctx context.Context, org, id string) (connectors
 	if err != nil {
 		return connectors.Target{}, err
 	}
+	return s.target(ctx, in)
+}
+
+// LoadDelivery reads an instance by id alone, for the public webhook route:
+// instance ids are random, so an id names at most one instance, and an
+// ambiguous id is treated as unknown.
+func (s ConnectorStore) LoadDelivery(ctx context.Context, id string) (connectors.Target, error) {
+	rows, err := s.Pool.Query(ctx, "SELECT "+connectorColumns+connectorFrom+" WHERE c.id=$1 LIMIT 2", id)
+	if err != nil {
+		return connectors.Target{}, err
+	}
+	var found []connectors.Instance
+	for rows.Next() {
+		in, err := scanConnector(rows)
+		if err != nil {
+			rows.Close()
+			return connectors.Target{}, err
+		}
+		found = append(found, in)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return connectors.Target{}, err
+	}
+	if len(found) != 1 {
+		return connectors.Target{}, corpus.ErrNotFound
+	}
+	return s.target(ctx, found[0])
+}
+
+func (s ConnectorStore) target(ctx context.Context, in connectors.Instance) (connectors.Target, error) {
+	org, id := in.Organization, in.ID
 	t := connectors.Target{Instance: in}
+	var err error
 	if in.Health.Usage != nil {
 		t.ReadsToday = in.Health.Usage.ItemsRead
 	}
@@ -398,13 +453,78 @@ func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, ru
 	if len(p.Diagnostics) > 0 {
 		diagnostics = []byte(p.Diagnostics)
 	}
+	// A push report replaces the previous one (setup_at moves only when it
+	// changes); missed deliveries record a delivery error.
+	var pushState, pushClass, pushCode, pushInterval any
+	if p.Push != nil {
+		pushState = p.Push.State
+		if p.Push.Class != "" {
+			pushClass = string(p.Push.Class)
+		}
+		if p.Push.Code != "" {
+			pushCode = p.Push.Code
+		}
+		if p.Push.PollInterval > 0 {
+			pushInterval = int64(p.Push.PollInterval / time.Second)
+		}
+	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE connector_instances SET checkpoint=$4, last_item_at=CASE WHEN $5 THEN now() ELSE last_item_at END,
  usage_previous_items=CASE WHEN usage_day=`+utcToday+` THEN usage_previous_items WHEN usage_day=`+utcToday+`-1 THEN usage_items ELSE 0 END,
  usage_items=CASE WHEN usage_day=`+utcToday+` THEN usage_items+$6 ELSE $6 END,
  usage_day=CASE WHEN usage_day IS NULL AND $6=0 THEN NULL ELSE `+utcToday+` END,
- diagnostics=COALESCE($7::jsonb,diagnostics)
-WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics)
+ diagnostics=COALESCE($7::jsonb,diagnostics),
+ push_setup_at=CASE WHEN $8::text IS NULL OR ($8 IS NOT DISTINCT FROM push_state AND $9::text IS NOT DISTINCT FROM push_setup_class AND $10::text IS NOT DISTINCT FROM push_setup_code) THEN push_setup_at ELSE now() END,
+ push_state=COALESCE($8,push_state),
+ push_setup_class=CASE WHEN $8::text IS NULL THEN push_setup_class ELSE $9 END,
+ push_setup_code=CASE WHEN $8::text IS NULL THEN push_setup_code ELSE $10 END,
+ push_poll_interval_seconds=CASE WHEN $8::text IS NULL THEN push_poll_interval_seconds ELSE $11::integer END,
+ push_error_class=CASE WHEN $12 THEN 'transient' ELSE push_error_class END,
+ push_error_code=CASE WHEN $12 THEN '`+connectors.CodeMissedDeliveries+`' ELSE push_error_code END,
+ push_error_at=CASE WHEN $12 THEN now() ELSE push_error_at END
+WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics, pushState, pushClass, pushCode, pushInterval, p.Missed)
 	return tag.RowsAffected() == 1, err
+}
+
+// RecordDelivery commits a relayed delivery's outcome: an accepted one moves
+// the last delivery and usage, and clears the delivery error (missed
+// deliveries only when it carried items); a failure records it and brings a
+// pull run relaxed by healthy push back to the instance's interval. Connector
+// Health is re-evaluated in the same transaction.
+func (s ConnectorStore) RecordDelivery(ctx context.Context, org, id string, o connectors.DeliveryOutcome) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return err
+	}
+	var enabled bool
+	if err = tx.QueryRow(ctx, "SELECT enabled FROM connector_instances WHERE organization=$1 AND id=$2 FOR UPDATE", org, id).Scan(&enabled); err != nil || !enabled {
+		return err
+	}
+	var class, code any
+	if o.Failure != nil {
+		class, code = string(o.Failure.Class), o.Failure.Code
+	}
+	_, err = tx.Exec(ctx, `UPDATE connector_instances SET
+ next_run_at=CASE WHEN $5::text IS NOT NULL THEN LEAST(next_run_at,now()+make_interval(secs => interval_seconds::double precision)) ELSE next_run_at END,
+ push_error_class=CASE WHEN $5::text IS NOT NULL THEN $5 WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_class END,
+ push_error_code=CASE WHEN $5::text IS NOT NULL THEN $6 WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_code END,
+ push_error_at=CASE WHEN $5::text IS NOT NULL THEN now() WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_at END,
+ push_last_delivery_at=CASE WHEN $3 THEN now() ELSE push_last_delivery_at END,
+ last_item_at=CASE WHEN $7 THEN now() ELSE last_item_at END,
+ usage_previous_items=CASE WHEN $8=0 OR usage_day=`+utcToday+` THEN usage_previous_items WHEN usage_day=`+utcToday+`-1 THEN usage_items ELSE 0 END,
+ usage_items=CASE WHEN $8=0 THEN usage_items WHEN usage_day=`+utcToday+` THEN usage_items+$8 ELSE $8 END,
+ usage_day=CASE WHEN $8=0 THEN usage_day ELSE `+utcToday+` END
+WHERE organization=$1 AND id=$2`, org, id, o.Accepted, o.Carried, class, code, o.Fresh, o.Reads)
+	if err != nil {
+		return err
+	}
+	if _, err = reevaluate(ctx, tx, org, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // FinishRun ends a live run: it records its outcome, schedules the next run
@@ -434,7 +554,9 @@ func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64
 	if failure != nil && !failure.Skipped {
 		code, class, retry = failure.Code, string(failure.Class), failure.RetryAfter.Seconds()
 	}
-	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision)),
+	// Healthy push relaxes pull to the kind's reported poll interval.
+	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision,
+  CASE WHEN push_state='active' AND push_error_code IS NULL THEN COALESCE(push_poll_interval_seconds,0) ELSE 0 END::double precision)),
  last_success_at=CASE WHEN $3 THEN now() ELSE last_success_at END,
  access_error_at=CASE WHEN $3 THEN NULL WHEN $5='access' THEN now() ELSE access_error_at END,
  last_error_code=COALESCE($4,last_error_code),last_error_class=COALESCE($5,last_error_class),last_error_at=CASE WHEN $4::text IS NULL THEN last_error_at ELSE now() END

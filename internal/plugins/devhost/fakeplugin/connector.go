@@ -2,7 +2,9 @@ package fakeplugin
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -25,7 +27,12 @@ import (
 // access error marked retryable), // connector-blob-part (a Blob Part in a
 // Manifest), connector-too-many-items (one item over max_items),
 // connector-attachment-mismatch (uploads other bytes than it described) and
-// accept-invalid (invalid requests answered 202). An item with an
+// accept-invalid (invalid requests answered 202) and
+// connector-receive-invalid-verdict (a refused delivery that carries items).
+// A push kind's receive (Plugin API 0.5) answers GET ?challenge=<c> with <c>,
+// and accepts a POST whose x-fake-signature is the hex HMAC-SHA256 of the body
+// under the credential token, its body listing items like the config
+// ({"items": [{"key", "text"}]}); any other signature is refused 401. An item with an
 // "attachment" text carries it as a text/plain attachment whose ref is the
 // item key, described and uploaded through the core's grant (Plugin API 0.4).
 func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write func(http.ResponseWriter, int, any)) {
@@ -47,7 +54,13 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		Checkpoint *struct {
 			Offset int `json:"offset"`
 		} `json:"checkpoint"`
-		PageInRun  int `json:"page_in_run"`
+		PageInRun int `json:"page_in_run"`
+		Request   struct {
+			Method     string              `json:"method"`
+			Query      string              `json:"query"`
+			Headers    map[string][]string `json:"headers"`
+			BodyBase64 string              `json:"body_base64"`
+		} `json:"request"`
 		Attachment struct {
 			Ref string `json:"ref"`
 		} `json:"attachment"`
@@ -127,6 +140,41 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 			next = map[string]any{"offset": offset}
 		}
 		write(w, 200, map[string]any{"items": items, "checkpoint": next, "more": end < len(config.Items), "reads": len(items)})
+	})
+	mux.HandleFunc("POST /v0/contributions/connector/receive", func(w http.ResponseWriter, r *http.Request) {
+		req, ok := read(w, r, "connector-receive-request.schema.json")
+		if !ok {
+			return
+		}
+		if req.Request.Method == "GET" {
+			challenge := strings.TrimPrefix(req.Request.Query, "challenge=")
+			write(w, 200, map[string]any{"verdict": "accepted", "response": map[string]any{"status": 200, "content_type": "text/plain", "body": challenge}})
+			return
+		}
+		body, _ := base64.StdEncoding.DecodeString(req.Request.BodyBase64)
+		mac := hmac.New(sha256.New, []byte(req.Credential.Token))
+		mac.Write(body)
+		signature := req.Request.Headers["x-fake-signature"]
+		var delivered struct {
+			Items []struct {
+				Key  string `json:"key"`
+				Text string `json:"text"`
+			} `json:"items"`
+		}
+		_ = json.Unmarshal(body, &delivered)
+		items := []any{}
+		for _, item := range delivered.Items {
+			items = append(items, map[string]any{"record_key": item.Key, "revision": "1", "content": map[string]any{"kind": "text", "text": item.Text}})
+		}
+		if len(signature) != 1 || !hmac.Equal([]byte(signature[0]), []byte(hex.EncodeToString(mac.Sum(nil)))) {
+			refused := map[string]any{"verdict": "refused", "response": map[string]any{"status": 401, "body": "bad signature"}}
+			if mode == "connector-receive-invalid-verdict" {
+				refused["items"] = items
+			}
+			write(w, 200, refused)
+			return
+		}
+		write(w, 200, map[string]any{"verdict": "accepted", "response": map[string]any{"status": 204}, "items": items, "reads": len(items)})
 	})
 	if m.Contributions.Connector.Attachments == nil {
 		return

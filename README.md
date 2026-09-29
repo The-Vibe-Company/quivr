@@ -140,7 +140,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
   and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become
   corrections, deleted or protected posts are withdrawn, and health shows daily reads
-  ([guide](docs/connectors/x.md)).
+  ([guide](docs/connectors/x.md)). In webhook mode, X posts arrive in near real time
+  through Filtered Stream webhooks relayed by the core to the plugin, with polling as the
+  fallback ([guide](docs/connectors/x-webhooks.md)).
   The deployment `credential_key` is optional. Without it, credential deposits are
   refused with `503 credentials_unavailable`, and everything else works.
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
@@ -222,7 +224,6 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 - Alerts that catch rephrased or translated articles with Quivr's own vectors, without an external classifier.
 - Filtering on typed field mappings (filter roles are validated and stored today).
-- X Filtered Stream webhooks as a lower-latency alternative to list polling.
 - Reprocessing quarantined Versions.
 
 The contract already describes some of these routes; the ones not implemented yet are

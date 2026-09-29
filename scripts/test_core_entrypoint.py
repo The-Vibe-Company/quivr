@@ -71,6 +71,15 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss'], 'x-list': ['/usr/local/bin/quivr-x-list'], 'm365-mail': ['/usr/local/bin/quivr-m365-mail']})
         both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
         self.assertEqual(both, {'rss', 'x-list', 'm365-mail', 'pdf-text', 'alerts'})
+        # The API runs only the push connector plugins, to relay webhook deliveries to them.
+        api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'}, 'api')}
+        self.assertEqual(api, {'x-list'})
+
+    def test_public_url_is_passed_when_set(self):
+        self.assertNotIn('public_url', core_entrypoint.build_config(ENV))
+        self.assertNotIn('public_url', core_entrypoint.build_config({**ENV, 'QUIVR_PUBLIC_URL': ' '}))
+        config = core_entrypoint.build_config({**ENV, 'QUIVR_PUBLIC_URL': 'https://quivr.example.com'})
+        self.assertEqual(config['public_url'], 'https://quivr.example.com')
 
     def test_pinned_manifests_are_the_repository_plugins(self):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.

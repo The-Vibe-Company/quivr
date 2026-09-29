@@ -397,6 +397,10 @@ Each post becomes a Record keyed by its original post id; an edit is a correctio
 and a post deleted or made protected on X within the recheck window is withdrawn.
 `GET /v0/connectors/{id}` shows `health.usage` (estimated billed reads per UTC day)
 and `health.diagnostics` (recheck coverage). See the [X guide](connectors/x.md).
+With `"webhook":{"enabled":true}` in its config, a deposited `consumer_secret` and a
+deployment `public_url`, the instance read also shows `webhook_url`, and posts arrive
+through X webhooks within seconds; `health.push` shows that side
+([webhook mode](connectors/x-webhooks.md)).
 
 Clients discover what they can configure with `GET /v0/connector-kinds`
 (`connectors:read`). It lists the kinds enabled on this deployment, each with its

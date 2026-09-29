@@ -28,10 +28,12 @@ PLUGINS = [
 # They are always pinned, and the worker always runs them, whatever QUIVR_DEMO_PLUGINS
 # says: a Connector Instance of their kind keeps polling once created, and an unpinned
 # kind would fail it with unsupported_connector_kind. ``configuration`` is the pin
-# configuration (default {}); the private-address refusal stays on.
+# configuration (default {}); the private-address refusal stays on. ``push`` plugins
+# also run beside the API, which relays the webhook deliveries of their kinds to them
+# (the instance webhook addresses need QUIVR_PUBLIC_URL).
 CONNECTORS = [
     {'id': 'rss', 'port': 9920},
-    {'id': 'x-list', 'port': 9930},
+    {'id': 'x-list', 'port': 9930, 'push': True},
     # Microsoft 365 mail on the public cloud endpoints (the plugin's defaults).
     {'id': 'm365-mail', 'port': 9940},
 ]
@@ -114,23 +116,31 @@ def build_config(env):
     # Optional: without it the core starts and refuses only credential deposits.
     if env.get('QUIVR_CREDENTIAL_KEY'):
         config['credential_key'] = env['QUIVR_CREDENTIAL_KEY']
+    # Optional: the API's public address, from which push instances get their webhook
+    # address (x_list webhook mode); without it they only poll.
+    if env.get('QUIVR_PUBLIC_URL', '').strip():
+        config['public_url'] = env['QUIVR_PUBLIC_URL'].strip()
     return config
 
 
-def sidecar_commands(env):
-    """(name, argv, cwd, env) of each plugin process. Its environment carries only the
-    secrets that plugin declares (alerts: TYPESAFE_API_KEY), never the core's.
+def sidecar_commands(env, role='worker'):
+    """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
+    plugin, the API only the connector plugins it relays push deliveries to. Its
+    environment carries only the secrets that plugin declares (alerts:
+    TYPESAFE_API_KEY), never the core's.
 
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
     commands = []
     for connector in CONNECTORS:
+        if role == 'api' and not connector.get('push'):
+            continue
         directory = PLUGIN_ROOT / connector['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
                  'QUIVR_PLUGIN_MANIFEST': str(directory / 'quivr-plugin.yaml')}
         commands.append((connector['id'], ['/usr/local/bin/quivr-' + connector['id']], str(directory), child))
-    if not plugins_enabled(env):
+    if role == 'api' or not plugins_enabled(env):
         return commands
     for plugin in PLUGINS:
         directory = PLUGIN_ROOT / plugin['id']
@@ -196,10 +206,11 @@ def main():
     # Only the API applies startup migrations; failures abort before serving.
     if mode == 'api':
         subprocess.run(['quivr', 'migrate'], check=True)
-    # The worker is the only process that calls plugins, so it runs them beside itself.
-    sidecars = sidecar_commands(os.environ) if mode == 'worker' else []
+    # The worker calls every plugin, and the API the push connector plugins it relays
+    # webhook deliveries to, so each runs those beside itself.
+    sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
     if sidecars:
-        sys.exit(supervise(sidecars + [('quivr worker', ['quivr', 'worker'], None, None)]))
+        sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, None)]))
     os.execvp('quivr', ['quivr', mode])
 
 

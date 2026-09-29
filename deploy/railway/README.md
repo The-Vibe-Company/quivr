@@ -72,6 +72,11 @@ Optional web variables for the Sources view (see `quivr-search/README.md`):
 volume. Without a volume, removed sources come back as paused after a web restart.
 Set the real feed list in the Railway variables, never in this repository.
 
+X lists in webhook mode (`docs/connectors/x-webhooks.md`) need the API's public
+address: set `QUIVR_PUBLIC_URL` (for example `https://<api domain>`) on api and
+worker. The API service then runs the x-list plugin beside itself to relay X's
+deliveries; without the variable, X lists only poll.
+
 ## Keyword alerts and PDF text (optional)
 
 The core image bakes in the first-party plugins [`alerts`](../../plugins/alerts/README.md),

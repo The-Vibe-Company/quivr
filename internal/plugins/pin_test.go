@@ -74,7 +74,7 @@ func TestLoadPinAcceptsAValidPin(t *testing.T) {
 
 func TestLoadPinRefusesInvalidPins(t *testing.T) {
 	good := writePinManifest(t, pinManifest)
-	incompatible := writePinManifest(t, strings.Replace(pinManifest, `plugin_api: ">=0.1.0 <0.2.0"`, `plugin_api: ">=0.5.0 <0.6.0"`, 1))
+	incompatible := writePinManifest(t, strings.Replace(pinManifest, `plugin_api: ">=0.1.0 <0.2.0"`, `plugin_api: ">=0.6.0 <0.7.0"`, 1))
 	oldEngine := writePinManifest(t, strings.Replace(pinManifest, `engine: ">=0.1.0 <0.2.0"`, `engine: ">=1.0.0"`, 1))
 	foreign := writePinManifest(t, pinManifest+"extensions:\n  other.outline:\n    \"1\": {type: object}\n")
 	clash := writePinManifest(t, strings.Replace(pinManifest, "id: acme.markdown", "id: example", 1)+"extensions:\n  example.editorial:\n    \"1\": {type: object}\n")

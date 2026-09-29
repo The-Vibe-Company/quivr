@@ -477,6 +477,7 @@ class ConnectorInstanceRef(Model):
     kind: str
     corpus_id: str | None = None
     source_namespace: str | None = None
+    webhook_url: str | None = None
     config: dict[str, Any]
 
 
@@ -524,6 +525,16 @@ class ConnectorItem(Model):
 
 
 @dataclass(kw_only=True)
+class PushStatus(Model):
+    "Since Plugin API 0.5, for a push kind: the plugin's view of the push channel it sets up at the source (a registered webhook and its subscriptions). active: deliveries are expected. pending: not set up yet; code may say why. failed: the source refused or broke the setup, and polling carries the collection alone; error_class access shows as the access_error Connector Health state. The core keeps the latest report."
+
+    state: Literal["active", "pending", "failed"]
+    error_class: Literal["access", "transient", "source"] | None = None
+    code: str | None = None
+    poll_interval_seconds: int | None = None
+
+
+@dataclass(kw_only=True)
 class ConnectorFetchResponse(Model):
     "200 body of POST /v0/contributions/connector/fetch. The engine validates every item as it validates a client submission before accepting it, and advances the checkpoint only after the items are durably accepted."
 
@@ -534,6 +545,7 @@ class ConnectorFetchResponse(Model):
     diagnostics: dict[str, Any] | None = None
     notice: str | None = None
     not_due: bool | None = None
+    push: PushStatus | None = None
 
 
 @dataclass(kw_only=True)
@@ -594,8 +606,41 @@ class ConnectorExpectation(Model):
 
 
 @dataclass(kw_only=True)
+class FixtureReceiveRequest(Model):
+    method: Literal["GET", "POST"]
+    query: str | None = None
+    headers: dict[str, str] | None = None
+    body: str | None = None
+    body_base64: str | None = None
+
+
+@dataclass(kw_only=True)
+class ExpectedDeliveryError(Model):
+    "The delivery is expected to fail with this error class instead of a verdict."
+
+    error_class: Literal["access", "transient", "source"]
+    code: str | None = None
+
+
+@dataclass(kw_only=True)
+class ExpectedDelivery(Model):
+    verdict: Literal["accepted", "refused"] | None = None
+    status: int | None = None
+    record_keys: list[str] | None = None
+    body_contains: str | None = None
+    error: ExpectedDeliveryError | None = None
+
+
+@dataclass(kw_only=True)
+class FixtureReceiveCase(Model):
+    description: str | None = None
+    request: FixtureReceiveRequest
+    expect: ExpectedDelivery | None = None
+
+
+@dataclass(kw_only=True)
 class ConnectorFixture(Model):
-    "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, and checks the credential. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs."
+    "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, checks the credential and, for a push kind, relays each receive case. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs."
 
     description: str | None = None
     connector: FixtureConnector
@@ -605,6 +650,7 @@ class ConnectorFixture(Model):
     now: str | None = None
     max_pages: int | None = None
     expect: ConnectorExpectation | None = None
+    receive: list[FixtureReceiveCase] | None = None
 
 
 @dataclass(kw_only=True)
@@ -686,6 +732,62 @@ class ConnectorUploadAttachmentResponse(Model):
     status: Literal["uploaded"] = "uploaded"
 
 
+@dataclass(kw_only=True)
+class ReceiveInstanceRef(Model):
+    "The Connector Instance the delivery is addressed to."
+
+    instance_id: str
+    kind: str
+    corpus_id: str
+    source_namespace: str
+    config: dict[str, Any]
+
+
+@dataclass(kw_only=True)
+class RelayedRequest(Model):
+    "The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed."
+
+    method: Literal["GET", "POST"]
+    query: str
+    headers: dict[str, list[str]]
+    body_base64: str
+
+
+@dataclass(kw_only=True)
+class ConnectorReceiveRequest(Model):
+    "POST /v0/contributions/connector/receive, since Plugin API 0.5, for a kind that declares the push mode. The core relays one request a source sent to the instance's public webhook route: the plugin verifies it with the credential (for example a signature over the raw body), answers any challenge, and returns the items it carries. The core ingests the items, then returns the plugin's answer to the source."
+
+    invocation_id: str
+    contribution: Literal["connector"] = "connector"
+    organization_id: str
+    configuration: dict[str, Any]
+    connector: ReceiveInstanceRef
+    credential: Any
+    checkpoint: Any
+    now: str
+    reads_today: int
+    request: RelayedRequest
+
+
+@dataclass(kw_only=True)
+class ReceiveAnswer(Model):
+    "What the core answers the source: a 2xx status for accepted, a 4xx status for refused. A challenge (such as a CRC check) is an accepted delivery with no items whose body is the challenge answer."
+
+    status: int
+    content_type: str | None = None
+    body: str | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorReceiveResponse(Model):
+    "200 body of POST /v0/contributions/connector/receive: the plugin's verdict on one relayed delivery and the answer the core returns to the source. accepted: the delivery is authentic; the core ingests its items (the fetch item shape, without attachments) before answering, so an item a pull run also returns converges on the same Receipt. refused: the delivery is not authentic or not addressed to this instance; the core returns the answer and changes nothing."
+
+    verdict: Literal["accepted", "refused"]
+    response: ReceiveAnswer
+    items: list[ConnectorItem] | None = None
+    reads: int | None = None
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
@@ -709,6 +811,8 @@ __all__ = [
     "ConnectorKind",
     "ConnectorLimits",
     "ConnectorOrigin",
+    "ConnectorReceiveRequest",
+    "ConnectorReceiveResponse",
     "ConnectorUploadAttachmentRequest",
     "ConnectorUploadAttachmentResponse",
     "Decision",
@@ -717,6 +821,8 @@ __all__ = [
     "EvaluatedRecord",
     "Evaluation",
     "Evidence",
+    "ExpectedDelivery",
+    "ExpectedDeliveryError",
     "ExpectedError",
     "ExpectedPage",
     "ExtensionEntry",
@@ -725,6 +831,8 @@ __all__ = [
     "FixtureConnector",
     "FixtureEvaluation",
     "FixtureInput",
+    "FixtureReceiveCase",
+    "FixtureReceiveRequest",
     "FixtureRecord",
     "Health",
     "InputBlob",
@@ -744,10 +852,14 @@ __all__ = [
     "PluginIdentity",
     "PluginManifest",
     "Provenance",
+    "PushStatus",
+    "ReceiveAnswer",
+    "ReceiveInstanceRef",
     "RecordPart",
     "RecordProvenance",
     "RecordSource",
     "RelationInput",
+    "RelayedRequest",
     "ResponseWarning",
     "RetryIntent",
     "RunCommand",

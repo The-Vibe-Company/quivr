@@ -1,0 +1,10 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200
+  },
+  "items": [],
+  "checkpoint": {
+    "since": "alert-7"
+  }
+}

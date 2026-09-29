@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector receive request, v0",
+  "description": "POST /v0/contributions/connector/receive, since Plugin API 0.5, for a kind that declares the push mode. The core relays one request a source sent to the instance's public webhook route: the plugin verifies it with the credential (for example a signature over the raw body), answers any challenge, and returns the items it carries. The core ingests the items, then returns the plugin's answer to the source.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "connector",
+    "credential",
+    "checkpoint",
+    "now",
+    "reads_today",
+    "request"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per delivery; correlate logs with it."
+    },
+    "contribution": {
+      "const": "connector"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The plugin configuration the installer supplies, valid against configuration.schema."
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "kind",
+        "config",
+        "corpus_id",
+        "source_namespace"
+      ],
+      "description": "The Connector Instance the delivery is addressed to.",
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Corpus the instance writes to; Relation targets bind to it."
+        },
+        "source_namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "config": {
+          "type": "object",
+          "description": "The Connector Instance configuration, already valid against the kind's config_schema."
+        }
+      }
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The decrypted Deposited Credential, for verifying the delivery. Sent only for this invocation: never log, echo or persist it."
+    },
+    "checkpoint": {
+      "description": "The current Acquisition Checkpoint, read-only: a receive answer carries no checkpoint, because pull runs own it. Null before the first run."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The core's clock (RFC 3339, UTC)."
+    },
+    "reads_today": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Source resources read during the current UTC day, by pull runs and deliveries."
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "query",
+        "headers",
+        "body_base64"
+      ],
+      "description": "The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed.",
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "The raw query string, without the leading ?."
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          },
+          "description": "Header values by lowercase name, in arrival order."
+        },
+        "body_base64": {
+          "type": "string",
+          "maxLength": 1398104,
+          "contentEncoding": "base64",
+          "description": "The exact body bytes, standard base64 (signatures cover the raw bytes); empty for no body."
+        }
+      }
+    }
+  }
+}

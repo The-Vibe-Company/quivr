@@ -22,8 +22,8 @@ creation, credentials, health, disable.
 - **An app-only bearer token.** Deposit it as the credential. It must be able
   to read the list. Set `expires_at` if your organization rotates tokens on a
   schedule.
-- **The consumer secret (optional).** It is stored encrypted but not used yet.
-  A later webhook mode will use it.
+- **The consumer secret (optional).** It is stored encrypted, and needed only
+  for [webhook mode](x-webhooks.md), which receives posts in real time.
 - **A list id.** This is the numeric id in the list URL
   (`https://x.com/i/lists/<list_id>`). Use a public list, or a list the app's
   token can read. An app-only token cannot read another account's private list.

@@ -41,11 +41,12 @@ const (
 )
 
 type config struct {
-	ListID          string     `json:"list_id"`
-	BackfillSince   *time.Time `json:"backfill_since"`
-	MaxReadsPerDay  int64      `json:"max_reads_per_day"`
-	RecheckWindow   int64      `json:"recheck_window_seconds"`
-	RecheckInterval int64      `json:"recheck_interval_seconds"`
+	ListID          string        `json:"list_id"`
+	BackfillSince   *time.Time    `json:"backfill_since"`
+	MaxReadsPerDay  int64         `json:"max_reads_per_day"`
+	RecheckWindow   int64         `json:"recheck_window_seconds"`
+	RecheckInterval int64         `json:"recheck_interval_seconds"`
+	Webhook         webhookConfig `json:"webhook"`
 }
 
 func (c config) window() time.Duration {
@@ -82,6 +83,8 @@ type checkpoint struct {
 	// ListReadDay is the UTC day of the last list request: X bills a post once
 	// per UTC day, so only the first list page of a day re-bills known posts.
 	ListReadDay string `json:"list_read_day,omitempty"`
+	// Push is the webhook setup, only while webhook mode is on.
+	Push *pushState `json:"push,omitempty"`
 }
 
 type sweep struct {
@@ -210,16 +213,34 @@ func (x XList) Fetch(ctx context.Context, req *quivrplugin.FetchRequest) (*quivr
 	}
 	scope := Scope{CorpusID: req.Connector.CorpusID, Namespace: req.Connector.SourceNamespace}
 	switch {
+	case cfg.Webhook.Enabled && cp.Push == nil:
+		cp.Push = &pushState{}
+	case !cfg.Webhook.Enabled && cp.Push != nil:
+		// Webhook mode was turned off: report it once and forget the setup.
+		// The rules and the webhook stay at X until an operator removes them.
+		cp.Push = nil
+		page.Push = quivrplugin.PushIsPending("webhook_disabled")
+	}
+	setupDue := cp.Push != nil && cp.Push.due(now, cfg.Webhook.resyncEvery())
+	switch {
 	case cp.Sweep != nil:
 		err = c.sweep(ctx, cfg, &cp, now, scope, page)
+		page.More = page.More || cp.Sweep == nil && setupDue
 	case cp.recheckDue(now, cfg.interval()):
 		if cp.Recheck == nil {
 			cp.Recheck = &recheck{Started: now}
 		}
 		err = c.recheck(ctx, &cp, now, page)
+		page.More = page.More || cp.Recheck == nil && setupDue
+	case setupDue:
+		c.stepSetup(ctx, cp.Push, cfg.Webhook, req.Connector.ID, req.Connector.WebhookURL, cfg.ListID, now)
+		page.More = cp.Push.Step != ""
 	}
 	if err != nil {
 		return nil, err
+	}
+	if cp.Push != nil {
+		page.Push = cp.Push.status(cfg.Webhook)
 	}
 	page.Checkpoint = cp
 	page.Diagnostics = diagnostics(cfg, cp)
@@ -242,6 +263,7 @@ func diagnostics(cfg config, cp checkpoint) map[string]any {
 	if cp.LastRecheck != nil {
 		d["last_recheck_at"] = cp.LastRecheck.UTC().Format(time.RFC3339)
 	}
+	pushDiagnostics(d, cp.Push)
 	return d
 }
 
@@ -293,6 +315,10 @@ func (c client) sweep(ctx context.Context, cfg config, cp *checkpoint, now time.
 	}
 	done := false
 	for _, post := range resp.Data {
+		if created, err := time.Parse(time.RFC3339, post.CreatedAt); err == nil && cp.Push.held(created, now) {
+			// The webhook may still deliver it; the next sweep reads it.
+			continue
+		}
 		if cp.Sweep.Top == "" || idAfter(post.ID, cp.Sweep.Top) {
 			cp.Sweep.Top = post.ID
 		}

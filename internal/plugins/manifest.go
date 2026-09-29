@@ -19,13 +19,13 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.4.0"
+const PluginAPIVersion = "0.5.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -36,6 +36,10 @@ var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription":
 // inside a Contribution (a JSON Pointer). A manifest that declares it needs a
 // plugin_api range that admits that version or a later supported one.
 var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.0"}
+
+// PushSince is the Plugin API version that introduced the connector push
+// mode: the core relays webhook deliveries to receive.
+const PushSince = "0.5.0"
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
@@ -90,6 +94,7 @@ const (
 	CodeInvalidExpressionSchema = "invalid_expression_schema"
 	CodeReservedField           = "reserved_field"
 	CodeInvalidCredentialSchema = "invalid_credential_schema"
+	CodeInvalidModes            = "invalid_modes"
 )
 
 // Issue is one actionable validation failure. Path is a JSON Pointer into the
@@ -620,7 +625,30 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 				Message: fmt.Sprintf("%s exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", pointer, since, r.String(), since, minimum.Major, minimum.Minor+1)})
 		}
 	}
+	connector, _ := contributions["connector"].(map[string]any)
+	kinds, _ := connector["kinds"].(map[string]any)
+	for _, name := range sortedKeys(kinds) {
+		kind, _ := kinds[name].(map[string]any)
+		if !declaresMode(kind, "push") {
+			continue
+		}
+		if minimum, admitted := admits(r, PushSince); !admitted {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/connector/kinds/" + pointerToken(name) + "/modes",
+				Message: fmt.Sprintf("kind %q declares the push mode, which exists since Plugin API %s and the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", name, PushSince, r.String(), PushSince, minimum.Major, minimum.Minor+1)})
+		}
+	}
 	return issues
+}
+
+// declaresMode reports whether a decoded connector kind lists mode.
+func declaresMode(kind map[string]any, mode string) bool {
+	modes, _ := kind["modes"].([]any)
+	for _, m := range modes {
+		if m == mode {
+			return true
+		}
+	}
+	return false
 }
 
 // admits reports whether the range admits a supported Plugin API version at
@@ -652,8 +680,8 @@ func pointerPresent(doc any, pointer string) bool {
 }
 
 // connectorKindIssues checks what the schema cannot for each declared
-// connector kind: config and credential schemas that compile, and the push
-// mode, which is reserved for a later Plugin API version.
+// connector kind: config and credential schemas that compile, and pull beside
+// push (the push mode's Plugin API version is checked with the range).
 func connectorKindIssues(connector map[string]any) []Issue {
 	kinds, _ := connector["kinds"].(map[string]any)
 	var issues []Issue
@@ -671,12 +699,9 @@ func connectorKindIssues(connector map[string]any) []Issue {
 				}
 			}
 		}
-		modes, _ := kind["modes"].([]any)
-		for _, mode := range modes {
-			if mode == "push" {
-				issues = append(issues, Issue{Code: CodeReservedField, Path: path + "/modes",
-					Message: fmt.Sprintf("kind %q declares the push mode, which is reserved for a later Plugin API version; declare modes: [pull]", name)})
-			}
+		if declaresMode(kind, "push") && !declaresMode(kind, "pull") {
+			issues = append(issues, Issue{Code: CodeInvalidModes, Path: path + "/modes",
+				Message: fmt.Sprintf("kind %q declares push without pull; declare modes: [pull, push], because polling is the fallback when deliveries stop", name)})
 		}
 	}
 	return issues

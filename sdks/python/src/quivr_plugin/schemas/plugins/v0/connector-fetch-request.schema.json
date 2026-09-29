@@ -64,6 +64,12 @@
           "maxLength": 200,
           "description": "The Source Namespace of the instance's Records, since Plugin API 0.3.1."
         },
+        "webhook_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048,
+          "description": "Since Plugin API 0.5, for a kind that declares the push mode on a deployment with a public URL: the public address where the source delivers to this instance. The core relays each delivery to receive, so a plugin registers this address with the source and never needs to be reachable itself."
+        },
         "config": {
           "type": "object",
           "description": "The Connector Instance configuration, already valid against the kind's config_schema."

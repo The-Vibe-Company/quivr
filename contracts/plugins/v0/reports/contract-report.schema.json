@@ -157,7 +157,8 @@
             "resume",
             "check_credential",
             "credentials",
-            "attachments"
+            "attachments",
+            "receive"
           ]
         },
         "title": {

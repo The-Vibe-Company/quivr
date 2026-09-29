@@ -54,6 +54,18 @@ without changes. A kind that declares a credential schema needs a credential.
 The Deposited Credential is decrypted in the worker for the run and sent only
 in request bodies. It is never logged, and it is never shown by the API.
 
+## Push deliveries
+
+A kind with `modes: [pull, push]` also receives what the source sends. Set
+`public_url` in `QUIVR_CONFIG` (for example `https://quivr.example.com`) and pin
+the plugin on the `api` processes too. Each instance then has a public route,
+`<public_url>/v0/connector-webhooks/<connector_id>` (its `webhook_url`), served
+without an API key. The API relays each request to the plugin, which verifies
+it with the credential. It ingests the items before answering the source, and
+answers 503 with `Retry-After` when the plugin is down. Polling stays on as the
+fallback, relaxed while the plugin reports push `active`; `health.push` shows
+the push side. X lists use it: [webhook mode](../connectors/x-webhooks.md).
+
 ## Health
 
 | What happens | `health.last_error.code` | Effect |

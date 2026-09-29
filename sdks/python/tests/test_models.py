@@ -32,6 +32,8 @@ MODELS = {
     "connector-describe-attachment-response.schema.json": models.ConnectorDescribeAttachmentResponse,
     "connector-upload-attachment-request.schema.json": models.ConnectorUploadAttachmentRequest,
     "connector-upload-attachment-response.schema.json": models.ConnectorUploadAttachmentResponse,
+    "connector-receive-request.schema.json": models.ConnectorReceiveRequest,
+    "connector-receive-response.schema.json": models.ConnectorReceiveResponse,
 }
 
 

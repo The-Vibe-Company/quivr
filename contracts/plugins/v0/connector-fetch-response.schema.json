@@ -44,6 +44,9 @@
     "not_due": {
       "type": "boolean",
       "description": "true: the source asked not to be polled yet (for example an RSS ttl). The run is skipped: no items, more false and the request's checkpoint unchanged."
+    },
+    "push": {
+      "$ref": "#/$defs/PushStatus"
     }
   },
   "$defs": {
@@ -156,6 +159,43 @@
         "sha256": [
           "size_bytes"
         ]
+      }
+    },
+    "PushStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "description": "Since Plugin API 0.5, for a push kind: the plugin's view of the push channel it sets up at the source (a registered webhook and its subscriptions). active: deliveries are expected. pending: not set up yet; code may say why. failed: the source refused or broke the setup, and polling carries the collection alone; error_class access shows as the access_error Connector Health state. The core keeps the latest report.",
+      "properties": {
+        "state": {
+          "enum": [
+            "active",
+            "pending",
+            "failed"
+          ]
+        },
+        "error_class": {
+          "enum": [
+            "access",
+            "transient",
+            "source"
+          ],
+          "description": "Required when state is failed, absent otherwise."
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 64,
+          "description": "Required when state is failed; an optional reason when pending; absent when active."
+        },
+        "poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Only with state active: while deliveries arrive, the core runs pull at most this often (the greater of this and the instance's interval), as a safety net. It returns to the instance's interval as soon as push degrades."
+        }
       }
     }
   }

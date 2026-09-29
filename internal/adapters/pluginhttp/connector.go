@@ -108,6 +108,7 @@ type connectorRef struct {
 	Kind            string          `json:"kind"`
 	CorpusID        string          `json:"corpus_id,omitempty"`
 	SourceNamespace string          `json:"source_namespace,omitempty"`
+	WebhookURL      string          `json:"webhook_url,omitempty"`
 	Config          json.RawMessage `json:"config"`
 }
 
@@ -198,6 +199,9 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 	if plugins.SendsInstanceScope(served) {
 		scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
 	}
+	if c.Pushes() && plugins.SendsWebhookURL(served) {
+		scoped.WebhookURL = r.WebhookURL
+	}
 	request, err := json.Marshal(fetchRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
 		Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint,
 		Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
@@ -222,6 +226,9 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		return connectors.Page{}, connectors.ErrNotDue
 	}
 	out := connectors.Page{Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
+	if p := page.Push; p != nil && c.Pushes() {
+		out.Push = &connectors.PushStatus{State: p.State, Class: connectors.ErrorClass(p.ErrorClass), Code: p.Code, PollInterval: time.Duration(p.PollIntervalSeconds) * time.Second}
+	}
 	for _, item := range page.Items {
 		mapped, err := mapItem(item)
 		if err != nil {

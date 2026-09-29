@@ -40,6 +40,8 @@ func TestModelsCarryEveryContractField(t *testing.T) {
 		"connector-upload-attachment-request.schema.json":    func() any { return &AttachmentRequest{} },
 		"connector-describe-attachment-response.schema.json": func() any { return &describeJSON{} },
 		"connector-upload-attachment-response.schema.json":   func() any { return &uploadJSON{} },
+		"connector-receive-request.schema.json":              func() any { return &ReceiveRequest{} },
+		"connector-receive-response.schema.json":             func() any { return &deliveryJSON{} },
 	}
 	checked := map[string]int{}
 	for _, c := range index.Cases {

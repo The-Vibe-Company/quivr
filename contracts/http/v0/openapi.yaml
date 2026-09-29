@@ -1339,6 +1339,63 @@ paths:
           minimum: 1
           maximum: 100
           default: 100
+  /v0/connector-webhooks/{connector_id}:
+    get:
+      operationId: relayConnectorChallenge
+      description: Public webhook route of one Connector Instance whose kind declares the push mode; the address
+        is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge)
+        with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the
+        plugin like a delivery.
+      security: []
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        2XX:
+          description: The connector plugin accepted the delivery; its items were ingested before this answer.
+            The body and content type are the plugin's answer to the source (for example a challenge response).
+        4XX:
+          description: The connector plugin refused the delivery (for example a bad signature), with its
+            own body; nothing changed. 404 names no enabled instance of a kind that declares push; 413 a
+            body over 1 MiB.
+        '500':
+          description: The delivery cannot be processed (the plugin reported an access or source error),
+            shown in health.push.
+        '503':
+          description: Temporarily unavailable (the plugin is unreachable or ingestion is down); retry after
+            Retry-After seconds. Polling catches up meanwhile.
+    post:
+      operationId: relayConnectorDelivery
+      description: Relay one delivery the source sends to the Connector Instance. The core passes the raw request
+        (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns
+        the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update
+        health.push.
+      security: []
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        2XX:
+          description: The connector plugin accepted the delivery; its items were ingested before this answer.
+            The body and content type are the plugin's answer to the source (for example a challenge response).
+        4XX:
+          description: The connector plugin refused the delivery (for example a bad signature), with its
+            own body; nothing changed. 404 names no enabled instance of a kind that declares push; 413 a
+            body over 1 MiB.
+        '500':
+          description: The delivery cannot be processed (the plugin reported an access or source error),
+            shown in health.push.
+        '503':
+          description: Temporarily unavailable (the plugin is unreachable or ingestion is down); retry after
+            Retry-After seconds. Polling catches up meanwhile.
   /v0/connectors/{connector_id}:
     get:
       operationId: getConnector
@@ -2393,13 +2450,65 @@ components:
           description: Kind-defined diagnostics from the latest acquisition page, documented on the kind's
             operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a
             secret or source content.
+        push:
+          $ref: '#/components/schemas/ConnectorPush'
       required:
       - state
       - evaluated_at
       description: Last committed Connector Health, evaluated at each acquisition run, credential replacement
         and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring,
         silent, active. access_error means the source refused access (distinct from silent, which means
-        no new item within the threshold). Other failures appear only as last_error.
+        no new item within the threshold), including a push channel refused access while polling carries
+        the collection. Other failures appear only as last_error.
+    ConnectorPush:
+      type: object
+      additionalProperties: false
+      properties:
+        state:
+          type: string
+          enum:
+          - active
+          - pending
+          - degraded
+          description: active, deliveries are expected; pending, the kind has not set its push channel up
+            yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's
+            interval carries the collection.
+        error:
+          $ref: '#/components/schemas/ConnectorPushError'
+        last_delivery_at:
+          type: string
+          format: date-time
+          description: Last delivery the connector plugin accepted.
+        poll_interval_seconds:
+          type: integer
+          minimum: 1
+          description: While push is active, polling runs at most this often, as a safety net.
+      required:
+      - state
+      description: Push delivery health, present once a kind that declares the push mode reports its push
+        channel.
+    ConnectorPushError:
+      type: object
+      additionalProperties: false
+      properties:
+        class:
+          type: string
+          enum:
+          - access
+          - transient
+          - source
+        code:
+          type: string
+          minLength: 1
+          description: For example webhook_invalid (the source invalidated the webhook), plugin_unavailable
+            (a delivery found the plugin down) or missed_deliveries (polling found items no delivery brought).
+        at:
+          type: string
+          format: date-time
+      required:
+      - class
+      - code
+      - at
     Connector:
       type: object
       additionalProperties: false
@@ -2451,6 +2560,11 @@ components:
           $ref: '#/components/schemas/CredentialMetadata'
         health:
           $ref: '#/components/schemas/ConnectorHealth'
+        webhook_url:
+          type: string
+          format: uri
+          description: Public address of the instance's webhook route, present when its kind declares the
+            push mode and the deployment sets public_url. The kind's plugin registers it with the source.
       required:
       - connector_id
       - corpus_id

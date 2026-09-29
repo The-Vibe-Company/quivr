@@ -399,7 +399,7 @@
           "default": [
             "pull"
           ],
-          "description": "pull: the core schedules fetch. push (relayed webhook deliveries) is reserved for a later Plugin API version."
+          "description": "pull: the core schedules fetch. push, since Plugin API 0.5: the core relays the deliveries a source sends to the instance's public webhook route to receive, and returns the plugin's answer to the source. A push kind also declares pull: polling stays the fallback."
         }
       }
     }

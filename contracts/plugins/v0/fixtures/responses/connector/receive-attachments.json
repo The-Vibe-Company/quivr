@@ -1,0 +1,32 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200
+  },
+  "items": [
+    {
+      "record_key": "alert-8",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "Map attached."
+            }
+          }
+        ]
+      },
+      "attachments": [
+        {
+          "key": "map",
+          "role": "attachment",
+          "media_type": "image/png",
+          "ref": "map-8"
+        }
+      ]
+    }
+  ]
+}

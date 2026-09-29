@@ -64,6 +64,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/connectors/{connector_id}/disable`](#post-v0connectorsconnector_iddisable) | `disableConnector` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/credential`](#put-v0connectorsconnector_idcredential) | `replaceConnectorCredential` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/schedule`](#put-v0connectorsconnector_idschedule) | `changeConnectorSchedule` | `connectors:write` |
+| [`GET /v0/connector-webhooks/{connector_id}`](#get-v0connector-webhooksconnector_id) | `relayConnectorChallenge` |  |
+| [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 
@@ -946,6 +948,50 @@ Set the polling interval of an enabled instance. Setting the current value commi
 | --- | --- | --- |
 | `200` | `application/json` [`Connector`](#connector) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+### Connector webhooks
+
+#### `GET /v0/connector-webhooks/{connector_id}`
+
+Operation `relayConnectorChallenge`. No authentication.
+
+Public webhook route of one Connector Instance whose kind declares the push mode; the address is its webhook_url. There is no API key; the connector plugin verifies the request (a signature, a challenge) with the Deposited Credential. A GET is typically a source's verification challenge, relayed to the plugin like a delivery.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `2XX` |  | The connector plugin accepted the delivery; its items were ingested before this answer. The body and content type are the plugin's answer to the source (for example a challenge response). |
+| `4XX` |  | The connector plugin refused the delivery (for example a bad signature), with its own body; nothing changed. 404 names no enabled instance of a kind that declares push; 413 a body over 1 MiB. |
+| `500` |  | The delivery cannot be processed (the plugin reported an access or source error), shown in health.push. |
+| `503` |  | Temporarily unavailable (the plugin is unreachable or ingestion is down); retry after Retry-After seconds. Polling catches up meanwhile. |
+
+#### `POST /v0/connector-webhooks/{connector_id}`
+
+Operation `relayConnectorDelivery`. No authentication.
+
+Relay one delivery the source sends to the Connector Instance. The core passes the raw request (a body of at most 1 MiB, lowercase headers) to the connector plugin, which verifies it and returns the items it carries. Items converge with those of pull runs on the same Receipts. Deliveries update health.push.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `2XX` |  | The connector plugin accepted the delivery; its items were ingested before this answer. The body and content type are the plugin's answer to the source (for example a challenge response). |
+| `4XX` |  | The connector plugin refused the delivery (for example a bad signature), with its own body; nothing changed. 404 names no enabled instance of a kind that declares push; 413 a body over 1 MiB. |
+| `500` |  | The delivery cannot be processed (the plugin reported an access or source error), shown in health.push. |
+| `503` |  | Temporarily unavailable (the plugin is unreachable or ingestion is down); retry after Retry-After seconds. Polling catches up meanwhile. |
 
 ### Connector kinds
 
@@ -3279,7 +3325,7 @@ description: Per-UTC-day source read counters, present only for kinds that repor
 
 ### `ConnectorHealth`
 
-Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3290,6 +3336,7 @@ Last committed Connector Health, evaluated at each acquisition run, credential r
 | `last_error` | [`ConnectorError`](#connectorerror) |  |  |
 | `usage` | [`ConnectorUsage`](#connectorusage) |  |  |
 | `diagnostics` | object |  | Kind-defined diagnostics from the latest acquisition page, documented on the kind's operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a secret or source content. |
+| `push` | [`ConnectorPush`](#connectorpush) |  |  |
 
 <details>
 <summary>Full schema</summary>
@@ -3322,10 +3369,90 @@ properties:
   diagnostics:
     type: object
     description: Kind-defined diagnostics from the latest acquisition page, documented on the kind's operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a secret or source content.
+  push:
+    $ref: '#/components/schemas/ConnectorPush'
 required:
   - state
   - evaluated_at
-description: Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+description: Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
+```
+
+</details>
+
+### `ConnectorPush`
+
+Push delivery health, present once a kind that declares the push mode reports its push channel.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `state` | string | yes | active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection. One of `active`, `pending`, `degraded`. |
+| `error` | [`ConnectorPushError`](#connectorpusherror) |  |  |
+| `last_delivery_at` | string (date-time) |  | Last delivery the connector plugin accepted. |
+| `poll_interval_seconds` | integer |  | While push is active, polling runs at most this often, as a safety net. Minimum `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  state:
+    type: string
+    enum:
+      - active
+      - pending
+      - degraded
+    description: active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection.
+  error:
+    $ref: '#/components/schemas/ConnectorPushError'
+  last_delivery_at:
+    type: string
+    format: date-time
+    description: Last delivery the connector plugin accepted.
+  poll_interval_seconds:
+    type: integer
+    minimum: 1
+    description: While push is active, polling runs at most this often, as a safety net.
+required:
+  - state
+description: Push delivery health, present once a kind that declares the push mode reports its push channel.
+```
+
+</details>
+
+### `ConnectorPushError`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `class` | string | yes | One of `access`, `transient`, `source`. |
+| `code` | string | yes | For example webhook_invalid (the source invalidated the webhook), plugin_unavailable (a delivery found the plugin down) or missed_deliveries (polling found items no delivery brought). Minimum length `1`. |
+| `at` | string (date-time) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  class:
+    type: string
+    enum:
+      - access
+      - transient
+      - source
+  code:
+    type: string
+    minLength: 1
+    description: For example webhook_invalid (the source invalidated the webhook), plugin_unavailable (a delivery found the plugin down) or missed_deliveries (polling found items no delivery brought).
+  at:
+    type: string
+    format: date-time
+required:
+  - class
+  - code
+  - at
 ```
 
 </details>
@@ -3349,6 +3476,7 @@ description: Last committed Connector Health, evaluated at each acquisition run,
 | `disabled_at` | string (date-time) |  |  |
 | `credential` | [`CredentialMetadata`](#credentialmetadata) |  |  |
 | `health` | [`ConnectorHealth`](#connectorhealth) | yes |  |
+| `webhook_url` | string (uri) |  | Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source. |
 
 Example `connector`:
 
@@ -3493,6 +3621,10 @@ properties:
     $ref: '#/components/schemas/CredentialMetadata'
   health:
     $ref: '#/components/schemas/ConnectorHealth'
+  webhook_url:
+    type: string
+    format: uri
+    description: Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source.
 required:
   - connector_id
   - corpus_id

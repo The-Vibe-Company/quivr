@@ -111,6 +111,15 @@ func main() {
 - **Errors** tell the core what to show operators: `AccessError` for a
   refused credential (health `access_error`), `TransientError` for an outage or
   a rate limit (retried), `SourceError` for data you cannot use.
+- **Push** (Plugin API 0.5): declare `modes: [pull, push]` and implement
+  `Receiver`. The core relays each request the source sends to the instance's
+  public `WebhookURL` (in fetch requests; register it with the source).
+  `Receive` verifies it with the credential over `req.Request.Body()`, then
+  answers `Accept(items...)`, `Respond(200, type, body)` for a challenge, or
+  `Refuse(401, reason)`, which changes nothing. Map a delivered item exactly as
+  `Fetch` maps it, so both paths converge on one Receipt. `Page.Push`
+  (`PushIsActive`, `PushIsPending`, `PushHasFailed`) reports your setup at the
+  source; an active one may relax polling.
 
 ## Test it
 
@@ -126,7 +135,8 @@ if err := plugintest.Verify(plugin, f); err != nil { // pages, errors, credentia
 
 A fixture ([schema](../../contracts/plugins/v0/connector-fixture.schema.json))
 names the kind, config, credential and starting checkpoint, and what to
-expect: the Record Keys of each page, an error class, the credential check.
+expect: the Record Keys of each page, an error class, the credential check,
+and for a push kind the `receive` cases with their expected verdicts.
 Use test credentials of 8 characters or more, so the leak check can see them.
 
 Then certify the plugin with the Contract Runner:

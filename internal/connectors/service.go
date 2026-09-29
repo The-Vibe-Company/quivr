@@ -69,6 +69,8 @@ type Health struct {
 	Usage *Usage
 	// Diagnostics is the kind-defined object of the latest committed page.
 	Diagnostics json.RawMessage
+	// Push is nil until a push kind reports its push channel.
+	Push *PushHealth
 }
 
 // Usage counts source resources read per UTC day (current and previous).
@@ -112,6 +114,19 @@ type Service struct {
 	Registry    *Registry
 	Sealer      Sealer
 	MinInterval time.Duration
+	// PublicURL is the deployment's public base URL, from which push
+	// instances get their webhook address; "" gives them none.
+	PublicURL string
+}
+
+// WebhookURL is the public webhook address of an instance whose kind
+// declares the push mode, or "".
+func (s Service) WebhookURL(in Instance) string {
+	c, ok := s.Registry.Lookup(in.Kind)
+	if r, pushes := c.(Receiver); !ok || !pushes || !r.Pushes() {
+		return ""
+	}
+	return WebhookURL(s.PublicURL, in.ID)
 }
 
 // CreateInput is a creation command. Secret is the raw kind-specific secret.

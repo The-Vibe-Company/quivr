@@ -32,9 +32,12 @@ func (r *run) connector(ctx context.Context, own []ownFixture) {
 	for _, cr := range runs {
 		r.invokeConnector(ctx, cr)
 		r.checkConnectorCredential(ctx, cr)
+		r.receiveConnector(ctx, cr)
 	}
 	if len(runs) > 0 {
-		r.invalidConnectorRequests(ctx, runs[0].run)
+		r.receiveCoverage(runs)
+		receive := r.invalidConnectorRequests(ctx, runs[0].run)
+		r.invalidReceiveRequests(ctx, runs, receive)
 		r.credentialsCheck(runs)
 	}
 }
@@ -328,8 +331,10 @@ func (r *run) checkConnectorCredential(ctx context.Context, cr connectorRun) {
 
 // invalidConnectorRequests sends requests the protocol schemas reject, or for
 // a kind the plugin does not declare, to both routes. Each must be refused
-// with the error envelope and retryable false.
-func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.ConnectorRun) {
+// with the error envelope and retryable false. It returns the normative
+// invalid receive requests, which only a push plugin is sent.
+func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.ConnectorRun) map[string][]byte {
+	receive := map[string][]byte{}
 	valid := run.FetchRequest(run.Checkpoint, 0, 0, "invalid")
 	credential := run.CheckCredentialRequest("invalid")
 	unknownKind := func(m map[string]any) {
@@ -357,6 +362,11 @@ func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.Connect
 		}
 		schema, route := "connector-fetch-request.schema.json", routeFetch
 		switch {
+		case strings.HasPrefix(name, "requests/connector/receive"):
+			if len(plugins.ValidateDocument("connector-receive-request.schema.json", raw)) > 0 {
+				receive[name] = raw
+			}
+			continue
 		case strings.HasPrefix(name, "requests/connector/check-credential"):
 			schema, route = "connector-check-credential-request.schema.json", routeCheckCredential
 		case strings.HasPrefix(name, "requests/connector/describe-attachment"):
@@ -397,6 +407,7 @@ func (r *run) invalidConnectorRequests(ctx context.Context, run *devhost.Connect
 		check.Issues = judgeRefusal(result, problem, c.reason)
 		r.add(check, started)
 	}
+	return receive
 }
 
 // credentialsCheck looks for every credential string of the fixtures in every

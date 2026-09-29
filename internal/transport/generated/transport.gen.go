@@ -59,25 +59,25 @@ func (e BlobContentKind) Valid() bool {
 
 // Defines values for ConnectorHealthState.
 const (
-	AccessError        ConnectorHealthState = "access_error"
-	Active             ConnectorHealthState = "active"
-	CredentialExpiring ConnectorHealthState = "credential_expiring"
-	Disabled           ConnectorHealthState = "disabled"
-	Silent             ConnectorHealthState = "silent"
+	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
+	ConnectorHealthStateActive             ConnectorHealthState = "active"
+	ConnectorHealthStateCredentialExpiring ConnectorHealthState = "credential_expiring"
+	ConnectorHealthStateDisabled           ConnectorHealthState = "disabled"
+	ConnectorHealthStateSilent             ConnectorHealthState = "silent"
 )
 
 // Valid indicates whether the value is a known member of the ConnectorHealthState enum.
 func (e ConnectorHealthState) Valid() bool {
 	switch e {
-	case AccessError:
+	case ConnectorHealthStateAccessError:
 		return true
-	case Active:
+	case ConnectorHealthStateActive:
 		return true
-	case CredentialExpiring:
+	case ConnectorHealthStateCredentialExpiring:
 		return true
-	case Disabled:
+	case ConnectorHealthStateDisabled:
 		return true
-	case Silent:
+	case ConnectorHealthStateSilent:
 		return true
 	default:
 		return false
@@ -117,6 +117,48 @@ func (e ConnectorKindDescriptionCredential) Valid() bool {
 	case Optional:
 		return true
 	case Required:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorPushState.
+const (
+	ConnectorPushStateActive   ConnectorPushState = "active"
+	ConnectorPushStateDegraded ConnectorPushState = "degraded"
+	ConnectorPushStatePending  ConnectorPushState = "pending"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushState enum.
+func (e ConnectorPushState) Valid() bool {
+	switch e {
+	case ConnectorPushStateActive:
+		return true
+	case ConnectorPushStateDegraded:
+		return true
+	case ConnectorPushStatePending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorPushErrorClass.
+const (
+	Access    ConnectorPushErrorClass = "access"
+	Source    ConnectorPushErrorClass = "source"
+	Transient ConnectorPushErrorClass = "transient"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushErrorClass enum.
+func (e ConnectorPushErrorClass) Valid() bool {
+	switch e {
+	case Access:
+		return true
+	case Source:
+		return true
+	case Transient:
 		return true
 	default:
 		return false
@@ -680,7 +722,7 @@ type Connector struct {
 	DisabledAt *time.Time          `json:"disabled_at,omitempty"`
 	Enabled    bool                `json:"enabled"`
 
-	// Health Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+	// Health Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
 	Health       ConnectorHealth `json:"health"`
 	HealthPolicy struct {
 		CredentialWarningSeconds int `json:"credential_warning_seconds"`
@@ -693,6 +735,9 @@ type Connector struct {
 		IntervalSeconds int `json:"interval_seconds"`
 	} `json:"schedule"`
 	SourceNamespace string `json:"source_namespace"`
+
+	// WebhookUrl Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source.
+	WebhookUrl *string `json:"webhook_url,omitempty"`
 }
 
 // ConnectorCreate defines model for ConnectorCreate.
@@ -716,7 +761,7 @@ type ConnectorError struct {
 	Code string    `json:"code"`
 }
 
-// ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold). Other failures appear only as last_error.
+// ConnectorHealth Last committed Connector Health, evaluated at each acquisition run, credential replacement and disable; evaluated_at shows its age. Precedence disabled, access_error, credential_expiring, silent, active. access_error means the source refused access (distinct from silent, which means no new item within the threshold), including a push channel refused access while polling carries the collection. Other failures appear only as last_error.
 type ConnectorHealth struct {
 	// Diagnostics Kind-defined diagnostics from the latest acquisition page, documented on the kind's operator guide page (for x_list, the deletion recheck coverage). Informational; never holds a secret or source content.
 	Diagnostics   *map[string]interface{} `json:"diagnostics,omitempty"`
@@ -724,7 +769,10 @@ type ConnectorHealth struct {
 	LastError     *ConnectorError         `json:"last_error,omitempty"`
 	LastItemAt    *time.Time              `json:"last_item_at,omitempty"`
 	LastSuccessAt *time.Time              `json:"last_success_at,omitempty"`
-	State         ConnectorHealthState    `json:"state"`
+
+	// Push Push delivery health, present once a kind that declares the push mode reports its push channel.
+	Push  *ConnectorPush       `json:"push,omitempty"`
+	State ConnectorHealthState `json:"state"`
 
 	// Usage Per-UTC-day source read counters, present only for kinds that report reads.
 	Usage *ConnectorUsage `json:"usage,omitempty"`
@@ -788,6 +836,35 @@ type ConnectorPage struct {
 	Items          []Connector `json:"items"`
 	NextPageCursor *string     `json:"next_page_cursor,omitempty"`
 }
+
+// ConnectorPush Push delivery health, present once a kind that declares the push mode reports its push channel.
+type ConnectorPush struct {
+	Error *ConnectorPushError `json:"error,omitempty"`
+
+	// LastDeliveryAt Last delivery the connector plugin accepted.
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+
+	// PollIntervalSeconds While push is active, polling runs at most this often, as a safety net.
+	PollIntervalSeconds *int `json:"poll_interval_seconds,omitempty"`
+
+	// State active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection.
+	State ConnectorPushState `json:"state"`
+}
+
+// ConnectorPushState active, deliveries are expected; pending, the kind has not set its push channel up yet; degraded, the setup failed or deliveries fail or miss items, and polling at the instance's interval carries the collection.
+type ConnectorPushState string
+
+// ConnectorPushError defines model for ConnectorPushError.
+type ConnectorPushError struct {
+	At    time.Time               `json:"at"`
+	Class ConnectorPushErrorClass `json:"class"`
+
+	// Code For example webhook_invalid (the source invalidated the webhook), plugin_unavailable (a delivery found the plugin down) or missed_deliveries (polling found items no delivery brought).
+	Code string `json:"code"`
+}
+
+// ConnectorPushErrorClass defines model for ConnectorPushError.Class.
+type ConnectorPushErrorClass string
 
 // ConnectorSchedule defines model for ConnectorSchedule.
 type ConnectorSchedule struct {
@@ -1800,6 +1877,12 @@ type ServerInterface interface {
 	// (GET /v0/connector-kinds)
 	ListConnectorKinds(w http.ResponseWriter, r *http.Request)
 
+	// (GET /v0/connector-webhooks/{connector_id})
+	RelayConnectorChallenge(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (POST /v0/connector-webhooks/{connector_id})
+	RelayConnectorDelivery(w http.ResponseWriter, r *http.Request, connectorId string)
+
 	// (GET /v0/connectors)
 	ListConnectors(w http.ResponseWriter, r *http.Request, params ListConnectorsParams)
 
@@ -2093,6 +2176,58 @@ func (siw *ServerInterfaceWrapper) ListConnectorKinds(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListConnectorKinds(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RelayConnectorChallenge operation middleware
+func (siw *ServerInterfaceWrapper) RelayConnectorChallenge(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RelayConnectorChallenge(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RelayConnectorDelivery operation middleware
+func (siw *ServerInterfaceWrapper) RelayConnectorDelivery(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RelayConnectorDelivery(w, r, connectorId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3453,6 +3588,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}/attempts", wrapper.ListDeliveryAttempts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors", wrapper.ListConnectors)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors", wrapper.CreateConnector)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorChallenge)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorDelivery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}", wrapper.GetConnector)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/disable", wrapper.DisableConnector)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/credential", wrapper.ReplaceConnectorCredential)
@@ -3646,6 +3783,90 @@ func (response ListConnectorKindsdefaultJSONResponse) VisitListConnectorKindsRes
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type RelayConnectorChallengeRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+}
+
+type RelayConnectorChallengeResponseObject interface {
+	VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error
+}
+
+type RelayConnectorChallenge2XXResponse struct {
+	StatusCode int
+}
+
+func (response RelayConnectorChallenge2XXResponse) VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(response.StatusCode)
+	return nil
+}
+
+type RelayConnectorChallenge4XXResponse struct {
+	StatusCode int
+}
+
+func (response RelayConnectorChallenge4XXResponse) VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(response.StatusCode)
+	return nil
+}
+
+type RelayConnectorChallenge500Response struct {
+}
+
+func (response RelayConnectorChallenge500Response) VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(500)
+	return nil
+}
+
+type RelayConnectorChallenge503Response struct {
+}
+
+func (response RelayConnectorChallenge503Response) VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error {
+	w.WriteHeader(503)
+	return nil
+}
+
+type RelayConnectorDeliveryRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+}
+
+type RelayConnectorDeliveryResponseObject interface {
+	VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error
+}
+
+type RelayConnectorDelivery2XXResponse struct {
+	StatusCode int
+}
+
+func (response RelayConnectorDelivery2XXResponse) VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(response.StatusCode)
+	return nil
+}
+
+type RelayConnectorDelivery4XXResponse struct {
+	StatusCode int
+}
+
+func (response RelayConnectorDelivery4XXResponse) VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(response.StatusCode)
+	return nil
+}
+
+type RelayConnectorDelivery500Response struct {
+}
+
+func (response RelayConnectorDelivery500Response) VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(500)
+	return nil
+}
+
+type RelayConnectorDelivery503Response struct {
+}
+
+func (response RelayConnectorDelivery503Response) VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(503)
+	return nil
 }
 
 type ListConnectorsRequestObject struct {
@@ -5328,6 +5549,12 @@ type StrictServerInterface interface {
 	// (GET /v0/connector-kinds)
 	ListConnectorKinds(ctx context.Context, request ListConnectorKindsRequestObject) (ListConnectorKindsResponseObject, error)
 
+	// (GET /v0/connector-webhooks/{connector_id})
+	RelayConnectorChallenge(ctx context.Context, request RelayConnectorChallengeRequestObject) (RelayConnectorChallengeResponseObject, error)
+
+	// (POST /v0/connector-webhooks/{connector_id})
+	RelayConnectorDelivery(ctx context.Context, request RelayConnectorDeliveryRequestObject) (RelayConnectorDeliveryResponseObject, error)
+
 	// (GET /v0/connectors)
 	ListConnectors(ctx context.Context, request ListConnectorsRequestObject) (ListConnectorsResponseObject, error)
 
@@ -5589,6 +5816,58 @@ func (sh *strictHandler) ListConnectorKinds(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListConnectorKindsResponseObject); ok {
 		if err := validResponse.VisitListConnectorKindsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RelayConnectorChallenge operation middleware
+func (sh *strictHandler) RelayConnectorChallenge(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request RelayConnectorChallengeRequestObject
+
+	request.ConnectorId = connectorId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RelayConnectorChallenge(ctx, request.(RelayConnectorChallengeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RelayConnectorChallenge")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RelayConnectorChallengeResponseObject); ok {
+		if err := validResponse.VisitRelayConnectorChallengeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RelayConnectorDelivery operation middleware
+func (sh *strictHandler) RelayConnectorDelivery(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request RelayConnectorDeliveryRequestObject
+
+	request.ConnectorId = connectorId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RelayConnectorDelivery(ctx, request.(RelayConnectorDeliveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RelayConnectorDelivery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RelayConnectorDeliveryResponseObject); ok {
+		if err := validResponse.VisitRelayConnectorDeliveryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -1,4 +1,4 @@
-# The push mode (relayed webhook deliveries) is reserved for a later Plugin API version.
+# The push mode (relayed webhook deliveries) needs Plugin API 0.5.
 id: example-feeds
 version: 1.0.0
 compatibility:

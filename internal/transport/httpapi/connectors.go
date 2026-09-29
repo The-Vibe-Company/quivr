@@ -42,7 +42,7 @@ func connectorFailure(w http.ResponseWriter, err error) {
 	}
 }
 
-func connectorToTransport(in connectors.Instance) transport.Connector {
+func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
 	out := transport.Connector{ConnectorId: in.ID, CorpusId: in.CorpusID, SourceNamespace: in.Namespace, Kind: transport.ConnectorKind(in.Kind), Enabled: in.Enabled, CreatedAt: in.CreatedAt.UTC(), Config: map[string]any{}}
 	_ = json.Unmarshal(in.Config, &out.Config)
 	out.Schedule.IntervalSeconds = int(in.Interval.Seconds())
@@ -80,6 +80,24 @@ func connectorToTransport(in connectors.Instance) transport.Connector {
 		if json.Unmarshal(h.Diagnostics, &d) == nil && d != nil {
 			out.Health.Diagnostics = &d
 		}
+	}
+	if p := h.Push; p != nil {
+		push := &transport.ConnectorPush{State: transport.ConnectorPushState(p.State())}
+		if e := p.Error(); e != nil {
+			push.Error = &transport.ConnectorPushError{Class: transport.ConnectorPushErrorClass(e.Class), Code: e.Code, At: e.At.UTC()}
+		}
+		if p.LastDeliveryAt != nil {
+			v := p.LastDeliveryAt.UTC()
+			push.LastDeliveryAt = &v
+		}
+		if p.Healthy() && p.PollInterval > 0 {
+			v := int(p.PollInterval / time.Second)
+			push.PollIntervalSeconds = &v
+		}
+		out.Health.Push = push
+	}
+	if u := a.Connectors.WebhookURL(in); u != "" {
+		out.WebhookUrl = &u
 	}
 	return out
 }
@@ -175,7 +193,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			connectorFailure(w, err)
 			return true
 		}
-		send(w, 201, connectorToTransport(inst))
+		send(w, 201, a.connectorToTransport(inst))
 	case len(path) == 1:
 		a.listConnectors(w, r, scope)
 	case len(path) == 2:
@@ -184,7 +202,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			connectorFailure(w, err)
 			return true
 		}
-		send(w, 200, connectorToTransport(inst))
+		send(w, 200, a.connectorToTransport(inst))
 	case path[2] == "disable":
 		var body transport.ActionRequest
 		if !decodeInto(w, r, a.actionSchema, &body) {
@@ -195,7 +213,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			connectorFailure(w, err)
 			return true
 		}
-		send(w, 200, connectorToTransport(inst))
+		send(w, 200, a.connectorToTransport(inst))
 	case path[2] == "schedule":
 		var body transport.ScheduleChange
 		if !decodeInto(w, r, a.scheduleSchema, &body) {
@@ -206,7 +224,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			connectorFailure(w, err)
 			return true
 		}
-		send(w, 200, connectorToTransport(inst))
+		send(w, 200, a.connectorToTransport(inst))
 	default:
 		var body transport.CredentialReplace
 		if !decodeInto(w, r, a.credentialSchema, &body) {
@@ -217,7 +235,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			connectorFailure(w, err)
 			return true
 		}
-		send(w, 200, connectorToTransport(inst))
+		send(w, 200, a.connectorToTransport(inst))
 	}
 	return true
 }
@@ -314,7 +332,7 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 			page.NextPageCursor = &next
 			break
 		}
-		page.Items = append(page.Items, connectorToTransport(in))
+		page.Items = append(page.Items, a.connectorToTransport(in))
 	}
 	send(w, 200, page)
 }

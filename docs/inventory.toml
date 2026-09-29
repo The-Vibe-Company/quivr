@@ -73,6 +73,7 @@ excluded = [
 "docs/connectors/README.md" = { audience = "functional", kind = "guide", summary = "set up and operate scheduled sources of content" }
 "docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide", summary = "collect mail from a Microsoft 365 mailbox" }
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide", summary = "collect articles from RSS and Atom feeds" }
+"docs/connectors/x-webhooks.md" = { audience = "functional", kind = "guide", summary = "receive the posts of an X list in real time through webhooks" }
 "docs/connectors/x.md" = { audience = "functional", kind = "guide", summary = "collect posts from an X list" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
 "docs/described-alerts.md" = { audience = "functional", kind = "guide", summary = "write alerts in plain language, and see what is sent to the model provider" }
@@ -116,11 +117,12 @@ excluded = [
 "docs/connectors/README.md" = 225
 "docs/connectors/microsoft-365.md" = 230
 "docs/connectors/rss.md" = 190
+"docs/connectors/x-webhooks.md" = 95
 "docs/connectors/x.md" = 190
 "docs/described-alerts.md" = 150
 "docs/first-search.md" = 310
 "docs/keyword-alerts.md" = 155
-"docs/plugins/run-a-connector-plugin.md" = 70
+"docs/plugins/run-a-connector-plugin.md" = 84
 "docs/plugins/write-a-normalizer.md" = 360
 "docs/runnable-guides.md" = 85
 "docs/what-quivr-can-do.md" = 60
@@ -128,6 +130,6 @@ excluded = [
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 104
-"sdks/go/README.md" = 153
+"sdks/go/README.md" = 165
 "sdks/python/README.md" = 125
 "tests/acceptance/README.md" = 50

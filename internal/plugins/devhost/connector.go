@@ -3,10 +3,13 @@ package devhost
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
@@ -15,6 +18,8 @@ import (
 const (
 	ConnectorFetchRoute           = "/v0/contributions/connector/fetch"
 	ConnectorCheckCredentialRoute = "/v0/contributions/connector/check_credential"
+	// ConnectorReceiveRoute relays a push delivery (Plugin API 0.5).
+	ConnectorReceiveRoute = "/v0/contributions/connector/receive"
 )
 
 // Connector fixture defaults (contracts/plugins/v0/connector-fixture.schema.json).
@@ -71,9 +76,43 @@ type ConnectorRun struct {
 		Error           *ConnectorExpectedError      `json:"error,omitempty"`
 		CheckCredential *ConnectorExpectedCredential `json:"check_credential,omitempty"`
 	}
+	// Receives are the fixture's push deliveries (Plugin API 0.5).
+	Receives []ConnectorReceiveCase
 
 	configuration json.RawMessage
 	short         string
+	pushes        bool
+}
+
+// ConnectorReceiveCase is one delivery a connector fixture relays to receive.
+type ConnectorReceiveCase struct {
+	Description string `json:"description,omitempty"`
+	Request     struct {
+		Method     string            `json:"method"`
+		Query      string            `json:"query,omitempty"`
+		Headers    map[string]string `json:"headers,omitempty"`
+		Body       *string           `json:"body,omitempty"`
+		BodyBase64 *string           `json:"body_base64,omitempty"`
+	} `json:"request"`
+	Expect *ConnectorExpectedDelivery `json:"expect,omitempty"`
+}
+
+// ConnectorExpectedDelivery is what a receive case expects.
+type ConnectorExpectedDelivery struct {
+	Verdict      string                  `json:"verdict,omitempty"`
+	Status       int                     `json:"status,omitempty"`
+	RecordKeys   []string                `json:"record_keys,omitempty"`
+	BodyContains string                  `json:"body_contains,omitempty"`
+	Error        *ConnectorExpectedError `json:"error,omitempty"`
+}
+
+// RelayedRequest is the request a receive invocation relays: lowercase header
+// names, the exact body in base64.
+type RelayedRequest struct {
+	Method     string              `json:"method"`
+	Query      string              `json:"query"`
+	Headers    map[string][]string `json:"headers"`
+	BodyBase64 string              `json:"body_base64"`
 }
 
 type connectorFixture struct {
@@ -81,12 +120,13 @@ type connectorFixture struct {
 		Kind   string          `json:"kind"`
 		Config json.RawMessage `json:"config"`
 	} `json:"connector"`
-	Credential    json.RawMessage `json:"credential,omitempty"`
-	Configuration json.RawMessage `json:"configuration,omitempty"`
-	Checkpoint    json.RawMessage `json:"checkpoint,omitempty"`
-	Now           string          `json:"now,omitempty"`
-	MaxPages      int             `json:"max_pages,omitempty"`
-	Expect        json.RawMessage `json:"expect,omitempty"`
+	Credential    json.RawMessage        `json:"credential,omitempty"`
+	Configuration json.RawMessage        `json:"configuration,omitempty"`
+	Checkpoint    json.RawMessage        `json:"checkpoint,omitempty"`
+	Now           string                 `json:"now,omitempty"`
+	MaxPages      int                    `json:"max_pages,omitempty"`
+	Expect        json.RawMessage        `json:"expect,omitempty"`
+	Receive       []ConnectorReceiveCase `json:"receive,omitempty"`
 }
 
 type connectorRef struct {
@@ -94,6 +134,7 @@ type connectorRef struct {
 	Kind            string          `json:"kind"`
 	CorpusID        string          `json:"corpus_id,omitempty"`
 	SourceNamespace string          `json:"source_namespace,omitempty"`
+	WebhookURL      string          `json:"webhook_url,omitempty"`
 	Config          json.RawMessage `json:"config"`
 }
 
@@ -162,7 +203,12 @@ func BuildConnectorRun(path string, m *plugins.Manifest) (*ConnectorRun, []plugi
 			return nil, nil, err
 		}
 	}
+	run.Receives, run.pushes = f.Receive, plugins.KindPushes(m, run.Kind)
 	issues := plugins.ValidateConfiguration(m, run.configuration)
+	if len(run.Receives) > 0 && !run.pushes {
+		issues = append(issues, plugins.Issue{Code: plugins.CodeInvalidConfig, Path: "/receive",
+			Message: fmt.Sprintf("kind %q does not declare the push mode; only a push kind's fixture has receive cases", run.Kind)})
+	}
 	issues = append(issues, plugins.ValidateConnectorInstance(m, run.Kind, run.Config, run.Credential)...)
 	if len(issues) > 0 {
 		return nil, issues, nil
@@ -181,10 +227,18 @@ const (
 	DevSourceNamespace = "dev-namespace"
 )
 
+// DevWebhookBase prefixes the webhook_url of a replayed fixture's fetch
+// requests: a push kind's plugin sees an address it cannot reach, as a
+// fixture never involves the real source.
+const DevWebhookBase = "https://quivr.invalid/v0/connector-webhooks/"
+
 func (r *ConnectorRun) scopedRef(kind string) connectorRef {
 	ref := r.ref(kind)
 	if plugins.SendsInstanceScope(r.PluginAPI) {
 		ref.CorpusID, ref.SourceNamespace = DevCorpusID, DevSourceNamespace
+	}
+	if r.pushes && plugins.SendsWebhookURL(r.PluginAPI) {
+		ref.WebhookURL = DevWebhookBase + ref.InstanceID
 	}
 	return ref
 }
@@ -208,6 +262,54 @@ func (r *ConnectorRun) CheckCredentialRequest(suffix string) []byte {
 		Credential: r.Credential, Now: r.Now,
 	})
 	return body
+}
+
+type connectorReceiveRequest struct {
+	connectorCredentialRequest
+	Checkpoint json.RawMessage `json:"checkpoint"`
+	ReadsToday int64           `json:"reads_today"`
+	Request    RelayedRequest  `json:"request"`
+}
+
+// Relayed turns a fixture receive case into the relayed request: header names
+// lowercased, a text body encoded as base64.
+func (c ConnectorReceiveCase) Relayed() RelayedRequest {
+	out := RelayedRequest{Method: c.Request.Method, Query: c.Request.Query, Headers: map[string][]string{}}
+	names := make([]string, 0, len(c.Request.Headers))
+	for name := range c.Request.Headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		lower := strings.ToLower(name)
+		out.Headers[lower] = append(out.Headers[lower], c.Request.Headers[name])
+	}
+	switch {
+	case c.Request.BodyBase64 != nil:
+		out.BodyBase64 = *c.Request.BodyBase64
+	case c.Request.Body != nil:
+		out.BodyBase64 = base64.StdEncoding.EncodeToString([]byte(*c.Request.Body))
+	}
+	return out
+}
+
+// ReceiveRequest builds the receive request of one relayed delivery of the
+// run, with the dev scope and the fixture's checkpoint.
+func (r *ConnectorRun) ReceiveRequest(relayed RelayedRequest, suffix string) []byte {
+	ref := r.ref(r.Kind)
+	ref.CorpusID, ref.SourceNamespace = DevCorpusID, DevSourceNamespace
+	body, _ := json.Marshal(connectorReceiveRequest{connectorCredentialRequest: connectorCredentialRequest{
+		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
+		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: ref,
+		Credential: r.Credential, Now: r.Now,
+	}, Checkpoint: r.Checkpoint, Request: relayed})
+	return body
+}
+
+// InvokeConnectorReceive posts a receive request and applies check to a 200
+// body, such as a closure over plugins.CheckReceiveOutput.
+func InvokeConnectorReceive(ctx context.Context, baseURL string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
+	return invoke(ctx, baseURL, ConnectorReceiveRoute, request, maxResponseBytes, check)
 }
 
 // InvokeConnectorFetch posts a fetch request and applies check to a 200 body,

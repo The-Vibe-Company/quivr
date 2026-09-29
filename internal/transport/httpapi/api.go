@@ -61,6 +61,8 @@ type API struct {
 	credentialSchema *jsonschema.Schema
 	// Commands counts accepted durable commands; the zero value ignores them.
 	Commands telemetry.Commands
+	// Relay serves the public webhook routes of push Connector Instances.
+	Relay *connectors.Relay
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -165,6 +167,11 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		slog.Info("http request", "method", r.Method, "request_id", id, "status", observed.status, "duration_ms", time.Since(start).Milliseconds())
 	}()
+	if isWebhookRoute(r.URL.Path) {
+		// A source authenticates to the connector plugin, not with an API key.
+		a.relayDelivery(w, r)
+		return
+	}
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		failure(w, 401, "invalid_api_key")

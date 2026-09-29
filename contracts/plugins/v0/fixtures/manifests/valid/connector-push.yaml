@@ -1,0 +1,36 @@
+# A source collector with push (Plugin API 0.5): the source also delivers
+# new items to the instance's public webhook route, which the core relays to
+# receive; pull stays the fallback.
+id: example-alerts
+version: 1.0.0
+description: Collects alerts from a service that polls and pushes.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.5.0 <0.6.0"
+contributions:
+  connector:
+    kinds:
+      alerts:
+        description: Alerts of one account, polled and pushed.
+        config_schema:
+          type: object
+          additionalProperties: false
+          required: [account]
+          properties:
+            account: {type: string}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token, signing_secret]
+          properties:
+            token: {type: string, minLength: 8}
+            signing_secret: {type: string, minLength: 8}
+        default_interval_seconds: 300
+        modes: [pull, push]
+    timeout_ms: 5000
+extensions:
+  example-alerts:
+    "1":
+      type: object
+      properties:
+        severity: {type: string}

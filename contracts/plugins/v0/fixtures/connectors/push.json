@@ -1,0 +1,70 @@
+{
+  "description": "A pull run, a signed delivery, a challenge and a delivery with a wrong signature.",
+  "connector": {
+    "kind": "alerts",
+    "config": {
+      "account": "desk"
+    }
+  },
+  "credential": {
+    "token": "test-token-0000",
+    "signing_secret": "test-signing-0000"
+  },
+  "now": "2026-09-29T09:00:00Z",
+  "expect": {
+    "pages": [
+      {
+        "record_keys": [
+          "alert-6"
+        ],
+        "more": false
+      }
+    ]
+  },
+  "receive": [
+    {
+      "description": "A signed delivery.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Example-Signature": "sha256=SSUGTPKUcDA4Cmf/Ca9HYAILhd8zCPfYSyXSqoAk54w="
+        },
+        "body": "{\"alerts\":[{\"id\":\"alert-7\",\"text\":\"Harbour closed by fog.\",\"severity\":\"high\"}]}"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 200,
+        "record_keys": [
+          "alert-7"
+        ]
+      }
+    },
+    {
+      "description": "The source's verification challenge.",
+      "request": {
+        "method": "GET",
+        "query": "challenge=abc123"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 200,
+        "body_contains": "response_token"
+      }
+    },
+    {
+      "description": "A wrong signature is refused.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "X-Example-Signature": "sha256=AAAA"
+        },
+        "body": "{\"alerts\":[{\"id\":\"alert-7\",\"text\":\"Harbour closed by fog.\",\"severity\":\"high\"}]}"
+      },
+      "expect": {
+        "verdict": "refused",
+        "status": 401
+      }
+    }
+  ]
+}

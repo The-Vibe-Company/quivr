@@ -112,10 +112,12 @@ def healthy_port(port):
         return False
 
 
-def start_first_party(stack):
-    """Build each pinned first-party plugin, run it and wait for its health."""
-    stop_first_party(stack)
+def start_first_party(stack, only=None):
+    """Build each pinned first-party plugin (or only the named ones), run it and wait for its health."""
+    stop_first_party(stack, only)
     for row in first_party(stack):
+        if only is not None and row['id'] not in only:
+            continue
         directory, binary = ROOT / 'plugins' / row['id'], stack.directory / f"quivr-{row['id']}"
         log = stack.directory / f"{row['id']}-plugin.log"
         subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, check=True)
@@ -132,8 +134,10 @@ def start_first_party(stack):
             time.sleep(.05)
 
 
-def stop_first_party(stack):
+def stop_first_party(stack, only=None):
     for row in FIRST_PARTY:
+        if only is not None and row['id'] not in only:
+            continue
         pid = stack.state.pop(f"{row['id']}_plugin_pid", None)
         stack.save()
         if pid is None:

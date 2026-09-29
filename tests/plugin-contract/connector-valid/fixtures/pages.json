@@ -1,19 +1,107 @@
 {
-  "description": "Five items in pages of two, then nothing new when resumed.",
-  "connector": {"kind": "static", "config": {"page_size": 2, "items": [
-    {"key": "item-1", "text": "First item"},
-    {"key": "item-2", "text": "Second item", "attachment": "attached notes"},
-    {"key": "item-3", "text": "Third item"},
-    {"key": "item-4", "text": "Fourth item"},
-    {"key": "item-5", "text": "Fifth item"}
-  ]}},
-  "credential": {"token": "test-token-connector-valid"},
+  "description": "Five items in pages of two, then nothing new when resumed; a signed delivery, a challenge and a forged delivery.",
+  "connector": {
+    "kind": "static",
+    "config": {
+      "page_size": 2,
+      "items": [
+        {
+          "key": "item-1",
+          "text": "First item"
+        },
+        {
+          "key": "item-2",
+          "text": "Second item",
+          "attachment": "attached notes"
+        },
+        {
+          "key": "item-3",
+          "text": "Third item"
+        },
+        {
+          "key": "item-4",
+          "text": "Fourth item"
+        },
+        {
+          "key": "item-5",
+          "text": "Fifth item"
+        }
+      ]
+    }
+  },
+  "credential": {
+    "token": "test-token-connector-valid"
+  },
   "expect": {
     "pages": [
-      {"record_keys": ["item-1", "item-2"], "more": true},
-      {"record_keys": ["item-3", "item-4"], "more": true},
-      {"record_keys": ["item-5"], "more": false}
+      {
+        "record_keys": [
+          "item-1",
+          "item-2"
+        ],
+        "more": true
+      },
+      {
+        "record_keys": [
+          "item-3",
+          "item-4"
+        ],
+        "more": true
+      },
+      {
+        "record_keys": [
+          "item-5"
+        ],
+        "more": false
+      }
     ],
-    "check_credential": {"status": "ok"}
-  }
+    "check_credential": {
+      "status": "ok"
+    }
+  },
+  "receive": [
+    {
+      "description": "A signed delivery.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "X-Fake-Signature": "1597a36168aacf1cdfa9a947048701945cf476058439d87f529f9acf49cf2e67"
+        },
+        "body": "{\"items\":[{\"key\":\"item-6\",\"text\":\"Pushed item\"}]}"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 204,
+        "record_keys": [
+          "item-6"
+        ]
+      }
+    },
+    {
+      "description": "The verification challenge.",
+      "request": {
+        "method": "GET",
+        "query": "challenge=probe-7"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 200,
+        "body_contains": "probe-7"
+      }
+    },
+    {
+      "description": "A forged delivery is refused.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "X-Fake-Signature": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "body": "{\"items\":[{\"key\":\"item-6\",\"text\":\"Pushed item\"}]}"
+      },
+      "expect": {
+        "verdict": "refused",
+        "status": 401
+      }
+    }
+  ]
 }

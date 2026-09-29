@@ -10,10 +10,16 @@ build, test or pin the plugin.
   module; `make plugin-boundary` keeps it off the engine's packages.
 - **Manifest** [quivr-plugin.yaml](quivr-plugin.yaml): plugin id and extension
   namespace `connector.x_list`, the names the former built-in kind used, so
-  existing Connector Instances and Records carry over. Plugin API 0.3.1, because
-  the plugin binds Relation targets to the instance's `corpus_id` and
-  `source_namespace`, and declares `max_checkpoint_bytes` 256 KiB for the
-  deletion recheck set (up to 2,000 posts).
+  existing Connector Instances and Records carry over. Plugin API 0.5: the
+  plugin binds Relation targets to the instance's `corpus_id` and
+  `source_namespace`, receives webhook deliveries (`modes: [pull, push]`), and
+  declares `max_checkpoint_bytes` 512 KiB for the deletion recheck set (up to
+  2,000 posts) and the members of a webhook resync.
+- **Webhook mode** ([guide](../../docs/connectors/x-webhooks.md)): pull runs
+  keep Filtered Stream rules, the webhook and its link in step with the list
+  members (`stream.go`); `Receive` answers the CRC check and maps signed
+  deliveries with `MapPost`, like polling (`webhook.go`). The X endpoint shapes
+  follow X's public docs and are tested against fakes only.
 - **Configuration**: `api_endpoint`, the X API origin (default
   `https://api.x.com`). Set it only to point at a test fake.
 - **Credential check**: answers ok without calling X, because X bills every
@@ -24,7 +30,7 @@ build, test or pin the plugin.
 `make dev`, `make verify` and the browser demo build and pin it on every stack
 start (`QUIVR_X_LIST=off make dev` leaves it out); they point `api_endpoint` at
 the local fake X API. The Railway image runs it beside the worker on
-127.0.0.1:9930. Elsewhere, build it (`go build .` here) and pin it as
+127.0.0.1:9930, and beside the API for webhook deliveries. Elsewhere, build it (`go build .` here) and pin it as
 [Run a connector plugin](../../docs/plugins/run-a-connector-plugin.md) explains.
 
 ## Test it

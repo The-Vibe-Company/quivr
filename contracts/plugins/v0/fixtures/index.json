@@ -551,9 +551,9 @@
       "valid": false,
       "schema_valid": true,
       "errors": [
-        "reserved_field"
+        "incompatible_plugin_api"
       ],
-      "description": "The push mode is reserved for a later Plugin API version."
+      "description": "The push mode needs a plugin_api range that admits 0.5."
     },
     {
       "file": "manifests/invalid/connector-plugin-api-0.2.yaml",
@@ -1097,6 +1097,262 @@
       "valid": false,
       "schema_valid": false,
       "description": "A connector fixture names its kind."
+    },
+    {
+      "file": "manifests/valid/connector-push.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.5 manifest whose kind declares pull and push."
+    },
+    {
+      "file": "manifests/invalid/connector-push-without-pull.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_modes"
+      ],
+      "description": "A push kind also declares pull, the fallback."
+    },
+    {
+      "file": "requests/connector/fetch-push.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A fetch for a push kind carries the instance's public webhook_url."
+    },
+    {
+      "file": "requests/connector/receive.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A relayed signed delivery: raw body in base64, lowercase header names."
+    },
+    {
+      "file": "requests/connector/receive-challenge.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A relayed verification challenge (GET with a query string, no body)."
+    },
+    {
+      "file": "requests/connector/receive-put.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Only GET and POST are relayed."
+    },
+    {
+      "file": "requests/connector/receive-no-request.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A receive request carries the relayed request."
+    },
+    {
+      "file": "requests/connector/receive-uppercase-header.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Relayed header names are lowercase."
+    },
+    {
+      "file": "responses/connector/receive-accepted.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An accepted delivery with one item and a read."
+    },
+    {
+      "file": "responses/connector/receive-challenge.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A challenge answered: accepted, no items, the answer in the body."
+    },
+    {
+      "file": "responses/connector/receive-refused.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A delivery refused with a 4xx answer."
+    },
+    {
+      "file": "responses/connector/receive-refused-with-items.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A refused delivery carries no items."
+    },
+    {
+      "file": "responses/connector/receive-accepted-4xx.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An accepted delivery is answered with a 2xx status."
+    },
+    {
+      "file": "responses/connector/receive-refused-2xx.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A refused delivery is answered with a 4xx status."
+    },
+    {
+      "file": "responses/connector/receive-attachments.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Items in a delivery carry no attachments."
+    },
+    {
+      "file": "responses/connector/receive-undeclared-namespace.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Delivered items use only declared namespaces."
+    },
+    {
+      "file": "responses/connector/receive-checkpoint.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A receive answer carries no checkpoint: pull runs own it."
+    },
+    {
+      "file": "responses/connector/receive-header-injection.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "content_type is one header value, without line breaks."
+    },
+    {
+      "file": "responses/connector/push-active.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "The push channel is active; pull relaxes to a 15-minute safety net."
+    },
+    {
+      "file": "responses/connector/push-failed.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "The source invalidated the webhook: an access failure, polling carries on."
+    },
+    {
+      "file": "responses/connector/push-pending.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Push is not set up yet, with the reason."
+    },
+    {
+      "file": "responses/connector/push-failed-without-class.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A failed push status carries an error_class and a code."
+    },
+    {
+      "file": "responses/connector/push-active-with-error.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An active push status carries no error."
+    },
+    {
+      "file": "responses/connector/push-pending-with-interval.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "poll_interval_seconds goes only with state active."
+    },
+    {
+      "file": "responses/connector/push-active.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Only a plugin whose kinds declare push reports a push status."
+    },
+    {
+      "file": "connectors/push.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture with receive cases: a signed delivery, a challenge and a wrong signature."
+    },
+    {
+      "file": "connectors/push-body-twice.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A receive case has a text body or a base64 body, not both."
     }
   ]
 }

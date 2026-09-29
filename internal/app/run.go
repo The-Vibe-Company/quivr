@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -64,6 +65,10 @@ type Config struct {
 	ConnectorFixtures bool `json:"connector_fixtures"`
 	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
 	ConnectorMinInterval string `json:"connector_min_interval"`
+	// PublicURL is the base URL where sources reach this deployment's API
+	// (https://quivr.example.com). Instances of a kind that declares the push
+	// mode get their webhook address from it; without it they only poll.
+	PublicURL string `json:"public_url"`
 	// M365 is refused: the m365_mail kind moved to the connector.m365_mail
 	// plugin, whose pin configuration carries its endpoints.
 	M365 json.RawMessage `json:"m365"`
@@ -193,6 +198,9 @@ func Run(command string) error {
 	if err != nil {
 		return err
 	}
+	if err := validPublicURL(cfg.PublicURL); err != nil {
+		return err
+	}
 	for token, s := range cfg.Keys {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
 			return errors.New("invalid scoped credential configuration")
@@ -293,7 +301,7 @@ func Run(command string) error {
 		return nil
 	}
 	connectorStore := postgres.ConnectorStore{ContentStore: store}
-	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
+	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{PublicURL: cfg.PublicURL, Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error { return postgres.SchemaReady(ctx, pool) }
 	ready := func(ctx context.Context) error {
@@ -363,7 +371,9 @@ func Run(command string) error {
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators}), httpapi.WithOperations(operations.Service{Store: store}),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval}), httpapi.WithCommands(commands))
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands),
+			// Push deliveries are relayed by the API, which the source reaches.
+			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
@@ -473,6 +483,19 @@ func Run(command string) error {
 	defer cancel()
 	for _, s := range servers {
 		_ = s.Shutdown(shutdown)
+	}
+	return nil
+}
+
+// validPublicURL accepts an empty public_url or an absolute http(s) URL
+// without query or fragment.
+func validPublicURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return errors.New("public_url must be an absolute http(s) URL without credentials, query or fragment, such as https://quivr.example.com")
 	}
 	return nil
 }

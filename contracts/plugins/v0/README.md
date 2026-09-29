@@ -1,10 +1,11 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.3.1`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.5.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
-and `0.3.1` adds the instance scope to connector fetch requests, the declared
-checkpoint bound and `_` in plugin ids and extension namespaces. JSON Schemas in this
+`0.3.1` the instance scope to connector fetch requests, the declared
+checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
+connector attachments, and `0.5.0` the connector push mode (`receive`). JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -21,6 +22,7 @@ and the glossary in [CONTEXT.md](../../../CONTEXT.md).
 | `subscription-response.schema.json` | `POST /v0/contributions/subscription` 200 response (since 0.2) |
 | `connector-fetch-request.schema.json`, `connector-fetch-response.schema.json` | `POST /v0/contributions/connector/fetch` request and 200 response (since 0.3) |
 | `connector-check-credential-request.schema.json`, `connector-check-credential-response.schema.json` | `POST /v0/contributions/connector/check_credential` request and 200 response (since 0.3) |
+| `connector-receive-request.schema.json`, `connector-receive-response.schema.json` | `POST /v0/contributions/connector/receive` request and 200 response (since 0.5) |
 | `error.schema.json` | Body of every non-2xx response |
 | `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
 | `subscription-fixture.schema.json` | Subscription fixture: a local test input that tools turn into subscription requests (since 0.2) |
@@ -40,7 +42,7 @@ equivalent copies under other names out of both contracts.
 
 ## Contributions
 
-Plugin API 0.4 accepts three Contributions, and a manifest declares at least one:
+Plugin API 0.5 accepts three Contributions, and a manifest declares at least one:
 
 | Contribution | Since | Purpose |
 | --- | --- | --- |
@@ -55,12 +57,13 @@ are **reserved**. A manifest that declares them is rejected
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.4.0` and still serves every `0.1`, `0.2` and `0.3` plugin unchanged: a
+implements `0.5.0` and still serves every `0.1`, `0.2`, `0.3` and `0.4` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1` or `0.4.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0` or `0.5.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
-is `incompatible_plugin_api` at that field.
+is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
+at its `modes`.
 A patch version only adds optional fields; a plugin that validates requests
 strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
@@ -86,6 +89,7 @@ version.
 | `POST /v0/contributions/connector/check_credential` | 200 `{"status":"ok"}` | Check that the source accepts a credential |
 | `POST /v0/contributions/connector/describe_attachment` | 200 size and SHA-256, or a skip | Describe one attachment's bytes (since 0.4, with `attachments`) |
 | `POST /v0/contributions/connector/upload_attachment` | 200 `{"status":"uploaded"}` | Upload one attachment to a core grant (since 0.4, with `attachments`) |
+| `POST /v0/contributions/connector/receive` | 200 verdict and answer | Verify one relayed delivery and return its items (since 0.5, for a push kind) |
 
 - **Errors.** Every non-2xx response carries the error envelope
   `{code, message, retryable}`. `retryable: true` asks the engine to retry
@@ -115,7 +119,7 @@ version.
 | `contributions.subscription.max_batch_size` | Most evaluations per request, 1–256, default 32; the core splits larger batches |
 | `contributions.subscription.timeout_ms`, `.retry.max_attempts`, `.limits.max_response_bytes` | As for the normalizer |
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
-| `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]` (`push` is `reserved_field`); `description` |
+| `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
 | `configuration.schema` | JSON Schema 2020-12 for installer configuration |
@@ -440,8 +444,59 @@ the Record Keys (and `more`) of each page, an `error` (`error_class`, optional
 `code`) or the `check_credential` answer. The Instance is
 `dev-connector-<digest>`, invocations `dev-invocation-<digest>-<page>`, from the
 first 16 hex digits of the SHA-256 of the fixture bytes; fetch requests carry
-`corpus_id` `dev-corpus` and `source_namespace` `dev-namespace`.
-`fixtures/connectors/feed.json` is a normative example.
+`corpus_id` `dev-corpus` and `source_namespace` `dev-namespace`, and for a
+push kind the `webhook_url` `https://quivr.invalid/v0/connector-webhooks/<instance>`.
+`fixtures/connectors/feed.json` is a normative example. A push kind's fixture
+lists `receive` cases (since 0.5): a `request` (`method`, `query`, `headers`,
+and a text `body` or a `body_base64`) and what to `expect` (`verdict`,
+`status`, `record_keys`, `body_contains`, or an `error`), relayed with the
+fixture's config, credential and checkpoint; `fixtures/connectors/push.json`
+is a normative example.
+
+### Connector push
+
+Since Plugin API 0.5, a kind with `modes: [pull, push]` also receives what
+the source sends. The core owns one public route per Connector Instance,
+`/v0/connector-webhooks/<instance>` under the deployment's `public_url`, and
+sends that address to the plugin as `connector.webhook_url` in fetch
+requests, so the plugin registers it with the source and is never exposed
+itself. For each `GET` or `POST` to the route, with a body of at most 1 MiB,
+the core calls **`receive`** (`connector-receive-request.schema.json`) with the
+Instance (and its `corpus_id` and `source_namespace`), the credential, the
+current checkpoint (read-only), `now`, `reads_today` and the relayed
+`request`: `method`, raw `query`, `headers` by lowercase name (at most 64; no
+hop-by-hop header or `Cookie`) and `body_base64`, the exact bytes a signature
+covers. The deadline is `timeout_ms`, capped at 8 seconds.
+
+The plugin verifies the request with the credential and answers
+(`connector-receive-response.schema.json`) a `verdict` and the `response` the
+core returns to the source (`status`, optional `content_type` and a text
+`body` of at most 64 KiB):
+
+- `accepted` with a 2xx status: the request is authentic. Its `items` (the
+  fetch item shape, without attachments) are ingested before the source is
+  answered, through the same path as a pull run's, so an item both paths
+  return converges on the same Receipt. A challenge, such as a CRC check, is
+  `accepted` with no items and the answer in the body. `reads` counts toward
+  the usage counters.
+- `refused` with a 4xx status and no items: not authentic or not for this
+  instance. The core answers the source and changes nothing.
+
+`CheckReceiveOutput` judges every answer (`invalid_verdict`, the item rules,
+declared namespaces). An answer carries no checkpoint: pull runs own it. When
+the plugin is unavailable, or answers a `transient` error, the source gets a
+503 with `Retry-After`; an `access` or `source` error is a 500. Those failures
+show in Connector Health (`health.push`), never a refused request.
+
+A fetch answer may report the kind's push channel in `push`: `state`
+`active`, `pending` (with an optional `code` saying why) or `failed` (with
+`error_class` and `code`). An `access` failure is the `access_error` health
+state while pull carries on. With `active`, `poll_interval_seconds` relaxes
+pull to a safety net while nothing goes wrong. A pull run that, with push
+active since before it started, still creates new Record Versions reports
+`missed_deliveries` and returns pull to the instance's interval, so a plugin
+holds back items the source may still be delivering. Only a plugin with a push
+kind reports a push status (`invalid_push_status`).
 
 ## Normative fixtures
 
@@ -602,6 +657,7 @@ When the manifest declares `connector`, it adds checks with
 | `invalid_request` | A non-JSON body, an unknown field, an undeclared kind and the normative invalid requests in `fixtures/requests/connector/` are refused on both routes with a terminal error envelope. |
 | `credentials` | No fixture credential string of 8 characters or more appears in any answer, or in the plugin's output when the runner launched it (`credential_leak`). |
 | `attachments` (per fixture) | When the manifest declares `attachments`, each attachment the pages returned is described (unless its descriptor is exact), granted to the runner's loopback storage and uploaded; the stored bytes match the description (`attachment_mismatch`, `attachment_too_large`). |
+| `receive` (per case) | When a kind declares `push`: each fixture `receive` case is answered within `timeout_ms` with a verdict `CheckReceiveOutput` accepts (`invalid_verdict`) and the case's expectation (`unexpected_items`). At least one case exists (`no_fixture`). Invalid receive requests are refused like the others. |
 
 The human report goes to stdout; the plugin's own output goes to stderr.
 `--report <file>` writes the JSON report described by

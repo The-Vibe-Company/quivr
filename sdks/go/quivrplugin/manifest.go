@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.4.0"
+const PluginAPIVersion = "0.5.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector Contribution. The engine validates the
@@ -62,14 +62,25 @@ type AttachmentLimits struct {
 
 // ConnectorKind is one declared connector kind.
 type ConnectorKind struct {
-	Description            string          `json:"description,omitempty"`
-	ConfigSchema           json.RawMessage `json:"config_schema"`
-	CredentialSchema       json.RawMessage `json:"credential_schema,omitempty"`
+	Description      string          `json:"description,omitempty"`
+	ConfigSchema     json.RawMessage `json:"config_schema"`
+	CredentialSchema json.RawMessage `json:"credential_schema,omitempty"`
 	// CredentialRequired false makes the declared credential optional: an
 	// instance without one is invoked with a null credential (default true).
-	CredentialRequired *bool `json:"credential_required,omitempty"`
-	DefaultIntervalSeconds int             `json:"default_interval_seconds"`
-	Modes                  []string        `json:"modes,omitempty"`
+	CredentialRequired     *bool    `json:"credential_required,omitempty"`
+	DefaultIntervalSeconds int      `json:"default_interval_seconds"`
+	Modes                  []string `json:"modes,omitempty"`
+}
+
+// Pushes reports whether the kind declares the push mode (Plugin API 0.5):
+// its implementation then also implements Receiver.
+func (k ConnectorKind) Pushes() bool {
+	for _, mode := range k.Modes {
+		if mode == "push" {
+			return true
+		}
+	}
+	return false
 }
 
 // Output bounds, as in the contract.
@@ -164,6 +175,11 @@ func loadManifest(path string) (*loadedManifest, error) {
 	}
 	if c.Attachments != nil && compareVersions(api, "0.4.0") < 0 {
 		return nil, fmt.Errorf("%s: contributions.connector.attachments needs a plugin_api range that admits Plugin API 0.4.0", path)
+	}
+	for name, kind := range c.Kinds {
+		if kind.Pushes() && compareVersions(api, "0.5.0") < 0 {
+			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API 0.5.0", path, name)
+		}
 	}
 	m.pluginAPI = api
 	return m, nil

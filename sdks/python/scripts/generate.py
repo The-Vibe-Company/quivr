@@ -45,6 +45,8 @@ FILES = {
     "connector-describe-attachment-response.schema.json": "ConnectorDescribeAttachmentResponse",
     "connector-upload-attachment-request.schema.json": "ConnectorUploadAttachmentRequest",
     "connector-upload-attachment-response.schema.json": "ConnectorUploadAttachmentResponse",
+    "connector-receive-request.schema.json": "ConnectorReceiveRequest",
+    "connector-receive-response.schema.json": "ConnectorReceiveResponse",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".
@@ -92,6 +94,14 @@ NAMES = {
     "plugins/v0/connector-describe-attachment-request.schema.json#/properties/item": "AttachmentItem",
     "plugins/v0/connector-upload-attachment-request.schema.json#/properties/item": "UploadAttachmentItem",
     "plugins/v0/connector-upload-attachment-request.schema.json#/properties/grant": "UploadGrant",
+    "plugins/v0/connector-fetch-response.schema.json#/$defs/PushStatus": "PushStatus",
+    "plugins/v0/connector-receive-request.schema.json#/properties/connector": "ReceiveInstanceRef",
+    "plugins/v0/connector-receive-request.schema.json#/properties/request": "RelayedRequest",
+    "plugins/v0/connector-receive-response.schema.json#/properties/response": "ReceiveAnswer",
+    "plugins/v0/connector-fixture.schema.json#/properties/receive/items": "FixtureReceiveCase",
+    "plugins/v0/connector-fixture.schema.json#/properties/receive/items/properties/request": "FixtureReceiveRequest",
+    "plugins/v0/connector-fixture.schema.json#/properties/receive/items/properties/expect": "ExpectedDelivery",
+    "plugins/v0/connector-fixture.schema.json#/properties/receive/items/properties/expect/properties/error": "ExpectedDeliveryError",
 }
 
 HEADER = '''"""Typed Plugin Protocol v0 models.

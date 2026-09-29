@@ -46,17 +46,21 @@ type HealthInput struct {
 	CredentialExpiresAt *time.Time
 	SilentAfter         time.Duration
 	CredentialWarning   time.Duration
+	// PushAccessRefused: the push channel is refused access (the source
+	// invalidated the webhook, say) while pull carries the collection.
+	PushAccessRefused bool
 }
 
 // Evaluate derives Connector Health at now. An access failure is reported as
 // access_error until a later successful run, so a source that refuses access
-// is never mistaken for one that simply stopped publishing. Transient and
-// source failures are visible only as the last error.
+// is never mistaken for one that simply stopped publishing; so is a push
+// channel refused access, until it recovers. Transient and source failures
+// are visible only as the last error.
 func Evaluate(h HealthInput, now time.Time) string {
 	if !h.Enabled {
 		return HealthDisabled
 	}
-	if h.AccessErrorAt != nil {
+	if h.AccessErrorAt != nil || h.PushAccessRefused {
 		return HealthAccessError
 	}
 	if h.CredentialExpiresAt != nil && !h.CredentialExpiresAt.After(now.Add(h.CredentialWarning)) {

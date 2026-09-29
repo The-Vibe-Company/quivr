@@ -6,7 +6,7 @@ id: certified.connector-valid
 version: 0.1.0
 compatibility:
   engine: ">=0.1.0 <0.2.0"
-  plugin_api: ">=0.3.0 <0.5.0"
+  plugin_api: ">=0.3.0 <0.6.0"
 contributions:
   connector:
     kinds:
@@ -34,6 +34,7 @@ contributions:
           properties:
             token: {type: string, minLength: 8}
         default_interval_seconds: 300
+        modes: [pull, push]
     timeout_ms: 5000
     limits:
       max_items: 3

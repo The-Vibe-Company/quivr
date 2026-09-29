@@ -37,11 +37,21 @@ type fakeX struct {
 	reset     int64
 	listError string
 	requests  []string
+
+	// Filtered Stream webhook state: the list members, the stream rules, the
+	// registered webhooks and the ones linked to the stream. crcFails makes
+	// every CRC check of a webhook fail.
+	members  []string
+	rules    []streamRule
+	webhooks []xWebhook
+	linked   map[string]bool
+	crcFails bool
+	nextID   int
 }
 
 func newFakeX(t *testing.T) (*fakeX, *httptest.Server) {
 	t.Helper()
-	f := &fakeX{posts: map[string]map[string]any{}, deleted: map[string]bool{}, protected: map[string]bool{}}
+	f := &fakeX{posts: map[string]map[string]any{}, deleted: map[string]bool{}, protected: map[string]bool{}, linked: map[string]bool{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -69,7 +79,11 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	q := r.URL.Query()
-	f.requests = append(f.requests, r.URL.Path+"?"+q.Encode())
+	if r.Method == http.MethodGet {
+		f.requests = append(f.requests, r.URL.Path+"?"+q.Encode())
+	} else {
+		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	}
 	if r.Header.Get("Authorization") != "Bearer "+testToken {
 		w.WriteHeader(401)
 		return
@@ -83,6 +97,9 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if f.serveStream(w, r) {
+		return
+	}
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/2/lists/") && strings.HasSuffix(r.URL.Path, "/tweets"):
 		if f.listError != "" {
@@ -137,6 +154,88 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveStream serves list members (two per page), stream rules, webhooks and
+// their links to the stream. A webhook passes its CRC check unless crcFails.
+func (f *fakeX) serveStream(w http.ResponseWriter, r *http.Request) bool {
+	reply := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+	path := r.URL.Path
+	switch {
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/2/lists/") && strings.HasSuffix(path, "/members"):
+		start, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Query().Get("pagination_token"), "m"))
+		end := min(start+2, len(f.members))
+		var users []any
+		for _, id := range f.members[start:end] {
+			users = append(users, map[string]any{"id": id, "username": "user" + id})
+		}
+		meta := map[string]any{"result_count": end - start}
+		if end < len(f.members) {
+			meta["next_token"] = fmt.Sprintf("m%d", end)
+		}
+		reply(map[string]any{"data": users, "meta": meta})
+	case path == "/2/tweets/search/stream/rules" && r.Method == http.MethodGet:
+		reply(map[string]any{"data": f.rules})
+	case path == "/2/tweets/search/stream/rules" && r.Method == http.MethodPost:
+		var body struct {
+			Add    []streamRule `json:"add"`
+			Delete struct {
+				IDs []string `json:"ids"`
+			} `json:"delete"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, rule := range body.Add {
+			f.nextID++
+			rule.ID = fmt.Sprintf("rule-%d", f.nextID)
+			f.rules = append(f.rules, rule)
+		}
+		kept := f.rules[:0]
+		for _, rule := range f.rules {
+			if !slicesContains(body.Delete.IDs, rule.ID) {
+				kept = append(kept, rule)
+			}
+		}
+		f.rules = kept
+		reply(map[string]any{"meta": map[string]any{"sent": "now"}})
+	case path == "/2/webhooks" && r.Method == http.MethodGet:
+		reply(map[string]any{"data": f.webhooks})
+	case path == "/2/webhooks" && r.Method == http.MethodPost:
+		var body struct {
+			URL string `json:"url"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if f.crcFails {
+			w.WriteHeader(400)
+			reply(map[string]any{"errors": []any{map[string]any{"message": "CRC validation failed"}}})
+			return true
+		}
+		f.nextID++
+		hook := xWebhook{ID: fmt.Sprintf("hook-%d", f.nextID), URL: body.URL, Valid: true}
+		f.webhooks = append(f.webhooks, hook)
+		reply(map[string]any{"data": hook})
+	case strings.HasPrefix(path, "/2/webhooks/") && r.Method == http.MethodPut:
+		id := strings.TrimPrefix(path, "/2/webhooks/")
+		for i := range f.webhooks {
+			if f.webhooks[i].ID == id {
+				f.webhooks[i].Valid = !f.crcFails
+				reply(map[string]any{"data": f.webhooks[i]})
+				return true
+			}
+		}
+		w.WriteHeader(404)
+	case path == "/2/tweets/search/webhooks" && r.Method == http.MethodGet:
+		var links []any
+		for id := range f.linked {
+			links = append(links, map[string]any{"webhook_id": id})
+		}
+		reply(map[string]any{"data": links})
+	case strings.HasPrefix(path, "/2/tweets/search/webhooks/") && r.Method == http.MethodPost:
+		f.linked[strings.TrimPrefix(path, "/2/tweets/search/webhooks/")] = true
+		reply(map[string]any{"data": map[string]any{"provisioned": true}})
+	default:
+		return false
+	}
+	return true
+}
+
 func (f *fakeX) take() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -170,6 +269,7 @@ type instance struct {
 	api        string
 	config     string
 	token      string
+	webhookURL string
 	checkpoint json.RawMessage
 	reads      int64
 	now        time.Time
@@ -200,6 +300,7 @@ type page struct {
 	Reads       int64            `json:"reads"`
 	Notice      string           `json:"notice"`
 	Diagnostics map[string]any   `json:"diagnostics"`
+	Push        map[string]any   `json:"push"`
 	Error       *envelope        `json:"-"`
 }
 
@@ -218,7 +319,7 @@ func (in *instance) fetch(pageInRun int) page {
 	body, _ := json.Marshal(map[string]any{
 		"invocation_id": fmt.Sprintf("test-%d", pageInRun), "contribution": "connector", "organization_id": "org_a",
 		"configuration": map[string]any{"api_endpoint": in.api},
-		"connector":     map[string]any{"instance_id": "connector_x", "kind": "x_list", "corpus_id": "corpus_1", "source_namespace": "x", "config": json.RawMessage(in.config)},
+		"connector":     in.connector(),
 		"credential":    map[string]any{"bearer_token": in.token}, "checkpoint": checkpoint,
 		"now": in.now.Format(time.RFC3339), "page_in_run": pageInRun, "reads_today": in.reads,
 	})
@@ -236,6 +337,14 @@ func (in *instance) fetch(pageInRun int) page {
 		in.t.Fatal(err)
 	}
 	return out
+}
+
+func (in *instance) connector() map[string]any {
+	c := map[string]any{"instance_id": "connector_x", "kind": "x_list", "corpus_id": "corpus_1", "source_namespace": "x", "config": json.RawMessage(in.config)}
+	if in.webhookURL != "" {
+		c["webhook_url"] = in.webhookURL
+	}
+	return c
 }
 
 // run is one acquisition run; it returns its pages (the last one may be an error).

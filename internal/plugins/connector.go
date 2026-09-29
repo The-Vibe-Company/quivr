@@ -146,6 +146,8 @@ type ConnectorPage struct {
 	Diagnostics json.RawMessage `json:"diagnostics,omitempty"`
 	Notice      string          `json:"notice,omitempty"`
 	NotDue      bool            `json:"not_due,omitempty"`
+	// Push is a push kind's report on its push channel (Plugin API 0.5).
+	Push *ConnectorPushStatus `json:"push,omitempty"`
 }
 
 // CheckConnectorOutput judges a 200 fetch response exactly as the engine does
@@ -184,9 +186,18 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 		issues = append(issues, Issue{Code: CodeInvalidNotDue, Path: "/not_due",
 			Message: "not_due: true skips the run: answer no items, more: false and the request's checkpoint unchanged"})
 	}
+	issues = append(issues, pushStatusIssues(page.Push, m)...)
+	return append(issues, checkItems(ctx, page.Items, m)...)
+}
+
+// checkItems judges the items of a fetch page or a delivery: unique Record
+// Keys, attachments only when the manifest declares them and within their
+// size cap, then each item's content and extensions.
+func checkItems(ctx context.Context, items []ConnectorItem, m *Manifest) []Issue {
+	var issues []Issue
 	validator := NewDeclaredExtensions(m)
 	seen := map[string]int{}
-	for i, item := range page.Items {
+	for i, item := range items {
 		path := fmt.Sprintf("/items/%d", i)
 		if first, dup := seen[item.RecordKey]; dup {
 			issues = append(issues, Issue{Code: CodeDuplicateRecordKey, Path: path + "/record_key",

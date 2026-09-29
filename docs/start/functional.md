@@ -17,6 +17,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 - [Connector Instances: operator guide](../connectors/README.md): set up and operate scheduled sources of content
 - [Microsoft 365 mailbox (`m365_mail`): operator guide](../connectors/microsoft-365.md): collect mail from a Microsoft 365 mailbox
 - [RSS and Atom feeds (`rss`)](../connectors/rss.md): collect articles from RSS and Atom feeds
+- [X lists in real time: webhook mode](../connectors/x-webhooks.md): receive the posts of an X list in real time through webhooks
 - [X lists (`x_list`): operator guide](../connectors/x.md): collect posts from an X list
 - [Described alerts: alerts written in plain language](../described-alerts.md): write alerts in plain language, and see what is sent to the model provider
 - [Your first search](../first-search.md): create a Corpus, add a Record and search it, step by step

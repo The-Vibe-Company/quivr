@@ -1,0 +1,13 @@
+# A push kind keeps pull: polling is the fallback when deliveries stop.
+id: example-alerts
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.5.0 <0.6.0"
+contributions:
+  connector:
+    kinds:
+      alerts:
+        config_schema: {type: object}
+        default_interval_seconds: 300
+        modes: [push]

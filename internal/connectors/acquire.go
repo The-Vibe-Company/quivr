@@ -73,6 +73,11 @@ type Progress struct {
 	Items       bool
 	Reads       int64
 	Diagnostics json.RawMessage
+	// Push is the page's push report, nil for none.
+	Push *PushStatus
+	// Missed: push was active since before the run, yet the page created
+	// new Versions the source never delivered.
+	Missed bool
 }
 
 // RunStore persists acquisition progress.
@@ -108,7 +113,10 @@ type Acquirer struct {
 	AttachmentBudget int64
 	// SoftRunLimit overrides DefaultSoftRunLimit.
 	SoftRunLimit time.Duration
-	Now          func() time.Time
+	// PublicURL builds the webhook address push kinds register with the
+	// source; "" leaves push kinds without one.
+	PublicURL string
+	Now       func() time.Time
 }
 
 func (a Acquirer) now() time.Time {
@@ -191,7 +199,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var notice string
 	reads := target.ReadsToday
 	for i := 0; i < pages; i++ {
-		page, err := connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
+		page, err := connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: WebhookURL(a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
 		if errors.Is(err, ErrNotDue) && i == 0 {
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
@@ -232,7 +240,10 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			stored += size
 			fresh = fresh || created
 		}
-		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: page.Diagnostics})
+		// Push active since before this run should have delivered anything
+		// new; a push kind holds back what is too recent to have arrived.
+		missed := fresh && target.Health.Push != nil && target.Health.Push.Healthy()
+		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: page.Diagnostics, Push: page.Push, Missed: missed})
 		if err != nil {
 			return err
 		}

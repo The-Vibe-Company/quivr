@@ -148,8 +148,11 @@ type FetchRequest struct {
 	// CorpusID and Namespace are the Corpus and Source Namespace the
 	// instance writes to, for connectors that bind Relation targets
 	// themselves (plugin kinds).
-	CorpusID   string
-	Namespace  string
+	CorpusID  string
+	Namespace string
+	// WebhookURL is the instance's public webhook address, for push kinds
+	// that register it with the source; "" without a public URL.
+	WebhookURL string
 	Config     json.RawMessage
 	Credential json.RawMessage
 	Checkpoint json.RawMessage
@@ -176,6 +179,9 @@ type Page struct {
 	// Notice is a diagnostic code for a run that completed normally but must
 	// report a condition (e.g. a spend cap); it ends the run.
 	Notice string
+	// Push is a push kind's report on its push channel; nil keeps the
+	// previous report.
+	Push *PushStatus
 }
 
 // Connector is the internal contract of one connector kind. It is shaped so a
