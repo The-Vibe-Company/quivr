@@ -185,3 +185,27 @@ func (p *Processing) Write(w io.Writer) {
 	p.outcomes.Write(w)
 	p.searchable.Write(w)
 }
+
+// ChangePrune counts change events the journal prune physically deleted and
+// prune passes that failed (THE-697). The zero value is ready; nil ignores.
+type ChangePrune struct{ pruned, failures atomic.Int64 }
+
+// Pruned counts n deleted change events.
+func (p *ChangePrune) Pruned(n int) {
+	if p != nil && n > 0 {
+		p.pruned.Add(int64(n))
+	}
+}
+
+// Failed counts one failed prune pass.
+func (p *ChangePrune) Failed() {
+	if p != nil {
+		p.failures.Add(1)
+	}
+}
+
+// Write renders the prune counters.
+func (p *ChangePrune) Write(w io.Writer) {
+	fmt.Fprintf(w, "# HELP quivr_change_events_pruned_total Change events physically deleted after the retention window.\n# TYPE quivr_change_events_pruned_total counter\nquivr_change_events_pruned_total %d\n", p.pruned.Load())
+	fmt.Fprintf(w, "# HELP quivr_change_prune_failures_total Change-journal prune passes that failed.\n# TYPE quivr_change_prune_failures_total counter\nquivr_change_prune_failures_total %d\n", p.failures.Load())
+}

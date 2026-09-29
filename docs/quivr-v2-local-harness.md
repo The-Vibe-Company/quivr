@@ -131,7 +131,13 @@ Retrieve shared journal events using a captured cursor, deduplicate by event ID
 and verify SSE/polling resume against the same committed mutations. `make verify`
 starts a second API over the same database with `change_retention: 2s` so
 pre-stream cursor expiry (HTTP 410) is proven publicly; in-stream `stream_error`
-is covered by transport tests.
+is covered by transport tests. The worker also physically prunes the change
+journal of `org_r` (key `QUIVR_TEST_RETENTION`) after 2 s, every second
+(`change_prune` with `allow_short_retention`). The short retention is confined
+to `org_r`, so org_a/org_b cursors keep the default seven days.
+`TestChangePruneExpiresCursorsAndResyncConverges` proves the sequence: prune,
+then 410 on the seven-day API, then catalog resync converging. Verification
+records these settings under `timing_overrides.change_prune`.
 
 The harness configuration provisions one webhook destination per test
 Organization (`local-receiver-org-a`, `local-receiver-org-b`) with obvious

@@ -27,6 +27,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -79,6 +80,9 @@ type Config struct {
 	// normalizer. API and worker refuse to start on an invalid pin; an
 	// unreachable plugin never prevents startup.
 	Plugin *plugins.PinConfig `json:"plugin"`
+
+	// ChangePrune tunes the worker's change-journal prune (THE-697).
+	ChangePrune ChangePruneConfig `json:"change_prune"`
 }
 
 // XConfig points the x_list connector at the X API; api_endpoint defaults to
@@ -175,6 +179,10 @@ func Run(command string) error {
 		if retention, err = time.ParseDuration(cfg.ChangeRetention); err != nil || retention <= 0 {
 			return errors.New("change_retention must be a positive duration")
 		}
+	}
+	prune, err := cfg.ChangePrune.parse(retention)
+	if err != nil {
+		return err
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
@@ -295,12 +303,13 @@ func Run(command string) error {
 	deliveryStore := postgres.DeliveryStore{ContentStore: store}
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
 	commands := telemetry.NewCommands()
+	pruneMetrics := &telemetry.ChangePrune{}
 	if command == "worker" {
 		// Delivery attempt outcomes and admissible backlog, processing outcomes and
 		// acceptance-to-searchable durations, in Prometheus text format.
 		processingMetrics := telemetry.NewProcessing()
 		processor.Observer = processingObserver{metrics: processingMetrics, store: store}
-		deliveryMetrics.Extra = processingMetrics.Write
+		deliveryMetrics.Extra = func(w io.Writer) { processingMetrics.Write(w); pruneMetrics.Write(w) }
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
@@ -351,6 +360,20 @@ func Run(command string) error {
 		go func() {
 			defer close(deliveryDone)
 			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics}.Run(ctx)
+		}()
+		pruneDone := make(chan struct{})
+		defer func() {
+			stop()
+			select {
+			case <-pruneDone:
+			case <-time.After(5 * time.Second):
+			}
+		}()
+		// The change-journal prune is a bounded PostgreSQL loop beside
+		// evaluation and delivery; its watermark keeps cursor expiry exact.
+		go func() {
+			defer close(pruneDone)
+			changes.Pruner{Store: store, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)

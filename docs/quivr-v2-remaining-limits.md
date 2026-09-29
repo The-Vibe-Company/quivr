@@ -16,7 +16,6 @@ stay visible. The Spec 1 obligation map is in
 | --- | --- | --- |
 | Webhook destinations are not filtered against private or internal addresses | Server-side request forgery from the worker's network | [THE-695](https://linear.app/thevibecompany/issue/THE-695) |
 | No withdrawal notice for a Subscription disabled when the withdrawal is dispatched | A paused consumer keeps an alert for withdrawn content | [THE-696](https://linear.app/thevibecompany/issue/THE-696) |
-| Change events are never physically pruned; expiry is computed from cursor age | Unbounded journal growth | [THE-697](https://linear.app/thevibecompany/issue/THE-697) |
 | Concurrent rebuilds of one Corpus can activate out of order; abandoned generations are never purged | Active configuration can lag the latest request; projection store growth | [THE-698](https://linear.app/thevibecompany/issue/THE-698) |
 | PostgreSQL adapter tests need the whole Linux stack | Slow feedback off Linux | [THE-699](https://linear.app/thevibecompany/issue/THE-699) |
 | Hybrid search ranks below semantic search on the FR/EN fixture | Relevance, kept separate from this list | [THE-641](https://linear.app/thevibecompany/issue/THE-641) |
@@ -36,6 +35,23 @@ stay visible. The Spec 1 obligation map is in
   records it in `readiness.json` (`dependency_start_retries`).
 - Change-cursor expiry is proven with a second API at 2 s retention.
   In-stream expiry is proven only by handler tests.
+- Physical pruning of the change journal (THE-697) is proven on org_r only:
+  the harness worker prunes it after 2 s through an explicit
+  `allow_short_retention` override, reported under `timing_overrides`.
+
+**Change feed**
+
+- The prune waits for evaluation dispatch. A stalled dispatch checkpoint holds
+  back pruning of its Organization and the journal grows until dispatch resumes.
+- Two emission probes (`record.enrichment_available`, `operation.updated`)
+  detect an earlier emission by looking up its event. If the same mutation
+  commits again more than `change_retention` after the first one, that event is
+  gone and the same `event_id` is published again at a new position. Clients
+  already deduplicate by `event_id`. A repeated evaluation cannot create a
+  second Match.
+- Expiry uses both the pruned watermark and the age rule, so a cursor can
+  get 410 while its next events are still stored (the prune lags or dispatch
+  holds it back). It never resumes over a gap.
 - Migrations may break in-flight work. Restarts are reported, not avoided, and
   there is no expand/contract or compatibility matrix.
 

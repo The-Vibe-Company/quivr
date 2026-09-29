@@ -63,7 +63,8 @@ type Window struct {
 	Through int64
 	// Head is the committed head at scan time.
 	Head int64
-	// Expired is true when the first position after the cursor is older than retention.
+	// Expired is true when the cursor precedes the pruned watermark, or when
+	// the first position after it is older than retention.
 	Expired bool
 }
 

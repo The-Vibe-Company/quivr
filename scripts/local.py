@@ -17,6 +17,9 @@ CAPTURE_SECRET='whsec_'+base64.b64encode(b'local-test-signing-secret-capture').d
 # Shortened webhook retry policy of the local harness, like its other short intervals (dev and verify;
 # deployment defaults: 1s/5m/24h/10s). Verification reports it in report.json.
 DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'5s','window':'60s'}
+# The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
+# short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
+PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}
 def port():
     import socket
     with socket.socket() as s:
@@ -36,7 +39,7 @@ class Stack:
             self.save()
         for key,value in [('short_api_port',port()),('short_probe_port',port()),('receiver_port',port()),('graph_port',port()),('fake_x_port',port())]:
             self.state.setdefault(key,value)
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -66,6 +69,8 @@ class Stack:
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
             # The browser demo (scripts/demo.py) owns org_d: its connectors keep polling without touching acceptance Organizations.
             s['demo']:scope('org_d',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write'],['*']),
+            # Change-journal prune acceptance owns org_r, the only Organization the harness prunes.
+            s['retention']:scope('org_r',['corpora:read','corpora:write','content:read','content:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
@@ -85,7 +90,7 @@ class Stack:
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
-        worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps(cfg));worker.chmod(0o600)
+        worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps({**cfg,'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
         # Keyless variant (THE-691): same stack without credential_key, its own Organization
         # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
@@ -197,7 +202,7 @@ class Stack:
                 if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -436,7 +441,7 @@ def finish(stack,steps,status,start):
         dirty=bool(run(['git','status','--porcelain','--untracked-files=no'],capture_output=True,text=True).stdout.strip())
         verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
             'scope':'Every feature acceptance suite, adapter integration, outage/restart scenarios and the assembled public journey (THE-662) over real PostgreSQL, Temporal, S3, Weaviate and TEI',
-            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s'},'pins':pins(),
+            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s','change_prune':PRUNE_OVERRIDES},'pins':pins(),
             'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
             'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
         verify_report.redact_tree(stack.directory,verify_report.secrets_of(stack.state)+[CAPTURE_SECRET])
