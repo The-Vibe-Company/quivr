@@ -1,0 +1,23 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_d0683b7f08b18a 1,4,8,10,14,17-18,25,28,32,35-38
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_ed0f22b9bbfe57 8,121-126
+scripts/local.py
+  s_54b80c92daa9cb::t_5bec94946805ab 509,512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "30723e524bc8910928cd4cd11e6dfc25b516749e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
