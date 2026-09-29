@@ -851,8 +851,47 @@ paths:
     post:
       operationId: disableSubscription
       description: Commit disable. Block new evaluation commits and new Delivery Attempt admissions, including
-        queued retries and update notices. In-flight attempts may complete. Repeat is idempotent; history
-        remains. Re-enable/reconfiguration workflows are outside the tracer.
+        queued retries and update notices. In-flight attempts may complete. A match.withdrawn notice for
+        a Match of this Subscription is still committed with its pending Delivery, which makes no attempt
+        until re-enable. Repeat is idempotent; history remains. Reconfiguration is outside the tracer.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+  /v0/subscriptions/{subscription_id}/enable:
+    post:
+      operationId: enableSubscription
+      description: Commit re-enable of a disabled Subscription on the same Subscription Version. Evaluation
+        resumes from this commit; changes made while disabled are never evaluated. Pending Deliveries
+        parked by the disable become eligible again under the usual admission checks and keep their
+        delivery window, except a match.withdrawn notice committed while disabled, whose window starts
+        at this re-enable. Enabling an enabled Subscription, or repeating the request, is idempotent and
+        commits no event.
       x-required-permissions:
       - monitoring:write
       responses:

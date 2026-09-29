@@ -96,9 +96,10 @@ type EvaluationStore interface {
 	// Match, it atomically commits a match.no_longer_matches notice for that
 	// Match; it never creates a Match. It completes the intent.
 	CommitNoMatch(ctx context.Context, in Intent) (string, error)
-	// CommitWithdrawal rechecks the Tombstone and Subscription eligibility and
-	// idempotently commits the match.withdrawn notice for the Record's latest
-	// positive Match. It completes the intent.
+	// CommitWithdrawal rechecks the Tombstone and the Subscription's Corpus
+	// scope and idempotently commits the match.withdrawn notice for the
+	// Record's latest positive Match, whether or not the Subscription is
+	// enabled (admission parks it while disabled). It completes the intent.
 	CommitWithdrawal(ctx context.Context, in Intent) (string, error)
 	Backlog(ctx context.Context) (Backlog, error)
 }

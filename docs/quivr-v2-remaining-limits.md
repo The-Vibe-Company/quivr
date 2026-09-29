@@ -14,7 +14,6 @@ stay visible. The Spec 1 obligation map is in
 
 | Limit | Impact | Ticket |
 | --- | --- | --- |
-| No withdrawal notice for a Subscription disabled when the withdrawal is dispatched | A paused consumer keeps an alert for withdrawn content | [THE-696](https://linear.app/thevibecompany/issue/THE-696) |
 | PostgreSQL adapter tests need the whole Linux stack | Slow feedback off Linux | [THE-699](https://linear.app/thevibecompany/issue/THE-699) |
 | Hybrid search ranks below semantic search on the FR/EN fixture | Relevance, kept separate from this list | [THE-641](https://linear.app/thevibecompany/issue/THE-641) |
 
@@ -106,6 +105,12 @@ stay visible. The Spec 1 obligation map is in
 - Delivery is at least once: a crash after sending can resend the same
   event id and bytes.
 - Deliveries exhausted by the retry migration emitted no `delivery.updated`.
+- Re-enabling a Subscription resumes delivery of its parked notices under their
+  original window, so an ordinary notice parked for longer than the window ends
+  `exhausted` (`window_elapsed`) without being sent. Only a `match.withdrawn`
+  notice committed while the Subscription was disabled gets a window that starts
+  at the re-enable (THE-696). Changes made during the pause are never
+  evaluated; there is no backfill command.
 - Delivery refuses private and internal receiver addresses after DNS
   resolution ([THE-695](https://linear.app/thevibecompany/issue/THE-695)), but
   a public hostname the operator configures is trusted: there is no egress

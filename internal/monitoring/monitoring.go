@@ -111,7 +111,7 @@ type SubscriptionInput struct {
 	DestinationID       string    `json:"destination_id"`
 }
 
-// Store persists definitions. Creation and disable are idempotent per
+// Store persists definitions. Creation, disable and enable are idempotent per
 // Organization, route family and key: the same canonical input returns the
 // same resource in its current state, changed input returns ErrConflict.
 // Each commit appends its public events to the Organization journal.
@@ -121,6 +121,7 @@ type Store interface {
 	CreateSubscription(ctx context.Context, org string, in SubscriptionInput, query SavedQueryVersion) (Subscription, error)
 	Subscription(ctx context.Context, org, id string) (Subscription, error)
 	DisableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
+	EnableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
 }
 
 // CorpusAuthorizer confirms that every Corpus belongs to the Organization.
@@ -249,6 +250,21 @@ func (s Service) DisableSubscription(ctx context.Context, scope corpus.Scope, ke
 		return Subscription{}, err
 	}
 	return s.Store.DisableSubscription(ctx, scope.Organization, key, id)
+}
+
+// EnableSubscription re-enables a disabled Subscription from now: evaluation
+// resumes after the re-enable, without backfilling the pause, and its parked
+// Deliveries become claimable again under the unchanged admission rules and
+// delivery window. Repeating it, or enabling an enabled Subscription, is
+// idempotent and commits no event.
+func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
+	if !scope.Allows("monitoring:write") {
+		return Subscription{}, ErrForbidden
+	}
+	if _, err := s.visible(ctx, scope, id); err != nil {
+		return Subscription{}, err
+	}
+	return s.Store.EnableSubscription(ctx, scope.Organization, key, id)
 }
 
 func (s Service) visible(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {

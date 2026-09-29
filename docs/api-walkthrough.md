@@ -300,7 +300,8 @@ Operations are supported.
 - `GET /v0/records?corpus_id=…` traverses the authorized Record catalog; when a change
   cursor expires, use it as the `resync_url` to resynchronize.
 - `/v0/saved-queries` and `/v0/subscriptions` create pinned, versioned Saved Queries and
-  activate or disable Subscriptions.
+  activate, disable or re-enable Subscriptions. Re-enabling resumes evaluation from
+  that point, with no backfill of the pause.
 - Enabled Subscriptions evaluate Record Versions that become searchable or enriched
   after their activation boundary. Each positive evaluation creates one unique Match
   with a pending Delivery, an immutable `match.created` notice and a change-feed event. Read them through
@@ -327,7 +328,9 @@ Operations are supported.
     is created. An evaluator failure never sends it;
   - a withdrawal sends `match.withdrawn` for the latest Match. Search stops returning
     the Record at once; the notice follows asynchronously and is delivered even though
-    the Record is withdrawn. Subscriptions disabled at that point get none.
+    the Record is withdrawn. A Subscription disabled at that point gets the notice too.
+    It stays pending with no attempt until `POST /v0/subscriptions/{id}/enable`, then
+    it is delivered: its delivery window starts at the re-enable.
 
   A `match.created` or `match.corrected` not yet delivered when a later correction
   notice exists for the same Subscription and Record is not sent any more, nor is a

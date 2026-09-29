@@ -112,21 +112,24 @@ ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &rec
 		kind := monitoring.IntentEvaluation
 		var rows pgx.Rows
 		if eventType == "record.withdrawn" {
-			// A withdrawal concerns the enabled Subscriptions already alerted
-			// about the Record, whatever their activation. No Match commits
-			// after the Tombstone, so every relevant Match precedes this event.
+			// A withdrawal concerns the Subscriptions already alerted about the
+			// Record, whatever their activation or enabled state: a disabled
+			// one gets its notice committed and delivered after re-enable. No
+			// Match commits after the Tombstone, so every relevant Match
+			// precedes this event.
 			kind = monitoring.IntentWithdrawal
 			rows, err = tx.Query(ctx, `SELECT s.id,s.current_version_id,latest.record_version_id
 FROM (SELECT DISTINCT subscription_id FROM matches WHERE organization=$1 AND record_id=$2 AND position<$3 AND subscription_id>$4) alerted
 JOIN subscriptions s ON s.organization=$1 AND s.id=alerted.subscription_id
 JOIN LATERAL (SELECT m.record_version_id FROM matches m WHERE m.organization=$1 AND m.record_id=$2 AND m.subscription_id=s.id ORDER BY m.position DESC LIMIT 1) latest ON true
-WHERE s.enabled
 ORDER BY s.id LIMIT $5`, org, recordID, sequence, after, s.page())
 		} else {
+			// A re-enabled Subscription evaluates only triggers after its
+			// re-enable: the pause is never backfilled.
 			rows, err = tx.Query(ctx, `SELECT s.id,v.id,$6::text FROM subscription_corpora sc
 JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
 JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,s.current_version_id)
-WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND v.activation_position<$3 AND s.id>$4
+WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND v.activation_position<$3 AND coalesce(s.enabled_position,0)<$3 AND s.id>$4
 ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID)
 		}
 		if err != nil {
@@ -240,9 +243,10 @@ func (s EvaluationStore) CommitNoMatch(ctx context.Context, in monitoring.Intent
 }
 
 // CommitWithdrawal consumes a withdrawal intent. It does not run the positive
-// no-Tombstone guard: it requires the Tombstone, an enabled Subscription and
-// the Record's Corpus in its scope, then commits the match.withdrawn notice for
-// the latest positive Match once.
+// no-Tombstone guard: it requires the Tombstone and the Record's Corpus in the
+// Subscription's scope, then commits the match.withdrawn notice for the latest
+// positive Match once. A disabled Subscription gets it too: committing a
+// notice is not an attempt, and admission parks it until a re-enable.
 func (s EvaluationStore) CommitWithdrawal(ctx context.Context, in monitoring.Intent) (string, error) {
 	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitWithdrawal(ctx, tx, in) })
 }
@@ -271,21 +275,23 @@ func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decid
 type subscriptionPin struct{ queryID, queryVersionID, destination string }
 
 // guardEvaluation is the core eligibility guard of an evaluated Version: the
-// Subscription is enabled on the pinned Version, the Version is the Record's
-// current eligible Version and its Corpus is in the Subscription's scope. A
-// refusal is returned as an outcome.
+// Subscription is enabled on the pinned Version (and the trigger is later than
+// its latest re-enable), the Version is the Record's current eligible Version
+// and its Corpus is in the Subscription's scope. A refusal is returned as an
+// outcome.
 func guardEvaluation(ctx context.Context, tx pgx.Tx, in monitoring.Intent) (pinned subscriptionPin, corpusID, refused string, err error) {
 	org := in.Organization
 	var enabled bool
 	var current string
-	err = tx.QueryRow(ctx, `SELECT s.enabled,s.current_version_id,v.saved_query_id,v.saved_query_version_id,v.destination_id FROM subscriptions s JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID).Scan(&enabled, &current, &pinned.queryID, &pinned.queryVersionID, &pinned.destination)
+	var resumed int64
+	err = tx.QueryRow(ctx, `SELECT s.enabled,coalesce(s.enabled_position,0),s.current_version_id,v.saved_query_id,v.saved_query_version_id,v.destination_id FROM subscriptions s JOIN subscription_versions v ON (v.organization,v.id)=(s.organization,$3::text) WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.SubscriptionVersionID).Scan(&enabled, &resumed, &current, &pinned.queryID, &pinned.queryVersionID, &pinned.destination)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pinned, "", monitoring.OutcomeIneligible, nil
 	}
 	if err != nil {
 		return pinned, "", "", err
 	}
-	if !enabled || current != in.SubscriptionVersionID {
+	if !enabled || current != in.SubscriptionVersionID || in.Sequence <= resumed {
 		return pinned, "", monitoring.OutcomeSubscriptionDisabled, nil
 	}
 	var eligible bool
@@ -398,9 +404,6 @@ WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.RecordID).Scan(
 	if err != nil {
 		return "", err
 	}
-	if !enabled {
-		return monitoring.OutcomeSubscriptionDisabled, nil
-	}
 	if !tombstoned || !scoped {
 		return monitoring.OutcomeIneligible, nil
 	}
@@ -408,7 +411,8 @@ WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.RecordID).Scan(
 	if err != nil || !found {
 		return monitoring.OutcomeIneligible, err
 	}
-	created, err := commitNotice(ctx, tx, org, notice{Kind: monitoring.NoticeWithdrawn, CorpusID: corpusID, Destination: prior.destination,
+	// Committed while disabled, its delivery window opens at the re-enable.
+	created, err := commitNotice(ctx, tx, org, notice{Kind: monitoring.NoticeWithdrawn, CorpusID: corpusID, Destination: prior.destination, Dormant: !enabled,
 		References: monitoring.NoticeReferences{MatchID: prior.id, RecordID: in.RecordID, RecordVersionID: prior.versionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: prior.subscriptionVersionID}}, nil)
 	if err != nil || !created {
 		return monitoring.OutcomeDuplicate, err
@@ -417,9 +421,12 @@ WHERE s.organization=$1 AND s.id=$2`, org, in.SubscriptionID, in.RecordID).Scan(
 }
 
 // notice is one monitoring notice to commit; its Delivery ID is derived.
+// A Dormant notice is committed while its Subscription is disabled: its
+// delivery window does not start until a re-enable makes it admissible.
 type notice struct {
 	Kind, CorpusID, Destination string
 	References                  monitoring.NoticeReferences
+	Dormant                     bool
 }
 
 // commitNotice commits a notice's public event, optional Match (withMatch runs
@@ -458,7 +465,11 @@ func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatc
 	if r.PreviousMatchID != "" {
 		previous = r.PreviousMatchID
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id) VALUES($1,$2,$3,$4,$5,$6)`, org, r.DeliveryID, r.MatchID, n.Destination, n.Kind, eventID(event)); err != nil {
+	var windowStart any
+	if n.Dormant {
+		windowStart = "infinity"
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start) VALUES($1,$2,$3,$4,$5,$6,$7::timestamptz)`, org, r.DeliveryID, r.MatchID, n.Destination, n.Kind, eventID(event), windowStart); err != nil {
 		return false, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,

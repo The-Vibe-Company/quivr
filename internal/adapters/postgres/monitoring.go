@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -33,11 +34,11 @@ func claimRequest(ctx context.Context, tx pgx.Tx, org, family, key string, canon
 
 // appendScopedEvents appends one public event per pinned Corpus, because the
 // change feed is read per Corpus. They share the resource and differ only in
-// their stable per-Corpus event ID. It returns the last position.
-func appendScopedEvents(ctx context.Context, tx pgx.Tx, org, kind, resource, id string, corpusIDs []string) (int64, error) {
+// their stable per-Corpus event ID, derived from mutation. It returns the last position.
+func appendScopedEvents(ctx context.Context, tx pgx.Tx, org, kind, resource, id, mutation string, corpusIDs []string) (int64, error) {
 	var last int64
 	for _, corpusID := range corpusIDs {
-		position, err := appendEventAt(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: kind, Resource: resource, ResourceID: id, MutationID: id + "/" + corpusID})
+		position, err := appendEventAt(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: kind, Resource: resource, ResourceID: id, MutationID: mutation + "/" + corpusID})
 		if err != nil {
 			return 0, err
 		}
@@ -76,7 +77,7 @@ func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monit
 		if _, err = tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
 			return monitoring.SavedQuery{}, err
 		}
-		if _, err = appendScopedEvents(ctx, tx, org, "saved_query.created", "saved_query", id, in.Definition.CorpusIDs); err != nil {
+		if _, err = appendScopedEvents(ctx, tx, org, "saved_query.created", "saved_query", id, id, in.Definition.CorpusIDs); err != nil {
 			return monitoring.SavedQuery{}, err
 		}
 		existing = id
@@ -136,7 +137,7 @@ func (s ContentStore) CreateSubscription(ctx context.Context, org string, in mon
 		}
 		// Activation commits its public event and boundary together; the journal
 		// lock orders every earlier change below it and every later one above it.
-		boundary, err := appendScopedEvents(ctx, tx, org, "subscription.created", "subscription", id, query.Definition.CorpusIDs)
+		boundary, err := appendScopedEvents(ctx, tx, org, "subscription.created", "subscription", id, id, query.Definition.CorpusIDs)
 		if err != nil {
 			return monitoring.Subscription{}, err
 		}
@@ -196,11 +197,13 @@ func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id stri
 			return monitoring.Subscription{}, err
 		}
 		if changed.RowsAffected() == 1 {
-			var corpora []string
-			if err = tx.QueryRow(ctx, "SELECT coalesce(array_agg(corpus_id ORDER BY corpus_id),'{}') FROM subscription_corpora WHERE organization=$1 AND subscription_id=$2", org, id).Scan(&corpora); err != nil {
+			// A disable after a re-enable is a distinct fact: its event
+			// identity names the re-enable it follows. The first keeps its own.
+			corpora, mutation, err := toggleScope(ctx, tx, org, id, "enabled_position")
+			if err != nil {
 				return monitoring.Subscription{}, err
 			}
-			position, err := appendScopedEvents(ctx, tx, org, "subscription.disabled", "subscription", id, corpora)
+			position, err := appendScopedEvents(ctx, tx, org, "subscription.disabled", "subscription", id, mutation, corpora)
 			if err != nil {
 				return monitoring.Subscription{}, err
 			}
@@ -213,6 +216,81 @@ func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id stri
 		return monitoring.Subscription{}, err
 	}
 	return s.Subscription(ctx, org, id)
+}
+
+// EnableSubscription re-enables a disabled Subscription once, under the
+// journal lock that Match commits and Delivery admission also take. It commits
+// subscription.enabled per pinned Corpus and records its position, after which
+// evaluation resumes (the pause is never backfilled), and it makes the
+// Subscription's parked Delivery work due now: every claim is admitted again
+// through the unchanged canonical checks and delivery window, so refused work
+// (superseded, withdrawn Record) parks again and elapsed work ends exhausted.
+func (s ContentStore) EnableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
+	canonical, err := json.Marshal(map[string]string{"subscription_id": id})
+	if err != nil {
+		return monitoring.Subscription{}, err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return monitoring.Subscription{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return monitoring.Subscription{}, err
+	}
+	existing, err := claimRequest(ctx, tx, org, "subscription_enable", key, canonical, id)
+	if err != nil {
+		return monitoring.Subscription{}, err
+	}
+	if existing == "" {
+		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET enabled=true WHERE organization=$1 AND id=$2 AND NOT enabled", org, id)
+		if err != nil {
+			return monitoring.Subscription{}, err
+		}
+		if changed.RowsAffected() == 1 {
+			// Each re-enable is a distinct fact: its event identity names the
+			// disable it follows.
+			corpora, mutation, err := toggleScope(ctx, tx, org, id, "disabled_position")
+			if err != nil {
+				return monitoring.Subscription{}, err
+			}
+			position, err := appendScopedEvents(ctx, tx, org, "subscription.enabled", "subscription", id, mutation, corpora)
+			if err != nil {
+				return monitoring.Subscription{}, err
+			}
+			if _, err = tx.Exec(ctx, "UPDATE subscriptions SET enabled_position=$3 WHERE organization=$1 AND id=$2", org, id, position); err != nil {
+				return monitoring.Subscription{}, err
+			}
+			// Notices committed during the pause (withdrawals) open their
+			// window now; work parked by the disable keeps its window.
+			if _, err = tx.Exec(ctx, `UPDATE deliveries d SET window_start=now() FROM matches m
+WHERE d.organization=$1 AND d.window_start='infinity' AND (m.organization,m.id)=(d.organization,d.match_id) AND m.subscription_id=$2`, org, id); err != nil {
+				return monitoring.Subscription{}, err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE delivery_outbox o SET available_at=now(),lease_until='-infinity'
+FROM deliveries d JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
+WHERE o.organization=$1 AND o.available_at='infinity' AND (d.organization,d.id)=(o.organization,o.delivery_id) AND m.subscription_id=$2`, org, id); err != nil {
+				return monitoring.Subscription{}, err
+			}
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return monitoring.Subscription{}, err
+	}
+	return s.Subscription(ctx, org, id)
+}
+
+// toggleScope reads the pinned Corpora of a Subscription whose enabled state
+// changes and the event identity of that change: the Subscription ID, suffixed
+// with the position of the previous opposite change (column) when there is one.
+func toggleScope(ctx context.Context, tx pgx.Tx, org, id, column string) ([]string, string, error) {
+	var corpora []string
+	var previous *int64
+	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT array_agg(corpus_id ORDER BY corpus_id) FROM subscription_corpora WHERE organization=$1 AND subscription_id=$2),'{}'),`+column+` FROM subscriptions WHERE organization=$1 AND id=$2`, org, id).Scan(&corpora, &previous)
+	if err != nil || previous == nil {
+		return corpora, id, err
+	}
+	return corpora, fmt.Sprint(id, "@", *previous), nil
 }
 
 // unmarshalNumbers preserves pinned plugin-defined numbers exactly.

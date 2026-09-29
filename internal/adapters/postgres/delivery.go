@@ -72,7 +72,9 @@ func attemptID(org, deliveryID string, number int) string {
 // end (the final one exactly at the edge), so work that became due after the
 // window end can only be parked work made claimable again (for example by a
 // re-enable): it ends exhausted without an attempt, and disabling and
-// re-enabling never extends the window.
+// re-enabling never extends the window. The window starts at the Delivery's
+// creation, except for a notice committed while its Subscription was disabled
+// (a withdrawal), whose window starts at the re-enable (window_start).
 func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
 	org := w.Organization
 	tx, err := s.Pool.Begin(ctx)
@@ -100,7 +102,7 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, win
 	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,n.kind,s.enabled,
   r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
   `+laterNoticesSQL+`,
-  coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>d.created_at+make_interval(secs => $3::double precision),false)
+  coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>coalesce(d.window_start,d.created_at)+make_interval(secs => $3::double precision),false)
 FROM deliveries d
 JOIN matches m ON (m.organization,m.id)=(d.organization,d.match_id)
 JOIN monitoring_notices n ON (n.organization,n.event_id)=(d.organization,d.event_id)
@@ -186,18 +188,19 @@ func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt,
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
-	// The window is judged on the database clock against the Delivery's
-	// creation; every wait, including a receiver's Retry-After, is capped at
+	// The window is judged on the database clock from the Delivery's window
+	// start (its creation, or the re-enable for a notice committed while
+	// disabled); every wait, including a receiver's Retry-After, is capped at
 	// the window end so one final attempt can happen at the edge.
 	var corpusID, state string
 	var next time.Time
 	err = tx.QueryRow(ctx, `UPDATE deliveries d SET
-  state=CASE WHEN $4='acknowledged' THEN 'delivered' WHEN $4='permanent_error' OR now()>=d.created_at+make_interval(secs => $6::double precision) THEN 'exhausted' ELSE 'pending' END,
-  exhausted_reason=CASE WHEN $4='acknowledged' THEN '' WHEN $4='permanent_error' THEN 'permanent_error' WHEN now()>=d.created_at+make_interval(secs => $6::double precision) THEN 'window_elapsed' ELSE '' END,
+  state=CASE WHEN $4='acknowledged' THEN 'delivered' WHEN $4='permanent_error' OR now()>=coalesce(d.window_start,d.created_at)+make_interval(secs => $6::double precision) THEN 'exhausted' ELSE 'pending' END,
+  exhausted_reason=CASE WHEN $4='acknowledged' THEN '' WHEN $4='permanent_error' THEN 'permanent_error' WHEN now()>=coalesce(d.window_start,d.created_at)+make_interval(secs => $6::double precision) THEN 'window_elapsed' ELSE '' END,
   last_outcome=$4
 FROM matches m
 WHERE d.organization=$1 AND d.id=$2 AND d.state='delivering' AND d.attempt_count=$3 AND (m.organization,m.id)=(d.organization,d.match_id)
-RETURNING m.corpus_id,d.state,LEAST(now()+make_interval(secs => $5::double precision),d.created_at+make_interval(secs => $6::double precision))`,
+RETURNING m.corpus_id,d.state,LEAST(now()+make_interval(secs => $5::double precision),coalesce(d.window_start,d.created_at)+make_interval(secs => $6::double precision))`,
 		org, a.DeliveryID, a.Number, o.Outcome, r.Delay.Seconds(), r.Window.Seconds()).Scan(&corpusID, &state, &next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tx.Commit(ctx)
@@ -221,13 +224,15 @@ RETURNING m.corpus_id,d.state,LEAST(now()+make_interval(secs => $5::double preci
 
 // DeliveryBacklog reads the admissible scheduled delivery work: pending or
 // delivering Deliveries whose outbox work is due or waiting for a retry.
-// Parked work (refused admission) is not stuck work and is excluded.
+// Parked work (refused admission) is not stuck work and is excluded, as is a
+// notice committed while its Subscription is disabled whose window has not
+// started (it is parked on its first claim).
 func (s DeliveryStore) DeliveryBacklog(ctx context.Context) (monitoring.DeliveryBacklog, error) {
 	var b monitoring.DeliveryBacklog
 	var age float64
-	err := s.Pool.QueryRow(ctx, `SELECT count(*),coalesce(extract(epoch FROM now()-min(d.created_at)),0)::double precision
+	err := s.Pool.QueryRow(ctx, `SELECT count(*),coalesce(extract(epoch FROM now()-min(coalesce(d.window_start,d.created_at))),0)::double precision
 FROM delivery_outbox o JOIN deliveries d ON (d.organization,d.id)=(o.organization,o.delivery_id)
-WHERE o.available_at<'infinity' AND d.state IN ('pending','delivering')`).Scan(&b.Pending, &age)
+WHERE o.available_at<'infinity' AND d.state IN ('pending','delivering') AND d.window_start IS DISTINCT FROM 'infinity'`).Scan(&b.Pending, &age)
 	b.OldestAge = time.Duration(age * float64(time.Second))
 	return b, err
 }

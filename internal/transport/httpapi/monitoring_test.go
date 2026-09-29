@@ -61,6 +61,13 @@ func (d *definitions) DisableSubscription(_ context.Context, org, key, id string
 	return s, nil
 }
 
+func (d *definitions) EnableSubscription(_ context.Context, org, key, id string) (monitoring.Subscription, error) {
+	s := d.subs[id]
+	s.Enabled = true
+	d.subs[id] = s
+	return s, nil
+}
+
 type allCorpora struct{}
 
 func (allCorpora) Authorize(context.Context, corpus.Scope, []string) error { return nil }
@@ -163,6 +170,11 @@ func TestMonitoringDefinitionsRoundTripPinnedConfiguration(t *testing.T) {
 		t.Fatalf("disabled state not visible: %v", read)
 	}
 	call(t, server, "GET", versionPath, monitorReader, "", 200)
+	enabled, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/enable", monitor, `{"idempotency_key":"e1"}`, 200)
+	if enabled["enabled"] != true || enabled["current_version"].(map[string]any)["version_id"] != current["version_id"] {
+		t.Fatalf("enable keeps the same Version: %v", enabled)
+	}
+	call(t, server, "GET", "/v0/subscriptions/subscription_s1/enable", monitorReader, "", 405)
 }
 
 func TestMonitoringRejectsWithPublicErrors(t *testing.T) {
@@ -187,6 +199,8 @@ func TestMonitoringRejectsWithPublicErrors(t *testing.T) {
 		{"other Organization read", "GET", "/v0/saved-queries/saved_query_q1", monitorOther, "", 404, "not_found"},
 		{"unknown Subscription disable", "POST", "/v0/subscriptions/missing/disable", monitor, `{"idempotency_key":"d"}`, 404, "not_found"},
 		{"disable without key", "POST", "/v0/subscriptions/missing/disable", monitor, `{}`, 422, "invalid_schema"},
+		{"unknown Subscription enable", "POST", "/v0/subscriptions/missing/enable", monitor, `{"idempotency_key":"e"}`, 404, "not_found"},
+		{"read-only enable", "POST", "/v0/subscriptions/missing/enable", monitorReader, `{"idempotency_key":"e"}`, 403, "forbidden"},
 		{"unsupported method", "DELETE", "/v0/saved-queries/saved_query_q1", monitor, "", 405, "method_not_allowed"},
 	}
 	for _, c := range cases {

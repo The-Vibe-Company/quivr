@@ -66,7 +66,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	switch {
 	case len(parts) == 0:
 		method = "POST"
-	case resource == "subscriptions" && len(parts) == 2 && parts[1] == "disable":
+	case resource == "subscriptions" && len(parts) == 2 && (parts[1] == "disable" || parts[1] == "enable"):
 		method = "POST"
 	case len(parts) == 1, len(parts) == 3 && parts[1] == "versions":
 	default:
@@ -110,14 +110,18 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	case len(parts) == 1:
 		s, err := a.Monitoring.Subscription(ctx, scope, parts[0])
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
-	case parts[1] == "disable":
+	case parts[1] == "disable" || parts[1] == "enable":
 		var in struct {
 			Key string `json:"idempotency_key"`
 		}
 		if !a.decodeMonitoring(w, r, a.monitoringSchemas.action, &in) {
 			return true
 		}
-		s, err := a.Monitoring.DisableSubscription(ctx, scope, in.Key, parts[0])
+		toggle := a.Monitoring.DisableSubscription
+		if parts[1] == "enable" {
+			toggle = a.Monitoring.EnableSubscription
+		}
+		s, err := toggle(ctx, scope, in.Key, parts[0])
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	default:
 		v, err := a.Monitoring.SubscriptionVersion(ctx, scope, parts[0], parts[2])

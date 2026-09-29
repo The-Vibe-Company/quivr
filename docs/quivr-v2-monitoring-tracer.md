@@ -38,6 +38,8 @@ requirements of this tracer.
   enabled, and withdrawal eligibility. Disabling the Subscription stops new
   evaluations and new notification attempts, including retries of pending work.
   Already admitted/in-flight requests may finish; history remains available.
+  A withdrawal notice is still committed while disabled and is sent after a
+  re-enable (THE-696).
   A withdrawn Record cannot generate another ordinary content notification;
   a dedicated withdrawal notification has different eligibility.
 - Polling and SSE use the same opaque committed Change Cursor and the
@@ -129,14 +131,16 @@ structured errors, per-route-family idempotency and opaque pagination apply.
 | POST `/v0/subscriptions` | Enable a pinned query/evaluator with one destination, from now |
 | GET `/v0/subscriptions/{id}` and `/versions/{version_id}` | Inspect enabled state and immutable configuration |
 | POST `/v0/subscriptions/{id}/disable` | Stop new evaluation commits and notification admissions |
+| POST `/v0/subscriptions/{id}/enable` | Resume evaluation from now and admission of parked notices |
 | GET `/v0/matches?subscription_id=…` and `/v0/matches/{id}` | Read positive Match history and explanation |
 | GET `/v0/deliveries/{id}` and `/attempts` | Observe notification state and transport outcomes |
 
 The first tracer references a deployment-configured `destination_id`, bound to
 one Organization, URL and signing secret. The local harness configures its one
 receiver there. No secret is accepted or returned through these monitoring
-resources. A destination registry, editing/re-enabling subscriptions and changing
-recipient routes are later product features, not required to prove this flow.
+resources. A destination registry, editing subscriptions and changing recipient
+routes are later product features, not required to prove this flow. Re-enabling a
+disabled Subscription on its same Version is implemented (THE-696).
 
 A Saved Query Version contains Corpus IDs, a plugin-interpreted expression,
 retrieval profile and `from_activation` temporal policy. A Subscription Version
@@ -166,13 +170,13 @@ Current authorization is checked again before exposing explanations or content.
   destination is 422 `unknown_destination`.
 - **Scope:** writes need `monitoring:write`, reads `monitoring:read`. Creating a
   Saved Query or Subscription over any Corpus the key does not grant, or that is
-  not in its Organization, is 403 `forbidden`, as for search. Reads and disable
-  of definitions whose pinned Corpora are not all granted, or from another
+  not in its Organization, is 403 `forbidden`, as for search. Reads, disable and
+  enable of definitions whose pinned Corpora are not all granted, or from another
   Organization, are 404. Only `balanced` is accepted as `retrieval_profile`
   (422 `unsupported_profile`); an unknown Saved Query Version is 422
   `unknown_saved_query`.
 - **Idempotency:** route families are Saved Query creation, Subscription
-  creation and disable. The same key and canonical request return the same
+  creation, disable and enable. The same key and canonical request return the same
   resource in its current state; changed input is 409 `idempotency_conflict`.
   Names are immutable. Replaying Subscription creation after disable returns
   `enabled: false`. Disabling an already disabled Subscription succeeds without
@@ -334,8 +338,10 @@ Current authorization is checked again before exposing explanations or content.
   retry is then refused. A refused Delivery whose window passes stays
   `pending` (disabling fabricates no transport outcome). The window is never
   extended: parked work that becomes claimable after its window end (for
-  example through a future re-enable) ends `exhausted` with reason
-  `window_elapsed` without an attempt. `access_denied` has no producer yet:
+  example through a re-enable) ends `exhausted` with reason
+  `window_elapsed` without an attempt. The one exception is a withdrawal
+  notice committed while its Subscription is disabled, whose window starts at
+  the re-enable (see THE-696 below). `access_denied` has no producer yet:
   there is no Subscription reconfiguration or destination rights revocation.
   `superseded` is described under "Implemented corrections and withdrawal".
 - **Reads:** `GET /v0/deliveries/{id}` adds `next_attempt_at` while the
@@ -377,17 +383,16 @@ Current authorization is checked again before exposing explanations or content.
 - **Withdrawal:** the Content transaction intent is the `record.withdrawn`
   event that Withdraw commits with the Tombstone (once per Record). The
   evaluation dispatch checkpoint also consumes it and records one withdrawal
-  intent (`evaluation_intents.kind = withdrawal`) per enabled Subscription
-  with a Match on the Record, in the same paged, checkpointed transaction. No
+  intent (`evaluation_intents.kind = withdrawal`) per Subscription with a
+  Match on the Record, enabled or not (THE-696), in the same paged, checkpointed transaction. No
   Match commits after the Tombstone, so every relevant Match precedes the
   event. The evaluation workers claim withdrawal intents with the same lease
   and backoff and run no evaluator: under the journal lock they require the
-  Tombstone, an enabled Subscription and the Record's Corpus in its scope
-  (not the positive no-Tombstone guard), then commit `match.withdrawn` for
-  the latest positive Match, with that Match's Version, once. A Subscription
-  disabled after dispatch gets no notice (outcome `subscription_disabled`).
-  Limitation: a Subscription disabled when the withdrawal is dispatched never
-  gets that notice; there is no re-enable. Withdraw itself is unchanged, so
+  Tombstone and the Record's Corpus in the Subscription's scope (not the
+  positive no-Tombstone guard nor the enabled state), then commit
+  `match.withdrawn` for the latest positive Match, with that Match's Version,
+  once. A disabled Subscription's notice is delivered after re-enable; see
+  THE-696 below. Withdraw itself is unchanged, so
   search, matching and ordinary admission stop at once, independently of
   this worker.
 - **Identities:** each notice's `event_id` derives from its type and its
@@ -415,14 +420,51 @@ Current authorization is checked again before exposing explanations or content.
   later kinds exist and `monitoring.AdmissionReason` alone decides which kinds
   they supersede. A superseded Delivery is refused like other refusals: no
   attempt, it stays `pending` with admission `superseded` and its work is
-  parked. Parked work never becomes claimable again, so it stays `pending`
-  rather than `exhausted`, like a disabled Subscription's. An attempt already
+  parked. A re-enable can make it claimable again, but it is refused again
+  before its window is checked, so it stays `pending` rather than
+  `exhausted`. An attempt already
   admitted finishes, and a delivered notice is unaffected.
 - **Negative decisions stay cheap:** a `no_match` for a Record without a Match
   on another Version completes without the journal lock, as before; only a
   possible invalidation takes it. This is safe because a Match on another
   Version commits only while that Version is current, before this Version's
   intent is dispatched.
+
+### Implemented withdrawal notices across disable and re-enable (THE-696)
+
+Withdrawal is the notice whose absence has the highest editorial and legal
+impact: a consumer that paused a Subscription must not keep showing an alert
+for content withdrawn during the pause. So:
+
+- **Commit whatever the enabled state:** the `match.withdrawn` notice, its
+  Delivery, feed event and outbox work are committed for every alerted
+  Subscription, disabled at dispatch or at commit alike. Committing a notice is
+  not an attempt, so "disable stops new notification attempts" still holds.
+  The notice identity is unchanged, so retries, re-dispatch, repeated
+  withdrawals and disable/enable cycles commit it at most once.
+- **No attempt while disabled:** admission refuses it (`subscription_disabled`)
+  like any other notice of a disabled Subscription: it stays `pending`, is
+  parked and appears on the feed and on `GET /v0/deliveries/{id}` with that
+  admission reason.
+- **Re-enable:** `POST /v0/subscriptions/{id}/enable` (`monitoring:write`, its
+  own idempotency family, same visibility as disable) keeps the same
+  Subscription Version. Under the journal lock it sets the Subscription
+  enabled, commits `subscription.enabled` for each pinned Corpus and records
+  its journal position, and makes the Subscription's parked Delivery work
+  claimable again. Enabling an enabled Subscription commits nothing. Every
+  claim is admitted through the usual checks, so a superseded or
+  withdrawn-Record notice parks again. Each disable or enable after the first
+  has its own event identity.
+- **From now:** evaluation resumes after the re-enable's position. A trigger
+  at or before it is neither dispatched nor committed, including intents still
+  retrying from before the pause, so the pause is never backfilled.
+- **Window:** a notice committed while its Subscription is disabled starts its
+  delivery window at its first admissible moment, the re-enable, rather than at
+  its commit. A withdrawal notice is therefore always sent after a re-enable,
+  however long the pause lasted. Every other Delivery keeps THE-656's window
+  from its creation, including one that was admissible and then parked by a
+  disable: after a long pause it ends `exhausted` with `window_elapsed`
+  without an attempt.
 
 ## Evaluation and transactions
 
@@ -446,7 +488,7 @@ restarts. Repeated evaluation work does not change the unique Match identity.
 
 | Boundary | Facts committed together |
 | --- | --- |
-| Subscription creation/disable | Configuration or enabled-state change, activation boundary when created, public event; commits serialize with Match creation and Delivery admission |
+| Subscription creation/disable/enable | Configuration or enabled-state change, activation boundary when created, public event; commits serialize with Match creation and Delivery admission |
 | Positive evaluation | Core eligibility guard, Match or existing Match, logical Delivery, immutable notice/event and outbox work |
 | Ordinary correction no longer matching | Core guard on the current correction and enabled Subscription, recorded negative outcome, notice linked to the prior positive Match, unique Delivery and outbox/event; no new Match |
 | Withdrawal | Content commits Tombstone, fence, Record event and withdrawal-notification intent; a worker idempotently creates the linked notice/Delivery with its event afterward |
@@ -456,8 +498,8 @@ The ordinary update notice references the prior positive Match for this Record
 and pinned Subscription, and uses its pinned destination. This resolves the
 single-destination journey without adding destination-reconfiguration policy.
 Withdrawal notice creation does not run the positive-Match no-Tombstone guard;
-it checks that the Tombstone exists and that the Subscription and recipient scope
-remain eligible. Content suppression never waits for that worker.
+it checks that the Tombstone exists and that the recipient scope remains
+eligible, whether or not the Subscription is enabled (THE-696). Content suppression never waits for that worker.
 
 ## Events
 
@@ -477,7 +519,8 @@ Public feed events also cover committed `corpus.created`,
 `corpus.retrieval_changed`, `receipt.pending`, `receipt.resolved`,
 `record.materialized`, `record.searchable`, `record.corrected`,
 `record.enrichment_available`, `record.withdrawn`, `saved_query.created`,
-`subscription.created`, `subscription.disabled`, `operation.updated` and
+`subscription.created`, `subscription.disabled`, `subscription.enabled`,
+`operation.updated` and
 `delivery.updated` transitions. A replay or duplicate no-op emits no new fact.
 Delivery status events are feed-only; they never trigger another webhook.
 Every catalog mutation retains the Record invalidation required by THE-543;

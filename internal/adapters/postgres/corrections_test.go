@@ -32,11 +32,12 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	var err error
 	// s0: positive correction; s1: negative correction; s2: disabled after
 	// the withdrawal is dispatched; s3: disabled before it is dispatched.
+	// Both disabled ones still get their withdrawal notice (THE-696).
 	subs := make([]monitoring.Subscription, 4)
 	for i := range subs {
 		subs[i] = f.subscribe(fmt.Sprint("s", i))
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store, Page: 2} // three withdrawal candidates span two pages
+	evaluation := postgres.EvaluationStore{ContentStore: store, Page: 3} // four withdrawal candidates span two pages
 	intent := func(i int, recordID, versionID string) monitoring.Intent {
 		return f.intent(subs[i], recordID, versionID)
 	}
@@ -203,19 +204,21 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 		return out
 	}
 	intents := withdrawals()
-	if len(intents) != 3 || intents[subs[3].ID].SubscriptionID != "" || intents[subs[0].ID].VersionID != v2 || intents[subs[1].ID].VersionID != v1 || intents[subs[0].ID].RecordID != record {
+	if len(intents) != 4 || intents[subs[3].ID].SubscriptionID != subs[3].ID || intents[subs[0].ID].VersionID != v2 || intents[subs[1].ID].VersionID != v1 || intents[subs[0].ID].RecordID != record {
 		t.Fatalf("withdrawal intents %+v", intents)
 	}
-	// s2 is disabled after dispatch: the worker recheck creates no notice.
+	// s2 is disabled after dispatch: its notice is committed all the same.
 	if _, err = service.DisableSubscription(ctx, scope, "disable-s2", subs[2].ID); err != nil {
 		t.Fatal(err)
 	}
-	commit(monitoring.OutcomeSubscriptionDisabled, func() (string, error) { return evaluation.CommitWithdrawal(ctx, intents[subs[2].ID]) })
+	for _, i := range []int{2, 3} {
+		commit(monitoring.OutcomeWithdrawalNotified, func() (string, error) { return evaluation.CommitWithdrawal(ctx, intents[subs[i].ID]) })
+	}
 	for _, want := range []string{monitoring.OutcomeWithdrawalNotified, monitoring.OutcomeDuplicate} {
 		commit(want, func() (string, error) { return evaluation.CommitWithdrawal(ctx, intents[subs[0].ID]) })
 	}
 	commit(monitoring.OutcomeWithdrawalNotified, func() (string, error) { return evaluation.CommitWithdrawal(ctx, intents[subs[1].ID]) })
-	if n := count(`SELECT count(*) FROM monitoring_notices WHERE organization=$1 AND kind='match.withdrawn'`, org); n != 2 {
+	if n := count(`SELECT count(*) FROM monitoring_notices WHERE organization=$1 AND kind='match.withdrawn'`, org); n != 4 {
 		t.Fatalf("withdrawal notices: %d", n)
 	}
 	// The withdrawal notice references the latest positive Match and its Version.
@@ -245,7 +248,8 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 		}
 	}
 	created2, _ := noticeOf(matchOf(2, v1), monitoring.NoticeCreated)
-	if admitted[withdrawn.ID] != "" || admitted[superseded.ID] != "record_withdrawn" || admitted[created2.ID] != "subscription_disabled" {
+	withdrawn2, _ := noticeOf(matchOf(2, v1), monitoring.NoticeWithdrawn)
+	if admitted[withdrawn.ID] != "" || admitted[superseded.ID] != "record_withdrawn" || admitted[created2.ID] != "subscription_disabled" || admitted[withdrawn2.ID] != "subscription_disabled" {
 		t.Fatalf("admission after withdrawal %v", admitted)
 	}
 	// A repeated withdrawal emits no second record.withdrawn and no new intent.
@@ -253,7 +257,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 		t.Fatal(err)
 	}
 	drain()
-	if len(withdrawals()) != 3 {
+	if len(withdrawals()) != 4 {
 		t.Fatal("repeated withdrawal dispatched new work")
 	}
 }

@@ -53,6 +53,13 @@ func (m *memoryStore) DisableSubscription(_ context.Context, org, key, id string
 	return s, nil
 }
 
+func (m *memoryStore) EnableSubscription(_ context.Context, org, key, id string) (monitoring.Subscription, error) {
+	s := m.subscriptions[org+"/"+id]
+	s.Enabled = true
+	m.subscriptions[org+"/"+id] = s
+	return s, nil
+}
+
 type corpora map[string]bool
 
 func (c corpora) Authorize(_ context.Context, _ corpus.Scope, ids []string) error {
@@ -234,5 +241,17 @@ func TestDisableConcealsOutsideScope(t *testing.T) {
 	}
 	if v, err := s.SubscriptionVersion(ctx, writer, sub.ID, sub.Current.VersionID); err != nil || v.Evaluator.PluginID != "quivr.fixture" {
 		t.Fatalf("pinned version survives disable: %v %+v", err, v)
+	}
+	// Re-enable has the same visibility and permission rules.
+	for name, scope := range map[string]corpus.Scope{"partial Corpus grant": narrow, "other Organization": outside} {
+		if _, err = s.EnableSubscription(ctx, scope, "e", sub.ID); !errors.Is(err, monitoring.ErrNotFound) {
+			t.Errorf("%s enable: %v", name, err)
+		}
+	}
+	if _, err = s.EnableSubscription(ctx, reader, "e", sub.ID); !errors.Is(err, monitoring.ErrForbidden) {
+		t.Errorf("read-only enable: %v", err)
+	}
+	if got, err = s.EnableSubscription(ctx, writer, "e", sub.ID); err != nil || !got.Enabled || got.Current.VersionID != sub.Current.VersionID {
+		t.Fatalf("enable: %v %+v", err, got)
 	}
 }

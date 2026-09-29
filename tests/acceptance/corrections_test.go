@@ -193,23 +193,20 @@ func TestMonitoringCorrectionNotices(t *testing.T) {
 }
 
 // TestMonitoringWithdrawalNotices withdraws an alerted Record: suppression is
-// immediate; the enabled Subscription receives a linked match.withdrawn notice
-// after one retried failure, with identical bytes; a Subscription disabled
-// before the withdrawal receives none; the Match stays inspectable.
+// immediate; the Subscription receives a linked match.withdrawn notice after
+// one retried failure, with identical bytes; the Match stays inspectable. A
+// Subscription disabled at the withdrawal is covered by
+// TestMonitoringWithdrawalNoticeAfterReenable.
 func TestMonitoringWithdrawalNotices(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	receiver := startReceiver(t)
-	s := newNoticeScenario(t, "withdrawal", "Dépêche retirée "+markerCorrectionMatch,
-		map[string]any{"default": "match"}, map[string]any{"default": "match"})
-	alerted, disabled := s.subscriptions[0], s.subscriptions[1]
+	s := newNoticeScenario(t, "withdrawal", "Dépêche retirée "+markerCorrectionMatch, map[string]any{"default": "match"})
+	alerted := s.subscriptions[0]
 	receiver.scriptType(alerted, "match.withdrawn", reply{status: 503}, reply{status: 204})
-	for _, sub := range s.subscriptions {
-		deliveredAsPolled(t, receiver, s.created[sub])
-	}
-	request(t, "POST", "/v0/subscriptions/"+disabled+"/disable", admin, map[string]any{"idempotency_key": "withdrawal-disable-" + disabled}, 200)
+	deliveredAsPolled(t, receiver, s.created[alerted])
 
 	// Search after enrichment so the Version is observed in its final projected
 	// shape (lexical anchor plus enriched object, THE-690).
@@ -238,15 +235,72 @@ func TestMonitoringWithdrawalNotices(t *testing.T) {
 	if got := attemptOutcomes(t, refs["delivery_id"].(string)); !reflect.DeepEqual(got, []string{"retryable_error", "acknowledged"}) {
 		t.Fatal("withdrawal notice attempts", got)
 	}
-	// Both Subscriptions' withdrawal work comes from the same dispatch step:
-	// the disabled one received nothing.
-	for _, e := range s.awaitNotices(t, nil)["match.withdrawn"] {
-		if refsOf(e)["subscription_id"] == disabled {
-			t.Fatal("disabled Subscription notified", e)
-		}
-	}
 	if m := request(t, "GET", "/v0/matches/"+match["match_id"].(string), admin, nil, 200); m["record_version_id"] != match["record_version_id"] {
 		t.Fatal("withdrawn Record's Match must stay inspectable", m)
+	}
+}
+
+// TestMonitoringWithdrawalNoticeAfterReenable proves THE-696's policy: a
+// Subscription disabled when its alerted Record is withdrawn still gets the
+// linked match.withdrawn notice and Delivery. No attempt is made while it is
+// disabled, even for longer than the delivery window. The re-enable (on the
+// change feed) opens the notice's window, and the notice is delivered with the
+// polled bytes. The Match history is unchanged.
+func TestMonitoringWithdrawalNoticeAfterReenable(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	receiver := startReceiver(t)
+	s := newNoticeScenario(t, "reenable", "Dépêche en pause "+markerCorrectionMatch, map[string]any{"default": "match"})
+	sub := s.subscriptions[0]
+	deliveredAsPolled(t, receiver, s.created[sub])
+	match := refsOf(s.created[sub])
+	if disabled := request(t, "POST", "/v0/subscriptions/"+sub+"/disable", admin, map[string]any{"idempotency_key": "reenable-disable-" + sub}, 200); disabled["enabled"] != false {
+		t.Fatal("disable", disabled)
+	}
+	accepted := request(t, "POST", "/v0/records/withdrawals", admin, withdrawalCommand(s.corpus, s.recordKey+"-withdraw", "example-feed", s.recordKey, "source retraction"), 202)
+	if resolved := awaitReceipt(t, accepted["receipt_id"].(string)); resolved["outcome"] != "withdrawal_applied" {
+		t.Fatal(resolved)
+	}
+
+	// The notice is committed and polled while the Subscription is disabled.
+	notice := s.awaitNotices(t, map[string]int{"match.withdrawn": 1})["match.withdrawn"][0]
+	refs := refsOf(notice)
+	if refs["subscription_id"] != sub || refs["match_id"] != match["match_id"] || refs["record_version_id"] != match["record_version_id"] || refs["record_id"] != s.record {
+		t.Fatal("match.withdrawn references", notice)
+	}
+	deliveryID := refs["delivery_id"].(string)
+	// No attempt while disabled, for longer than the delivery window.
+	for paused := time.Now().Add(shortWindow + 5*time.Second); time.Now().Before(paused); time.Sleep(5 * time.Second) {
+		d := request(t, "GET", "/v0/deliveries/"+deliveryID, admin, nil, 200)
+		admission := d["admission"].(map[string]any)
+		if d["state"] != "pending" || d["attempt_count"] != float64(0) || admission["allowed"] != false || admission["reason"] != "subscription_disabled" {
+			t.Fatal("withdrawal notice while disabled", d)
+		}
+		if n := len(receiver.capturesOf(notice["event_id"].(string))); n != 0 || len(attemptOutcomes(t, deliveryID)) != 0 {
+			t.Fatal("withdrawal notice attempted while disabled", n)
+		}
+	}
+
+	// Re-enable: announced on the feed, then the notice is delivered once.
+	if enabled := request(t, "POST", "/v0/subscriptions/"+sub+"/enable", admin, map[string]any{"idempotency_key": "reenable-enable-" + sub}, 200); enabled["enabled"] != true {
+		t.Fatal("enable", enabled)
+	}
+	if feed, _ := drain(t, admin, s.corpus, s.cursor, 0); eventPosition(feed, "subscription.enabled", sub) < eventPosition(feed, "match.withdrawn", match["match_id"].(string)) {
+		t.Fatal("subscription.enabled must follow the committed notice on the feed", feed)
+	}
+	deliveredAsPolled(t, receiver, notice)
+	if got := attemptOutcomes(t, deliveryID); !reflect.DeepEqual(got, []string{"acknowledged"}) {
+		t.Fatal("withdrawal notice attempts after re-enable", got)
+	}
+	if n := len(receiver.capturesOf(notice["event_id"].(string))); n != 1 {
+		t.Fatal("withdrawal notice captures", n)
+	}
+	// The Match history is unchanged: the notice references the only Match.
+	history := request(t, "GET", matchesPath(sub, "", 0), admin, nil, 200)["items"].([]any)
+	if len(history) != 1 || history[0].(map[string]any)["match_id"] != match["match_id"] || history[0].(map[string]any)["record_version_id"] != match["record_version_id"] {
+		t.Fatal("Match history after re-enable", history)
 	}
 }
 

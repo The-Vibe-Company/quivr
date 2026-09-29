@@ -1533,6 +1533,9 @@ type CreateSubscriptionJSONRequestBody = SubscriptionCreate
 // DisableSubscriptionJSONRequestBody defines body for DisableSubscription for application/json ContentType.
 type DisableSubscriptionJSONRequestBody = ActionRequest
 
+// EnableSubscriptionJSONRequestBody defines body for EnableSubscription for application/json ContentType.
+type EnableSubscriptionJSONRequestBody = ActionRequest
+
 // CreateUploadJSONRequestBody defines body for CreateUpload for application/json ContentType.
 type CreateUploadJSONRequestBody = UploadRequest
 
@@ -1845,6 +1848,9 @@ type ServerInterface interface {
 
 	// (POST /v0/subscriptions/{subscription_id}/disable)
 	DisableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
+
+	// (POST /v0/subscriptions/{subscription_id}/enable)
+	EnableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
 
 	// (GET /v0/subscriptions/{subscription_id}/versions/{version_id})
 	GetSubscriptionVersion(w http.ResponseWriter, r *http.Request, subscriptionId string, versionId string)
@@ -2936,6 +2942,32 @@ func (siw *ServerInterfaceWrapper) DisableSubscription(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// EnableSubscription operation middleware
+func (siw *ServerInterfaceWrapper) EnableSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscription_id" -------------
+	var subscriptionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnableSubscription(w, r, subscriptionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSubscriptionVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetSubscriptionVersion(w http.ResponseWriter, r *http.Request) {
 
@@ -3184,6 +3216,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}", wrapper.GetSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/versions/{version_id}", wrapper.GetSubscriptionVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/disable", wrapper.DisableSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/enable", wrapper.EnableSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches", wrapper.ListMatches)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches/{match_id}", wrapper.GetMatch)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}", wrapper.GetDelivery)
@@ -4654,6 +4687,46 @@ func (response DisableSubscriptiondefaultJSONResponse) VisitDisableSubscriptionR
 	return err
 }
 
+type EnableSubscriptionRequestObject struct {
+	SubscriptionId string `json:"subscription_id"`
+	Body           *EnableSubscriptionJSONRequestBody
+}
+
+type EnableSubscriptionResponseObject interface {
+	VisitEnableSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type EnableSubscription200JSONResponse Subscription
+
+func (response EnableSubscription200JSONResponse) VisitEnableSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableSubscriptiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response EnableSubscriptiondefaultJSONResponse) VisitEnableSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSubscriptionVersionRequestObject struct {
 	SubscriptionId string `json:"subscription_id"`
 	VersionId      string `json:"version_id"`
@@ -4921,6 +4994,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/subscriptions/{subscription_id}/disable)
 	DisableSubscription(ctx context.Context, request DisableSubscriptionRequestObject) (DisableSubscriptionResponseObject, error)
+
+	// (POST /v0/subscriptions/{subscription_id}/enable)
+	EnableSubscription(ctx context.Context, request EnableSubscriptionRequestObject) (EnableSubscriptionResponseObject, error)
 
 	// (GET /v0/subscriptions/{subscription_id}/versions/{version_id})
 	GetSubscriptionVersion(ctx context.Context, request GetSubscriptionVersionRequestObject) (GetSubscriptionVersionResponseObject, error)
@@ -6000,6 +6076,39 @@ func (sh *strictHandler) DisableSubscription(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DisableSubscriptionResponseObject); ok {
 		if err := validResponse.VisitDisableSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnableSubscription operation middleware
+func (sh *strictHandler) EnableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string) {
+	var request EnableSubscriptionRequestObject
+
+	request.SubscriptionId = subscriptionId
+
+	var body EnableSubscriptionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnableSubscription(ctx, request.(EnableSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnableSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnableSubscriptionResponseObject); ok {
+		if err := validResponse.VisitEnableSubscriptionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
