@@ -51,6 +51,7 @@ internal/plugins/manifest.go
   s_54b80c92daa9cb::t_cfcfdf6b9612c7 600-605
   s_54b80c92daa9cb::t_d1ee7068fd54aa 22,35-39,67-72,163-174,366-373,595,606-614,618-628
   s_54b80c92daa9cb::t_24705e28c1ca80 629
+  s_54b80c92daa9cb::t_ca01c73be2946d 28
 internal/plugins/connector.go
   s_54b80c92daa9cb::t_68973db617223e 43-48,51-71
   s_54b80c92daa9cb::t_8e1ca63fd16e8b 279-326
@@ -84,6 +85,7 @@ internal/adapters/pluginhttp/connector_test.go
   s_54b80c92daa9cb::t_35b3278f6bb45e 84-87,89-92,95
   s_54b80c92daa9cb::t_db6174fb46f6ca 248,281-371
   s_54b80c92daa9cb::t_7a35a2758ec1cc 12,99,101
+  s_54b80c92daa9cb::t_6287049ad842e9 100,280
 internal/plugins/devhost/connector.go
   s_54b80c92daa9cb::t_bd86cc66bc3b6e 224-280
 internal/adapters/postgres/connectors_test.go
@@ -108,6 +110,7 @@ contracts/plugins/v0/fixtures/responses/connector/attachments.json
 internal/uploads/uploads.go
   s_54b80c92daa9cb::t_add32a47195da3 134-155
   s_54b80c92daa9cb::t_08bf0dd35e499a 87
+  s_54b80c92daa9cb::t_6287049ad842e9 88
 ---
 {
   "schema_version": "authorship/3.0.0",
