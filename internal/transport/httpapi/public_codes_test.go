@@ -37,9 +37,10 @@ func written(t *testing.T, write func(*httptest.ResponseRecorder)) (int, string)
 // Adding detail to a domain error must never change its public code.
 func TestContentFailureCodesIgnoreDetail(t *testing.T) {
 	for sentinel, want := range map[error]string{
-		content.ErrInvalid:     "invalid_input",
-		content.ErrUnsupported: "unsupported_content",
-		content.ErrConflict:    "idempotency_conflict",
+		content.ErrInvalid:        "invalid_input",
+		content.ErrUnsupported:    "unsupported_content",
+		content.ErrConflict:       "idempotency_conflict",
+		content.ErrExtensionOwned: "extension_namespace_owned",
 		&content.ManifestViolation{Kind: content.ErrInvalid, Detail: `duplicate Part key "a"`}: "invalid_input",
 	} {
 		for style, err := range detailed(sentinel) {

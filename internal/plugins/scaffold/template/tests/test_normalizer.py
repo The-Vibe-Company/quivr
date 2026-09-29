@@ -6,7 +6,7 @@ from pathlib import Path
 
 from quivr_plugin.testing import expect_response, invoke_fixture
 
-from __PLUGIN_MODULE__.normalizer import plugin, split_markdown
+from __PLUGIN_MODULE__.normalizer import OUTLINE, outline, plugin, split_markdown
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -31,6 +31,15 @@ class SplitMarkdown(unittest.TestCase):
         self.assertEqual(sections, ["Preface.", "# Heading\n\nBody."])
 
 
+class Outline(unittest.TestCase):
+    def test_counts_headings_and_levels_outside_code(self):
+        text = "# Report\n\n## One\n\n```\n# not a heading\n```\n\n### Detail\n\n## Two\n"
+        self.assertEqual(outline(text), {"heading_count": 4, "heading_levels": ["h1", "h2", "h3"]})
+
+    def test_no_headings(self):
+        self.assertEqual(outline("Just text.\n"), {"heading_count": 0, "heading_levels": []})
+
+
 class Normalizer(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -53,6 +62,9 @@ class Normalizer(unittest.TestCase):
         self.assertEqual(parts[0].content.text, "Quarterly field report")
         self.assertEqual([p.role for p in parts[1:]], ["body", "body", "body"])
         self.assertIsNone(response.warnings)
+        entry = response.extensions[OUTLINE]
+        self.assertEqual(entry.schema_version, "1")
+        self.assertEqual(entry.data, {"heading_count": 3, "heading_levels": ["h1", "h2"]})
 
     def test_sections_beyond_the_limit_are_merged(self):
         text = "\n".join(f"## Section {i}\n\nText {i}.\n" for i in range(5))

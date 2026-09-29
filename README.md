@@ -166,6 +166,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   becomes searchable through the plugin's Parts, and its Version shows
   `provenance.normalization`. This covers the successful path only; failure handling
   comes next ([walkthrough](docs/api-walkthrough.md#external-normalizers)).
+- **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
+  registered at startup beside the built-in ones. Its normalizer's extensions are
+  validated against their schemas and published on the Version, clients cannot write
+  them (`422 extension_namespace_owned`), and retrieval mappings can map them into search.
 - **Python Plugin SDK** (`sdks/python/`) with `quivr plugin init`, which scaffolds a
   Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
   discovery digest and replays a fixture through the engine's Manifest validation,
@@ -183,7 +187,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - Plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The rest of the plugin platform: plugin-owned extension namespaces, retry,
+- The rest of the plugin platform: retry,
   quarantine and optional fallback for normalizer failures, and a PDF to text
   reference normalizer.
 

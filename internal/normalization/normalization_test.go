@@ -37,6 +37,14 @@ configuration:
     type: object
     properties:
       max_sections: {type: integer}
+extensions:
+  acme.markdown.outline:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [heading_count]
+      properties:
+        heading_count: {type: integer, minimum: 0}
 `
 
 var input = []byte("# Title\n\nBody")
@@ -229,6 +237,32 @@ func TestNormalizeRecordsTheValidatedOutputOnce(t *testing.T) {
 	}
 }
 
+func outline(version string, count any) map[string]any {
+	return map[string]any{"acme.markdown.outline": map[string]any{"schema_version": version, "data": map[string]any{"heading_count": count}}}
+}
+
+// Extensions in the plugin's declared namespaces are validated and recorded:
+// top-level ones beside the Manifest, Part ones inside it.
+func TestNormalizerExtensionsAreRecorded(t *testing.T) {
+	f := setup(t, func(int) (int, any) {
+		r := textParts("Title", "Body")
+		r["extensions"] = outline("1", 2)
+		r["manifest"].(map[string]any)["parts"].([]any)[1].(map[string]any)["extensions"] = outline("1", 1)
+		return 200, r
+	})
+	if err := f.service.Normalize(context.Background(), "org_a", "receipt_1"); err != nil {
+		t.Fatal(err)
+	}
+	stored := f.store.saved["version_1"]
+	if ext, ok := stored.Extensions["acme.markdown.outline"]; !ok || ext.SchemaVersion != "1" || ext.Data["heading_count"] != float64(2) {
+		t.Fatalf("recorded extensions %+v", stored.Extensions)
+	}
+	var m content.Manifest
+	if err := json.Unmarshal(f.blobs.objects[stored.Manifest.Key], &m); err != nil || m.Parts[1].Extensions["acme.markdown.outline"].Data["heading_count"] != float64(1) {
+		t.Fatalf("Part extensions not kept in the Manifest: %+v %v", m, err)
+	}
+}
+
 func TestConcurrentRunsConvergeOnOneOutput(t *testing.T) {
 	f := setup(t, func(int) (int, any) { return 200, textParts("Title", "Body") })
 	var wg sync.WaitGroup
@@ -284,6 +318,13 @@ func (c *conflictStore) Normalized(context.Context, string, string) (content.Nor
 	return content.Normalized{}, false, nil
 }
 
+var issueCodes = map[string]string{
+	"undeclared namespace":          plugins.CodeUndeclaredNamespace,
+	"undeclared schema version":     plugins.CodeUndeclaredSchemaVersion,
+	"schema-invalid extension":      plugins.CodeInvalidExtension,
+	"schema-invalid Part extension": plugins.CodeInvalidExtension,
+}
+
 func TestNormalizationFailuresAreClassified(t *testing.T) {
 	for name, tc := range map[string]struct {
 		answer   func(int) (int, any)
@@ -305,9 +346,24 @@ func TestNormalizationFailuresAreClassified(t *testing.T) {
 			return 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{map[string]any{"key": "b", "role": "source", "content": map[string]any{"kind": "blob", "blob_id": "blob_other", "media_type": "text/markdown"}}}}}
 		}, "", "normalizer_invalid_output"},
 		"too many parts": {func(int) (int, any) { return 200, textParts("a", "b", "c", "d", "e") }, "", "normalizer_invalid_output"},
-		"version extensions": {func(int) (int, any) {
+		"undeclared namespace": {func(int) (int, any) {
 			r := textParts("a")
 			r["extensions"] = map[string]any{"acme.markdown": map[string]any{"schema_version": "1", "data": map[string]any{}}}
+			return 200, r
+		}, "", "normalizer_invalid_output"},
+		"undeclared schema version": {func(int) (int, any) {
+			r := textParts("a")
+			r["extensions"] = outline("2", 1)
+			return 200, r
+		}, "", "normalizer_invalid_output"},
+		"schema-invalid extension": {func(int) (int, any) {
+			r := textParts("a")
+			r["extensions"] = outline("1", "many")
+			return 200, r
+		}, "", "normalizer_invalid_output"},
+		"schema-invalid Part extension": {func(int) (int, any) {
+			r := textParts("a")
+			r["manifest"].(map[string]any)["parts"].([]any)[0].(map[string]any)["extensions"] = outline("1", -1)
 			return 200, r
 		}, "", "normalizer_invalid_output"},
 		"oversized response": {func(int) (int, any) { return 200, textParts(strings.Repeat("x", normalization.MaxManifestBytes+10)) }, "", "normalizer_invalid_output"},
@@ -331,6 +387,13 @@ func TestNormalizationFailuresAreClassified(t *testing.T) {
 			}
 			if len(f.store.saved) != 0 {
 				t.Fatal("a failed invocation recorded output")
+			}
+			// Invalid extensions keep their structured issue for the diagnostic.
+			if want := issueCodes[name]; want != "" {
+				var invalid *pluginhttp.InvalidOutput
+				if !errors.As(err, &invalid) || len(invalid.Issues) == 0 || invalid.Issues[0].Code != want {
+					t.Fatalf("got %v, want the structured issue %s", err, want)
+				}
 			}
 		})
 	}

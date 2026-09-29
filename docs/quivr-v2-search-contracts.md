@@ -260,6 +260,12 @@ that is not logical (`^[a-z][a-z0-9_]{0,63}$`, so engine names such as
 non-text type, or duplicate names and roles; `unsupported_profile` for an
 uninstalled `plugin_profile`. Corpus creation applies the same validation.
 
+Declared namespaces are the built-in ones plus those owned by the pinned
+plugin (THE-684). A pointer such as
+`/extensions/{plugin id}.outline/data/heading_levels` therefore addresses data
+the plugin's normalizer published on the Version. The rebuild reads it from the
+stored Version, like any other source field, and never calls the plugin.
+
 - The configuration is resolved first: a pinned profile's default fields, then
   explicit fields overriding them by logical name. The only built-in profile,
   `example.editorial`, is an illustrative profile paired with the example

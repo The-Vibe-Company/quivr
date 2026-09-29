@@ -131,7 +131,18 @@ An installation can pin one external plugin in its startup configuration
 - **Output checks.** The output goes through the same validation as a
   `kind: "manifest"` submission, plus the declared `max_parts`. The stored Manifest
   must fit in 2 MiB, like any canonical object. Blob Parts may
-  reference only the input Blob, and extensions are refused for now.
+  reference only the input Blob. Extensions, top-level and on Parts, must use a
+  namespace and schema version the plugin declares, with valid data
+  (`undeclared_namespace`, `undeclared_schema_version`, `invalid_extension`);
+  otherwise nothing is recorded and the Receipt is blocked with
+  `normalizer_invalid_output`.
+- **Plugin-owned namespaces.** At startup the pinned plugin's declared namespaces are
+  registered beside the built-in ones; a namespace not prefixed by the plugin id or
+  clashing with a built-in one refuses startup. Valid top-level extensions are
+  published on the Version beside the submitted ones (Part extensions stay in the
+  Manifest), and retrieval mappings may point at `/extensions/{namespace}/...`. A
+  client submission, single or batch, that writes a plugin-owned namespace returns
+  `422 extension_namespace_owned`.
 - **Publication.** The validated Manifest is stored once per Version, so re-running
   the step converges on it. It is then published and searchable like any Manifest.
   Rebuilds and retrieval generations read the stored Manifest and never call the

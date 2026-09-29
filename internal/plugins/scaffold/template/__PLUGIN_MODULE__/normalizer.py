@@ -4,13 +4,20 @@ The first level-1 heading, when nothing precedes it, becomes the ``title``
 Part. Every heading then starts a ``body`` Part keyed ``section-<n>`` that
 holds the heading and its text; Quivr indexes ``title`` and ``body`` text
 Parts. Headings inside fenced code blocks are ignored.
+
+The response also carries the document outline in the plugin's own extension
+namespace ``<plugin id>.outline`` (declared in ``quivr-plugin.yaml``): the
+heading count and the heading levels used. Quivr validates it against the
+declared schema and publishes it on the Version.
 """
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from quivr_plugin import (
+    ExtensionEntry,
     Invocation,
     ManifestContent,
     NormalizerResponse,
@@ -29,21 +36,12 @@ HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 plugin = Plugin(MANIFEST)
+OUTLINE = f"{plugin.manifest.model.id}.outline"
 
 
-def split_markdown(text: str) -> tuple[str | None, list[str]]:
-    """Return the document title (or None) and the non-empty section texts."""
-    title: str | None = None
-    sections: list[str] = []
-    current: list[str] = []
+def lines(text: str) -> Iterator[tuple[str, re.Match[str] | None]]:
+    """Yield each line with its heading match; lines in fenced code are never headings."""
     fence: str | None = None
-
-    def flush() -> None:
-        body = "\n".join(current).strip()
-        if body:
-            sections.append(body)
-        current.clear()
-
     for line in text.splitlines():
         marker = FENCE.match(line)
         if marker:
@@ -51,9 +49,24 @@ def split_markdown(text: str) -> tuple[str | None, list[str]]:
                 fence = marker.group(1)
             elif marker.group(1).startswith(fence[0] * len(fence)):
                 fence = None
-            current.append(line)
+            yield line, None
             continue
-        heading = None if fence else HEADING.match(line)
+        yield line, None if fence else HEADING.match(line)
+
+
+def split_markdown(text: str) -> tuple[str | None, list[str]]:
+    """Return the document title (or None) and the non-empty section texts."""
+    title: str | None = None
+    sections: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        body = "\n".join(current).strip()
+        if body:
+            sections.append(body)
+        current.clear()
+
+    for line, heading in lines(text):
         if heading and len(heading.group(1)) == 1 and title is None and not sections and not "".join(current).strip():
             title = heading.group(2).strip() or None
             current.clear()
@@ -63,6 +76,12 @@ def split_markdown(text: str) -> tuple[str | None, list[str]]:
         current.append(line)
     flush()
     return title, sections
+
+
+def outline(text: str) -> dict[str, object]:
+    """Return the heading count and the heading levels used, in document order."""
+    levels = [f"h{len(heading.group(1))}" for _, heading in lines(text) if heading]
+    return {"heading_count": len(levels), "heading_levels": list(dict.fromkeys(levels))}
 
 
 @plugin.normalizer
@@ -87,4 +106,8 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     for number, section in enumerate(sections, start=1):
         parts.append(Part(key=f"section-{number}", role="body", content=TextContent(text=section)))
     invocation.logger.info("normalized", extra={"parts": len(parts)})
-    return NormalizerResponse(manifest=ManifestContent(parts=parts), warnings=warnings or None)
+    return NormalizerResponse(
+        manifest=ManifestContent(parts=parts),
+        extensions={OUTLINE: ExtensionEntry(schema_version="1", data=outline(text))},
+        warnings=warnings or None,
+    )

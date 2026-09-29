@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,6 +136,69 @@ func TestNormalizerMakesRoutedBlobsSearchable(t *testing.T) {
 	state, _ := json.Marshal(normalizerState{Corpus: corpusID, Record: ready["record_id"].(string), Version: ready["version_id"].(string), Invocation: invocation, PartKey: partKey})
 	if err := os.WriteFile(normalizerStatePath(), state, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestNormalizerExtensionsFeedRetrievalMappings ingests a routed Blob whose
+// pinned normalizer returns an outline in the plugin's own extension
+// namespace: the Version publishes it, a retrieval mapping projects it into
+// search once activated, and clients cannot write that namespace.
+func TestNormalizerExtensionsFeedRetrievalMappings(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := time.Now().UTC().Format("20060102T150405.000000")
+	corpusID := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Normalizer extensions", "idempotency_key": "normalizer-extensions-" + run}, 201)["corpus_id"].(string)
+	// Distinct bytes: the same upload request would replay the earlier, already
+	// verified Upload Session, which offers no transfer.
+	blobID := uploadBlob(t, admin, []byte(normalizerMarkdown+"\nLogged on run "+run+".\n"), "text/markdown")
+	accepted := request(t, "POST", "/v0/records", admin, map[string]any{
+		"idempotency_key": "normalizer-extensions-" + run,
+		"source":          map[string]any{"corpus_id": corpusID, "namespace": "guides", "record_key": "harbour"},
+		"content":         map[string]any{"kind": "blob", "blob_id": blobID, "media_type": "text/markdown"},
+	}, 202)
+	ready := awaitRetrievalReady(t, accepted["receipt_id"].(string))
+	version := request(t, "GET", "/v0/records/"+ready["record_id"].(string)+"/versions/"+ready["version_id"].(string), admin, nil, 200)
+	plugin, _ := version["provenance"].(map[string]any)["normalization"].(map[string]any)["plugin_id"].(string)
+	namespace := plugin + ".outline"
+	outline, _ := version["extensions"].(map[string]any)[namespace].(map[string]any)
+	data, _ := outline["data"].(map[string]any)
+	if plugin == "" || outline["schema_version"] != "1" || data["heading_count"] != float64(2) || fmt.Sprint(data["heading_levels"]) != "[h1 h2]" {
+		t.Fatalf("plugin extension not published on the Version: %v", version["extensions"])
+	}
+
+	// "h2" appears only in the plugin's outline, never in the canonical text.
+	if hits := lexicalHits(t, []string{corpusID}, "h2"); len(hits) != 0 {
+		t.Fatalf("unmapped plugin extension was searchable: %v", hits)
+	}
+	mapping := map[string]any{"fields": []any{map[string]any{"name": "heading_levels", "source_pointer": "/extensions/" + namespace + "/data/heading_levels", "type": "string_array", "roles": []string{"search"}}}}
+	op := request(t, "PUT", "/v0/corpora/"+corpusID+"/retrieval", admin, map[string]any{"idempotency_key": "outline-" + run, "retrieval": mapping}, 202)
+	if done := awaitOperation(t, "/v0/operations/"+op["operation_id"].(string)); done["state"] != "succeeded" {
+		t.Fatalf("configuration outcome %v", done)
+	}
+	if hits := lexicalHits(t, []string{corpusID}, "h2"); len(hits) != 1 || hits[ready["version_id"].(string)] == nil {
+		t.Fatalf("mapped plugin extension not searchable: %v", hits)
+	}
+
+	// Clients cannot write the plugin-owned namespace, single or batch; a
+	// built-in namespace still works.
+	write := func(key, ns string, data map[string]any) map[string]any {
+		c := inlineCommand(corpusID, key+"-"+run, key, "Forged outline")
+		c["extensions"] = map[string]any{ns: map[string]any{"schema_version": "1", "data": data}}
+		return c
+	}
+	forged := write("forged", namespace, map[string]any{"heading_count": 9, "heading_levels": []string{"h1"}})
+	if rejected := request(t, "POST", "/v0/records", admin, forged, 422); rejected["code"] != "extension_namespace_owned" {
+		t.Fatalf("client write to a plugin namespace: %v", rejected)
+	}
+	batch := request(t, "POST", "/v0/records/batch", admin, map[string]any{"items": []any{forged, write("builtin", "example.editorial", map[string]any{"headline": "Allowed"})}}, 200)
+	items := batch["items"].([]any)
+	if e, _ := items[0].(map[string]any)["error"].(map[string]any); e["code"] != "extension_namespace_owned" {
+		t.Fatalf("batch write to a plugin namespace: %v", items[0])
+	}
+	if _, ok := items[1].(map[string]any)["receipt"]; !ok {
+		t.Fatalf("batch write to a built-in namespace: %v", items[1])
 	}
 }
 

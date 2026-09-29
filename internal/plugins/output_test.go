@@ -112,6 +112,30 @@ func TestDeclaredExtensionsIsTheEngineValidatorSeam(t *testing.T) {
 	}
 }
 
+// Extension data is stored as JSON text the engine can persist: a NUL in a
+// string value or a key is invalid output, never a storage failure retried.
+func TestDeclaredExtensionsRejectNUL(t *testing.T) {
+	report := plugins.Validate([]byte(strings.Replace(outputManifest, "      additionalProperties: false\n      required: [pages]\n      properties:\n        pages: {type: integer, minimum: 0}\n", "", 1)))
+	if !report.Valid {
+		t.Fatalf("manifest: %+v", report.Errors)
+	}
+	validator := plugins.NewDeclaredExtensions(report.Manifest)
+	for name, data := range map[string]map[string]any{
+		"value":        {"title": "a\x00b"},
+		"nested value": {"list": []any{map[string]any{"x": "\x00"}}},
+		"key":          {"a\x00": 1},
+	} {
+		err := validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: data}})
+		var v *plugins.Violation
+		if !errors.As(err, &v) || v.Code != plugins.CodeInvalidExtension || !errors.Is(err, content.ErrInvalid) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if err := validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: map[string]any{"title": "ok"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMaxResponseBytesIsBoundedByTheEngine(t *testing.T) {
 	m := outputContext(t).Manifest
 	if got := plugins.MaxResponseBytes(m); got != plugins.DefaultMaxResponseBytes {

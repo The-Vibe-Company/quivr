@@ -123,6 +123,12 @@ func Run(command string) error {
 			return err
 		}
 	}
+	// The pinned plugin owns its declared extension namespaces beside the
+	// built-in ones: clients cannot write them, retrieval mappings may read them.
+	extensions, err := plugins.ExtensionRegistry(pin)
+	if err != nil {
+		return err
+	}
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
 	}
@@ -203,7 +209,7 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: content.BuiltinExtensions{}, Normalizations: store}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: extensions, Normalizations: store}
 	if pin != nil {
 		contents.Routes = pin
 	}

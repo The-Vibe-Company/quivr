@@ -807,10 +807,13 @@ type Normalization struct {
 }
 
 // Normalized is the durable, validated normalizer output of one Record
-// Version: its Manifest object and its provenance.
+// Version: its Manifest object, its provenance and the extensions it produced
+// in the plugin's own namespaces, published on the Version beside the
+// submitted ones.
 type Normalized struct {
 	Manifest   Blob
 	Provenance Normalization
+	Extensions Extensions
 }
 
 // NormalizationStore reads the durable normalizer output of a Record Version.
@@ -857,5 +860,17 @@ func (s Service) normalizedManifest(ctx context.Context, work *Work) (Manifest, 
 	}
 	provenance["normalization"] = normalization
 	work.Command.Provenance = provenance
+	if len(n.Extensions) > 0 {
+		// Plugin-owned namespaces never collide with submitted ones: clients
+		// cannot write them.
+		extensions := make(Extensions, len(work.Command.Extensions)+len(n.Extensions))
+		for ns, ext := range work.Command.Extensions {
+			extensions[ns] = ext
+		}
+		for ns, ext := range n.Extensions {
+			extensions[ns] = ext
+		}
+		work.Command.Extensions = extensions
+	}
 	return m, nil
 }

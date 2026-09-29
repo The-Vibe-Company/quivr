@@ -398,9 +398,9 @@ def verify(stack,steps):
     steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions')
     # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
     steps.run('monitoring',stack.tests,'TestMonitoring')
-    # A routed Markdown Blob is normalized by the pinned plugin; then invalid pins are refused,
-    # and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
-    steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable')
+    # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
+    # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
+    steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings')
     steps.run('normalizer_startup',normalizer_plugin.verify,stack)
     steps.run('normalizer_rebuild_without_plugin',stack.tests,'TestNormalizerRebuildWithoutPlugin')
     steps.run('delivery_worker_restart',delivery_restart,stack)

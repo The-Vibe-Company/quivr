@@ -172,18 +172,16 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	case err != nil:
 		return retry("plugin_unavailable", err)
 	}
+	// Extensions, top-level and on Parts, were checked against the namespaces,
+	// schema versions and schemas the pinned manifest declares: Part ones stay
+	// in the Manifest, top-level ones are recorded beside it and published on
+	// the Version.
 	manifest := response.Manifest
-	// Plugin-owned extension namespaces are not stored yet.
-	extended := len(response.Extensions) > 0
 	for i, p := range manifest.Parts {
-		extended = extended || len(p.Extensions) > 0
 		if p.Content.Kind == "blob" {
 			// Checked to be the input Blob: record its verified checksum.
 			manifest.Parts[i].Content.BlobSHA256 = input.Blob.SHA256
 		}
-	}
-	if extended {
-		return terminal("normalizer_invalid_output", errors.New("extensions are not accepted from plugins yet"))
 	}
 	manifest.Kind = "manifest"
 	raw, err := json.Marshal(manifest)
@@ -197,7 +195,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	if err != nil {
 		return retry("blob_verification_unavailable", err)
 	}
-	stored, err := s.Store.SaveNormalized(ctx, org, work.VersionID, content.Normalized{Manifest: blob, Provenance: provenance})
+	stored, err := s.Store.SaveNormalized(ctx, org, work.VersionID, content.Normalized{Manifest: blob, Provenance: provenance, Extensions: response.Extensions})
 	if err != nil {
 		return retry("normalization_store_unavailable", err)
 	}

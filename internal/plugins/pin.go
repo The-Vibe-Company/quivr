@@ -6,12 +6,17 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
 
 // Issue codes of a startup pin, beside the manifest codes.
 const (
 	CodeInvalidPin    = "invalid_pin"
 	CodeRouteConflict = "route_conflict"
+	// CodeNamespaceConflict is a declared extension namespace that clashes
+	// with one the engine already owns.
+	CodeNamespaceConflict = "namespace_conflict"
 )
 
 // Route modes. Plugin Platform v0 activates required routes only; optional
@@ -92,6 +97,11 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	if len(c.Routes) == 0 {
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "a pin needs at least one media type route"})
 	}
+	for _, namespace := range namespacesOf(m) {
+		if content.DeclaredExtension(namespace) {
+			issues = append(issues, Issue{Code: CodeNamespaceConflict, Path: "/extensions/" + pointerToken(namespace), Message: fmt.Sprintf("extension namespace %q is a built-in namespace of the engine; declare a namespace of your own under %q", namespace, m.ID+".")})
+		}
+	}
 	declared := map[string]bool{}
 	if m.Contributions.Normalizer != nil {
 		for _, mediaType := range m.Contributions.Normalizer.MediaTypes {
@@ -125,6 +135,32 @@ func LoadPin(c PinConfig) (*Pin, error) {
 		return nil, refuse(issues)
 	}
 	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, routes: routes}, nil
+}
+
+func namespacesOf(m *Manifest) []string {
+	namespaces := make([]string, 0, len(m.Extensions))
+	for ns := range m.Extensions {
+		namespaces = append(namespaces, ns)
+	}
+	sort.Strings(namespaces)
+	return namespaces
+}
+
+// ExtensionRegistry registers the pinned plugin's declared extension
+// namespaces beside the built-in ones; a nil pin registers none. API and
+// worker install it as the content.Service validator at startup, so clients
+// cannot write a plugin-owned namespace and retrieval mappings may address it.
+// The plugin's own output is validated by DeclaredExtensions of the same
+// manifest (CheckNormalizerOutput).
+func ExtensionRegistry(p *Pin) (*content.ExtensionRegistry, error) {
+	registry := content.NewExtensionRegistry()
+	if p == nil {
+		return registry, nil
+	}
+	if err := registry.Own(p.Manifest.ID, namespacesOf(&p.Manifest)...); err != nil {
+		return nil, &PinError{Path: p.Path, Issues: []Issue{{Code: CodeNamespaceConflict, Path: "/extensions", Message: err.Error()}}}
+	}
+	return registry, nil
 }
 
 func keysOf(m map[string]bool) []string {

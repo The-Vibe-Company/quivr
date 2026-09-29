@@ -134,6 +134,14 @@ def verify(stack):
         (bad / 'quivr-plugin.yaml').write_text('\n'.join(lines) + '\n')
         refused(stack, name, pin(stack, bad / 'quivr-plugin.yaml'), code)
     refused(stack, 'configuration', pin(stack, configuration={'max_sections': 0}), 'invalid_configuration')
+    # Declared extension namespaces must be the plugin's own and must not clash with a built-in one.
+    for name, text, code in [('foreign-namespace', template.replace(f'{NAME}.outline:', 'other.outline:'), 'foreign_namespace'),
+                             ('builtin-namespace', template.replace(f'id: {NAME}', 'id: example').replace(f'{NAME}.outline:', 'example.editorial:'), 'namespace_conflict')]:
+        assert text != template, name
+        bad = stack.directory / f'bad-plugin-{name}'
+        bad.mkdir(exist_ok=True)
+        (bad / 'quivr-plugin.yaml').write_text(text)
+        refused(stack, name, pin(stack, bad / 'quivr-plugin.yaml'), code)
     # An unreachable plugin is not a startup failure.
     stop(stack)
     stack.stop_processes()

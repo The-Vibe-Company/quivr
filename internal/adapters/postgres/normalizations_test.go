@@ -76,7 +76,7 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	}
 
 	manifestPath := filepath.Join(t.TempDir(), plugins.ManifestFile)
-	if err := os.WriteFile(manifestPath, []byte("id: acme.markdown\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"), 0o600); err != nil {
+	if err := os.WriteFile(manifestPath, []byte("id: acme.markdown\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\nextensions:\n  acme.markdown.outline:\n    \"1\": {type: object, properties: {heading_count: {type: integer}}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
@@ -92,7 +92,7 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
 			map[string]any{"key": "title", "role": "title", "content": map[string]any{"kind": "text", "text": "Lighthouse guide"}},
 			map[string]any{"key": "section-1", "role": "section", "content": map[string]any{"kind": "text", "text": "The keeper lights the lamp."}},
-		}}})
+		}}, "extensions": map[string]any{"acme.markdown.outline": map[string]any{"schema_version": "1", "data": map[string]any{"heading_count": 1}}}})
 	}))
 	defer server.Close()
 	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: manifestPath, Endpoint: server.URL, Routes: []plugins.RouteConfig{{MediaType: "text/markdown"}}})
@@ -166,6 +166,13 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	recorded, _, _ := store.Normalized(ctx, org, resolved.VersionID)
 	if n["invocation_id"] != recorded.Provenance.InvocationID || n["input_sha256"] != blob.Blob.SHA256 || n["plugin_id"] != "acme.markdown" {
 		t.Fatalf("provenance %+v, recorded %+v", v.Provenance, recorded)
+	}
+	// The plugin's extensions are recorded once and published on the Version.
+	if ext, ok := v.Extensions["acme.markdown.outline"]; !ok || ext.SchemaVersion != "1" || ext.Data["heading_count"] != float64(1) {
+		t.Fatalf("published extensions %+v", v.Extensions)
+	}
+	if recorded.Extensions["acme.markdown.outline"].Data["heading_count"] != float64(1) {
+		t.Fatalf("recorded extensions %+v", recorded.Extensions)
 	}
 	if ids, _ := v.Provenance["source_blob_ids"].([]any); len(ids) != 1 || ids[0] != blob.ID {
 		t.Fatalf("source provenance %+v", v.Provenance)

@@ -41,6 +41,7 @@ response = json.load(open("response.json"))
 roles = [part["role"] for part in response["manifest"]["parts"]]
 assert roles == ["title", "body", "body", "body"], roles
 assert response["manifest"]["parts"][0]["content"]["text"] == "Quarterly field report"
+assert response["extensions"]["demo.outline"] == {"schema_version": "1", "data": {"heading_count": 3, "heading_levels": ["h1", "h2"]}}, response.get("extensions")
 log = open("dev.log").read()
 assert "discovery matches quivr-plugin.yaml" in log, log
 assert "response valid" in log, log

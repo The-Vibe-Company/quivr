@@ -125,12 +125,12 @@ the engine's structural Manifest rules: unique Part keys, known and acyclic
 parents, valid text, complete Relation targets, and the Part count and
 structure bounds.
 
-**Protocol rules checked at certification time.** These rules are part of the
-v0 contract. `quivr plugin test` (the Contract Runner, below) checks them on
-every normalizer response, with the validation in `internal/plugins`
-(`CheckNormalizerOutput`) that the engine is meant to reuse. The engine does
-not invoke plugins yet, so it does not enforce them at ingestion until the
-slices named below land.
+**Protocol rules checked at certification time and enforced at ingestion.**
+These rules are part of the v0 contract. `quivr plugin test` (the Contract
+Runner, below) checks them on every normalizer response with the validation in
+`internal/plugins` (`CheckNormalizerOutput`), and the engine applies the same
+function to every invocation of a pinned normalizer before anything is
+recorded.
 
 1. **Blob Parts may reference only the input Blob.** A normalizer response
    must not introduce other Blobs. A Blob Part must name the input Blob id
@@ -138,18 +138,23 @@ slices named below land.
    Part carries no checksum. The reference is resolved to the verified input
    Blob, and its SHA-256 must equal the request's `input.sha256`. The runner
    re-hashes the file it served. *Checked by the Contract Runner; enforced by
-   the engine from THE-683.*
+   the engine (THE-683).*
 2. **Response size cap.** A response larger than the declared
    `max_response_bytes` (default 4 MiB) is invalid output
    (`response_too_large`). The engine caps the declared value at 16 MiB.
-   *Checked by the Contract Runner; enforced by the engine from THE-683.*
+   *Checked by the Contract Runner; enforced by the engine (THE-683).*
 3. **Namespace ownership.** Response extensions, top-level and on Parts, may
    use only namespaces and schema versions the plugin declares, with data
    valid against the declared schema (`undeclared_namespace`,
    `undeclared_schema_version`, `invalid_extension`). Clients may not write
    plugin-owned namespaces. *The output side is checked by the Contract
-   Runner. Engine enforcement, including rejection of client writes, arrives
-   with THE-684.*
+   Runner. The engine enforces both sides (THE-684): it registers the pinned
+   plugin's namespaces at startup (refusing a namespace not prefixed by the
+   plugin id, `foreign_namespace`, or clashing with a built-in one,
+   `namespace_conflict`), publishes valid output extensions on the Version,
+   fails invalid ones as `normalizer_invalid_output`, and rejects client
+   writes with 422 `extension_namespace_owned`. Retrieval mappings may point
+   at `/extensions/{plugin namespace}/...`.*
 
 A response with more Parts than the declared `max_parts` is also invalid
 (`too_many_parts`).

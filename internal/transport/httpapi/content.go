@@ -26,6 +26,8 @@ func contentFailure(err error) (int, string) {
 		return 409, "idempotency_conflict"
 	case errors.Is(err, content.ErrUnverifiedBlob):
 		return 422, "unverified_blob"
+	case errors.Is(err, content.ErrExtensionOwned):
+		return 422, "extension_namespace_owned"
 	case errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported):
 		return 422, publicCode(err, "invalid_input")
 	default:

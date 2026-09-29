@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -239,6 +240,12 @@ func (d *DeclaredExtensions) Validate(_ context.Context, exts content.Extensions
 		if string(data) == "null" {
 			data = []byte("{}")
 		}
+		// The engine stores extension data as JSON text, which cannot hold
+		// NUL; like Part text, such output is invalid, not retryable.
+		if containsNUL(ext.Data) {
+			return &Violation{Kind: content.ErrInvalid, Code: CodeInvalidExtension, Path: path + "/data",
+				Detail: fmt.Sprintf("%q data contains a NUL character, which the engine cannot store", ns)}
+		}
 		instance, err := decodeInstance(data)
 		if err == nil {
 			err = schema.Validate(instance)
@@ -256,6 +263,28 @@ func (d *DeclaredExtensions) Validate(_ context.Context, exts content.Extensions
 		}
 	}
 	return nil
+}
+
+// containsNUL reports whether a decoded JSON value holds a NUL character in a
+// string or an object key.
+func containsNUL(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return strings.ContainsRune(v, 0)
+	case map[string]any:
+		for k, e := range v {
+			if strings.ContainsRune(k, 0) || containsNUL(e) {
+				return true
+			}
+		}
+	case []any:
+		for _, e := range v {
+			if containsNUL(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func orRoot(path string) string {

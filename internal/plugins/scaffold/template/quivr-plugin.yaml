@@ -22,5 +22,25 @@ configuration:
         minimum: 1
         maximum: 255
         description: Sections beyond this number are merged into the last one.
+# Extension namespaces this plugin owns. Each is the plugin id or starts with
+# it followed by a dot; the engine validates the normalizer's extensions
+# against these schemas, publishes them on the Version and rejects client
+# writes to them. Retrieval mappings may point at /extensions/<namespace>/data/...
+extensions:
+  __PLUGIN_ID__.outline:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [heading_count, heading_levels]
+      properties:
+        heading_count:
+          type: integer
+          minimum: 0
+          description: Number of headings, the title included.
+        heading_levels:
+          type: array
+          uniqueItems: true
+          items: {enum: [h1, h2, h3, h4, h5, h6]}
+          description: Heading levels used by the document, in document order.
 run:
   command: [python3, -m, __PLUGIN_MODULE__]

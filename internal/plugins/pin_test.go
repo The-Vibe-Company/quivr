@@ -76,6 +76,8 @@ func TestLoadPinRefusesInvalidPins(t *testing.T) {
 	good := writePinManifest(t, pinManifest)
 	incompatible := writePinManifest(t, strings.Replace(pinManifest, `plugin_api: ">=0.1.0 <0.2.0"`, `plugin_api: ">=0.2.0 <0.3.0"`, 1))
 	oldEngine := writePinManifest(t, strings.Replace(pinManifest, `engine: ">=0.1.0 <0.2.0"`, `engine: ">=1.0.0"`, 1))
+	foreign := writePinManifest(t, pinManifest+"extensions:\n  other.outline:\n    \"1\": {type: object}\n")
+	clash := writePinManifest(t, strings.Replace(pinManifest, "id: acme.markdown", "id: example", 1)+"extensions:\n  example.editorial:\n    \"1\": {type: object}\n")
 	for name, tc := range map[string]struct {
 		config plugins.PinConfig
 		want   string
@@ -93,6 +95,8 @@ func TestLoadPinRefusesInvalidPins(t *testing.T) {
 		}), plugins.CodeRouteConflict},
 		"optional route":     {pinConfig(good, func(c *plugins.PinConfig) { c.Routes[0].Mode = "optional" }), plugins.CodeInvalidPin},
 		"unknown route mode": {pinConfig(good, func(c *plugins.PinConfig) { c.Routes[0].Mode = "sometimes" }), plugins.CodeInvalidPin},
+		"foreign namespace":  {pinConfig(foreign, nil), plugins.CodeForeignNamespace},
+		"built-in namespace": {pinConfig(clash, nil), plugins.CodeNamespaceConflict},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := plugins.LoadPin(tc.config)
@@ -114,5 +118,29 @@ func TestLoadPinDefaultsConfigurationToAnEmptyObject(t *testing.T) {
 	}
 	if string(pin.Configuration) != `{}` {
 		t.Fatalf("configuration %s", pin.Configuration)
+	}
+}
+
+// The pinned plugin's declared namespaces are registered beside the built-in
+// ones: clients may no longer write them, and retrieval mappings may.
+func TestPinRegistersItsExtensionNamespaces(t *testing.T) {
+	path := writePinManifest(t, pinManifest+"extensions:\n  acme.markdown.outline:\n    \"1\": {type: object}\n")
+	pin, err := plugins.LoadPin(pinConfig(path, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := plugins.ExtensionRegistry(pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner, ok := registry.Owner("acme.markdown.outline"); !ok || owner != "acme.markdown" {
+		t.Fatalf("owner %q %t", owner, ok)
+	}
+	if !registry.Declared("example.editorial") || !registry.Declared("acme.markdown.outline") {
+		t.Fatal("built-in or plugin namespace not declared")
+	}
+	none, err := plugins.ExtensionRegistry(nil)
+	if err != nil || none.Declared("acme.markdown.outline") || !none.Declared("example.editorial") {
+		t.Fatalf("without a pin: %v", err)
 	}
 }

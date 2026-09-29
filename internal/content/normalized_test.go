@@ -198,6 +198,31 @@ func TestMaterializePublishesTheNormalizedManifestWithProvenance(t *testing.T) {
 	}
 }
 
+// Plugin output extensions are published on the Version beside the submitted
+// ones; the accepted Command is not mutated.
+func TestMaterializePublishesNormalizerExtensions(t *testing.T) {
+	blobs := memoryBlobs{}
+	manifest := content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "section-1", Role: "body", Content: content.Text{Kind: "text", Text: "Body"}}}}
+	raw, _ := json.Marshal(manifest)
+	stored, _ := blobs.Put(context.Background(), "org_a", raw)
+	command := routedCommand("text/markdown")
+	command.Content.BlobSHA256 = content.Hash(markdownBytes)
+	command.Extensions = content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "Submitted"}}}
+	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
+	produced := content.Extensions{"acme.markdown.outline": {SchemaVersion: "1", Data: map[string]any{"heading_count": float64(1)}}}
+	service := content.Service{Repository: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: content.Normalization{PluginID: "acme.markdown"}, Extensions: produced}}}
+	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
+		t.Fatal(err)
+	}
+	got := repo.published[0].Command.Extensions
+	if len(got) != 2 || got["example.editorial"].Data["headline"] != "Submitted" || got["acme.markdown.outline"].Data["heading_count"] != float64(1) {
+		t.Fatalf("published extensions %+v", got)
+	}
+	if len(command.Extensions) != 1 || len(repo.work.Command.Extensions) != 1 {
+		t.Fatal("the accepted Command was mutated")
+	}
+}
+
 func TestMaterializeWaitsForNormalization(t *testing.T) {
 	command := routedCommand("text/markdown")
 	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
