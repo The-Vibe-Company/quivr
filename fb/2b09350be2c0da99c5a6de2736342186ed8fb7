@@ -1,0 +1,107 @@
+docs/plugins/write-a-normalizer.md
+  s_54b80c92daa9cb::t_9b98146bc0f318 1-96,98-102,106-136,147-162,164-166,168-266,269-283,285-286,290-321
+  s_54b80c92daa9cb::t_88aca94dab3740 284,287-289
+  s_54b80c92daa9cb::t_f2ada56d277b7a 97,163,167,267-268
+  s_54b80c92daa9cb::t_471a422e4dd552 137-146
+  s_54b80c92daa9cb::t_bff368f489fbe4 103-105
+plugins/pdf-text/.gitignore
+  s_54b80c92daa9cb::t_dd09a0f2355875 1-3
+README.md
+  s_54b80c92daa9cb::t_f43a40754a66e3 186-193
+  s_54b80c92daa9cb::t_c6ae58e8409dfd 234-236
+  s_54b80c92daa9cb::t_5b2568d1bfc563 213
+  s_54b80c92daa9cb::t_9de5cd6409ec0f 200
+plugins/pdf-text/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_83beeae277f383 1-58,65-114,119-120,128-129,134-146
+  s_54b80c92daa9cb::t_c6b1656589883e 115-118,121-127,130-133
+  s_54b80c92daa9cb::t_34613fc3147d45 59-64
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_a4d4caf50b9864 9-11
+  s_54b80c92daa9cb::t_8b965768ee1c3d 15
+  s_54b80c92daa9cb::t_e7226d100dc1fc 74-83
+scripts/test_normalizer_plugin.py
+  s_54b80c92daa9cb::t_2540f2296a04c9 49-67
+  s_54b80c92daa9cb::t_acca0d393ac5f3 1-48,68-76
+third_party/README.md
+  s_54b80c92daa9cb::t_711e876c243157 14
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_492f8474d34fd8 155,157-158,161
+  s_54b80c92daa9cb::t_83eb45a09a8990 131
+  s_54b80c92daa9cb::t_80760eb19198c1 39,41-46,55-57,61-62,79-85,96-99
+  s_54b80c92daa9cb::t_4c3c88feeb3152 208-219
+  s_54b80c92daa9cb::t_93c41b3063bbbc 1-8,14,17-19,26-38,40,47-54,63,91-93,95,100,102,105-106,121-126,129-130,132-134
+  s_54b80c92daa9cb::t_e92001324a5934 9-13,15-16
+  s_54b80c92daa9cb::t_baace1cbadc742 86-87
+  s_54b80c92daa9cb::t_91e7ec44582ac9 70-78
+plugins/pdf-text/scripts/make_fixtures.py
+  s_54b80c92daa9cb::t_d40864f3341f8f 1-73
+plugins/pdf-text/fixtures/sample.pdf
+  s_54b80c92daa9cb::t_cd7c8759577a52 1-68
+plugins/pdf-text/pyproject.toml
+  s_54b80c92daa9cb::t_528143f34909fa 1-11,15-17
+  s_54b80c92daa9cb::t_15aaf9cf6c09af 12-14
+plugins/pdf-text/pdf_text/__init__.py
+  s_54b80c92daa9cb::t_c16b0b8d3e198a 1
+plugins/pdf-text/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_21db060f8a7c0c 1-31,33-35,53-54
+  s_54b80c92daa9cb::t_b3330337ff80af 32
+  s_54b80c92daa9cb::t_76a9c9e84ec993 36-52
+tests/acceptance/pdf_test.go
+  s_54b80c92daa9cb::t_dbc9783886bad7 1-55,59-80,87-96,102-107,109-110,113,115-116,124-125,134-135,137,140-141
+  s_54b80c92daa9cb::t_ec05e7e88bb810 81-86
+  s_54b80c92daa9cb::t_79a734ab6a35a6 56-58,136,138-139
+  s_54b80c92daa9cb::t_148b5350a0f4fd 121,133
+  s_54b80c92daa9cb::t_11587d52cdfe12 97-101,108,111-112,114,117-120,122-123,126-132
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_25051b69bb0430 15-17
+  s_54b80c92daa9cb::t_4c1f3e6d4fb827 109
+  s_54b80c92daa9cb::t_a6a3e56f22b06f 1-14,18-41,43-51,53-56,67-75,80-108,110-114
+  s_54b80c92daa9cb::t_04cc60febc1fad 42
+  s_54b80c92daa9cb::t_4e5f4b48f4fdb6 52,57-66,76-79
+plugins/pdf-text/fixtures/sample.json
+  s_54b80c92daa9cb::t_0ef61f319f2e9f 1-7
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_6c077b750353f9 210-222
+  s_54b80c92daa9cb::t_32408dd63cf202 204-209,225-226
+  s_54b80c92daa9cb::t_fa6d784cd5771d 201-203,223-224
+scripts/local.py
+  s_54b80c92daa9cb::t_48ffc6854eb2ab 476
+  s_54b80c92daa9cb::t_d02e653996013d 88-89
+  s_54b80c92daa9cb::t_6cb43b0c1cc50b 472-473
+  s_54b80c92daa9cb::t_5fc9429f4630bb 411-413
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_b925b642f2fe11 392,396-401,403-408,430,432,436-437
+  s_54b80c92daa9cb::t_feed0b77503e4d 393-395,402
+  s_54b80c92daa9cb::t_56ef86cdb62c8c 433-435
+  s_54b80c92daa9cb::t_9de5cd6409ec0f 429,431
+plugins/pdf-text/pdf_text/normalizer.py
+  s_54b80c92daa9cb::t_ef64afc71fd05c 1-11,14-22,24-26,28-38,42,44,47-115,117-124,126-160,164
+  s_54b80c92daa9cb::t_90dcaccf4888b4 12-13
+  s_54b80c92daa9cb::t_77f523b0a10793 45-46
+  s_54b80c92daa9cb::t_163a84b8189547 125
+  s_54b80c92daa9cb::t_f22910908f8b50 165-169
+  s_54b80c92daa9cb::t_0d2f0de2869c78 23,116
+  s_54b80c92daa9cb::t_9f93046a59ffb5 161-163
+  s_54b80c92daa9cb::t_35addbda64ac29 27
+  s_54b80c92daa9cb::t_b3330337ff80af 39-41,43
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_9b156118c3e979 34-41
+plugins/pdf-text/pdf_text/__main__.py
+  s_54b80c92daa9cb::t_83996d98fd219c 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fb2b09350be2c0da99c5a6de2736342186ed8fb7",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

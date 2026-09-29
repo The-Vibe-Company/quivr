@@ -1,0 +1,28 @@
+docs/plugins/write-a-normalizer.md
+  s_54b80c92daa9cb::t_2ea5d8c9378275 145
+  s_54b80c92daa9cb::t_e31e88d9f663bb 97,167
+  s_54b80c92daa9cb::t_392f6bd0da8998 265-293
+  s_54b80c92daa9cb::t_9b8919bbcd5785 244-250
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_e31e88d9f663bb 28-30,77-79
+tests/acceptance/pdf_test.go
+  s_54b80c92daa9cb::t_48f4d38756ecc9 123
+README.md
+  s_54b80c92daa9cb::t_e31e88d9f663bb 189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc4c9040df4e09849f2af5ed9e3ab3b277ebaf7a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
