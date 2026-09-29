@@ -1,0 +1,23 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_c9be1ad2b38841 33,37-38,40-66
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_c9be1ad2b38841 293-294,313-314,343-344
+scripts/local.py
+  s_54b80c92daa9cb::t_c9be1ad2b38841 405-407,479-480,521
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f0dee393b1d00e6ddeb3e9e083c0fde5ae486f85",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
