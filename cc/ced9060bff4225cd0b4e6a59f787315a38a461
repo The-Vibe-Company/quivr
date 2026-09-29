@@ -1,0 +1,70 @@
+tests/acceptance/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_92db77c4e9f41e 99
+  s_54b80c92daa9cb::t_74de0e8f684cbd 1-98,100-154
+internal/monitoring/engine.go
+  s_54b80c92daa9cb::t_da5ccebd8a7957 25-27,64-67,228-229
+  s_54b80c92daa9cb::t_05279daef510fa 230
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_0c6f00ca1f5fa6 933-934
+  s_54b80c92daa9cb::t_01ebcfc3e532af 3023
+  s_54b80c92daa9cb::t_ecdc73e5e1fb0a 732-734,764-836,895-897,927-932,935-1005,1012,1050,2682-2694,2721-2723,2729,2782-2803,2844-2847,2854,3012
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_aef144876981a4 114-118
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_449be151117d66 22-32,45-76,89-115,134-136,164,251-315
+  s_54b80c92daa9cb::t_5ff7bc23d14863 316
+internal/adapters/postgres/delivery.go
+  s_54b80c92daa9cb::t_5aaf59a949cabc 100,102,111,141
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_a0d37524381c42 305-312
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_6208dddaf3bafd 102
+internal/adapters/postgres/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_7ad909bbeef35b 1-3,5-146,148-293,295-336
+  s_54b80c92daa9cb::t_ddc1ac0e808ea4 4,147,294
+internal/adapters/postgres/monitoring.go
+  s_54b80c92daa9cb::t_98fbd15dd17b87 9,36-64,80-87,95-97,99-100,102-105,114,126-132,134,136-143,145-175,177-189,193-204,206,208-231,233-237,241-245,247-251,257,259-262,268-273,278,282,294-302,305,307-317,319-351,353-375,377-386,388-393,406,408-415,417-422,424-435,437,439-445,447-469,475-478,480-483,485
+  s_54b80c92daa9cb::t_b50b3a3b89d6e3 190-192
+docs/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_aef144876981a4 131-132,137-138,145-147,183,339-340,349,473-539,562,593-595
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_8d9c7ca7e8883a 17,19-20,24-76,82,95,315-389
+internal/monitoring/engine_test.go
+  s_54b80c92daa9cb::t_de80223e478947 162-163,172,175-179,186,203
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_ab3935e7d04d26 559,576-592,621,641-656
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_323111386ebb3c 179,194-195,880,899,1232-1236,1266-1272,1346-1351,1378-1387,1553-1558,1565-1567,1574-1576,1875-1880,1893-1895,1902-1904,2880-2931,3021-3046,3099-3124,3369-3370,3374-3375,4651-4730,4888-4927,5008-5047,5301-5306,5319-5321,5328-5330,6268-6333,6449-6481,6548-6579
+  s_54b80c92daa9cb::t_9d77f3a0a020f2 6580
+migrations/20260929T0948Z_monitoring_edit_delete.sql
+  s_54b80c92daa9cb::t_b333af5e855909 1-12
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_298f5c982a0dee 49-50,53-54
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_c4bedcce1ef2dd 2-4,62-63,67,87-89,93-94,99,118-123,133-146,150-159,162-168,170,172-173,193-200,202,205-206,209,212,216,218,220,237-238,240-243,247,250,253-257,259-274,276-277,279-285,287-288,290-301,304-316,319-323,325,335-336,338-341,345,348-371,390,401-413
+  s_54b80c92daa9cb::t_3f3cf0aedf60c2 25-31
+  s_54b80c92daa9cb::t_392fcab43488ac 414
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_3ea78f195475f4 127-132,135-139,188,193-194,284-290,292-296,299,301-306,313,316-318,320,322
+  s_54b80c92daa9cb::t_5aaf59a949cabc 546,550,562,573-574
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_903ccb7f35e13f 5,23,34-36,46-47,72,105-118,132-134,137-142,144-147,156-164,201,211
+internal/monitoring/matches.go
+  s_54b80c92daa9cb::t_a7608317778ecd 58-59,66,68-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ccced9060bff4225cd0b4e6a59f787315a38a461",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
