@@ -165,7 +165,8 @@ def redact_tree(directory, secrets):
 
 
 def markdown(report):
-    lines = [f"# Quivr verification report — {report['status']}", '',
+    part = f" (part `{report['part']}`)" if report.get('part') else ''
+    lines = [f"# Quivr verification report{part} — {report['status']}", '',
              f"- Source: `{report['source']}`{' (uncommitted changes)' if report.get('dirty') else ''}",
              f"- Platform: {report['pins']['platform']} only; no other platform or production readiness is claimed",
              f"- Duration: {report['duration_seconds']} s"]

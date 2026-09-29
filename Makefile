@@ -11,9 +11,11 @@ verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
 # Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
 check: docs denylist migrations contracts image-context test
-verify: check
-	GO=$(GO) python3 scripts/local.py verify
-	GO=$(GO) python3 scripts/demo.py verify
+# make check, then every part of the stack verification one after another, then the demo.
+# make verify part=<name>[,<name>] runs only those parts, without make check; parts are listed
+# in scripts/local.py (parts) and CI runs them in parallel.
+verify: $(if $(part),,check)
+	GO=$(GO) python3 scripts/local.py verify $(if $(part),--part $(part))
 # PostgreSQL adapter suite on a bare migrated database (THE-699): make adapter-postgres [args='-run TestX']
 adapter-postgres:
 	GO=$(GO) python3 scripts/adapter_postgres.py $(args)

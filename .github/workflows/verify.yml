@@ -10,7 +10,67 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
+# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
+# verification part pass, so branch protection needs no change when a part is added.
 jobs:
+  # Everything that needs no Docker stack (make check): the first result, in a few minutes.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # The frozen-docs rule compares with the merge base of this checkout and main,
+      # so it needs full history (about 25 MB); the migration guard reads main's tree.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: contracts/http/v0/checks/requirements.txt
+      - run: make check
+      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-contract-report
+          path: .scratch/plugin-sdk/contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subscription-plugin-contract-report
+          path: .scratch/plugin-sdk/subscription-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pdf-text-contract-report
+          path: .scratch/plugin-sdk/pdf-text-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: alerts-contract-report
+          path: .scratch/plugin-sdk/alerts-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      # The public contracts this commit checked.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contracts
+          path: |
+            contracts/http/v0/openapi.yaml
+            contracts/shared/v0/manifest.schema.json
+          if-no-files-found: warn
   # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
   # dependency. It proves the suite needs no state left by acceptance scenarios.
   adapter-postgres:
@@ -35,66 +95,54 @@ jobs:
             .scratch/quivr-adapter-pg-*/postgres.log
             .scratch/quivr-adapter-pg-*/services.json
           if-no-files-found: warn
-  verify:
+  # The stack verification in parallel parts, each on its own isolated stack (THE-755).
+  # The parts are defined in scripts/local.py (parts); scripts/test_ci_output.py checks this list.
+  part:
+    name: verify ${{ matrix.part }}
     # The one declared supported platform (linux/amd64); see scripts/inventory.py.
     runs-on: ubuntu-24.04
-    # The assembled journey and lifecycle proofs (THE-662) add about five minutes.
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [core, monitoring, plugins, connectors, demo]
     steps:
-      # The frozen-docs rule compares with the merge base of this checkout and main,
-      # so it needs full history (about 25 MB); the migration guard reads main's tree.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+          cache: pip
+          cache-dependency-path: contracts/http/v0/checks/requirements.txt
+      # The pinned E5 model and tokenizer; scripts/prepare_*.py check them by digest after a restore.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .scratch/e5-model
+            .scratch/tokenizer
+          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'internal/processing/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+      - if: matrix.part == 'demo'
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
-      - run: make verify
-      # Contract Runner report for the `quivr plugin init` template (scripts/plugin_sdk.sh).
-      - uses: actions/upload-artifact@v4
-        if: always()
+          cache: npm
+          cache-dependency-path: quivr-search/package-lock.json
+      - if: matrix.part == 'demo'
+        uses: actions/cache@v4
         with:
-          name: plugin-contract-report
-          include-hidden-files: true
-          path: .scratch/plugin-sdk/contract-report.json
-          if-no-files-found: warn
-      # Contract Runner report for the `quivr plugin init --kind subscription` template (scripts/plugin_sdk.sh).
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: subscription-plugin-contract-report
-          include-hidden-files: true
-          path: .scratch/plugin-sdk/subscription-contract-report.json
-          if-no-files-found: warn
-      # Contract Runner report for the reference plugin plugins/pdf-text (scripts/plugin_sdk.sh).
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pdf-text-contract-report
-          include-hidden-files: true
-          path: .scratch/plugin-sdk/pdf-text-contract-report.json
-          if-no-files-found: warn
-      # Contract Runner report for the first-party keyword alerts plugin plugins/alerts (scripts/plugin_sdk.sh).
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: alerts-contract-report
-          include-hidden-files: true
-          path: .scratch/plugin-sdk/alerts-contract-report.json
-          if-no-files-found: warn
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('quivr-search/package-lock.json') }}
+      - if: matrix.part == 'demo'
+        run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
+      - run: make verify part=${{ matrix.part }}
       - uses: actions/upload-artifact@v4
         id: verification-artifact
         if: always()
         with:
-          name: verification
+          name: verification-${{ matrix.part }}
           include-hidden-files: true
           path: |
             .scratch/quivr-verify-*/report.json
@@ -111,6 +159,7 @@ jobs:
             .scratch/quivr-verify-*/m365-restart.json
             .scratch/quivr-verify-*/*-before-lifecycle.log
             .scratch/quivr-verify-*/acceptance.log
+            .scratch/quivr-verify-*/adapters.log
             .scratch/quivr-verify-*/api*.log*
             .scratch/quivr-verify-*/worker*.log*
             .scratch/quivr-verify-*/migrate*.log*
@@ -118,7 +167,6 @@ jobs:
             .scratch/quivr-verify-*/temporal.log
             .scratch/quivr-verify-*/seaweed.log
             .scratch/quivr-verify-*/weaviate.log
-            .scratch/quivr-verify-*/adapters.log
             .scratch/quivr-verify-*/normalizer-*.log
             .scratch/quivr-verify-*/bad-pin-*.log
             .scratch/quivr-verify-*/normalizer-startup.json
@@ -137,11 +185,21 @@ jobs:
             .scratch/quivr-demo-verify-*/demo-report.json
             .scratch/quivr-demo-verify-*/browser.log
             .scratch/quivr-demo-verify-*/playwright.json
-            .scratch/quivr-demo-verify-*/browser/**/trace.zip
             .scratch/quivr-demo-verify-*/browser/**/*.png
-            contracts/http/v0/openapi.yaml
-            contracts/shared/v0/manifest.schema.json
+            .scratch/quivr-demo-verify-*/browser/**/trace.zip
           if-no-files-found: warn
       # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
         run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"
+  # The one check to require: green only when every job above is green.
+  verify:
+    if: always()
+    needs: [check, adapter-postgres, part]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}"
+          exit 1
+      - run: echo "check, adapter-postgres and every verification part passed"

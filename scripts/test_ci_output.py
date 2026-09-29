@@ -3,7 +3,7 @@
 The go test case runs a real `go test -json` on a throwaway module, so a change in how
 test2json frames output breaks it here instead of on a red CI run.
 """
-import json, os, pathlib, subprocess, tempfile, unittest
+import json, os, pathlib, re, subprocess, tempfile, unittest
 from unittest import mock
 
 import ci_summary
@@ -154,6 +154,13 @@ class Summary(unittest.TestCase):
         text, failures = ci_summary.summary([], [])
         self.assertIn('Verification did not run', text)
         self.assertEqual(failures, [])
+
+
+class Parts(unittest.TestCase):
+    def test_ci_runs_every_part_of_make_verify(self):
+        workflow = (local.ROOT / '.github/workflows/verify.yml').read_text()
+        matrix = re.search(r'^\s+part: \[(.*)\]$', workflow, re.M).group(1)
+        self.assertEqual([p.strip() for p in matrix.split(',')], list(local.parts()) + [local.DEMO])
 
 
 if __name__ == '__main__':

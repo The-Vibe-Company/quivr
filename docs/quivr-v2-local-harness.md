@@ -290,15 +290,44 @@ the non-required `Retrieval baseline` workflow, on manual dispatch only.
 ## Implemented verification (THE-662)
 
 `make verify` runs on linux/amd64 only (ubuntu-24.04 in CI); no other platform is
-claimed. It runs the same commands locally and in CI, in this order:
+claimed. It runs the same commands locally and in CI; locally in this order,
+in CI as parallel jobs (below):
 1. `make check`, with no Docker stack:
    - `docs`, `denylist` and `migrations`;
    - `contracts`, which regenerates the transport and compares it with the
      committed code. It also validates the full OpenAPI document, every example
      (the original 24 are a guarded floor) and at least 31 boundary checks;
    - `image-context`, then `test`.
-2. `scripts/local.py verify`.
-3. The demo UI check.
+2. `scripts/local.py verify`: the stack verification, in parts. Each part
+   starts its own isolated stack, then runs its steps in order.
+3. The demo UI check, the last part (`demo`).
+
+**Parts (THE-755).** `parts()` in `scripts/local.py` names them:
+- `core`: core acceptance, adapters, dependency outages, rebuild, operations,
+  the change feed and the CLI;
+- `monitoring`: monitoring, delivery across a worker restart and the journey;
+- `plugins`: normalizer and alert plugins, the runnable guides, the keyless core
+  and the lifecycle;
+- `connectors`: connector acquisition and restart resumption;
+- `demo`: `scripts/demo.py verify`.
+
+Every stack part starts with `persistence_across_restart`, which grants the
+scoped key its Corpus. `make verify` runs the parts one after another and stops at the
+first failed one. `make verify part=core` (or `part=core,demo`) runs only those
+parts, without `make check`.
+
+To add a step, add one line to the part whose state it needs, for example
+`acceptance('mcp','^TestMCP')` or `step('name',fn)`. Steps that restart
+processes or share captures stay in one part. A new part also goes in the
+matrix of `.github/workflows/verify.yml`; `scripts/test_ci_output.py` checks
+the two lists match.
+
+**CI jobs.** `check` runs `make check`, `adapter-postgres` the adapter suite,
+and `verify <part>` one part each, all in parallel. `verify` passes only when
+all of them pass; it is the one check to require on `main`. The parts cache Go
+modules and builds, pip, the E5 model and tokenizer, npm and the Playwright
+browser. Docker images are not cached; their pull is part of `start_stack`,
+which each report times.
 
 **Isolation.** Each run gets:
 - a unique Compose project `quivr-verify-<run id>`, with its own network and volumes;
@@ -311,11 +340,9 @@ it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE
 `scripts/test_local.py` enforces this.
 
 **Steps and report.**
-- Every scenario is a named step:
-  - persistence, core acceptance, adapters and outages;
-  - changes/catalog/rebuild, monitoring, the `quivr` CLI (`TestCLI*`, run with the
-    stack's built binary as `QUIVR_TEST_BINARY`) and delivery restart;
-  - the three journey phases, connectors, keyless, capture validation and lifecycle.
+- Every scenario is a named step of one part. The `quivr` CLI step (`TestCLI*`)
+  runs the stack's built binary as `QUIVR_TEST_BINARY`. Each stack part runs
+  capture validation last, before `lifecycle` in `plugins`.
 - On success, failure or interrupt (SIGINT or SIGTERM), the run captures service
   logs and `services.json`, writes `dependency-inventory.json`, then removes only
   its own project.
@@ -328,7 +355,7 @@ it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE
   - pins: image digests, model revision, tokenizer, toolchain;
   - the unsupported platforms;
   - a link to [the remaining-limit report](quivr-v2-remaining-limits.md).
-- CI uploads the artifacts and appends `report.md` to the job summary.
+- CI uploads each part's artifacts and writes its job summary (see failure output below).
 - With `QUIVR_KEEP_ON_FAILURE=1`, a failed run keeps its project for inspection.
   Remove it with `QUIVR_PROJECT=<name> make reset`.
 

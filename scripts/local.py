@@ -8,7 +8,7 @@ import guides
 import normalizer_plugin
 import ports
 import subscription_plugin
-import argparse, base64, json, os, pathlib, secrets, signal, subprocess, time, urllib.request, uuid
+import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
 
@@ -409,8 +409,32 @@ def connectors(stack):
     fake_x.start(stack.state['fake_x_port'])
     stack.tests('TestConnector')
 
-def verify(stack,steps):
-    """Every verification step in order; each feature keeps its own tests."""
+def step(name,fn,*args):
+    """One named verification step: fn(stack,*args)."""
+    return lambda stack,steps:steps.run(name,fn,stack,*args)
+
+def acceptance(name,pattern):
+    """A step that runs the acceptance tests matching pattern against the part's stack."""
+    return step(name,Stack.tests,pattern)
+
+def contract_python():
+    """The Python that validates captures: CONTRACT_PYTHON, or the contracts venv (created when a part runs without make check)."""
+    python=os.environ.get('CONTRACT_PYTHON')
+    if python:return python
+    venv_dir=ROOT/'.scratch/contracts/venv'
+    if not (venv_dir/'bin/python').exists():run(['python3','-m','venv',str(venv_dir)])
+    # Idempotent and quick when satisfied; recovers a half-installed venv and follows requirement changes.
+    run([str(venv_dir/'bin/pip'),'-q','install','-r','contracts/http/v0/checks/requirements.txt'])
+    return str(venv_dir/'bin/python')
+
+def validate_captures(stack):
+    run([contract_python(),'scripts/validate_captures.py',str(stack.directory)])
+
+def parts():
+    """The full verification in parts (THE-755). Each part starts its own isolated stack and runs its
+    steps in order, so a step sees only the state its own part built. CI runs the parts in parallel
+    (.github/workflows/verify.yml); `make verify` runs them one after another. To add a step, add one
+    line to the part whose state it needs: acceptance('name','^TestPattern') or step('name',fn)."""
     from embedding_outage import verify as verify_embedding_outage
     from rebuild_recovery import verify as verify_rebuild_recovery
     from operation_control import verify as verify_operation_control
@@ -418,55 +442,79 @@ def verify(stack,steps):
     from m365_restart import verify as verify_m365_restart
     from connector_x_restart import verify as verify_connector_x_restart
     from lifecycle import verify as verify_lifecycle
-    steps.run('persistence_across_restart',persistence,stack)
-    steps.run('core_acceptance',stack.tests,'TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch')
-    steps.run('adapter_integration',adapters,stack)
-    steps.run('ingestion_outages',stack.ingestion_outages)
-    steps.run('embedding_outage',verify_embedding_outage,stack)
-    steps.run('rebuild_recovery',verify_rebuild_recovery,stack)
-    steps.run('operation_control',verify_operation_control,stack)
-    # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them after
-    # order-sensitive acceptance and timed outage scenarios.
-    steps.run('short_retention_api',stack.start_short_retention_api)
-    steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions')
-    # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
-    steps.run('monitoring',stack.tests,'TestMonitoring')
-    # The built quivr binary searches through the public API and keeps its offline plugin tools (THE-702).
-    steps.run('cli',stack.tests,'^TestCLI')
-    # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
-    # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
-    steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings')
-    steps.run('normalizer_startup',normalizer_plugin.verify,stack)
-    steps.run('normalizer_rebuild_without_plugin',stack.tests,'TestNormalizerRebuildWithoutPlugin')
-    # With the plugin down, routed work waits and the platform stays healthy; then a controllable
-    # test plugin is pinned to observe every failure class and the optional-route fallback.
-    steps.run('normalizer_outage',normalizer_plugin.outage,stack)
-    steps.run('normalizer_failures',normalizer_plugin.failures,stack)
-    # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
-    steps.run('pdf_normalizer_pin',normalizer_plugin.switch,stack,'pdf-text')
-    steps.run('pdf_normalizer',stack.tests,'TestPDF')
-    # Alerts decided by the pinned alert-rule template, next to pdf-text: one webhook per match,
-    # none for a non-match, 422 for an invalid expression, metadata rules; then a rule-plugin outage
-    # delays evaluation, which completes after the restart.
-    steps.run('alert_plugin',subscription_plugin.verify,stack)
-    # Keyword alerts decided by plugins/alerts: the evidence names the matched terms, a filter alone alerts.
-    steps.run('keyword_alerts',subscription_plugin.keywords,stack)
-    # Described alerts judged through the fake System One server, never TypeSafe: one call per article for every described alert.
-    steps.run('described_alerts',subscription_plugin.described,stack)
-    steps.run('alert_plugin_outage',subscription_plugin.outage,stack)
-    steps.run('delivery_worker_restart',delivery_restart,stack)
-    journey(stack,steps)
-    steps.run('connectors',connectors,stack)
-    steps.run('connector_restart',verify_connector_restart,stack)
-    steps.run('m365_restart',verify_m365_restart,stack)
-    steps.run('x_restart',verify_connector_x_restart,stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
-    # Runnable guide blocks, after the timed scenarios, each page in its own Organization.
-    steps.run('runnable_guides',guides.verify,stack)
-    # The keyless worker would fail credentialed instances of earlier scenarios.
-    steps.run('keyless_core',stack.verify_keyless)
-    steps.run('validate_captures',run,[os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])
-    # Last: stop/migrate/reset semantics on this isolated project.
-    steps.run('lifecycle',verify_lifecycle,stack)
+    # Every part first restarts PostgreSQL under load and grants the scoped key its Corpus.
+    setup=[step('persistence_across_restart',persistence)]
+    return {
+        # Core contracts, adapters, outages of every dependency, then the change feed and the CLI.
+        'core':setup+[
+            acceptance('core_acceptance','TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch'),
+            step('adapter_integration',adapters),
+            step('ingestion_outages',Stack.ingestion_outages),
+            step('embedding_outage',verify_embedding_outage),
+            step('rebuild_recovery',verify_rebuild_recovery),
+            step('operation_control',verify_operation_control),
+            # Change-feed, catalog resync and rebuild tests add Corpora and ingestion load; run them after
+            # order-sensitive acceptance and timed outage scenarios. The outages kill every process, so
+            # the short-retention API starts after them.
+            step('short_retention_api',Stack.start_short_retention_api),
+            acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions'),
+            # The built quivr binary searches through the public API and keeps its offline plugin tools (THE-702).
+            acceptance('cli','^TestCLI'),
+            step('validate_captures',validate_captures)],
+        # Monitoring, webhook delivery across a worker restart, and the assembled public journey (THE-662).
+        'monitoring':setup+[
+            step('short_retention_api',Stack.start_short_retention_api),
+            acceptance('monitoring','TestMonitoring'),
+            step('delivery_worker_restart',delivery_restart),
+            journey,
+            step('validate_captures',validate_captures)],
+        # Normalizer and alert-rule plugins, the keyless core, then the harness lifecycle.
+        'plugins':setup+[
+            # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
+            # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
+            acceptance('normalizer','TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings'),
+            step('normalizer_startup',normalizer_plugin.verify),
+            acceptance('normalizer_rebuild_without_plugin','TestNormalizerRebuildWithoutPlugin'),
+            # With the plugin down, routed work waits and the platform stays healthy; then a controllable
+            # test plugin is pinned to observe every failure class and the optional-route fallback.
+            step('normalizer_outage',normalizer_plugin.outage),
+            step('normalizer_failures',normalizer_plugin.failures),
+            # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
+            step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
+            acceptance('pdf_normalizer','TestPDF'),
+            # Alerts decided by the pinned alert-rule template, next to pdf-text: one webhook per match,
+            # none for a non-match, 422 for an invalid expression, metadata rules; then a rule-plugin outage
+            # delays evaluation, which completes after the restart.
+            step('alert_plugin',subscription_plugin.verify),
+            # Keyword alerts decided by plugins/alerts: the evidence names the matched terms, a filter alone alerts.
+            step('keyword_alerts',subscription_plugin.keywords),
+            # Described alerts judged through the fake System One server, never TypeSafe: one call per article for every described alert.
+            step('described_alerts',subscription_plugin.described),
+            step('alert_plugin_outage',subscription_plugin.outage),
+            # Runnable guide blocks, each page in its own Organization (scripts/guides.py).
+            step('runnable_guides',guides.verify),
+            # The keyless worker would fail credentialed instances of earlier scenarios.
+            step('keyless_core',Stack.verify_keyless),
+            step('validate_captures',validate_captures),
+            # Last: stop/migrate/reset semantics on this isolated project.
+            step('lifecycle',verify_lifecycle)],
+        # Connector acquisition keeps polling on its schedule, in its own Organization; then restart resumption.
+        'connectors':setup+[
+            # Connectors ingest PDF attachments; they run on the make dev default, the pdf-text pin.
+            step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
+            step('connectors',connectors),
+            step('connector_restart',verify_connector_restart),
+            step('m365_restart',verify_m365_restart),
+            step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
+            step('validate_captures',validate_captures)],
+    }
+
+# The browser demo (scripts/demo.py) runs on its own stack; it is the last part of `make verify`.
+DEMO='demo'
+
+def verify(stack,steps,part):
+    """Every step of one part, in order; each feature keeps its own tests."""
+    for entry in parts()[part]:entry(stack,steps)
 
 def preparation(stack,steps):
     """Cold preparation (model/tokenizer download) is reported apart from the warm stack start."""
@@ -493,8 +541,8 @@ def finish(stack,steps,status,start):
             except Exception:pass
         source=run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip()
         dirty=bool(run(['git','status','--porcelain','--untracked-files=no'],capture_output=True,text=True).stdout.strip())
-        verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
-            'scope':'Every feature acceptance suite, adapter integration, outage/restart scenarios and the assembled public journey (THE-662) over real PostgreSQL, Temporal, S3, Weaviate and TEI',
+        verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'part':getattr(stack,'part',None),'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
+            'scope':f"Part {getattr(stack,'part',None)} of the stack verification (steps below; parts in scripts/local.py) over real PostgreSQL, Temporal, S3, Weaviate and TEI",
             'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s','change_prune':PRUNE_OVERRIDES},'pins':pins(),
             'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
             'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
@@ -506,28 +554,45 @@ def finish(stack,steps,status,start):
         if kept:print(f'Kept for inspection (QUIVR_KEEP_ON_FAILURE=1). Remove it with: QUIVR_PROJECT={stack.name} make reset')
         for sig,handler in previous.items():signal.signal(sig,handler)
 
-def main():
-    parser=argparse.ArgumentParser();parser.add_argument('command',choices=['dev','verify','down','reset','migrate']);args=parser.parse_args()
-    verification=args.command=='verify'
+def run_stack(command,part=None):
+    """dev, down, reset, migrate, or verify one part on its own isolated stack."""
+    verification=command=='verify'
     # QUIVR_PROJECT selects an existing project for down/reset/migrate, e.g. a kept verification run.
-    name=os.environ.get('QUIVR_PROJECT') if args.command in ['down','reset','migrate'] else None
-    stack=Stack(name or ('quivr-verify-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]))
+    name=os.environ.get('QUIVR_PROJECT') if command in ['down','reset','migrate'] else None
+    stack=Stack(name or (f'quivr-verify-{part}-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]))
+    stack.part=part
     def interrupted(*_):raise verify_report.Interrupted()
     signal.signal(signal.SIGTERM,interrupted)
     steps=verify_report.Steps(echo=print if verification else None);stack.steps=steps;start=time.monotonic();status='failed'
     try:
-        if args.command in ['dev','verify']:
+        if command in ['dev','verify']:
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.
             normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
             subscription_plugin.select(stack,verification or subscription_plugin.from_environment(),subscription_plugin.described_mode(verification))
             steps.run('start_stack',stack.up)
-            if verification:verify(stack,steps)
+            if verification:verify(stack,steps,part)
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}")
-        elif args.command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
-        else:stack.down(args.command=='reset')
+        elif command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
+        else:stack.down(command=='reset')
         status='passed'
     except (KeyboardInterrupt,verify_report.Interrupted):
         status='interrupted';raise
     finally:
         if verification:finish(stack,steps,status,start)
+
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('command',choices=['dev','verify','down','reset','migrate'])
+    parser.add_argument('--part',default='',help='verify only these parts, comma-separated (default: every part, then the demo)')
+    args=parser.parse_args()
+    if args.command!='verify':return run_stack(args.command)
+    known=list(parts())+[DEMO]
+    chosen=[p for p in args.part.replace(' ',',').split(',') if p] or known
+    unknown=[p for p in chosen if p not in known]
+    if unknown:parser.error(f"unknown part {', '.join(unknown)}; parts: {', '.join(known)}")
+    # One part after another, each on a fresh stack; the first failed part stops the run.
+    for index,part in enumerate(chosen,1):
+        print(f'[verify] part {part} ({index}/{len(chosen)})',flush=True)
+        if part==DEMO:run([sys.executable,'scripts/demo.py','verify'])
+        else:run_stack('verify',part)
 if __name__=='__main__':main()
