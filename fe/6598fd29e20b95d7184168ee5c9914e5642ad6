@@ -1,6 +1,7 @@
 internal/connectors/kinds_test.go
   s_54b80c92daa9cb::t_edbe4e3fd277b9 26,30,80-87,89-92
   s_54b80c92daa9cb::t_8675887d1c0742 93
+  s_54b80c92daa9cb::t_c75bb2579ee6b2 13,25,27-28,44,49,52-53,88
 internal/transport/generated/transport.gen.go
   s_54b80c92daa9cb::t_541bf577ba4d94 690,707,745
 docs/start/plugin-author.md
@@ -31,6 +32,9 @@ docs/connectors/README.md
   s_54b80c92daa9cb::t_a26cf0090fa801 21
 scripts/test_core_entrypoint.py
   s_54b80c92daa9cb::t_342071ae71fb8f 56
+  s_54b80c92daa9cb::t_e2f4a532ac6ea3 67-69,71,73,79,89,125-126
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_f269b8f8962189 87,101
 ---
 {
   "schema_version": "authorship/3.0.0",
