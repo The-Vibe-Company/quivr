@@ -1,0 +1,35 @@
+CONTEXT.md
+  s_54b80c92daa9cb::t_04bf28e9dd88ba 266,273-276,286,289-291
+  s_54b80c92daa9cb::t_81502bf0bfb9a1 292
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_1b27c849147db2 210-220
+docs/plugins/write-a-normalizer.md
+  s_54b80c92daa9cb::t_ac9182ed8540f5 189
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_1b27c849147db2 168
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_dcf88081c127cb 4-5,18-19,22,38-46,49-59,70,94-98,117-120,145-149,193-257,262-265,306-324,357-359,369-370,386-397,404-406
+  s_54b80c92daa9cb::t_b3a49b7b4de1ed 329
+  s_54b80c92daa9cb::t_eee7f6c86afd02 343-346
+internal/normalization/normalization_test.go
+  s_54b80c92daa9cb::t_1b27c849147db2 227
+sdks/python/README.md
+  s_54b80c92daa9cb::t_ac9182ed8540f5 4-5,18,41-71,77-78,80,98-103
+  s_54b80c92daa9cb::t_ee850da8d930e9 104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "672f09918f40e58635fa7af8db02d35314b93c3f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

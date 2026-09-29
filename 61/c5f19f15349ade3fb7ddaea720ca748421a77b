@@ -1,0 +1,52 @@
+internal/plugins/scaffold/templates/subscription/.gitignore
+  s_54b80c92daa9cb::t_f4a03ff6c1fad8 1-3
+plugins/pdf-text/pyproject.toml
+  s_54b80c92daa9cb::t_965caa72be6920 14
+internal/plugins/scaffold/templates/normalizer/pyproject.toml
+  s_54b80c92daa9cb::t_965caa72be6920 1-14
+internal/plugins/scaffold/templates/subscription/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_9bf698f6f34bbb 1-40
+internal/plugins/scaffold/scaffold.go
+  s_54b80c92daa9cb::t_4c1c92e6a5506d 1-3,18-28,89-101,105-108,116,126-127
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_33fbaccc377741 79-102
+  s_54b80c92daa9cb::t_3dd67a47d65152 10-14
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_db3b6c19d7a076 1
+internal/plugins/scaffold/templates/subscription/pyproject.toml
+  s_54b80c92daa9cb::t_0a930f4b5394fd 1-14
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_c1da8373d9cf8c 1-4
+internal/plugins/cli/init.go
+  s_54b80c92daa9cb::t_4c1c92e6a5506d 13,15-16,19,32-40,59-62,66,71,77
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_cb0ee0366a2493 58-65
+internal/plugins/scaffold/scaffold_test.go
+  s_54b80c92daa9cb::t_193b9606006ac7 16,41-85,108,111
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/rule.py
+  s_54b80c92daa9cb::t_8dbfcbb3a59a57 1-56
+internal/plugins/scaffold/templates/subscription/fixtures/sample.json
+  s_54b80c92daa9cb::t_aafa8e5a98cbbf 1-15
+internal/plugins/scaffold/templates/subscription/tests/test_rule.py
+  s_54b80c92daa9cb::t_fc32d713e5375c 1-44
+internal/plugins/cli/dev_test.go
+  s_54b80c92daa9cb::t_eb6539eb6c22c9 31,42-49
+internal/plugins/scaffold/templates/subscription/README.md
+  s_54b80c92daa9cb::t_ecbb8c9383b4ab 1-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61c5f19f15349ade3fb7ddaea720ca748421a77b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

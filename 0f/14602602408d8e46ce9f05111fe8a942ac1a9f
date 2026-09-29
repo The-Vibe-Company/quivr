@@ -1,0 +1,98 @@
+tests/plugin-contract/subscription-unknown-part-key/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_d99a79043f0f1a 38-40,455-459,466,471
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_905e2d11778491 42-44,102,141-144,146-157,159-162,164
+  s_54b80c92daa9cb::t_aaa3c9cdcb8f54 145,158,163
+  s_54b80c92daa9cb::t_b7d7df3d90e81e 165-166
+tests/plugin-contract/subscription-oversize-evidence/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_0a1b371995054d 9
+  s_54b80c92daa9cb::t_be1b7eef27b213 205,209-217,253-255,303-360
+  s_54b80c92daa9cb::t_7e4662fe514d00 361
+internal/plugins/devhost/subscription_test.go
+  s_54b80c92daa9cb::t_ea2e7d53168753 1-9,11-100,102-112
+  s_54b80c92daa9cb::t_69f419143537fe 10,101
+tests/plugin-contract/subscription-missing-decision/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_44630c46bddad7 46-52,67-68,83-92,218-251,253-261,263,342,344,388-395,434-443,457-458,500,505,635,638,643-658
+  s_54b80c92daa9cb::t_5cc3b16f4cd536 659
+tests/plugin-contract/subscription-oversize-evidence/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-unknown-part-key/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-unexpected-decision/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-batch-dependent/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-nondeterministic/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+tests/plugin-contract/subscription-wrong-error-class/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-nondeterministic/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-oversize-evidence/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+internal/plugins/cli/test.go
+  s_54b80c92daa9cb::t_b15017cc8daf57 17,95,109-110
+  s_54b80c92daa9cb::t_788ea30248fc86 111
+tests/plugin-contract/subscription-nondeterministic/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+tests/plugin-contract/subscription-unexpected-decision/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+tests/plugin-contract/subscription-unexpected-decision/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+tests/plugin-contract/subscription-valid/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-4
+tests/plugin-contract/subscription-batch-dependent/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+tests/plugin-contract/subscription-unknown-part-key/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+tests/plugin-contract/subscription-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+tests/plugin-contract/subscription-wrong-error-class/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+internal/plugins/runner/subscription.go
+  s_54b80c92daa9cb::t_c8a5df08ec6bd0 1-198
+tests/plugin-contract/subscription-wrong-error-class/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+tests/plugin-contract/subscription-valid/fixtures/news.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-34
+internal/plugins/devhost/subscription.go
+  s_54b80c92daa9cb::t_6bf6a9cbf7b8ca 1-43,45-234
+  s_54b80c92daa9cb::t_d99a79043f0f1a 44
+tests/plugin-contract/subscription-batch-dependent/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+internal/plugins/cli/dev_test.go
+  s_54b80c92daa9cb::t_11d4ac1d918be8 96-155
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_44630c46bddad7 4,155-156,162-167
+  s_54b80c92daa9cb::t_c1be8399445357 168
+tests/plugin-contract/subscription-missing-decision/expect.json
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-6
+tests/plugin-contract/subscription-missing-decision/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4eb5eaa8aaa7b3 1-19
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_45882bc29d77d6 287-305
+  s_54b80c92daa9cb::t_c6bf1aed0cc626 36-37
+  s_54b80c92daa9cb::t_fddbf1a6725371 57-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f14602602408d8e46ce9f05111fe8a942ac1a9f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

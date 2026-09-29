@@ -1,0 +1,97 @@
+contracts/plugins/v0/subscription-response.schema.json
+  s_54b80c92daa9cb::t_a0fc1fcb3c0e55 1-69
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-plugin-api-0.1.yaml
+  s_54b80c92daa9cb::t_90e193016bfdbe 1-9
+contracts/plugins/v0/fixtures/responses/subscription/unknown-decision-value.json
+  s_54b80c92daa9cb::t_ca8a1c1947eff8 1-6
+internal/plugins/subscription.go
+  s_54b80c92daa9cb::t_8ed3a75577d4b9 1-265
+contracts/plugins/v0/fixtures/responses/subscription/unknown-decision.json
+  s_54b80c92daa9cb::t_d4c0e2a0af7a44 1-7
+contracts/plugins/v0/fixtures/responses/subscription/duplicate-decision.json
+  s_54b80c92daa9cb::t_40c2f6c3ea55ef 1-7
+contracts/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_7a78e7de0b0fe1 1-72
+contracts/plugins/v0/fixtures/responses/subscription/valid.json
+  s_54b80c92daa9cb::t_1220f486b6ac4a 1-17
+contracts/plugins/v0/fixtures/subscriptions/strike.json
+  s_54b80c92daa9cb::t_5e254702e47d4e 1-14
+contracts/plugins/v0/fixtures/responses/subscription/explanation-too-long.json
+  s_54b80c92daa9cb::t_8a753c78c06df2 1-18
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_de07104a2db883 48-51,349-351
+  s_54b80c92daa9cb::t_94d4ff585cd814 65-77,79,133-136
+  s_54b80c92daa9cb::t_00a1a0574b3a05 485-536
+  s_54b80c92daa9cb::t_d0d9e9ba79269d 22-33,45-46,52,60,78,109-132,137-141,282-295,333-348,356-357,361-370,372-387
+  s_54b80c92daa9cb::t_4b5614cf2ef48b 47
+contracts/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_104ac440b36926 1-165
+contracts/plugins/v0/fixtures/requests/subscription/reserved-vector.json
+  s_54b80c92daa9cb::t_070f2b95ddbf0a 1-26
+contracts/plugins/v0/fixtures/responses/subscription/explanation-at-limit.json
+  s_54b80c92daa9cb::t_1c71e3770533b0 1-18
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-vectors.yaml
+  s_54b80c92daa9cb::t_fd7e646d36efbd 1-10
+contracts/plugins/v0/fixtures/requests/subscription/empty-evaluations.json
+  s_54b80c92daa9cb::t_5393c7c0cbd2d9 1-17
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_9f92acb865d809 77
+contracts/plugins/v0/fixtures/manifests/valid/subscription.yaml
+  s_54b80c92daa9cb::t_17af43122506d3 1-41
+contracts/plugins/v0/fixtures/responses/subscription/unknown-part-key.json
+  s_54b80c92daa9cb::t_4d996da9c4d21b 1-10
+contracts/plugins/v0/fixtures/responses/subscription/match-without-evidence.json
+  s_54b80c92daa9cb::t_53c9fec332c429 1-6
+contracts/plugins/v0/fixtures/responses/subscription/too-many-part-keys.json
+  s_54b80c92daa9cb::t_8a753c78c06df2 1-118
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_4e4a6c5603cdfb 138,158-164,166-176,272-279
+  s_54b80c92daa9cb::t_e6a71772dc2749 165,280-305
+internal/plugins/cli/cli_test.go
+  s_54b80c92daa9cb::t_a905d9f7c04f51 21-36
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_71adbba52492bb 44-45,50-52,57
+  s_54b80c92daa9cb::t_ebfca38016aa2d 221-273
+  s_54b80c92daa9cb::t_d7da09fac88217 3
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_2f31459ead5652 25,85-94,159,169-242
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_2f2600c5ac99ec 2,48,263,306-330,332-513
+  s_54b80c92daa9cb::t_abda52c36eb541 331
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-invalid-schemas.yaml
+  s_54b80c92daa9cb::t_7ac5a196c41732 1-14
+contracts/plugins/v0/fixtures/responses/subscription/missing-decision.json
+  s_54b80c92daa9cb::t_87514a2f1b904d 1-9
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_a3d0d3dffc925d 24,271-272,275
+contracts/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_20cc626a23d512 45-46
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_a3d0d3dffc925d 86-92,108,111
+contracts/plugins/v0/fixtures/manifests/invalid/no-contribution.yaml
+  s_54b80c92daa9cb::t_74ec2fde43c824 1-7
+contracts/plugins/v0/fixtures/responses/subscription/details-too-large.json
+  s_54b80c92daa9cb::t_8a753c78c06df2 1-21
+contracts/plugins/v0/fixtures/requests/subscription/missing-record.json
+  s_54b80c92daa9cb::t_b1fcbe8feb9d31 1-17
+contracts/plugins/v0/fixtures/subscriptions/missing-expression.json
+  s_54b80c92daa9cb::t_a82ca4805b5cf0 1-10
+contracts/plugins/v0/fixtures/requests/subscription/valid.json
+  s_54b80c92daa9cb::t_02770bc301b74d 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f3d4dfa0cbd3a661da3ecf9a038c22c1e28fb36f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
