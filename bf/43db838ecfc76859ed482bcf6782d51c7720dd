@@ -1,0 +1,57 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_753d8fcbf3f614 2-10
+AGENTS.md
+  s_54b80c92daa9cb::t_59ee9b50217043 6
+README.md
+  s_54b80c92daa9cb::t_1649059f93e63e 169-172
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_017bb5ee591e6c 58-59
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_3d6108839f0e7d 12-14,17
+deploy/railway/web.Dockerfile
+  s_54b80c92daa9cb::t_ae6c1990f3bca6 11
+docs/agents/testing.md
+  s_54b80c92daa9cb::t_e798f76391caca 1-79
+docs/inventory.toml
+  s_54b80c92daa9cb::t_2d6de2cb05e895 58,92
+quivr-search/README.md
+  s_54b80c92daa9cb::t_87851e65e71fc5 45-52,71
+quivr-search/feed.mjs
+  s_54b80c92daa9cb::t_7c00e3721f7ddd 1-337
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_950f4c14a5edf1 8,51,93-96,276-278,287-296
+quivr-search/src/App.tsx
+  s_54b80c92daa9cb::t_a83da5ecb66155 17,22,26-30,114,129-133,142,200-203,279,303-313,341-347
+quivr-search/src/components/DocumentPanel.tsx
+  s_54b80c92daa9cb::t_8969f58cc744cc 32-33,40,56-58,60-71
+quivr-search/src/components/FeedView.tsx
+  s_54b80c92daa9cb::t_ad5da053812c76 1-334
+quivr-search/src/lib/feed.ts
+  s_54b80c92daa9cb::t_4482beb75a9764 1-36
+quivr-search/src/styles.css
+  s_54b80c92daa9cb::t_18cbaa886da98e 1550-1744
+quivr-search/tests/feed.spec.ts
+  s_54b80c92daa9cb::t_a27742ff16b03c 1-167
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_52ffd45d3d9d79 409-630
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_5ce4c39c304d96 31-32,37
+tests/acceptance/search_cli_test.go
+  s_54b80c92daa9cb::t_4589e12ee32f21 70,74-77,119-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf43db838ecfc76859ed482bcf6782d51c7720dd",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
