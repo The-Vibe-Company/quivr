@@ -231,7 +231,9 @@ func Run(command string) error {
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if err = postgres.Migrate(ctx, pool); err != nil {
+		// The PostgreSQL part runs first and alone needs no other dependency;
+		// rerunning migrate completes the S3, Weaviate and tokenizer steps.
+		if err = BootstrapDatabase(ctx, pool); err != nil {
 			return errors.New("migration failed; check database connectivity and schema")
 		}
 		for {
@@ -253,9 +255,6 @@ func Run(command string) error {
 				return errors.New("projection bootstrap deadline exceeded")
 			case <-time.After(200 * time.Millisecond):
 			}
-		}
-		if err = store.BootstrapGeneration(ctx, weaviate.InitialCollection, tei.Space().ID); err != nil {
-			return errors.New("projection routing bootstrap failed")
 		}
 		if _, err = encoder.Encode(ctx, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
 			return errors.New("tokenizer preparation required")

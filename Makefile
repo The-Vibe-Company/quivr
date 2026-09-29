@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev verify down reset migrate test contracts generate demo demo-reset verify-demo measure denylist migrations migration migration-restamp
+.PHONY: dev verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure denylist migrations migration migration-restamp
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -12,6 +12,9 @@ verify-demo:
 verify: denylist migrations contracts test
 	GO=$(GO) python3 scripts/local.py verify
 	GO=$(GO) python3 scripts/demo.py verify
+# PostgreSQL adapter suite on a bare migrated database (THE-699): make adapter-postgres [args='-run TestX']
+adapter-postgres:
+	GO=$(GO) python3 scripts/adapter_postgres.py $(args)
 test:
 	$(GO) vet ./...
 	$(GO) test ./...

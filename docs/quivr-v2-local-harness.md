@@ -34,6 +34,7 @@ matching belongs to a future plugin.
 | `make down` | Stop the development project's processes and containers and preserve its data volumes |
 | `make reset` | Stop the project and delete only its volumes and the state bound to that data. Generated credentials and ports are kept, and nothing is restarted: the next `make dev` initializes a fresh schema |
 | `make migrate` | Run the versioned initializer against the running project; report failures and required restarts. On a stopped project it fails and points to `make dev` |
+| `make adapter-postgres` | Run `go test ./internal/adapters/postgres/...` against a bare, migrated PostgreSQL in its own Compose project; works on macOS arm64 and Linux (see below) |
 
 `QUIVR_PROJECT=<name>` selects another project for `down`, `reset` and `migrate`,
 for example a verification run kept with `QUIVR_KEEP_ON_FAILURE=1`.
@@ -159,6 +160,35 @@ loopback, the same block sets `allow_private_destinations: true`, which is also
 recorded there; deployments keep the default refusal of private destinations. The worker probe's
 `/metrics` (`QUIVR_TEST_WORKER_PROBE_URL`) is scraped by the exhaustion test and
 saved as `delivery-metrics.txt`.
+
+### PostgreSQL adapter suite on a bare database
+
+`make adapter-postgres` gives fast feedback on transactions and guards without
+the full stack, and runs on macOS arm64 as well as Linux (only Docker, Go and
+Python are needed). It starts only the pinned `postgres` service of
+`deploy/compose/compose.yaml` in a project named `quivr-adapter-pg-<run id>`
+with its own random password, writes a `config.json` holding only
+`database_url`, and runs the suite with `QUIVR_ADAPTER_CONFIG` pointing at it.
+Extra `go test` arguments go in `args`, for example
+`make adapter-postgres args='-v -run TestDelivery'`.
+
+The suite's `TestMain` prepares the database with `app.BootstrapDatabase`, the
+PostgreSQL part of `quivr migrate`: the embedded migrations, then the default
+projection generation. It needs no S3, Weaviate or tokenizer and adds no flag
+to any production command. Both steps are idempotent, so inside `make verify`,
+where `quivr migrate` has already run, the same `TestMain` changes nothing. Two
+tests need more than PostgreSQL (the tokenizer, TEI and S3). They skip only
+when `QUIVR_ADAPTER_POSTGRES_ONLY=1`, which this target sets, and still run in
+`make verify`.
+
+The test output is streamed and saved to `.scratch/<project>/adapter-postgres.log`,
+with `postgres.log` and `services.json`. Secrets are redacted from them, and `config.json` is deleted with the database. On
+success, failure, Ctrl+C or SIGTERM the run removes only its own project
+(`docker compose -p <project> down --volumes`). With `QUIVR_KEEP_ON_FAILURE=1`
+a failed run is kept, and the command to remove it is printed. CI runs it as the
+separate `adapter-postgres` job. That job gives a signal within minutes, proves
+the Linux path, and fails if an adapter test silently depends on state that
+acceptance scenarios leave behind in `make verify`.
 
 ## Webhook fixture and bounded recovery scenarios
 

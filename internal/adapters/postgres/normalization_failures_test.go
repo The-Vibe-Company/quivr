@@ -20,12 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestMain(m *testing.M) {
-	// Lets this test binary serve as the controllable fake plugin process.
-	fakeplugin.MaybeRun()
-	os.Exit(m.Run())
-}
-
 // faultyManifest declares a quick timeout and a single budgeted attempt so
 // every failure class resolves in one invocation.
 const faultyManifest = `id: acme.faulty

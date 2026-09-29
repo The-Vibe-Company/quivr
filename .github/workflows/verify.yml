@@ -3,6 +3,30 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
+  # dependency. It proves the suite needs no state left by acceptance scenarios.
+  adapter-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: make adapter-postgres args=-v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adapter-postgres
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-adapter-pg-*/adapter-postgres.log
+            .scratch/quivr-adapter-pg-*/postgres.log
+            .scratch/quivr-adapter-pg-*/services.json
+          if-no-files-found: warn
   verify:
     # The one declared supported platform (linux/amd64); see scripts/inventory.py.
     runs-on: ubuntu-24.04

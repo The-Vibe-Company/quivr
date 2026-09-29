@@ -33,6 +33,9 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err = json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
+	if postgresOnly() {
+		t.Skip("needs the tokenizer; runs inside make verify, not make adapter-postgres")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)

@@ -36,6 +36,9 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
+	if postgresOnly() {
+		t.Skip("needs TEI, S3 and the tokenizer; runs inside make verify, not make adapter-postgres")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
