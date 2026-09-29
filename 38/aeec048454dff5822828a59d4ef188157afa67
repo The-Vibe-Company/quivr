@@ -1,0 +1,28 @@
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_c7a46db05b2a3d 43,58,60-63,87-88,337-338,355-359,379-412,604
+docs/connectors/microsoft-365.md
+  s_54b80c92daa9cb::t_14c42f008f4024 120-123,226-230
+  s_54b80c92daa9cb::t_ba883d8a4a5f26 5-8,115-118
+  s_54b80c92daa9cb::t_5982c2771598ff 13,102-107,110-111,119,153,175-176,201-203,218-220
+sdks/go/README.md
+  s_54b80c92daa9cb::t_41d9ce18015de0 104-110
+  s_54b80c92daa9cb::t_1ed01826ab8d24 82
+docs/plugins/run-a-connector-plugin.md
+  s_54b80c92daa9cb::t_648209dfab1a09 49-52,67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38aeec048454dff5822828a59d4ef188157afa67",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
