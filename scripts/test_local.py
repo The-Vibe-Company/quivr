@@ -190,7 +190,7 @@ class Finish(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             steps.run('journey_worker_stopped', lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
         env = {'QUIVR_KEEP_ON_FAILURE': '1'} if keep else {}
-        with mock.patch.dict(os.environ, env):
+        with mock.patch.dict(os.environ, env), mock.patch('builtins.print'):  # keep make check output readable
             local.finish(stack, steps, status, 0)
         return stack, json.loads((stack.directory / 'report.json').read_text()), (stack.directory / 'report.md').read_text()
 

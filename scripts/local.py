@@ -3,6 +3,7 @@
 from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
+import gotest
 import guides
 import normalizer_plugin
 import ports
@@ -228,9 +229,15 @@ class Stack:
     def tests(self,pattern,extra_env=None):
         s=self.state
         env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
-        with (self.directory/'acceptance.log').open('a') as log:
-            result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
-        if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
+        self.go_test(['-count=1','-run',pattern,'./tests/acceptance'],env,'acceptance')
+    def go_test(self,args,env,name):
+        """go test with its text in <name>.log; failed tests and every test's duration reach the report (THE-755)."""
+        record=getattr(self,'steps',None) and self.steps.record_tests
+        try:results=gotest.run(GO,args,ROOT,env,self.directory/(name+'.log'),self.directory/(name+'.jsonl'))
+        except gotest.Failed as failed:
+            if record and failed.results:record(failed.results.tests())
+            raise
+        if record:record(results.tests())
     def ingestion_outages(self):
         s=self.state
         base=f"http://127.0.0.1:{s['api_port']}"
@@ -371,8 +378,7 @@ def persistence(stack):
 
 def adapters(stack):
     stack.stop_processes()
-    with (stack.directory/'adapters.log').open('w') as log:
-        run([GO,'test','-count=1','-v','./internal/adapters/...','./internal/processing/...'],env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},stdout=log,stderr=log)
+    stack.go_test(['-count=1','./internal/adapters/...','./internal/processing/...'],{**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},'adapters')
     stack.start_processes()
 
 def delivery_restart(stack):
@@ -488,6 +494,9 @@ def finish(stack,steps,status,start):
             'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
             'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
         verify_report.redact_tree(stack.directory,verify_report.secrets_of(stack.state)+[CAPTURE_SECRET])
+        report=json.loads((stack.directory/'report.json').read_text())
+        # Failed tests are readable in the terminal; CI also puts them on the run page (scripts/ci_summary.py).
+        print(verify_report.failure_text(report),end='',flush=True)
         print('Verification report:',stack.directory/'report.md')
         if kept:print(f'Kept for inspection (QUIVR_KEEP_ON_FAILURE=1). Remove it with: QUIVR_PROJECT={stack.name} make reset')
         for sig,handler in previous.items():signal.signal(sig,handler)
@@ -500,7 +509,7 @@ def main():
     stack=Stack(name or ('quivr-verify-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]))
     def interrupted(*_):raise verify_report.Interrupted()
     signal.signal(signal.SIGTERM,interrupted)
-    steps=verify_report.Steps();start=time.monotonic();status='failed'
+    steps=verify_report.Steps(echo=print if verification else None);stack.steps=steps;start=time.monotonic();status='failed'
     try:
         if args.command in ['dev','verify']:
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.

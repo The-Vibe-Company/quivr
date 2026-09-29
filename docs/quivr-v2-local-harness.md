@@ -31,7 +31,8 @@ the notification-mechanics tests.
 | Target | Required behavior |
 | --- | --- |
 | `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed |
-| `make verify` | Run static/contract checks and tests in an isolated Compose project; collect a report and return nonzero on failure |
+| `make check` | Run everything that needs no Docker stack: docs, denylist, migrations, contracts, image context, `go vet`, `go test`, the scripts tests and the plugin SDK. Works on macOS; the command to run before pushing |
+| `make verify` | Run `make check`, then the acceptance scenarios in an isolated Compose project; collect a report and return nonzero on failure |
 | `make down` | Stop the development project's processes and containers and preserve its data volumes |
 | `make reset` | Stop the project and delete only its volumes and the state bound to that data. Generated credentials and ports are kept, and nothing is restarted: the next `make dev` initializes a fresh schema |
 | `make migrate` | Run the versioned initializer against the running project; report failures and required restarts. On a stopped project it fails and points to `make dev` |
@@ -290,13 +291,14 @@ the non-required `Retrieval baseline` workflow, on manual dispatch only.
 
 `make verify` runs on linux/amd64 only (ubuntu-24.04 in CI); no other platform is
 claimed. It runs the same commands locally and in CI, in this order:
-1. `denylist`, `migrations` and `contracts`, which regenerates the transport and
-   compares it with the committed code. It also validates the full OpenAPI
-   document, every example (the original 24 are a guarded floor) and at least
-   31 boundary checks.
-2. `test`.
-3. `scripts/local.py verify`.
-4. The demo UI check.
+1. `make check`, with no Docker stack:
+   - `docs`, `denylist` and `migrations`;
+   - `contracts`, which regenerates the transport and compares it with the
+     committed code. It also validates the full OpenAPI document, every example
+     (the original 24 are a guarded floor) and at least 31 boundary checks;
+   - `image-context`, then `test`.
+2. `scripts/local.py verify`.
+3. The demo UI check.
 
 **Isolation.** Each run gets:
 - a unique Compose project `quivr-verify-<run id>`, with its own network and volumes;
@@ -329,6 +331,18 @@ it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE
 - CI uploads the artifacts and appends `report.md` to the job summary.
 - With `QUIVR_KEEP_ON_FAILURE=1`, a failed run keeps its project for inspection.
   Remove it with `QUIVR_PROJECT=<name> make reset`.
+
+**Failure output (THE-755).** Go tests run with `go test -json`
+(`scripts/gotest.py`); `acceptance.log` and `adapters.log` keep the `-v` text.
+- The terminal prints one line per finished step with its duration.
+- A failed run prints the failed step, then each failed test's `--- FAIL` block
+  with a bounded excerpt of its output. Browser failures come from Playwright's
+  JSON report (`playwright.json`).
+- `report.json` keeps each step's tests with their durations and failures;
+  `report.md` adds the failed tests and the 15 slowest tests.
+- In CI, `scripts/ci_summary.py` writes the job summary: failed step, failed
+  tests with excerpts, a link to the artifacts, slowest tests and step timings.
+  It also adds one error annotation per failed test to the run page.
 
 **Readiness.** Every wait is bounded:
 - Compose `--wait` up to 180 s, with one more bounded attempt when a dependency

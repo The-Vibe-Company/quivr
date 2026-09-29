@@ -91,6 +91,7 @@ jobs:
           path: .scratch/plugin-sdk/alerts-contract-report.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
+        id: verification-artifact
         if: always()
         with:
           name: verification
@@ -135,9 +136,12 @@ jobs:
             .scratch/quivr-verify-*/response-*.json
             .scratch/quivr-demo-verify-*/demo-report.json
             .scratch/quivr-demo-verify-*/browser.log
+            .scratch/quivr-demo-verify-*/playwright.json
+            .scratch/quivr-demo-verify-*/browser/**/trace.zip
             .scratch/quivr-demo-verify-*/browser/**/*.png
             contracts/http/v0/openapi.yaml
             contracts/shared/v0/manifest.schema.json
           if-no-files-found: warn
+      # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
-        run: cat .scratch/quivr-verify-*/report.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"

@@ -63,7 +63,8 @@ Node.js 22+ and `jq`. The first run downloads pinned images and the E5 model (~1
 
 ```bash
 make dev      # start dependencies, run migrations, launch API + worker
-make verify   # contracts, unit tests and end-to-end journeys on an isolated stack
+make check    # docs, contracts, vet and unit tests without Docker (about 2 min); run before pushing
+make verify   # make check, then end-to-end journeys on an isolated stack
 make down     # stop everything, keep data (make reset also deletes volumes)
 ```
 
@@ -247,7 +248,8 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
 - Read [`AGENTS.md`](AGENTS.md) and [`CONTEXT.md`](CONTEXT.md) first; use the domain
   vocabulary in code and docs.
 - Change the contract in `contracts/http/v0/openapi.yaml`, then run `make generate`.
-- Keep `make verify` green; add tests with every behaviour change.
+- Run `make check` before pushing and keep `make verify` green; add tests with
+  every behaviour change.
 - Declare every new living doc page in [`docs/inventory.toml`](docs/inventory.toml)
   with one line giving its audience and kind (the file's header explains both);
   `make docs` fails on an undeclared page, a broken relative link or a missing

@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs denylist migrations migration migration-restamp image-context
+.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs denylist migrations migration migration-restamp image-context
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -9,7 +9,9 @@ demo-reset:
 	GO=$(GO) python3 scripts/demo.py reset
 verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
-verify: docs denylist migrations contracts image-context test
+# Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
+check: docs denylist migrations contracts image-context test
+verify: check
 	GO=$(GO) python3 scripts/local.py verify
 	GO=$(GO) python3 scripts/demo.py verify
 # PostgreSQL adapter suite on a bare migrated database (THE-699): make adapter-postgres [args='-run TestX']

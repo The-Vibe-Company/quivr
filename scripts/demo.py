@@ -11,7 +11,9 @@ import time
 import urllib.request
 import uuid
 import fake_feeds
+import gotest
 import subscription_plugin
+import verify_report
 from local import DEMO_DESTINATION, ROOT, Stack, port, run
 
 
@@ -28,6 +30,8 @@ def main():
     process = None
     started = time.monotonic()
     status = 'failed'
+    browser_report = stack.directory / 'playwright.json'
+    failures = []
     def interrupted(*_):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)
@@ -71,8 +75,17 @@ def main():
         if verify:
             test_env = {**os.environ, 'QUIVR_DEMO_URL': base, 'QUIVR_DEMO_PASSWORD': demo_password, 'QUIVR_DEMO_FEEDS_URL': feeds_url,
                         'QUIVR_DEMO_ARTIFACTS': str(stack.directory / 'browser')}
+            # The JSON report names each failed spec and times every spec (THE-755); list stays in browser.log.
+            test_env['PLAYWRIGHT_JSON_OUTPUT_NAME'] = str(browser_report)
             with (stack.directory / 'browser.log').open('w') as log:
-                run(['npm', 'test', '--prefix', 'quivr-search'], env=test_env, stdout=log, stderr=log)
+                try:
+                    run(['npm', 'test', '--prefix', 'quivr-search', '--', '--reporter=list,json'], env=test_env, stdout=log, stderr=log)
+                except subprocess.CalledProcessError:
+                    failures = verify_report.browser_results(browser_report)[1] or [
+                        {'test': 'npm test', 'seconds': None, 'excerpt': gotest.excerpt((stack.directory / 'browser.log').read_text(errors='replace').splitlines())}]
+                    for failure in failures:
+                        failure['log'] = str(stack.directory / 'browser.log')
+                    raise
         else:
             print(f'Demo: {base} — Ctrl+C to stop; texts persist until make demo-reset.', flush=True)
             process.wait()
@@ -95,7 +108,10 @@ def main():
         (stack.directory / 'demo-report.json').write_text(json.dumps({
             'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
             'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',
+            'tests': verify_report.browser_results(browser_report)[0], 'failures': failures,
         }, indent=2))
+        for failure in failures:
+            print(f"\n--- FAIL: {failure['test']} (log {failure['log']})\n" + '\n'.join('    ' + line for line in failure['excerpt'].splitlines()), flush=True)
         print('Demo artifacts:', stack.directory)
 
 
