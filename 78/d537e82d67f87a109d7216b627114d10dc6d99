@@ -1,0 +1,60 @@
+quivr-search/src/components/alerts/AlertDetail.tsx
+  s_54b80c92daa9cb::t_8dcc056dc85e2d 210-211
+  s_54b80c92daa9cb::t_b04d8a4e942365 8,15,27-28,47-54,56-60,102,128-131,140,152,156-158,162,164-171,173-176,181,183-186,191,194-199,203-207,209,216,289,339-342
+  s_54b80c92daa9cb::t_319a5b528e358b 55
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_bd6ea86c59c27b 34,64-67
+quivr-search/README.md
+  s_54b80c92daa9cb::t_efc8176007c741 90-91
+  s_54b80c92daa9cb::t_1a59378d68b1d2 55-62
+docs/inventory.toml
+  s_54b80c92daa9cb::t_aafa4efda1a755 123
+README.md
+  s_54b80c92daa9cb::t_1201943eed9a06 117-120
+quivr-search/src/components/alerts/AlertsView.tsx
+  s_54b80c92daa9cb::t_a9d60de7908b65 13,24,42,85,158,210,253
+  s_54b80c92daa9cb::t_8dcc056dc85e2d 232-235
+quivr-search/tests/alerts.test.mjs
+  s_54b80c92daa9cb::t_15a7dd9ad11479 1
+  s_54b80c92daa9cb::t_c5d2b24391fd9d 400-481
+  s_54b80c92daa9cb::t_ef1355bb279bd5 386
+quivr-search/tests/alerts.spec.ts
+  s_54b80c92daa9cb::t_a24089aa1639b8 3-6
+  s_54b80c92daa9cb::t_ba48c11bb1b773 211-297
+  s_54b80c92daa9cb::t_41062e5212a8d9 13-14
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_17513f1f6d021e 1,3,6-8,20-21,78,97-98,101-115,215-218,246-247,262,293-298,417-420
+quivr-search/src/components/alerts/AlertComposer.tsx
+  s_54b80c92daa9cb::t_8dcc056dc85e2d 206
+  s_54b80c92daa9cb::t_c5597a1e341180 2-7,9-14,16,27-70,72,76-77,81,83,92-98,103-110,118,123,129,135-143,154-179,182-205,207-252,266-271,283-288,294-296,300,306-358
+quivr-search/src/components/alerts/DescribedNote.tsx
+  s_54b80c92daa9cb::t_f3b3a57146d830 1-20
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_1a59378d68b1d2 83-84
+scripts/demo.py
+  s_54b80c92daa9cb::t_163ea6a131692c 44-48,57-58
+quivr-search/src/lib/alerts.ts
+  s_54b80c92daa9cb::t_af1485a7820e0a 1,3-4,10-17,25-33,46-48,51,53,57-58,76,86,93-96,101-103,132-137
+  s_54b80c92daa9cb::t_ef80a65084fd2d 138
+quivr-search/src/components/alerts/CaughtItem.tsx
+  s_54b80c92daa9cb::t_422dbab1bc2fc7 4-9,13,47-52,54-55,79
+  s_54b80c92daa9cb::t_8dcc056dc85e2d 56-78
+quivr-search/src/alerts.css
+  s_54b80c92daa9cb::t_8dcc056dc85e2d 9-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "78d537e82d67f87a109d7216b627114d10dc6d99",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
