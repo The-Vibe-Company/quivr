@@ -200,10 +200,11 @@ provides operation-specific atomic methods, not one generic CRUD repository per
 table. Its shared transaction helpers remain private. SQL, `pgx.Tx`, Temporal
 contexts and Weaviate objects stay out of module-facing contracts.
 
-Only genuinely shared value types belong in `internal/types`; keep behavior in
-its owning module. Module tests use the same interfaces as their callers, with
-real infrastructure where the guarantee is transactional. Do not create alternate
-database backends or an elaborate mocking layer merely to satisfy an abstraction.
+Only genuinely shared value types belong in a shared package, and none exists
+yet; keep behavior in its owning module. Module tests use the same interfaces as
+their callers, with real infrastructure where the guarantee is transactional. Do
+not create alternate database backends or an elaborate mocking layer merely to
+satisfy an abstraction.
 
 ### Repository and contract layout
 

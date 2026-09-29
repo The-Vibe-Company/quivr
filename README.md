@@ -254,6 +254,10 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
   vocabulary in code and docs.
 - Change the contract in `contracts/http/v0/openapi.yaml`, then run `make generate`.
 - Keep `make verify` green; add tests with every behaviour change.
+- Declare every new living doc page in [`docs/inventory.toml`](docs/inventory.toml)
+  with one line giving its audience and kind (the file's header explains both);
+  `make docs` fails on an undeclared page, a broken relative link or a missing
+  repository path, and names the fix.
 - Pull request titles follow Commitizen conventions, for example
   `feat(ingestion): accept record versions`.
 - Keep customer-specific formats and rules out of the core; they belong in plugins.

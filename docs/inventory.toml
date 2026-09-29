@@ -1,0 +1,72 @@
+# Documentation inventory: the single list of living documentation pages.
+#
+# `make docs` (scripts/docs.py, first step of `make verify`) fails when a
+# Markdown file is neither declared here nor matched by `dated` or `excluded`,
+# when a declared page is missing, or when a living page has a broken relative
+# link or names a repository path that does not exist.
+#
+# Add a living page with one line under [pages], in path order so that
+# parallel additions land in different places (`make docs` prints the line to
+# paste for an undeclared page):
+#
+#   "docs/path/to/page.md" = { audience = "functional", kind = "guide" }
+#
+# audience: who reads it
+#   functional     integrators and non-developers learning what Quivr does
+#   plugin-author  people extending Quivr with plugins
+#   contributor    people and coding agents changing this repository
+# kind: what it is
+#   guide                 task-oriented steps a reader follows
+#   concept               explanation of how and why something works
+#   generated-reference   output of a generator; edit the source, not the page
+#   index                 entry point that mostly links to other pages
+#
+# Globs use fnmatch: `*` also matches across folders.
+
+# Dated documents keep their date and status and are not link-checked.
+dated = [
+    "docs/adr/*.md",
+    "docs/evidence/*.md",
+    "research/*.md",
+]
+
+# Markdown that is not Quivr documentation.
+excluded = [
+    ".agents/skills/*",                                    # vendored coding-agent skills
+    "internal/plugins/scaffold/templates/*",               # files copied into new plugins
+    "contracts/plugins/v0/fixtures/*",                     # protocol test fixtures
+    "third_party/*/NOTICE.md",                             # upstream notices
+    "third_party/*/MODEL_CARD.md",                         # upstream model card
+]
+
+[pages]
+"AGENTS.md" = { audience = "contributor", kind = "guide" }
+"CONTEXT.md" = { audience = "contributor", kind = "concept" }
+"README.md" = { audience = "functional", kind = "index" }
+"contracts/http/v0/README.md" = { audience = "functional", kind = "concept" }
+"contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept" }
+"deploy/railway/README.md" = { audience = "functional", kind = "guide" }
+"docs/agents/domain.md" = { audience = "contributor", kind = "guide" }
+"docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide" }
+"docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide" }
+"docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide" }
+"docs/api-walkthrough.md" = { audience = "functional", kind = "guide" }
+"docs/connectors/README.md" = { audience = "functional", kind = "guide" }
+"docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide" }
+"docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
+"docs/connectors/x.md" = { audience = "functional", kind = "guide" }
+"docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
+"docs/quivr-v2-architecture-overview.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-backend-mvp-scope.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-canonical-data-model.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-ingestion-contracts.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-module-boundaries.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-monitoring-tracer.md" = { audience = "contributor", kind = "concept" }
+"docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
+"docs/quivr-v2-search-contracts.md" = { audience = "contributor", kind = "concept" }
+"plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }
+"quivr-search/README.md" = { audience = "functional", kind = "guide" }
+"sdks/python/README.md" = { audience = "plugin-author", kind = "guide" }
+"tests/acceptance/README.md" = { audience = "contributor", kind = "guide" }
+"third_party/README.md" = { audience = "contributor", kind = "index" }
