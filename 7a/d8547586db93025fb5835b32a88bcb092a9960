@@ -1,0 +1,27 @@
+AGENTS.md
+  s_54b80c92daa9cb::t_7ea885aac012b6 6
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_efc1a393d00514 1-48
+docs/inventory.toml
+  s_54b80c92daa9cb::t_e72a2700575c06 25-29,54,79-99
+scripts/docs.py
+  s_54b80c92daa9cb::t_48ddbe92d8cf26 12-14,132,134,286-389,411-415
+scripts/test_docs.py
+  s_54b80c92daa9cb::t_4c7fde2bbc6d69 15-17,243,258-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ad8547586db93025fb5835b32a88bcb092a9960",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
