@@ -20,6 +20,9 @@ Delivered kinds:
 - [Microsoft 365 mailbox (`m365_mail`)](microsoft-365.md)
 - [X lists (`x_list`)](x.md)
 
+A pinned plugin can add kinds of its own; see
+[Run a connector plugin](../plugins/run-a-connector-plugin.md).
+
 ## Before you start
 
 - **Deployment secret (optional).** `credential_key` (32+ random bytes) in the

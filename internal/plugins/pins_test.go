@@ -23,6 +23,44 @@ contributions:
     max_batch_size: 8
 `
 
+const connectorManifest = `id: acme.source
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        config_schema: {type: object}
+        default_interval_seconds: 900
+        modes: [pull]
+`
+
+// A connector-only plugin needs no routes and resolves its kinds; it
+// receives credentials, so plain HTTP is allowed only on loopback.
+func TestLoadPinsResolvesConnectorKinds(t *testing.T) {
+	source := writePinManifest(t, connectorManifest)
+	for _, endpoint := range []string{"http://127.0.0.1:9903", "http://[::1]:9903", "http://localhost:9903", "https://source.example:9903"} {
+		set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: source, Endpoint: endpoint}})
+		if err != nil {
+			t.Fatalf("%s: %v", endpoint, err)
+		}
+		if kinds := set.Connectors(); len(kinds) != 1 || kinds[0].Kind != "feed" || kinds[0].Pin.Manifest.ID != "acme.source" {
+			t.Fatalf("%s: connector kinds %+v", endpoint, kinds)
+		}
+	}
+	_, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: source, Endpoint: "http://source.example:9903"}})
+	assertPinCode(t, err, plugins.CodeInvalidPin)
+	if !strings.Contains(err.Error(), "https://") {
+		t.Fatalf("the refusal does not say how to fix it: %v", err)
+	}
+	var none *plugins.PinSet
+	if len(none.Connectors()) != 0 {
+		t.Fatal("a nil set provides no connector kind")
+	}
+}
+
 // Several plugins are pinned together: normalizers route by media type and
 // subscription evaluators resolve by plugin id and version.
 func TestLoadPinsRoutesContributionsAcrossPlugins(t *testing.T) {
@@ -79,6 +117,8 @@ func TestLoadPinsRefusesConflicts(t *testing.T) {
 	markdown := writePinManifest(t, pinManifest)
 	other := writePinManifest(t, strings.Replace(pinManifest, "id: acme.markdown", "id: acme.other", 1))
 	reserved := writePinManifest(t, strings.Replace(alertsManifest, "id: acme.alerts", "id: quivr.fixture", 1))
+	source := writePinManifest(t, connectorManifest)
+	sameKind := writePinManifest(t, strings.Replace(connectorManifest, "id: acme.source", "id: acme.mirror", 1))
 	for name, tc := range map[string]struct {
 		configs []plugins.PinConfig
 		code    string
@@ -87,6 +127,7 @@ func TestLoadPinsRefusesConflicts(t *testing.T) {
 			c.Routes = []plugins.RouteConfig{{MediaType: "text/x-rst"}}
 		})}, plugins.CodePluginConflict},
 		"media type routed twice": {[]plugins.PinConfig{pinConfig(markdown, nil), pinConfig(other, nil)}, plugins.CodeRouteConflict},
+		"connector kind twice":    {[]plugins.PinConfig{{Manifest: source, Endpoint: "http://127.0.0.1:9903"}, {Manifest: sameKind, Endpoint: "http://127.0.0.1:9904"}}, plugins.CodeKindConflict},
 		"reserved evaluator id":   {[]plugins.PinConfig{{Manifest: reserved, Endpoint: "http://127.0.0.1:9902"}}, plugins.CodePluginConflict},
 		"invalid member pin":      {[]plugins.PinConfig{pinConfig(markdown, nil), pinConfig(other, func(c *plugins.PinConfig) { c.Endpoint = "ftp://x" })}, plugins.CodeInvalidPin},
 	} {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
@@ -80,7 +81,9 @@ type Config struct {
 	// Plugins list and may be combined with it (it comes first).
 	Plugin *plugins.PinConfig `json:"plugin"`
 	// Plugins pins external plugins together: normalizers are routed by Blob
-	// media type, subscription evaluators by plugin id and version. API and
+	// media type, subscription evaluators by plugin id and version, connector
+	// kinds by name beside the built-in kinds (a kind with two providers is a
+	// conflict; a connector plugin needs https unless it is on loopback). API and
 	// worker refuse to start on an invalid pin or a conflict between pins; an
 	// unreachable plugin never prevents startup.
 	Plugins []plugins.PinConfig `json:"plugins"`
@@ -201,6 +204,9 @@ func Run(command string) error {
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}
+	// Connector kinds of pinned plugins resolve beside the enabled built-in
+	// kinds; a kind with two providers refuses startup.
+	kinds = append(kinds, pluginhttp.Connectors(pins)...)
 	registry, err := connectors.NewRegistry(kinds...)
 	if err != nil {
 		return err

@@ -313,3 +313,101 @@ func TestAPageNoticeCompletesTheRunWithADiagnostic(t *testing.T) {
 		t.Fatalf("finish %+v", f)
 	}
 }
+
+// checkingConnector is a plugin-like kind: it checks credentials and owns an
+// extension namespace.
+type checkingConnector struct {
+	stubConnector
+	checkErr error
+	checks   []CredentialRequest
+	ctxs     []context.Context
+}
+
+func (c *checkingConnector) CredentialSchema() []byte { return []byte(`{"type":"object"}`) }
+func (c *checkingConnector) ExtensionOwner() string   { return "acme.source" }
+func (c *checkingConnector) CheckCredential(_ context.Context, r CredentialRequest) error {
+	c.checks = append(c.checks, r)
+	return c.checkErr
+}
+func (c *checkingConnector) Fetch(ctx context.Context, r FetchRequest) (Page, error) {
+	c.ctxs = append(c.ctxs, ctx)
+	return c.stubConnector.Fetch(ctx, r)
+}
+
+func checkingAcquirer(t *testing.T, c *checkingConnector, deposited time.Time, lastSuccess *time.Time) (Acquirer, *fakeRuns) {
+	t.Helper()
+	a, runs := stubAcquirer(t, &c.stubConnector, 0)
+	registry, err := NewRegistry(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Registry = registry
+	sealed, _ := a.Sealer.Seal("org_a", "connector_1", []byte(`{"token":"fixture-test-secret-check"}`))
+	runs.target.Sealed = &sealed
+	runs.target.Credential = &CredentialInfo{Version: 1, DepositedAt: deposited}
+	runs.target.Health.LastSuccessAt = lastSuccess
+	return a, runs
+}
+
+// A credential deposited after the last successful poll is checked before
+// fetching; an access refusal ends the run as access_error without a fetch.
+// A credential that already worked is not checked again.
+func TestANewCredentialIsCheckedBeforeFetching(t *testing.T) {
+	deposited := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	earlier, later := deposited.Add(-time.Hour), deposited.Add(time.Hour)
+	for name, tc := range map[string]struct {
+		lastSuccess *time.Time
+		checkErr    error
+		checked     bool
+		fetched     bool
+		class       ErrorClass
+	}{
+		"never succeeded":         {nil, nil, true, true, ""},
+		"rotated after last poll": {&earlier, nil, true, true, ""},
+		"worked since deposit":    {&later, AccessError("token_rejected"), false, true, ""},
+		"refused by the source":   {nil, AccessError("token_rejected"), true, false, ClassAccess},
+		"plugin unreachable":      {nil, TransientError("plugin_unavailable"), true, false, ClassTransient},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &checkingConnector{stubConnector: stubConnector{pages: []Page{{Checkpoint: json.RawMessage(`{}`)}}}, checkErr: tc.checkErr}
+			a, runs := checkingAcquirer(t, c, deposited, tc.lastSuccess)
+			if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(c.checks) == 1; got != tc.checked {
+				t.Fatalf("checked %v, want %v", got, tc.checked)
+			}
+			if tc.checked && (string(c.checks[0].Credential) != `{"token":"fixture-test-secret-check"}` || c.checks[0].InstanceID != "connector_1" || c.checks[0].Organization != "org_a") {
+				t.Fatalf("check request %+v", c.checks[0])
+			}
+			if got := len(c.requests) > 0; got != tc.fetched {
+				t.Fatalf("fetched %v, want %v", got, tc.fetched)
+			}
+			f := runs.finished[0]
+			if tc.class == "" && f != nil || tc.class != "" && (f == nil || f.Class != tc.class) {
+				t.Fatalf("finish %+v, want class %q", f, tc.class)
+			}
+		})
+	}
+}
+
+// A plugin kind fetches on behalf of its plugin, so its items may write the
+// namespaces that plugin owns.
+func TestAPluginKindWritesItsOwnExtensionNamespaces(t *testing.T) {
+	c := &checkingConnector{stubConnector: stubConnector{pages: []Page{{Checkpoint: json.RawMessage(`{}`)}}}}
+	later := time.Now()
+	a, _ := checkingAcquirer(t, c, later.Add(-time.Hour), &later)
+	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+		t.Fatal(err)
+	}
+	registry := content.NewExtensionRegistry()
+	if err := registry.Own("acme.source", "acme.source"); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Validate(c.ctxs[0], content.Extensions{"acme.source": {SchemaVersion: "1"}}); err != nil {
+		t.Fatalf("the fetch context does not carry the owning plugin: %v", err)
+	}
+	if c.requests[0].Organization != "org_a" || c.requests[0].InstanceID != "connector_1" {
+		t.Fatalf("fetch request %+v", c.requests[0])
+	}
+}

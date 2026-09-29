@@ -157,7 +157,11 @@ func (p *Process) Stop(grace time.Duration) error {
 	return nil
 }
 
-var client = &http.Client{}
+// client never follows a redirect: the Plugin Protocol has none, and a 307
+// or 308 would resend a request body (a connector's credential) to another
+// address. A 3xx answer carries no error envelope, so it counts as plugin
+// unavailability, for the engine and the Contract Runner alike.
+var client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)

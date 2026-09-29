@@ -161,7 +161,9 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 		{"missing write action", readerKey, func(map[string]any) {}, 403, "forbidden"},
 		{"Corpus outside scope", connectorKey, func(b map[string]any) { b["corpus_id"] = "corpus_other" }, 404, "not_found"},
 		{"undelivered kind", connectorKey, func(b map[string]any) { b["kind"] = "rss" }, 422, "unsupported_connector_kind"},
-		{"unknown kind", connectorKey, func(b map[string]any) { b["kind"] = "ftp" }, 422, "invalid_schema"},
+		// A kind no provider serves; a plugin could provide it, so the contract does not enumerate kinds.
+		{"unknown kind", connectorKey, func(b map[string]any) { b["kind"] = "ftp" }, 422, "unsupported_connector_kind"},
+		{"malformed kind", connectorKey, func(b map[string]any) { b["kind"] = "FTP feed" }, 422, "invalid_schema"},
 		{"config fails the kind schema", connectorKey, func(b map[string]any) { b["config"] = map[string]any{"script": "x"} }, 422, "invalid_config"},
 		{"secret fails the kind schema", connectorKey, func(b map[string]any) { b["credential"] = map[string]any{"secret": map[string]any{"password": "x"}} }, 422, "invalid_credential"},
 		{"interval below the floor", connectorKey, func(b map[string]any) { b["schedule"] = map[string]any{"interval_seconds": 29} }, 422, "invalid_interval"},
@@ -327,7 +329,7 @@ func TestConnectorValidationErrorsPointAtTheOffendingField(t *testing.T) {
 		{"missing config member", func(b map[string]any) { b["config"] = map[string]any{} }, "invalid_config", "/config/script"},
 		{"secret member", func(b map[string]any) { b["credential"] = map[string]any{"secret": map[string]any{"token": ""}} }, "invalid_credential", "/credential/secret/token"},
 		{"interval below the floor", func(b map[string]any) { b["schedule"] = map[string]any{"interval_seconds": 29} }, "invalid_interval", "/schedule/interval_seconds"},
-		{"unknown kind", func(b map[string]any) { b["kind"] = "ftp" }, "invalid_schema", "/kind"},
+		{"malformed kind", func(b map[string]any) { b["kind"] = "FTP feed" }, "invalid_schema", "/kind"},
 	} {
 		b := valid()
 		c.edit(b)

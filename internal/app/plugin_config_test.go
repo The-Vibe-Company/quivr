@@ -78,3 +78,28 @@ func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
 		})
 	}
 }
+
+// Each connector kind resolves to one provider: a pinned plugin declaring a
+// kind the engine provides refuses api and worker startup, naming both.
+func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "quivr-plugin.yaml")
+	body := "id: acme.rss\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      rss:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"database_url": "postgres://127.0.0.1:1/unused", "cursor_key": strings.Repeat("c", 32),
+		"keys":    map[string]any{strings.Repeat("k", 32): map[string]any{"organization": "org_a", "actions": []string{"connectors:read"}, "corpora": []string{"*"}}},
+		"plugins": []any{map[string]any{"manifest": manifest, "endpoint": "http://127.0.0.1:1"}}})
+	config := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(config, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QUIVR_CONFIG", config)
+	for _, command := range []string{"api", "worker"} {
+		err := Run(command)
+		if err == nil || !strings.Contains(err.Error(), `connector kind "rss"`) || !strings.Contains(err.Error(), "the engine") || !strings.Contains(err.Error(), "plugin acme.rss@1.0.0") {
+			t.Fatalf("%s started with a kind provided twice: %v", command, err)
+		}
+	}
+}

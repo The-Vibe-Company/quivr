@@ -62,6 +62,10 @@ func (r *Registry) Describe() []KindDescription {
 			}
 			d.Description = annotations.Description
 		}
+		if describer, ok := c.(interface{ Description() string }); ok && d.Description == "" {
+			// A plugin kind's manifest description, when its schema has none.
+			d.Description = describer.Description()
+		}
 		if schema := c.CredentialSchema(); schema != nil {
 			d.CredentialSchema = json.RawMessage(schema)
 			d.Credential = CredentialOptional

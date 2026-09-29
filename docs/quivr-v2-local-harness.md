@@ -564,6 +564,14 @@ Described alerts are offered (the pin's `kinds`) only when the plugin has a clas
   plugin then sends article text to TypeSafe. Otherwise it pins
   `"kinds": ["keywords"]` and clears the key from the plugin's environment.
 
+`make verify` also pins the Go SDK sample connector
+(`sdks/go/examples/static-source`, kind `static`) in `plugins`
+(`scripts/connector_plugin.py`, log `.scratch/<project>/connector-plugin.log`);
+`make dev` does not. The connectors part's `collector_plugin` step checks that
+the kind is published with its schemas, collects searchable Records and resumes
+from its checkpoint, reports `plugin_unavailable` while the plugin is stopped,
+collects everything once it is back, and that no log holds the test token.
+
 The PostgreSQL adapter suite also kills the test plugin process in the middle of an
 invocation, restarts it, and checks that the Version ends with exactly one published
 Manifest.

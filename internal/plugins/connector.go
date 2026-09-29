@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -289,4 +290,58 @@ func compactLen(raw json.RawMessage) int {
 		return len(raw)
 	}
 	return len(b)
+}
+
+// MinSecretLength is the shortest credential string looked for in plugin
+// answers and output: shorter strings (a region, a flag) are not secrets and
+// would match by chance.
+const MinSecretLength = 8
+
+// CredentialSecrets lists the string leaves of a credential JSON document of
+// at least MinSecretLength characters.
+func CredentialSecrets(credential json.RawMessage) []string {
+	var v any
+	if len(credential) == 0 || json.Unmarshal(credential, &v) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	collectSecrets(v, seen)
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	return out
+}
+
+// ContainsSecret reports whether body holds one of the secrets, raw or JSON
+// escaped.
+func ContainsSecret(body []byte, secrets []string) bool {
+	for _, secret := range secrets {
+		if bytes.Contains(body, []byte(secret)) || bytes.Contains(body, jsonEscaped(secret)) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectSecrets(v any, into map[string]bool) {
+	switch v := v.(type) {
+	case string:
+		if len(v) >= MinSecretLength {
+			into[v] = true
+		}
+	case map[string]any:
+		for _, e := range v {
+			collectSecrets(e, into)
+		}
+	case []any:
+		for _, e := range v {
+			collectSecrets(e, into)
+		}
+	}
+}
+
+func jsonEscaped(s string) []byte {
+	b, _ := json.Marshal(s)
+	return bytes.Trim(b, `"`)
 }

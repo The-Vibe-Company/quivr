@@ -12,24 +12,29 @@ import (
 // evaluator id the engine reserves.
 const CodePluginConflict = "plugin_conflict"
 
+// CodeKindConflict is a connector kind declared by two pinned plugins.
+const CodeKindConflict = "kind_conflict"
+
 // ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
 // deterministic test evaluator); no plugin may be pinned under them.
 var ReservedEvaluatorIDs = []string{"quivr.fixture"}
 
 // PinSet is every plugin pinned at startup, with its Contribution routing:
 // normalizers by accepted Blob media type, subscription evaluators by plugin
-// id and version. A nil set pins nothing.
+// id and version, connectors by kind. A nil set pins nothing.
 type PinSet struct {
 	pins        []*Pin
 	normalizers map[string]*Pin
 	evaluators  map[string]*Pin
+	connectors  map[string]*Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
-// all of them. A plugin id pinned twice, a media type routed to two plugins
-// and a reserved evaluator id refuse startup. Nothing contacts a plugin.
+// all of them. A plugin id pinned twice, a media type routed to two plugins,
+// a connector kind provided by two plugins and a reserved evaluator id refuse
+// startup. Nothing contacts a plugin.
 func LoadPins(configs []PinConfig) (*PinSet, error) {
-	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}}
+	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}}
 	var issues []Issue
 	byID := map[string]int{}
 	for i, c := range configs {
@@ -72,6 +77,20 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 		}
 		if pin.Manifest.Contributions.Subscription != nil {
 			set.evaluators[EvaluatorKey(id, pin.Manifest.Version)] = pin
+		}
+		if c := pin.Manifest.Contributions.Connector; c != nil {
+			kinds := make([]string, 0, len(c.Kinds))
+			for kind := range c.Kinds {
+				kinds = append(kinds, kind)
+			}
+			sort.Strings(kinds)
+			for _, kind := range kinds {
+				if other, exists := set.connectors[kind]; exists {
+					issues = append(issues, Issue{Code: CodeKindConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("connector kind %q is also provided by %s@%s; each kind resolves to one provider, so pin only one of them", kind, other.Manifest.ID, other.Manifest.Version)})
+					continue
+				}
+				set.connectors[kind] = pin
+			}
 		}
 	}
 	if len(issues) > 0 {
@@ -134,6 +153,25 @@ func (s *PinSet) Evaluators() []*Pin {
 	for _, k := range keys {
 		out = append(out, s.evaluators[k])
 	}
+	return out
+}
+
+// PinnedKind is one connector kind a pinned plugin provides.
+type PinnedKind struct {
+	Kind string
+	Pin  *Pin
+}
+
+// Connectors lists the connector kinds of the pinned plugins, sorted by kind.
+func (s *PinSet) Connectors() []PinnedKind {
+	if s == nil {
+		return nil
+	}
+	out := make([]PinnedKind, 0, len(s.connectors))
+	for kind, pin := range s.connectors {
+		out = append(out, PinnedKind{Kind: kind, Pin: pin})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
 	return out
 }
 

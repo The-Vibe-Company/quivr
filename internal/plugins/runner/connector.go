@@ -18,10 +18,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
 )
 
-// minSecretLength is the shortest credential string the credentials check
-// looks for: shorter values ("en", "true") appear in ordinary output.
-const minSecretLength = 8
-
 type connectorRun struct {
 	label string
 	run   *devhost.ConnectorRun
@@ -371,12 +367,12 @@ func (r *run) credentialsCheck(runs []connectorRun) {
 		Title: "no credential value appears in a response, an error envelope or the plugin's output"}
 	secrets := map[string]bool{}
 	for _, cr := range runs {
-		var credential any
-		_ = json.Unmarshal(cr.run.Credential, &credential)
-		collectSecrets(credential, secrets)
+		for _, secret := range plugins.CredentialSecrets(cr.run.Credential) {
+			secrets[secret] = true
+		}
 	}
 	if len(secrets) == 0 {
-		check.Status, check.Note = Skip, fmt.Sprintf("no fixture credential has a string of at least %d characters to look for", minSecretLength)
+		check.Status, check.Note = Skip, fmt.Sprintf("no fixture credential has a string of at least %d characters to look for", plugins.MinSecretLength)
 		r.add(check, started)
 		return
 	}
@@ -396,7 +392,7 @@ func (r *run) credentialsCheck(runs []connectorRun) {
 	sort.Strings(names)
 	for _, secret := range slices.Sorted(maps.Keys(secrets)) {
 		for _, name := range names {
-			if bytes.Contains(sources[name], []byte(secret)) || bytes.Contains(sources[name], jsonEscaped(secret)) {
+			if plugins.ContainsSecret(sources[name], []string{secret}) {
 				check.Issues = append(check.Issues, plugins.Issue{Code: CodeCredentialLeak,
 					Message: fmt.Sprintf("a fixture credential value (%d characters) appears in %s; never echo, log or return a credential", len(secret), name)})
 				break
@@ -404,28 +400,6 @@ func (r *run) credentialsCheck(runs []connectorRun) {
 		}
 	}
 	r.add(check, started)
-}
-
-func collectSecrets(v any, into map[string]bool) {
-	switch v := v.(type) {
-	case string:
-		if len(v) >= minSecretLength {
-			into[v] = true
-		}
-	case map[string]any:
-		for _, e := range v {
-			collectSecrets(e, into)
-		}
-	case []any:
-		for _, e := range v {
-			collectSecrets(e, into)
-		}
-	}
-}
-
-func jsonEscaped(s string) []byte {
-	b, _ := json.Marshal(s)
-	return bytes.Trim(b, `"`)
 }
 
 // lockedBuffer collects the plugin's output from its stdout and stderr copiers.

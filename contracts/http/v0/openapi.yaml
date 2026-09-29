@@ -2146,15 +2146,12 @@ components:
         extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
     ConnectorKind:
       type: string
-      enum:
-      - fixture
-      - rss
-      - m365_mail
-      - x_list
-      description: Built-in connector kind. fixture is a deterministic test connector available only when
-        the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional
-        honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422
-        unsupported_connector_kind until they are delivered.
+      pattern: ^[a-z][a-z0-9_]{0,31}$
+      description: Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds
+        lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector
+        available only when the deployment enables it), rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents;
+        config url, optional honor_ttl; optional credential username+password or token), m365_mail (Microsoft
+        365 mailboxes) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
     CredentialDeposit:
       type: object
       additionalProperties: false

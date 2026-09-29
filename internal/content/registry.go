@@ -67,19 +67,38 @@ func (r *ExtensionRegistry) Declared(namespace string) bool {
 	return owned || DeclaredExtension(namespace)
 }
 
-// Validate implements ExtensionValidator for client submissions.
+type extensionWriterKey struct{}
+
+// WithExtensionWriter marks ctx as a submission made on behalf of a pinned
+// plugin whose output was already validated against its manifest's declared
+// extension schemas (a connector plugin's items). Only the engine sets it; a
+// client submission never carries it.
+func WithExtensionWriter(ctx context.Context, plugin string) context.Context {
+	return context.WithValue(ctx, extensionWriterKey{}, plugin)
+}
+
+// Validate implements ExtensionValidator for client submissions. A namespace
+// owned by the plugin of WithExtensionWriter is accepted as already validated;
+// every other owned namespace is refused.
 func (r *ExtensionRegistry) Validate(ctx context.Context, exts Extensions) error {
+	writer, _ := ctx.Value(extensionWriterKey{}).(string)
 	namespaces := make([]string, 0, len(exts))
 	for ns := range exts {
 		namespaces = append(namespaces, ns)
 	}
 	sort.Strings(namespaces)
+	rest := Extensions{}
 	for _, ns := range namespaces {
-		if owner, owned := r.owners[ns]; owned {
-			return publicerr.WithDetail(ErrExtensionOwned, "extension namespace %q is owned by plugin %q; only its normalizer output writes it", ns, owner)
+		owner, owned := r.owners[ns]
+		switch {
+		case owned && writer != "" && owner == writer:
+		case owned:
+			return publicerr.WithDetail(ErrExtensionOwned, "extension namespace %q is owned by plugin %q; only that plugin's output writes it", ns, owner)
+		default:
+			rest[ns] = exts[ns]
 		}
 	}
-	return BuiltinExtensions{}.Validate(ctx, exts)
+	return BuiltinExtensions{}.Validate(ctx, rest)
 }
 
 // Declared reports whether a namespace is built in.

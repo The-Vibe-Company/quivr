@@ -84,30 +84,6 @@ func (e ConnectorHealthState) Valid() bool {
 	}
 }
 
-// Defines values for ConnectorKind.
-const (
-	Fixture  ConnectorKind = "fixture"
-	M365Mail ConnectorKind = "m365_mail"
-	Rss      ConnectorKind = "rss"
-	XList    ConnectorKind = "x_list"
-)
-
-// Valid indicates whether the value is a known member of the ConnectorKind enum.
-func (e ConnectorKind) Valid() bool {
-	switch e {
-	case Fixture:
-		return true
-	case M365Mail:
-		return true
-	case Rss:
-		return true
-	case XList:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ConnectorKindCatalogCredentialDeposits.
 const (
 	ConnectorKindCatalogCredentialDepositsAvailable   ConnectorKindCatalogCredentialDeposits = "available"
@@ -711,7 +687,7 @@ type Connector struct {
 		SilentAfterSeconds       int `json:"silent_after_seconds"`
 	} `json:"health_policy"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it), rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), m365_mail (Microsoft 365 mailboxes) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
 	Kind     ConnectorKind `json:"kind"`
 	Schedule struct {
 		IntervalSeconds int `json:"interval_seconds"`
@@ -728,7 +704,7 @@ type ConnectorCreate struct {
 	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
 	IdempotencyKey string                 `json:"idempotency_key"`
 
-	// Kind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
+	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it), rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), m365_mail (Microsoft 365 mailboxes) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
 	Kind            ConnectorKind      `json:"kind"`
 	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
 	SourceNamespace string             `json:"source_namespace"`
@@ -766,8 +742,8 @@ type ConnectorHealthPolicy struct {
 	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
 }
 
-// ConnectorKind Built-in connector kind. fixture is a deterministic test connector available only when the deployment enables it. rss collects RSS 2.0, RSS 1.0, Atom and JSON Feed documents (config url, optional honor_ttl; optional credential username+password or token). m365_mail collects Microsoft 365 mailboxes. x_list polls an X list. Other kinds are refused with 422 unsupported_connector_kind until they are delivered.
-type ConnectorKind string
+// ConnectorKind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it), rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), m365_mail (Microsoft 365 mailboxes) and x_list (an X list). Another kind is refused with 422 unsupported_connector_kind.
+type ConnectorKind = string
 
 // ConnectorKindCatalog defines model for ConnectorKindCatalog.
 type ConnectorKindCatalog struct {

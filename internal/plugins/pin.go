@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
 	"strings"
@@ -101,6 +102,9 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	issues = append(issues, ValidateConfiguration(m, config)...)
 	if u, err := url.Parse(c.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/endpoint", Message: fmt.Sprintf("endpoint %q must be an http(s) base URL such as http://127.0.0.1:9900", c.Endpoint)})
+	} else if m.Contributions.Connector != nil && u.Scheme != "https" && !loopbackHost(u.Hostname()) {
+		// A connector receives Deposited Credentials in its request bodies.
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/endpoint", Message: fmt.Sprintf("endpoint %q: a connector plugin receives credentials; use https:// or a loopback address (127.0.0.1, ::1, localhost)", c.Endpoint)})
 	}
 	// Routes feed the normalizer. A plugin that also, or only, contributes an
 	// alert rule (subscription) is useful without routes.
@@ -252,6 +256,16 @@ func ExtensionRegistry(p *Pin) (*content.ExtensionRegistry, error) {
 		return nil, &PinError{Path: p.Path, Issues: []Issue{{Code: CodeNamespaceConflict, Path: "/extensions", Message: err.Error()}}}
 	}
 	return registry, nil
+}
+
+// loopbackHost reports whether an endpoint host is a loopback literal or
+// localhost, where plain HTTP never leaves the machine.
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // BuiltinTextMediaType reports whether the built-in text path can take a Blob

@@ -8,6 +8,7 @@ import guides
 import normalizer_plugin
 import ports
 import subscription_plugin
+import connector_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -96,7 +97,7 @@ class Stack:
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
-            s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
+            s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
             # The browser demo (scripts/demo.py) owns org_d: its connectors keep polling without touching acceptance Organizations.
             # Its keyword alerts (THE-734) need the monitoring rights and org_d's destination below.
@@ -125,9 +126,10 @@ class Stack:
             # The pinned external normalizer: pdf-text for application/pdf (make dev default), the
             # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
             plugin=normalizer_plugin.pin(self),
-            # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py). The fixture
+            # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
+            # verification the sample connector plugin (scripts/connector_plugin.py). The fixture
             # evaluator stays installed for the notification-mechanics acceptance tests.
-            plugins=subscription_plugin.pins(self),monitoring_fixture_evaluator=True)
+            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self),monitoring_fixture_evaluator=True)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -378,7 +380,7 @@ class Stack:
         """Stop this project's processes and containers. reset also deletes its volumes and the
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
-        normalizer_plugin.stop(self);subscription_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
             self.save()
@@ -529,6 +531,8 @@ def parts():
             # Connectors ingest PDF attachments; they run on the make dev default, the pdf-text pin.
             step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
             step('connectors',connectors),
+            # Connector kinds from a pinned plugin: collect and resume, then a plugin outage and its recovery.
+            step('collector_plugin',connector_plugin.verify),
             step('connector_restart',verify_connector_restart),
             step('m365_restart',verify_m365_restart),
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
@@ -596,6 +600,7 @@ def run_stack(command,part=None):
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.
             normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
             subscription_plugin.select(stack,verification or subscription_plugin.from_environment(),subscription_plugin.described_mode(verification))
+            connector_plugin.select(stack,verification)
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps,part)
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}")

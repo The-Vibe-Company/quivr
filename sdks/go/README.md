@@ -134,7 +134,8 @@ It runs every fixture page by page, feeding each checkpoint back, resumes from
 the final checkpoint, checks credentials, error classes and invalid requests,
 and fails when a credential value appears in an answer or in your plugin's
 output. CI certifies the sample and publishes its report as the
-`go-connector-contract-report` artifact.
+`go-connector-contract-report` artifact. To run it in Quivr, pin it as in
+[Run a connector plugin](../../docs/plugins/run-a-connector-plugin.md).
 
 ## Rules
 

@@ -100,3 +100,30 @@ func TestClientWritesToOwnedNamespacesAreRejected(t *testing.T) {
 		t.Fatal("a Service without a registry lost the built-in namespaces")
 	}
 }
+
+// A connector plugin's items reach the ingestion path on its behalf: its own
+// namespaces are accepted (the engine validated them against its manifest),
+// another plugin's stay refused.
+func TestTheOwningPluginWritesItsNamespacesThroughIngestion(t *testing.T) {
+	r := ownedRegistry(t)
+	if err := r.Own("acme-other", "acme-other"); err != nil {
+		t.Fatal(err)
+	}
+	owned := content.Extensions{"acme-md.outline": {SchemaVersion: "1", Data: map[string]any{"heading_count": 2}}, "example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "x"}}}
+	_, service := manifestService()
+	service.Extensions = r
+	command := manifestCommand()
+	command.Extensions = owned
+	if _, err := service.Accept(content.WithExtensionWriter(context.Background(), "acme-md"), scope(), command); err != nil {
+		t.Fatalf("the owner's write refused: %v", err)
+	}
+	command = manifestCommand()
+	command.Extensions = owned
+	if _, err := service.Accept(content.WithExtensionWriter(context.Background(), "acme-other"), scope(), command); !errors.Is(err, content.ErrExtensionOwned) {
+		t.Fatalf("another plugin wrote an owned namespace: %v", err)
+	}
+	invalid := content.Extensions{"acme-md.outline": owned["acme-md.outline"], "example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}}
+	if err := r.Validate(content.WithExtensionWriter(context.Background(), "acme-md"), invalid); !errors.Is(err, content.ErrInvalid) {
+		t.Fatalf("built-in namespaces lost their validation beside an owned one: %v", err)
+	}
+}

@@ -89,10 +89,14 @@ type Attachment struct {
 // FetchRequest is one page request. Credential is the decrypted secret JSON,
 // held only in memory for the duration of the fetch.
 type FetchRequest struct {
-	Config     json.RawMessage
-	Credential json.RawMessage
-	Checkpoint json.RawMessage
-	Now        time.Time
+	// Organization and InstanceID identify the Connector Instance, for
+	// connectors that run outside the engine (plugin kinds).
+	Organization string
+	InstanceID   string
+	Config       json.RawMessage
+	Credential   json.RawMessage
+	Checkpoint   json.RawMessage
+	Now          time.Time
 	// PageInRun is 0 for the first page of a run, then counts up.
 	PageInRun int
 	// ReadsToday is the number of source resources read during the current
@@ -130,6 +134,43 @@ type Connector interface {
 	Fetch(context.Context, FetchRequest) (Page, error)
 }
 
+// CredentialRequest asks whether the source accepts a Deposited Credential.
+type CredentialRequest struct {
+	Organization string
+	InstanceID   string
+	Config       json.RawMessage
+	Credential   json.RawMessage
+	Now          time.Time
+}
+
+// CredentialChecker is optionally implemented by a Connector that can check
+// a credential without fetching (plugin kinds, through check_credential). The
+// Acquirer calls it at the start of a run whose credential was deposited
+// after the last successful poll; a typed *Error ends the run like a fetch.
+type CredentialChecker interface {
+	CheckCredential(context.Context, CredentialRequest) error
+}
+
+// ExtensionOwner is optionally implemented by a Connector that runs as a
+// pinned plugin: its items may write the extension namespaces that plugin
+// owns, because its output was validated against the plugin's manifest.
+type ExtensionOwner interface {
+	ExtensionOwner() string
+}
+
+// Provider is optionally implemented by a Connector to name who provides its
+// kind in startup errors; built-in kinds are provided by "the engine".
+type Provider interface {
+	Provider() string
+}
+
+func providerOf(c Connector) string {
+	if p, ok := c.(Provider); ok {
+		return p.Provider()
+	}
+	return "the engine"
+}
+
 // ConfigChecker is optionally implemented by a Connector whose configuration
 // has rules JSON Schema cannot express (e.g. a bounded backfill window).
 type ConfigChecker interface {
@@ -145,10 +186,15 @@ type registered struct {
 // Registry resolves the connector kinds enabled in this deployment.
 type Registry struct{ kinds map[string]registered }
 
-// NewRegistry compiles each connector's schemas.
+// NewRegistry compiles each connector's schemas. Each kind resolves to
+// exactly one provider: a kind listed twice (for example a built-in kind and
+// a pinned plugin's) refuses startup.
 func NewRegistry(list ...Connector) (*Registry, error) {
 	r := &Registry{kinds: map[string]registered{}}
 	for _, c := range list {
+		if other, exists := r.kinds[c.Kind()]; exists {
+			return nil, fmt.Errorf("connector kind %q is provided by %s and by %s; each kind resolves to one provider", c.Kind(), providerOf(other.connector), providerOf(c))
+		}
 		entry := registered{connector: c}
 		var err error
 		if entry.config, err = compile(c.Kind()+"/config", c.ConfigSchema()); err != nil {
