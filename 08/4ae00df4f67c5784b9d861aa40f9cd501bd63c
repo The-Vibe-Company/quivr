@@ -1,0 +1,108 @@
+docs/dated/design/quivr-v2-ingestion-contracts.md
+  s_54b80c92daa9cb::t_76478228d44038 3-543
+README.md
+  s_54b80c92daa9cb::t_88bb2e9108f552 276
+  s_54b80c92daa9cb::t_8dcb9aa3bb9f8a 245,260,274-275
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_df0601bc38421c 60,474
+docs/dated/design/quivr-v2-architecture-overview.md
+  s_54b80c92daa9cb::t_5c97f6a253b39a 3-316
+docs/dated/design/quivr-v2-canonical-data-model.md
+  s_54b80c92daa9cb::t_271d0bf7285c5f 3-6
+Makefile
+  s_54b80c92daa9cb::t_4c559b7524ba3d 30-31
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_3510c2e43b62d0 15
+docs/inventory.toml
+  s_54b80c92daa9cb::t_c5c03a1d6b470b 26,31,34,62
+  s_54b80c92daa9cb::t_9bf17bacb81df0 27-30
+tests/acceptance/catalog_test.go
+  s_54b80c92daa9cb::t_265b94a083e3f7 18
+AGENTS.md
+  s_54b80c92daa9cb::t_34d943427e73ec 6
+docs/dated/research/plugin-isolation-runtime.md
+  s_54b80c92daa9cb::t_7d5b3de528c773 3-6
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_87279515c1e585 158
+scripts/docs.py
+  s_54b80c92daa9cb::t_b717e6c37da717 331-333
+  s_54b80c92daa9cb::t_cc05d22abe2f65 12-14,18-19,25,36,38,296-301,303-330,344-365,368-370,373-388,409-410,417-418,420
+  s_54b80c92daa9cb::t_627b0172b4917c 20-24,302,334-343,366-367,371-372
+docs/dated/research/storage-search-stack.md
+  s_54b80c92daa9cb::t_3fddc3b7fca71f 3-6
+docs/dated/research/event-runtime-devx.md
+  s_54b80c92daa9cb::t_b5069641876842 3-6
+docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md
+  s_54b80c92daa9cb::t_eb7c179b38bab4 9,23
+  s_54b80c92daa9cb::t_ace1097b2aed15 1-8,10,12-22,24
+  s_54b80c92daa9cb::t_6549b4a62f5183 11
+docs/dated/README.md
+  s_54b80c92daa9cb::t_c4b1427d94c39a 1-9,14-65
+  s_54b80c92daa9cb::t_11b934e6a2cbc9 10-13
+docs/dated/research/modern-search-devx.md
+  s_54b80c92daa9cb::t_82bb407b2f22d7 3-6
+docs/dated/research/windmill-for-quivr.md
+  s_54b80c92daa9cb::t_69bd34878d4751 3-6
+docs/dated/research/new-durable-runtime-systems.md
+  s_54b80c92daa9cb::t_bee542c9393ce9 3-6
+scripts/test_docs.py
+  s_54b80c92daa9cb::t_1783642d19172b 348
+  s_54b80c92daa9cb::t_cfb2cdcedb489f 292,317-332
+  s_54b80c92daa9cb::t_97dbbe606192e6 255-291,293-316,333-347,349-350,355,358,365,367
+docs/dated/evidence/the-664-deployment.md
+  s_54b80c92daa9cb::t_45ac34a04bb72b 3-6
+docs/dated/evidence/the-662-spec1-closure.md
+  s_54b80c92daa9cb::t_fcbddfc2001cbc 3-96
+docs/dated/design/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_90006475651b5c 3-757
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_22a0574f29fcdb 16-18
+docs/dated/research/pi-plugin-architecture.md
+  s_54b80c92daa9cb::t_765d34a0f2f65e 3-6
+docs/dated/evidence/the-663-ui.md
+  s_54b80c92daa9cb::t_ac159074f95405 3-6
+docs/agents/domain.md
+  s_54b80c92daa9cb::t_8fff2aff882143 40-44
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_c8017977c18aaa 11
+docs/dated/design/quivr-v2-search-contracts.md
+  s_54b80c92daa9cb::t_c98bb4e78d66d8 3-338
+docs/dated/research/meilisearch-for-quivr.md
+  s_54b80c92daa9cb::t_8340d7604ed30a 3-231
+docs/dated/research/forge-generation-pipeline.md
+  s_54b80c92daa9cb::t_7c8d81a298db22 3-184
+docs/dated/research/new-oss-vector-systems.md
+  s_54b80c92daa9cb::t_c9d37fb8c370ee 3-6
+docs/dated/evidence/the-675-query-floor.md
+  s_54b80c92daa9cb::t_78a7445b3912fe 3-14
+docs/dated/design/quivr-v2-backend-mvp-scope.md
+  s_54b80c92daa9cb::t_b437221c74cfed 3-6
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_c0d95ca1f97bc0 36-37,39-41
+contracts/http/v0/README.md
+  s_54b80c92daa9cb::t_a32dea4ef6ed0a 4-6
+docs/dated/design/quivr-v2-module-boundaries.md
+  s_54b80c92daa9cb::t_d46cd727487561 3-6
+docs/dated/research/herd-plugin-architecture.md
+  s_54b80c92daa9cb::t_cee37f58ec6a1d 3-6
+docs/dated/evidence/the-661-retrieval-baseline.md
+  s_54b80c92daa9cb::t_0055a3acb3d9d6 3-7
+docs/dated/research/deepseek-harness-plugin-architecture.md
+  s_54b80c92daa9cb::t_adea0d29dcf9a3 3-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "084ae00df4f67c5784b9d861aa40f9cd501bd63c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
