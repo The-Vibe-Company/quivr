@@ -1,0 +1,264 @@
+scripts/connector_x_push.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-91
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 4,136-245
+  s_54b80c92daa9cb::t_0095961476623a 246-248
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 72-73,117-129
+plugins/x-list/fakex_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 40-49,54,82-86,100-102,157-238,272,303,322,342-347
+  s_54b80c92daa9cb::t_1c72c2720e2c38 348-349
+sdks/go/quivrplugin/receive_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-153
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 45,84-101,196,205,216,227,238,335
+contracts/plugins/v0/fixtures/responses/connector/receive-header-injection.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-7
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 67-72
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted-4xx.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-24
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 554,556,1100-1355
+internal/transport/httpapi/webhooks_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-96
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-without-pull.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-13
+internal/connectors/push_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-228
+docs/inventory.toml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 76,120,125,133
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 4,6-8,25,45,60,62,65-66,92,122,447-499,660
+migrations/20260929T2133Z_connector_push.sql
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-18
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 74-82
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 400-403
+plugins/x-list/webhook.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-125
+sdks/go/quivrplugin/receive.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-251
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 85,174-177
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 480,527-536,548,608-640,643,653,735-790,814-815,824-825,834-835,855-857,862
+internal/adapters/postgres/connector_push_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-135
+contracts/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-58
+sdks/go/quivrplugin/conformance_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 43-44
+internal/transport/httpapi/webhooks.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-101
+contracts/plugins/v0/fixtures/responses/connector/push-failed-without-class.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-11
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-mode.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1
+contracts/plugins/v0/fixtures/requests/connector/receive.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-37
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 149-150,189-197,200
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 4,136-245
+  s_54b80c92daa9cb::t_eae740bc2cb67c 246-248
+contracts/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-142
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 77
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 35,38-40,334-337,365-369,410
+scripts/local.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 95-96,474,542-543
+plugins/x-list/xlist.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 44-49,86-87,216-225,228,234-237,242-244,266,318-321
+internal/plugins/runner/receive.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-157
+tests/acceptance/connectors_x_push_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-160
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 47-49,163-198
+  s_54b80c92daa9cb::t_1b6626ef98ef4f 199
+contracts/plugins/v0/fixtures/requests/connector/fetch-push.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-26
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 19,23,65-67,70-83,179-183
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-25
+docs/plugins/run-a-connector-plugin.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 57-68
+scripts/fake_x.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 7-8,11-24,28,32-34,43-48,51-55,62-101,117-139,143,147-153,162-163,168-169,172-216,236-237,240-248,267
+sdks/go/quivrplugin/testdata/push.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-21
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 115-117,119-120,137,139-140
+docs/connectors/x-webhooks.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-87
+contracts/plugins/v0/fixtures/requests/connector/receive-put.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-30
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 64-65,170-174
+contracts/plugins/v0/fixtures/manifests/valid/connector-push.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-36
+contracts/plugins/v0/fixtures/responses/connector/push-pending-with-interval.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-11
+contracts/plugins/v0/fixtures/responses/connector/receive-refused.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-8
+contracts/plugins/v0/fixtures/responses/connector/push-active.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-11
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 151-155,182-184
+internal/plugins/push.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-170
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-with-items.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-24
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 47-49,163-198
+  s_54b80c92daa9cb::t_44bfd5dae262db 199
+contracts/plugins/v0/fixtures/responses/connector/push-active-with-error.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-12
+contracts/plugins/v0/fixtures/responses/connector/receive-attachments.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-32
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 67-72
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 117,129-131
+plugins/x-list/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 3-5,12,53-83,93,97-99
+contracts/plugins/v0/fixtures/responses/connector/receive-undeclared-namespace.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-21
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 31-33,36,119-122,126-130,136-137,143,209-211,213
+internal/adapters/pluginhttp/receive_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-102
+contracts/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 4,136-245
+  s_54b80c92daa9cb::t_47f2140149e2fe 246-248
+plugins/x-list/fixtures/webhook.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-68
+contracts/plugins/v0/fixtures/responses/connector/push-failed.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-12
+plugins/x-list/webhook_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-243
+internal/adapters/pluginhttp/receive.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-80
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 75-79
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 402
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 67-72
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 160-161
+plugins/x-list/stream.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-372
+client/client.gen.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1959-1968,2394-2423,3640-3707,5687-5700,6335-6402,8478-8503,9461-9488,9490-9491
+  s_54b80c92daa9cb::t_871dea1df280c4 9489,9492
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 129-133,164-166,355,376-377
+internal/connectors/push.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-291
+contracts/plugins/v0/fixtures/responses/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-8
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 31-32,50-52,55-56,79-94,113,398-429,431,456-470,475-484,488-529,557-559
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-142
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-58
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 2-34,37-56,58-106
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 9,37
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 67-68,952-995,3328,3339,3372-3373,3377-3455,3479,3624-3627
+contracts/plugins/v0/fixtures/requests/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-30
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 402
+contracts/plugins/v0/fixtures/requests/connector/receive-uppercase-header.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-34
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 111,202-204,229-231
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 25-26
+README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 143-145
+plugins/x-list/xapi.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 4,47-70,72,76-78,81,84-100,112,114
+docs/start/functional.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 20
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-2xx.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-6
+internal/connectors/health.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 49-51,56-58,63
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 105-110,177
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 22,28,40-43,97,628-639,643-653,683-684,702-704
+contracts/plugins/v0/fixtures/responses/connector/push-pending.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-11
+contracts/plugins/v0/fixtures/requests/connector/receive-no-request.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-24
+contracts/plugins/v0/fixtures/connectors/push.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-70
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 402
+internal/app/run.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 33,68-71,201-203,304,374-376,489-499
+  s_54b80c92daa9cb::t_817b2506e81d81 500-501
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 76-80,116-119,202,243-246
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 5,7,30-35,57-63,144-177
+  s_54b80c92daa9cb::t_34c4cbade9ae92 178
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 35-36
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 183,189-197
+contracts/plugins/v0/fixtures/responses/connector/receive-checkpoint.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-10
+contracts/plugins/v0/fixtures/connectors/push-body-twice.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-17
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1342-1398,2453-2454,2461-2511,2563-2567
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1880-1885,2188-2239,3591-3592,3788-3871,5552-5557,5823-5874
+sdks/go/README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 114-122,138-139
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_bd0c6960c20fce 48-49,97-104
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 47-49,163-198
+  s_54b80c92daa9cb::t_96436de114465d 199
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-142
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 6,11-12,21-22,79-80,84-115,123-129,137,206,208-211,230-234,240-242,267-313
+  s_54b80c92daa9cb::t_0e676e40fcb790 314
+sdks/go/quivrplugin/connector.go
+  s_54b80c92daa9cb::t_bd0c6960c20fce 33-37,123-160,255
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_bd0c6960c20fce 1-58
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_bd0c6960c20fce 13-22,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fde6f9d28eeab58b6bb6fbedfa53d643a0d5eb3e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
