@@ -22,7 +22,7 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if len(os.Args) != 2 {
-		slog.Error("usage: quivr api|worker|migrate|plugin|search")
+		slog.Error("usage: quivr api|worker|migrate|plugin|search|mcp")
 		os.Exit(2)
 	}
 	if err := app.Run(os.Args[1]); err != nil {

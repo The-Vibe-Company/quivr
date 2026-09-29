@@ -66,6 +66,7 @@ type Command struct {
 // Env is what a command run sees of its process.
 type Env struct {
 	Getenv func(string) string
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 	// HTTPClient, when set, replaces the default client (tests only).
@@ -76,7 +77,7 @@ type Env struct {
 var Commands []Command
 
 func init() {
-	Commands = []Command{searchCommand}
+	Commands = []Command{searchCommand, mcpCommand}
 }
 
 // Lookup returns the online command called name.
@@ -94,7 +95,7 @@ func Lookup(name string) (Command, bool) {
 func Run(name string, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return RunContext(ctx, name, args, Env{Getenv: os.Getenv, Stdout: os.Stdout, Stderr: os.Stderr})
+	return RunContext(ctx, name, args, Env{Getenv: os.Getenv, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }
 
 // RunContext is Run with an explicit context and process environment.

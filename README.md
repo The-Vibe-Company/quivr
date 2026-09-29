@@ -199,6 +199,11 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   request, unreachable server). It uses a Go client generated from the contract
   (package [`client`](client/)) and never touches the stack's storage
   ([walkthrough](docs/api-walkthrough.md#from-the-command-line)).
+- **AI agents search and cite Quivr over MCP**: `quivr mcp --profile read` serves an
+  agent on stdio with three read-only tools. The agent can list the Corpora its key
+  reaches, search them, and read a hit's Record Version and Manifest, keeping Record,
+  Version, Part and exact excerpt offsets to cite. The API key alone decides access
+  ([Connect an AI agent](docs/connect-an-ai-agent.md)).
 - **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
   your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).
 

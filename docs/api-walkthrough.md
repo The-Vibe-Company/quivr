@@ -284,6 +284,11 @@ stale). Exit codes are the same for every online command:
 Errors print the public code and message, for example
 `quivr: forbidden: …`, with a hint for common codes.
 
+An AI agent reaches the same search through `quivr mcp --profile read`, which also
+lists reachable Corpora and reads a hit's Record Version. It reports a failed call to
+the agent as a tool error carrying the same public code, instead of exiting
+([Connect an AI agent](connect-an-ai-agent.md)).
+
 `POST /v0/corpora/{corpus_id}/rebuilds` starts an asynchronous projection rebuild from
 durable artifacts and returns an Operation readable at `/v0/operations/{operation_id}`.
 `POST /v0/operations/{operation_id}/cancel` cancels queued work at once; running work
