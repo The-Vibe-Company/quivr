@@ -1,5 +1,9 @@
 # DeepSeek Harness et Cordis : idées transférables à l’ingestion de Quivr V2
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Analyse du dépôt DeepSeek Harness au commit `76fda729799fe9b3848dbe2c211d4b231032b81e`._
 
 ## Conclusion courte

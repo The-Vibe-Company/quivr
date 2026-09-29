@@ -41,9 +41,12 @@ jobs:
     # The assembled journey and lifecycle proofs (THE-662) add about five minutes.
     timeout-minutes: 30
     steps:
+      # The frozen-docs rule compares with the merge base of this checkout and main,
+      # so it needs full history (about 25 MB); the migration guard reads main's tree.
       - uses: actions/checkout@v4
-      # The migration guard compares against main's tree; a shallow fetch is enough.
-      - run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

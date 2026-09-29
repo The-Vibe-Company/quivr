@@ -1,5 +1,9 @@
 # Cloudflare Forge as the Quivr V2 generation pipeline
 
+Date: 2026-09-29
+
+Status: final research note.
+
 _Research date: 28 September 2026. Forge was analysed at commit [`cfe397c`](https://github.com/cloudflare/forge/tree/cfe397c296a5e6d9fce01eb335ed805821e5547c), the only commit in the public repository, and exercised against the Quivr V2 client schema derived from `contracts/http/v0/openapi.yaml`. Statements marked **Observed** come from the source code, repository metadata or commands run for this note. Statements marked **Inference** are architectural judgements for Quivr, not facts about Forge._
 
 ## Decision-relevant summary
@@ -120,7 +124,7 @@ FORGE_OPENAPI_SPEC=…/openapi.overlaid.json pnpm run generate python go   # ~26
 ```
 
 - Output was written into `packages/cloudflare-forge-sdk-{python,go}`, and Fern **deleted those wrappers' `package.json` files**. The script also overwrites `fern/openapi.json` in place. Images: Python 1.14 GB, Go 888 MB.
-- **Python** (167 files, sync `CloudflareApi` and `AsyncCloudflareApi`, pydantic v2, httpx): package and README are named `cloudflare` ("pip install cloudflare"). Using `httpx.MockTransport` and our [`examples.json`](../contracts/http/v0/examples.json):
+- **Python** (167 files, sync `CloudflareApi` and `AsyncCloudflareApi`, pydantic v2, httpx): package and README are named `cloudflare` ("pip install cloudflare"). Using `httpx.MockTransport` and our [`examples.json`](../../../contracts/http/v0/examples.json):
   - 18 of 18 response examples round-trip exactly through the SDK models.
   - The 8 request examples (3 `IngestCommand`, `BatchRequest`, `SearchRequest`, `ConnectorCreate`, `SavedQueryCreate`, `SubscriptionCreate`) serialise byte-for-byte when passed as keyword arguments.
   - Request bodies are flattened into method kwargs, so there is no exported `IngestCommand` model.
@@ -177,7 +181,7 @@ The better shape is a hand-written server per audience on the official MCP SDK, 
 - Operation-level overlays only accept `description`. Other enrichment needs `$` deep merges or a pre-processing step.
 - Hand-written Markdown can live in the same Astro/Starlight project, since the `docs` collection is registered, but Cloudflare's `docs-site` routes do not serve it without changes.
 
-**Inference:** functional guides and plugin-author docs could share one Astro site with an `astro-fern` API reference. That requires owning an Astro application (routing, theme, snippets, base URL, static or server output) built on unpublished packages that Cloudflare shapes for its own site. Plugin-author docs describe the plugin SDK and the `quivr-plugin.yaml` manifest ([architecture overview](../docs/quivr-v2-architecture-overview.md), plugin system section). Forge only helps there if the plugin API is itself an OpenAPI document; otherwise those docs are ordinary Markdown.
+**Inference:** functional guides and plugin-author docs could share one Astro site with an `astro-fern` API reference. That requires owning an Astro application (routing, theme, snippets, base URL, static or server output) built on unpublished packages that Cloudflare shapes for its own site. Plugin-author docs describe the plugin SDK and the `quivr-plugin.yaml` manifest ([architecture overview](../design/quivr-v2-architecture-overview.md), plugin system section). Forge only helps there if the plugin API is itself an OpenAPI document; otherwise those docs are ordinary Markdown.
 
 ### Toolchain weight, CI, determinism
 

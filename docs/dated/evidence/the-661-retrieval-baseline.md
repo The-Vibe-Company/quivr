@@ -1,6 +1,10 @@
 # THE-661: text retrieval baseline
 
-Source: CI run [36403605116](https://github.com/The-Vibe-Company/quivr-v2/actions/runs/36403605116). It measured PR #20's merge ref `d5669a42`, which is branch head `d080248` merged onto `93e6d86`, with a clean tree. The protocol is [workload-v1](../../tests/measurement/workload-v1.json) and was frozen in its own commit before any result was observed. The machine-readable report is [the-661-retrieval-baseline.json](the-661-retrieval-baseline.json). To reproduce, run `make measure` on Linux x86_64 or the `Retrieval baseline` workflow.
+Date: 2026-09-28
+
+Status: final evidence report.
+
+Source: CI run [36403605116](https://github.com/The-Vibe-Company/quivr-v2/actions/runs/36403605116). It measured PR #20's merge ref `d5669a42`, which is branch head `d080248` merged onto `93e6d86`, with a clean tree. The protocol is [workload-v1](../../../tests/measurement/workload-v1.json) and was frozen in its own commit before any result was observed. The machine-readable report is [the-661-retrieval-baseline.json](the-661-retrieval-baseline.json). To reproduce, run `make measure` on Linux x86_64 or the `Retrieval baseline` workflow.
 
 Host: GitHub `ubuntu-24.04` runner (image 20260920.314.1), AMD EPYC 9V74 with **2 logical CPUs and 7.8 GiB**, Docker 28.0.4. Inference: CPU TEI float32 with the pinned E5 small snapshot. Retrieval profile: `balanced.e5-token-windows.v1`. The report pins image digests, model files, the tokenizer, the processing profile, the fixture and the workload.
 

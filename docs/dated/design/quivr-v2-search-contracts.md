@@ -1,8 +1,12 @@
 # Public text search and projection rebuild
 
+Date: 2026-09-15 (last revised 2026-09-29)
+
+Status: historical design record, frozen on 2026-09-29. Current behaviour is defined by the code, the contracts and the living documentation.
+
 Decision ticket: [THE-640](https://linear.app/thevibecompany/issue/THE-640).
 This closes the missing transport seams found by the THE-550 proof. The
-[OpenAPI](../contracts/http/v0/openapi.yaml) remains authoritative. It does not
+[OpenAPI](../../../contracts/http/v0/openapi.yaml) remains authoritative. It does not
 change THE-545's ranking seed or resolve the hybrid relevance deficit measured
 in THE-550.
 
@@ -331,7 +335,7 @@ through `PUT /v0/corpora/{corpus_id}/retrieval`.
 Contract fixtures cover semantic and lexical-only hit representations, non-ASCII
 excerpts, queued/succeeded rebuilds, forbidden raw score fields, required Corpus
 scope and paired embedding provenance. Generated Go/Python/TypeScript transport
-checks follow the [existing reproduction guide](../contracts/http/v0/README.md).
+checks follow the [existing reproduction guide](../../../contracts/http/v0/README.md).
 Cross-field excerpt bounds, authorization and contiguous ranking require runtime
 checks in addition to JSON Schema validation.
 

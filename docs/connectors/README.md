@@ -12,7 +12,7 @@ API refuses it with `422 unsupported_connector_kind`.
 
 The authoritative request
 and response shapes are in the [OpenAPI contract](../../contracts/http/v0/openapi.yaml).
-The design rationale is in [ingestion contracts](../quivr-v2-ingestion-contracts.md#pull-acquisition-connector-instances).
+The design rationale is in [ingestion contracts](../dated/design/quivr-v2-ingestion-contracts.md#pull-acquisition-connector-instances).
 
 Delivered kinds:
 

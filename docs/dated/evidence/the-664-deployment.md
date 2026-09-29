@@ -1,5 +1,9 @@
 # THE-664 deployment evidence
 
+Date: 2026-09-15
+
+Status: final evidence report.
+
 Live evaluation URL: https://web-production-7a373.up.railway.app
 
 Railway project `quivr-v2-demo`, ID `74b1e669-ead7-48c0-9f39-e807bb662826`, production environment `16ca09a5-197d-4611-ba69-1fe070306a08`. Runtime packaging was reviewed independently for Standards and Spec with no remaining findings. Deployment identities and sanitized public evidence are in `the-664-deployment.json`; credentials are deliberately absent.

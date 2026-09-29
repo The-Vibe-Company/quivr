@@ -1,5 +1,9 @@
 # Spec 1 — obligation map (THE-662)
 
+Date: 2026-09-28
+
+Status: final evidence report.
+
 Status: comparison written 2026-09-28 for
 [THE-532](https://linear.app/thevibecompany/issue/THE-532) (text-monitoring
 vertical slice) by its closing slice,
@@ -57,7 +61,7 @@ Verdicts: **met**; **met, caveat** (met, with an open limit that has a ticket);
 | 37 | Isolated acceptance, diagnostics and scoped cleanup | THE-662: per-run project, secrets and ports; step report; capture before cleanup on failure or interrupt | met by THE-662 |
 | 38 | Correlated logs, bounded errors and a few metrics | THE-656 delivery metrics; THE-662 command, processing, backlog and duration metrics with the failure drill | met by THE-662 (`failure-drill.json`) |
 | 39 | Language-neutral contracts and generated checks | Every `make verify`: original 24 examples and 31 boundaries guarded, Go/Python/TypeScript round trips, captured responses validated | met |
-| 40 | Honest limitation reporting | [remaining limits](../quivr-v2-remaining-limits.md), [dependency notices](../../third_party/README.md), `report.md` | met by THE-662 |
+| 40 | Honest limitation reporting | [remaining limits](../../quivr-v2-remaining-limits.md), [dependency notices](../../../third_party/README.md), `report.md` | met by THE-662 |
 
 ## Testing decisions
 
@@ -89,7 +93,7 @@ delivery run as PostgreSQL-leased loops, not as Temporal workflows.
   - [THE-697](https://linear.app/thevibecompany/issue/THE-697): change-event pruning;
   - [THE-698](https://linear.app/thevibecompany/issue/THE-698): rebuild ordering and purge;
   - [THE-699](https://linear.app/thevibecompany/issue/THE-699): `make adapter-postgres`.
-- Untracked, accepted limits: [remaining limits](../quivr-v2-remaining-limits.md).
+- Untracked, accepted limits: [remaining limits](../../quivr-v2-remaining-limits.md).
 
 ## Relevance (THE-641), kept separate
 

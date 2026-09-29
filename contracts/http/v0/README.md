@@ -1,9 +1,9 @@
 # Public HTTP transport contract
 
 `openapi.yaml` is the public transport source of truth for THE-543, THE-547 and THE-640.
-Design and scope are recorded in [ingestion](../../../docs/quivr-v2-ingestion-contracts.md)
-[thin monitoring](../../../docs/quivr-v2-monitoring-tracer.md), and
-[search/rebuild](../../../docs/quivr-v2-search-contracts.md).
+Design and scope are recorded in [ingestion](../../../docs/dated/design/quivr-v2-ingestion-contracts.md)
+[thin monitoring](../../../docs/dated/design/quivr-v2-monitoring-tracer.md), and
+[search/rebuild](../../../docs/dated/design/quivr-v2-search-contracts.md).
 Generated code belongs in transport/SDK packages when implementation starts;
 it is deliberately not checked into this design change.
 

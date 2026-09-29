@@ -1,5 +1,9 @@
 # THE-663 demo evidence
 
+Date: 2026-09-15
+
+Status: final evidence report.
+
 Source: [Quivr PR #3714](https://github.com/The-Vibe-Company/quivr/pull/3714), commit `63d7fc52035190732b2c810c63645a295ece672e`, `quivr-search/`.
 
 The requested better-ui and emil-design-eng skills were installed and read. Changes preserve the feather mark, purple accent, neutral surfaces, React/Phosphor stack and restrained search layout.

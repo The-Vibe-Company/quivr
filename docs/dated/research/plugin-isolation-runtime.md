@@ -1,5 +1,9 @@
 # Runtime de plugins isolés pour un backend Quivr distribué
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026, à partir de spécifications et documentations officielles actuelles._
 
 ## Conclusion

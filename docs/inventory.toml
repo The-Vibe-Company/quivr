@@ -28,11 +28,15 @@
 # about 5% above the page's size when it is added. Shorten a page before
 # raising its budget; see docs/agents/documentation.md.
 
-# Dated documents keep their date and status and are not link-checked.
+# Dated documents (ADRs, design records, evidence, research) keep their date and
+# status and are not link-checked. They are frozen: `make docs` fails when a
+# branch edits or removes one (compared with its merge base with origin/main),
+# unless its status there is `proposed`, and when a new one has no `Date:` or
+# `Status:` line near the top.
+# Supersede a dated document with a new one; see docs/adr/0004.
 dated = [
     "docs/adr/*.md",
-    "docs/evidence/*.md",
-    "research/*.md",
+    "docs/dated/*/*",
 ]
 
 # Markdown that is not Quivr documentation.
@@ -62,18 +66,12 @@ excluded = [
 "docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/x.md" = { audience = "functional", kind = "guide" }
+"docs/dated/README.md" = { audience = "contributor", kind = "index" }
 "docs/first-search.md" = { audience = "functional", kind = "guide" }
 "docs/keyword-alerts.md" = { audience = "functional", kind = "guide" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
-"docs/quivr-v2-architecture-overview.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-backend-mvp-scope.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-canonical-data-model.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-ingestion-contracts.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-module-boundaries.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-monitoring-tracer.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
-"docs/quivr-v2-search-contracts.md" = { audience = "contributor", kind = "concept" }
 "docs/runnable-guides.md" = { audience = "contributor", kind = "guide" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }

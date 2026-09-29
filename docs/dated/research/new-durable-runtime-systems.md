@@ -1,5 +1,9 @@
 # Runtimes durables récents pour Quivr : simplicité, plugins et passage à l'échelle
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Sources primaires uniquement : documentations officielles, dépôts et licences des projets._
 
 ## Conclusion

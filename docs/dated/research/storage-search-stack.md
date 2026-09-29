@@ -1,5 +1,9 @@
 # Stockage et recherche pour le backend Quivr
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Les constats portent sur les documentations et licences officielles disponibles à cette date. Les appréciations de simplicité et de risque sont des inférences architecturales, pas des benchmarks éditeurs._
 
 ## Décision courte

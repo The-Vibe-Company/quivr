@@ -15,7 +15,7 @@ import (
 )
 
 // This file runs the published resynchronization procedure
-// (docs/quivr-v2-ingestion-contracts.md, "Change feed and resynchronization")
+// (docs/dated/design/quivr-v2-ingestion-contracts.md, "Change feed and resynchronization")
 // as a minimal reference client. It is test code, not an SDK.
 
 // catalogView is a client's local current view: Record ID to Record resource.

@@ -1,5 +1,9 @@
 # Recherche — moteurs open source pour la projection de recherche Quivr
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 > État de la recherche : 3 septembre 2026
 > Périmètre : stockage et recherche vectorielle/hybride à plus de 100 M de chunks multimodaux, plusieurs vecteurs par unité, ACL/tenant, ingestion continue, rétention et exploitation Kubernetes.
 > Critère de licence : la fondation doit être sous une licence approuvée par l’OSI. BSL/BUSL, SSPL et composants propriétaires nécessaires au passage à l’échelle sont exclus.

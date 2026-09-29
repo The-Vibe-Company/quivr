@@ -1,5 +1,9 @@
 # Quivr V2 — Canonical data model and lifecycle invariants
 
+Date: 2026-09-04 (last revised 2026-09-29)
+
+Status: historical design record, frozen on 2026-09-29. Current behaviour is defined by the code, the contracts and the living documentation.
+
 > Decision record for [THE-546](https://linear.app/thevibecompany/issue/THE-546/define-canonical-data-invariants-and-lifecycle-state-machines)
 >
 > Scope: technical foundation and first text-monitoring vertical slice

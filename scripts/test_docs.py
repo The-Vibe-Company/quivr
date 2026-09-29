@@ -373,24 +373,119 @@ class Glossary(unittest.TestCase):
         with tmpdir() as tmp:
             glossary = GLOSSARY + '\n```\n**Example**:\n```\n'
             self.assertEqual(self.repo(tmp, glossary).findings(), [])
+FROZEN_INVENTORY = INVENTORY.replace('dated = ["history/**"]', 'dated = ["history/**", "docs/adr/*.md"]')
+ACCEPTED = '# Use a queue\n\nStatus: accepted\n\nWe use a queue.\n'
+PROPOSED = '# Use a cache\n\nStatus: proposed\n\nWe may use a cache.\n'
+REPORT = '# Load test\n\nDate: 2026-09-01\nStatus: final\n\nIt held.\n'
+
+
+def commit(root):
+    for args in (['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+                                 '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'base']):
+        subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True)
+
+
+class Frozen(unittest.TestCase):
+    """Dated documents and accepted ADRs are compared with the base commit."""
+
+    def repo(self, tmp):
+        repo = Repo(tmp, FROZEN_INVENTORY)
+        repo.write('docs/adr/0001-queue.md', ACCEPTED)
+        repo.write('docs/adr/0002-cache.md', PROPOSED)
+        repo.write('history/load.md', REPORT)
+        commit(repo.root)
+        return repo
+
+    def frozen(self, repo):
+        return [(f.rule, f.path, f.line) for f in d.check(repo.root, 'HEAD')]
+
+    def test_unchanged_base_passes(self):
+        with tmpdir() as tmp:
+            self.assertEqual(self.frozen(self.repo(tmp)), [])
+
+    def test_editing_an_accepted_adr_or_a_dated_document_fails_at_the_changed_line(self):
+        for path, text in (('docs/adr/0001-queue.md', ACCEPTED), ('history/load.md', REPORT)):
+            with self.subTest(path=path), tmpdir() as tmp:
+                repo = self.repo(tmp)
+                repo.write(path, text.replace('\n\n', '\n\nA quiet rewrite.\n', 1))
+                [finding] = d.check(repo.root, 'HEAD')
+                self.assertEqual((finding.rule, finding.path, finding.line), ('frozen-document', path, 3))
+                self.assertRegex(finding.fix, rf'git checkout [0-9a-f]{{12}} -- {path}`')
+                self.assertIn('supersedes it', finding.fix)
+
+    def test_removing_or_moving_a_dated_document_fails(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            (repo.root / 'history/load.md').rename(repo.root / 'history/load-2026.md')
+            self.assertEqual(self.frozen(repo), [('frozen-document', 'history/load.md', 1)])
+
+    def test_new_documents_and_proposed_adrs_may_change(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('docs/adr/0002-cache.md', PROPOSED.replace('may use', 'use').replace('proposed', 'accepted'))
+            repo.write('docs/adr/0003-supersede-queue.md', '# Drop the queue\n\nDate: 2026-09-29\nStatus: accepted\n')
+            repo.write('history/new.md', REPORT)
+            self.assertEqual(self.frozen(repo), [])
+
+    def test_a_path_that_is_no_longer_dated_may_move(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('docs/inventory.toml', FROZEN_INVENTORY.replace('history/**', 'archive/*/*'))
+            (repo.root / 'archive/reports').mkdir(parents=True)
+            (repo.root / 'history/load.md').rename(repo.root / 'archive/reports/load.md')
+            self.assertEqual(self.frozen(repo), [])
+
+    def test_a_branch_behind_its_base_is_judged_on_its_own_edits(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            git = ['git', '-C', tmp]
+            subprocess.run([*git, 'checkout', '-q', '-b', 'mainline'], check=True)
+            repo.write('docs/adr/0002-cache.md', PROPOSED.replace('proposed', 'accepted'))
+            repo.write('docs/adr/0003-later.md', '# Later\n\nDate: 2026-09-29\nStatus: accepted\n')
+            commit(repo.root)
+            subprocess.run([*git, 'checkout', '-q', '-'], check=True, capture_output=True)
+            self.assertEqual(self.frozen_against(repo, 'mainline'), [])
+            repo.write('docs/adr/0001-queue.md', ACCEPTED + 'Edited.\n')
+            self.assertEqual(self.frozen_against(repo, 'mainline'), [('frozen-document', 'docs/adr/0001-queue.md', 6)])
+
+    def frozen_against(self, repo, base):
+        return [(f.rule, f.path, f.line) for f in d.check(repo.root, base)]
+
+    def test_new_dated_document_without_date_or_status_fails(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('history/undated.md', '# Undated\n\nStatus: final\n')
+            repo.write('docs/adr/0003-bare.md', '# Bare\n\nWe decided.\n')
+            findings = d.check(repo.root, 'HEAD')
+        self.assertEqual([(f.rule, f.path) for f in findings],
+                         [('dated-header', 'docs/adr/0003-bare.md'), ('dated-header', 'history/undated.md')])
+        self.assertIn('Date: YYYY-MM-DD and Status: <status>', findings[0].fix)
+        self.assertIn('no Date: YYYY-MM-DD line', findings[1].message)
+
+    def test_unresolvable_base_fails_with_the_fetch_command(self):
+        with tmpdir() as tmp:
+            [finding] = d.check(self.repo(tmp).root, 'origin/main')
+        self.assertEqual(finding.rule, 'frozen-document')
+        self.assertIn('git fetch --no-tags origin', finding.fix)
 
 
 class Command(unittest.TestCase):
     def test_reports_and_fails(self):
         with tmpdir() as tmp:
             repo = Repo(tmp)
+            commit(repo.root)
             repo.write('docs/new.md', '[x](gone.md)\n')
             out = io.StringIO()
-            status = d.main(['--root', tmp], stdout=out)
+            status = d.main(['--root', tmp, '--base', 'HEAD'], stdout=out)
         self.assertEqual(status, 1)
         self.assertIn('docs/new.md:1: [unlisted-page]', out.getvalue())
         self.assertIn('1 documentation problem(s)', out.getvalue())
 
     def test_clean_repository_passes(self):
         with tmpdir() as tmp:
-            Repo(tmp)
+            commit(Repo(tmp).root)
             out = io.StringIO()
-            self.assertEqual(d.main(['--root', tmp], stdout=out), 0)
+            self.assertEqual(d.main(['--root', tmp, '--base', 'HEAD'], stdout=out), 0)
 
 
 if __name__ == '__main__':

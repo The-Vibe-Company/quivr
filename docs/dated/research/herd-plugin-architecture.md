@@ -1,5 +1,9 @@
 # Herdr : modèle de plugins et enseignements pour l’ingestion de Quivr V2
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Analyse du dépôt officiel Herdr au commit [`548d4c02d0a6ee199d8e65fb5fcc521fa70187d4`](https://github.com/GroepOnline/herdr/tree/548d4c02d0a6ee199d8e65fb5fcc521fa70187d4). Toutes les affirmations techniques ci-dessous reposent sur la documentation ou le code source officiels._
 
 ## Conclusion courte

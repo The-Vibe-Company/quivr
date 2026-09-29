@@ -1,5 +1,9 @@
 # Quivr V2 — Module ownership and repository design
 
+Date: 2026-09-14 (last revised 2026-09-29)
+
+Status: historical design record, frozen on 2026-09-29. Current behaviour is defined by the code, the contracts and the living documentation.
+
 Decision ticket: [Choose module boundaries and repository topology](https://linear.app/thevibecompany/issue/THE-542).
 
 Status: the interview choices, including Monitoring's atomic Match/Delivery

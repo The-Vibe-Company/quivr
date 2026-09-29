@@ -215,16 +215,12 @@ listed here, not in "What works today".
 | [Python Plugin SDK](sdks/python/README.md) | Writing, testing and running a Python normalizer |
 | [Architecture decisions](docs/adr/) | Hard-to-reverse decisions and why |
 | [Domain language](CONTEXT.md) | Corpus, Record, Version, Manifest, Receipt… |
-| [Architecture overview](docs/quivr-v2-architecture-overview.md) | Target architecture and plugin model |
-| [Module boundaries](docs/quivr-v2-module-boundaries.md) | Who owns what in the Go core |
-| [Canonical data model](docs/quivr-v2-canonical-data-model.md) | Lifecycles and invariants |
-| [Ingestion](docs/quivr-v2-ingestion-contracts.md) · [Search](docs/quivr-v2-search-contracts.md) · [Monitoring](docs/quivr-v2-monitoring-tracer.md) | Contract rationale |
 | [Connectors](docs/connectors/README.md) | Operating scheduled Connector Instances |
 | [Local harness](docs/quivr-v2-local-harness.md) | How `make dev` and `make verify` work |
 | [Remaining limits](docs/quivr-v2-remaining-limits.md) | Known limits and their tickets; what is not claimed |
 | [Third-party notices](third_party/README.md) | Dependency notices and inventory |
 | [Railway deployment](deploy/railway/README.md) | Hosted single-node evaluation demo |
-| [Research](research/) | Technology comparisons behind the stack |
+| [Dated documents](docs/dated/README.md) | Frozen design records, evidence and research: architecture, module boundaries, data model and contract rationale as decided |
 
 ## Repository layout
 
@@ -239,8 +235,7 @@ migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ firs
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI
 deploy/             Docker Compose and Railway deployment
-docs/               architecture, contracts and evidence
-research/           technology comparisons behind the stack
+docs/               living documentation, ADRs (docs/adr/) and dated documents (docs/dated/)
 multimodal-rag/     earlier exploration (submodule), not the target architecture
 ```
 
@@ -256,6 +251,9 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
   repository path, and names the fix.
 - Show API requests in guides as [runnable blocks](docs/runnable-guides.md), which
   `make verify` replays.
+- Never edit an accepted ADR or a dated document under `docs/dated/`: supersede it
+  with a new one ([ADR 0004](docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md));
+  `make docs` compares them with where your branch forked from `origin/main`.
 - Pull request titles follow Commitizen conventions, for example
   `feat(ingestion): accept record versions`.
 - Keep customer-specific formats and rules out of the core; they belong in plugins.

@@ -12,9 +12,20 @@ check fails when:
     over-budget     a page has more lines than its budget in [budgets]
     missing-budget  AGENTS.md, CONTEXT.md or a guide has no budget in [budgets]
     glossary-term   a CONTEXT.md term lacks a definition or an `_Avoid_:` line
+    frozen-document a dated document (ADRs included) differs from the base or
+                    was removed, unless the base version's status is proposed
+    dated-header    a new dated document has no Date: or Status: line
 
     python3 scripts/docs.py               # check the repository (make docs)
     python3 scripts/docs.py --root DIR    # check another checkout
+    python3 scripts/docs.py --base REF    # compare dated documents with REF
+
+Dated documents are compared with the commit where the checkout forked from
+the base (default origin/main, or the DOCS_BASE variable): the merge base, so a
+branch behind main is not blamed for main's later documents. That needs the
+history back to the fork point, not a shallow clone. The working tree is
+compared, so uncommitted edits are caught too. A dated document is
+superseded by a new one, never edited; see docs/adr/0004.
 
 Files are the tracked and untracked, non-ignored files, as for the denylist.
 External URLs are never fetched and anchors are not checked. A path in inline
@@ -25,7 +36,9 @@ no longer exists on purpose, write it without backticks.
 """
 import argparse
 import dataclasses
+import difflib
 import fnmatch
+import os
 import pathlib
 import posixpath
 import re
@@ -387,7 +400,99 @@ def check_glossary(tree):
     return findings
 
 
-def check(root):
+# Frozen dated documents -----------------------------------------------------
+
+BASE = 'origin/main'
+HEADER_LINES = 20
+_STATUS = re.compile(r'^[ \t]*(?:>[ \t]*)?Status:[ \t]*(\S.*)$', re.M)
+_DATE = re.compile(r'^[ \t]*(?:>[ \t]*)?Date:[ \t]*\d{4}-\d{2}-\d{2}\b', re.M)
+SUPERSEDE = ('restore it with `git checkout {commit} -- {path}`; a dated document is never edited, '
+             'so add a new document (or ADR) that supersedes it; see docs/adr/0004')
+
+
+def _header(text):
+    return '\n'.join(text.splitlines()[:HEADER_LINES])
+
+
+def _status(text):
+    match = _STATUS.search(_header(text))
+    return match.group(1).strip() if match else None
+
+
+def _first_difference(old, new):
+    old_lines, new_lines = old.splitlines(), new.splitlines()
+    for tag, _, _, first, _ in difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes():
+        if tag != 'equal':
+            return min(first + 1, max(len(new_lines), 1))
+    return 1
+
+
+def check_frozen(tree, dated, base):
+    """Findings for dated documents that differ from `base`, and new ones without a header."""
+    root = tree.root
+    resolved = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', '--quiet', f'{base}^{{commit}}'],
+                              capture_output=True, text=True)
+    if resolved.returncode != 0:
+        return [Finding(INVENTORY, 1, 'frozen-document',
+                        f'cannot resolve {base} to compare dated documents against',
+                        'run `git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main` '
+                        '(add --unshallow in a shallow clone; verify.yml fetches full history) '
+                        'or pass --base / set DOCS_BASE')]
+    # Compare with the commit this checkout forked from, not the base's tip, so that a
+    # branch behind main is not blamed for documents main added or changed since.
+    forked = subprocess.run(['git', '-C', str(root), 'merge-base', 'HEAD', resolved.stdout.strip()],
+                            capture_output=True, text=True)
+    if forked.returncode != 0:
+        return [Finding(INVENTORY, 1, 'frozen-document',
+                        f'cannot find where this checkout forked from {base}',
+                        'fetch the full history (`git fetch --unshallow`, or `fetch-depth: 0` in CI) '
+                        'or pass --base / set DOCS_BASE')]
+    commit = forked.stdout.strip()
+    blobs = {}
+    for entry in _git(root, 'ls-tree', '-r', '-z', commit):
+        meta, path = entry.split('\t', 1)
+        mode, kind, sha = meta.split()
+        if kind == 'blob' and _matches(path, dated):
+            blobs[path] = sha
+    findings = []
+    present = sorted(path for path in blobs if path in tree.files)
+    hashed = subprocess.run(['git', '-C', str(root), 'hash-object', '--', *present],
+                            check=True, capture_output=True, text=True).stdout.split() if present else []
+    current = dict(zip(present, hashed))
+    for path, sha in sorted(blobs.items()):
+        if current.get(path) == sha:
+            continue
+        old = subprocess.run(['git', '-C', str(root), 'cat-file', 'blob', sha],
+                             check=True, capture_output=True).stdout.decode('utf-8', errors='replace')
+        status = _status(old)
+        if status and status.lower().startswith('proposed'):
+            continue
+        state = f'status "{status}"' if status else 'no status'
+        if path not in tree.files:
+            findings.append(Finding(path, 1, 'frozen-document',
+                                    f'dated document ({state} where this branch forked from {base}) was removed or moved',
+                                    SUPERSEDE.format(commit=commit[:12], path=path)))
+            continue
+        new = (root / path).read_text(encoding='utf-8', errors='replace')
+        findings.append(Finding(path, _first_difference(old, new), 'frozen-document',
+                                f'dated document ({state} where this branch forked from {base}) was edited',
+                                SUPERSEDE.format(commit=commit[:12], path=path)))
+    for path in sorted(tree.files):
+        if path in blobs or not path.lower().endswith('.md') or not _matches(path, dated):
+            continue
+        header = _header((root / path).read_text(encoding='utf-8', errors='replace'))
+        missing = [name for name, pattern in (('Date: YYYY-MM-DD', _DATE), ('Status: <status>', _STATUS))
+                   if not pattern.search(header)]
+        if missing:
+            findings.append(Finding(path, 1, 'dated-header',
+                                    f'new dated document has no {" or ".join(missing)} line',
+                                    f'add {" and ".join(missing)} lines under the title, within the first '
+                                    f'{HEADER_LINES} lines (status "proposed" keeps it editable)'))
+    return findings
+
+
+def check(root, base=None):
+    """All findings; dated documents are compared with `base` only when one is given."""
     try:
         tree = Tree(root)
     except subprocess.CalledProcessError:
@@ -413,14 +518,18 @@ def check(root):
     findings.extend(check_budgets(tree, pages, budgets, page_lines))
     if GLOSSARY in pages and GLOSSARY in tree.files:
         findings.extend(check_glossary(tree))
+    if base is not None:
+        findings.extend(check_frozen(tree, dated, base))
     return sorted(findings)
 
 
 def main(argv=None, stdout=sys.stdout):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', default=str(ROOT))
+    parser.add_argument('--base', default=os.environ.get('DOCS_BASE') or BASE,
+                        help='git ref dated documents must match (default: $DOCS_BASE or origin/main)')
     args = parser.parse_args(argv)
-    findings = check(args.root)
+    findings = check(args.root, args.base)
     for finding in findings:
         print(finding, file=stdout)
     if findings:

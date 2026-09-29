@@ -1,5 +1,9 @@
 # Windmill comme runtime d'ingestion et de plugins pour Quivr
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Sources primaires uniquement : documentation officielle, dépôt et licences du projet._
 
 ## Verdict

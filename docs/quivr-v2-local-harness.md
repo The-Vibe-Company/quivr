@@ -13,9 +13,9 @@ it says "must", the implemented section records what was built.
 
 Start the reference stack with one command and verify behavior through public
 HTTP contracts and captured webhooks. Reuse the accepted
-[module boundaries](quivr-v2-module-boundaries.md),
-[ingestion contract](quivr-v2-ingestion-contracts.md) and
-[monitoring tracer](quivr-v2-monitoring-tracer.md).
+[module boundaries](dated/design/quivr-v2-module-boundaries.md),
+[ingestion contract](dated/design/quivr-v2-ingestion-contracts.md) and
+[monitoring tracer](dated/design/quivr-v2-monitoring-tracer.md).
 
 The [THE-549 spike](https://github.com/The-Vibe-Company/quivr-v2/tree/4196f51/prototype/runtime-spike)
 provides recovery scenarios and operational evidence. Its tests also inspect

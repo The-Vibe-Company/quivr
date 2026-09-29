@@ -1,5 +1,9 @@
 # Thin monitoring tracer and public change feed
 
+Date: 2026-09-14 (last revised 2026-09-29)
+
+Status: historical design record, frozen on 2026-09-29. Current behaviour is defined by the code, the contracts and the living documentation.
+
 Status: assembled contract, tracked in [THE-547](https://linear.app/thevibecompany/issue/THE-547).
 This is a foundation decision, not implementation of the full monitoring product.
 
@@ -119,7 +123,7 @@ reconfiguration histories.
 
 ## HTTP surface
 
-The [shared OpenAPI](../contracts/http/v0/openapi.yaml) defines these routes.
+The [shared OpenAPI](../../../contracts/http/v0/openapi.yaml) defines these routes.
 All read/write operations require `monitoring:read` or `monitoring:write`,
 respectively, plus the relevant Organization/Corpus authorization. Existing
 structured errors, per-route-family idempotency and opaque pagination apply.
@@ -750,7 +754,7 @@ Exhausted work remains inspectable; retry administration is later work.
 
 ## Verification and handoff
 
-The [transport verification guide](../contracts/http/v0/README.md) and fixtures
+The [transport verification guide](../../../contracts/http/v0/README.md) and fixtures
 cover schema validity and generated Go/Python/TypeScript representations. The
 signature fixture checks the documented bytes and signature changes on tampering. These are
 contract checks; they do not claim a running webhook or monitoring engine.

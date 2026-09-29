@@ -1,5 +1,9 @@
 # Meilisearch pour le backend générique Quivr
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 > Recherche effectuée le 3 septembre 2026. Sources utilisées : documentation, dépôts et publications officielles de Meilisearch uniquement. La version stable visible au moment de la recherche est `v1.53.0`; les capacités distribuées décrites ci-dessous ont été introduites dans l'Enterprise Edition à partir de `v1.37`.
 
 ## Conclusion
@@ -224,7 +228,7 @@ Le prototype démontre plusieurs qualités pertinentes de Meilisearch :
 - choix keyword/semantic/hybrid avec `semanticRatio`;
 - découpage du texte avant vectorisation.
 
-Références locales : [`docker-compose.yml`](../multimodal-rag/backend/multimodal_rag_api/docker-compose.yml), [`client.py`](../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/api/services/meilisearch/client.py), [`activities.py`](../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/temporal_worker/activities.py), [`search_helpers.py`](../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/api/services/search_helpers.py).
+Références locales : [`docker-compose.yml`](../../../multimodal-rag/backend/multimodal_rag_api/docker-compose.yml), [`client.py`](../../../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/api/services/meilisearch/client.py), [`activities.py`](../../../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/temporal_worker/activities.py), [`search_helpers.py`](../../../multimodal-rag/backend/multimodal_rag_api/src/multimodal_rag_api/api/services/search_helpers.py).
 
 Ce prototype ne valide pas encore une exploitation de production :
 

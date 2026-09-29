@@ -1,5 +1,9 @@
 # Event runtime Quivr : avancé, mais avec une excellente DevX
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche au 3 septembre 2026. Sources officielles uniquement._
 
 ## Conclusion courte

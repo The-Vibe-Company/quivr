@@ -1,5 +1,9 @@
 # Pi : extensions, Chord et enseignements pour l’ingestion de Quivr V2
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026. Sources primaires examinées au commit Pi `e44d75c20a51142abc056c243b13c1d7bb4be687` (`@earendil-works/pi-coding-agent` 0.84.4)._
 
 Le dépôt canonique actuel est [`earendil-works/pi`](https://github.com/earendil-works/pi). L’ancienne URL `badlogic/pi-mono`, encore présente dans certains permaliens historiques et résultats de recherche, redirige vers ce dépôt.

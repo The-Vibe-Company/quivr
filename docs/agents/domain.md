@@ -37,3 +37,8 @@ Surface any conflict with an existing ADR explicitly instead of silently overrid
 > Contradicts ADR-0007, but is worth reopening because...
 
 Record a new hard-to-reverse architecture decision in `docs/adr/` with the next available numeric prefix. Do not use an ADR for an easily reversible implementation detail.
+
+This repository overrides the `/domain-modeling` ADR template on two points ([ADR 0004](../adr/0004-documentation-rules-are-enforced-by-ci-only.md)); `make docs` enforces both:
+
+- Under the title, write a `Date: YYYY-MM-DD` line and a `Status:` line (`proposed` or `accepted`) as plain text, not frontmatter.
+- Never edit an ADR once it is accepted, not even to mark it superseded. The new ADR states which one it supersedes and why.

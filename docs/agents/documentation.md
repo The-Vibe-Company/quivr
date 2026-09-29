@@ -1,11 +1,11 @@
 # Documentation conventions
 
-How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets and the glossary form, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
+How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets, the glossary form and frozen dated documents, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
 
 ## Living and dated documents
 
 - **Living** documents describe current behaviour. They are updated in the pull request that changes that behaviour, and their links and repository paths must resolve.
-- **Dated** documents (ADRs, design specs, evidence, research) record what was decided or observed at a date. They keep their date, status and original language, and a newer document supersedes them instead of an edit.
+- **Dated** documents record what was decided or observed at a date: ADRs in `docs/adr/`, and design records, evidence and research in `docs/dated/` (listed in [its index](../dated/README.md)). Each starts with `Date:` and `Status:` lines and keeps its original language. Once merged it is frozen: `make docs` fails when a branch edits or removes one, unless its status is `proposed`, so a newer document supersedes it instead ([ADR 0004](../adr/0004-documentation-rules-are-enforced-by-ci-only.md)).
 
 Living documentation is written in English, with neutral examples: no customer names or configurations (see the generic-repository rule in `AGENTS.md`). Contract facts such as endpoints, request shapes, limits and error codes live in their artifacts (the OpenAPI contract, the code); prose links to them instead of restating them.
 

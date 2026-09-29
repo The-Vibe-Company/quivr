@@ -24,7 +24,7 @@ shows the Receipt and Version path. Permissions are `content:write` and
   are normalized.
 - A single command is limited to 1 MiB.
 - Structured Manifests (`kind: "manifest"`), extensions and relations are accepted
-  and preserved; see [ingestion contracts](quivr-v2-ingestion-contracts.md).
+  and preserved; see [ingestion contracts](dated/design/quivr-v2-ingestion-contracts.md).
 - `POST /v0/records/withdrawals` withdraws a Record; withdrawn Records are fenced so a
   late or stale submission cannot resurrect them.
 
@@ -433,7 +433,7 @@ lexical, semantic and hybrid MRR and Recall, p50/p95 latency per load condition 
 a p95 < 1 s target, cold/warm phase timings, resource peaks and pins. It is not part of
 `make verify`; the non-required `Retrieval baseline` workflow runs it on manual
 dispatch (`gh workflow run measure.yml --ref <branch>`). Recorded results are in
-[`docs/evidence/`](evidence/).
+[`docs/dated/evidence/`](dated/evidence/).
 
 Separately, `make verify` scores an original CC0 fixture of 24 French and English
 queries, with explicit title/body Parts, through the real adapters in a collection

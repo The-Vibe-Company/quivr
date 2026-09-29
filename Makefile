@@ -27,8 +27,9 @@ generate:
 	GO=$(GO) bash scripts/contracts.sh generate
 contracts:
 	GO=$(GO) bash scripts/contracts.sh check
-# Fails on an undeclared or missing doc page, a broken link or a missing path, a page over its line budget
-# or a malformed glossary term; see docs/inventory.toml and docs/agents/documentation.md.
+# Fails on an undeclared or missing doc page, a broken link or a missing path, a page over its line budget,
+# a malformed glossary term, or an edited dated doc or accepted ADR (compared with where the branch forked
+# from origin/main); see docs/inventory.toml and docs/agents/documentation.md.
 docs:
 	python3 scripts/docs.py
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.

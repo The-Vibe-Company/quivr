@@ -155,4 +155,4 @@ header. TLS terminates at Railway; no public API key belongs in the browser bund
   directly rather than supplying an invalid builder enum.
 
 Deployment IDs, final URL/DNS state, restart evidence and observed resource usage
-are recorded in the [deployment evidence](../../docs/evidence/) once verified.
+are recorded in the [deployment evidence](../../docs/dated/evidence/) once verified.

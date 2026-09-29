@@ -8,7 +8,7 @@ certifies production readiness, capacity, security or relevance.
 Each limit was declared by the slice that shipped the behaviour. A limit with a
 correctness or security impact has its own ticket; the rest are listed so they
 stay visible. The Spec 1 obligation map is in
-[docs/evidence/the-662-spec1-closure.md](evidence/the-662-spec1-closure.md).
+[docs/dated/evidence/the-662-spec1-closure.md](dated/evidence/the-662-spec1-closure.md).
 
 ## Open, tracked
 

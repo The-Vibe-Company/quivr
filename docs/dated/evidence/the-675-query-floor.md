@@ -1,5 +1,9 @@
 # THE-675: removing the per-query floor from public search
 
+Date: 2026-09-28
+
+Status: final evidence report.
+
 THE-661 measured a floor of about 850 ms on every public search, whatever the mode. This PR removes it. Search results are unchanged.
 
 Each search tokenized the query by starting the pinned `scripts/token_offsets.py` in a new Python process, and that process parsed the 17 MB `tokenizer.json` again every time. Ingestion segmentation started the same process. Now one pinned tokenizer process is started per binary and stays alive (`tokenizer.Server`).
@@ -7,7 +11,7 @@ Each search tokenized the query by starting the pinned `scripts/token_offsets.py
 Both measurements below come from the `Retrieval baseline` workflow:
 - same runner class: GitHub `ubuntu-24.04`, AMD EPYC 7763, 2 logical CPUs, 7.8 GiB;
 - same day and same harness;
-- the unchanged [workload-v1](../../tests/measurement/workload-v1.json) protocol, sha256 `95fc3c96…2b7304f`.
+- the unchanged [workload-v1](../../../tests/measurement/workload-v1.json) protocol, sha256 `95fc3c96…2b7304f`.
 
 | Run | Source | Report |
 | --- | --- | --- |

@@ -1,5 +1,9 @@
 # Recherche moderne et DX pour Quivr
 
+Date: 2026-09-03 (last revised 2026-09-28)
+
+Status: final research note.
+
 _Recherche effectuée le 3 septembre 2026 à partir des documentations, dépôts et licences officiels. Les verdicts sont des inférences architecturales pour Quivr, pas des résultats de benchmark. Cette note réexamine explicitement la proposition « OpenSearch par défaut » : elle ne doit pas être considérée comme validée._
 
 ## Conclusion courte
