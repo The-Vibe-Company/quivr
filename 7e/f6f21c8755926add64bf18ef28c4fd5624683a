@@ -3,13 +3,16 @@ internal/normalization/normalization_test.go
   s_54b80c92daa9cb::t_78aefc84a34e55 33-34,135-155
   s_54b80c92daa9cb::t_5db15153dc3d76 309,329-340,358-390,392-393,397,400-407,423,425-427,429,431-432,436-441,443-444,446-448,450-451,457-469,471-472,474-551,589
   s_54b80c92daa9cb::t_48997a6acc2877 473
+  s_54b80c92daa9cb::t_e6c867356f9313 412,417,422,424,428,430,453-456
 migrations/20260929T0716Z_normalization_failures.sql
   s_54b80c92daa9cb::t_3abef9b04d480f 1-42
 internal/adapters/postgres/normalizations.go
   s_54b80c92daa9cb::t_5b04d23cea84ab 13-15,18-19,21,23-25,29-43,50-52,55-67,87-114
+  s_54b80c92daa9cb::t_e6c867356f9313 12,20,22,26-28,76-77
 internal/adapters/postgres/content.go
   s_54b80c92daa9cb::t_ac8e26e22329ab 308,310-313,318-343,421-431,443-447
   s_54b80c92daa9cb::t_723be614b09739 258-268
+  s_54b80c92daa9cb::t_ec0565eeae6e43 317
 internal/plugins/pin.go
   s_54b80c92daa9cb::t_44170933a54f3e 22-24,43,121-123,125,169-172
   s_54b80c92daa9cb::t_c953d5ee6bb460 173-174
@@ -19,6 +22,7 @@ internal/content/content.go
   s_54b80c92daa9cb::t_710e32e7b189de 860-862,864-865,867,889,902
   s_54b80c92daa9cb::t_d2a8618e094880 274-276
   s_54b80c92daa9cb::t_6312ea061d702c 143
+  s_54b80c92daa9cb::t_b1fbdd0979a75d 886-887,894-895,897-898
 internal/plugins/pin_test.go
   s_54b80c92daa9cb::t_6e0384ba5e2baa 20,96-98,115-128
   s_54b80c92daa9cb::t_51f5ee73931a31 92
@@ -29,8 +33,11 @@ internal/content/normalized_test.go
   s_54b80c92daa9cb::t_b1e3f3cd61549b 346
 internal/normalization/normalization.go
   s_54b80c92daa9cb::t_b3d1ce8308bb91 3,5,7-13,38-41,49-66,69-70,72-77,115-133,135-139,152-159,161-163,169-171,174,177,180,188,190,192,208,211,217,219,221-223,225,241,244,248,252,255-257,259-266,278-330
+  s_54b80c92daa9cb::t_e6c867356f9313 250,258,267-277
 internal/orchestration/temporal/ingestion.go
   s_54b80c92daa9cb::t_edd0cf7812a14e 32-39,44-48,50-58,62-82,112-115,117-120
+internal/app/run.go
+  s_54b80c92daa9cb::t_dd02473109ac32 212
 ---
 {
   "schema_version": "authorship/3.0.0",
