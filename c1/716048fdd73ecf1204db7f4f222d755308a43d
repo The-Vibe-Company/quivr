@@ -1,0 +1,48 @@
+docs/inventory.toml
+  s_54b80c92daa9cb::t_f746afa4b6fd6e 58-91,113
+  s_54b80c92daa9cb::t_a519d4916cd5ed 12-16,27-28
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_98b5132ceab21f 3,21-24
+scripts/test_docs.py
+  s_54b80c92daa9cb::t_7bd12550bb59e4 119,329,473-529,531-536,538-547
+  s_54b80c92daa9cb::t_40bd347b61a64d 530,537
+  s_54b80c92daa9cb::t_93590e45920d91 548-549
+docs/start/functional.md
+  s_54b80c92daa9cb::t_bd3b66f42f5fdd 30
+  s_54b80c92daa9cb::t_a519d4916cd5ed 1-29,31
+docs/what-quivr-can-do.md
+  s_54b80c92daa9cb::t_bd31bdde0c178e 13,32-33,46-48
+  s_54b80c92daa9cb::t_4dfbab7a8f6591 1-12,14-31,34-39,43-45,49-55
+  s_54b80c92daa9cb::t_f746afa4b6fd6e 40-42
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_a519d4916cd5ed 1-20
+Makefile
+  s_54b80c92daa9cb::t_40812bf022b171 2,35-37
+  s_54b80c92daa9cb::t_9b6e7b9ae109c6 31-32
+README.md
+  s_54b80c92daa9cb::t_2ed6bf28981c07 207-218,244-246
+scripts/docs.py
+  s_54b80c92daa9cb::t_9b6e7b9ae109c6 525
+  s_54b80c92daa9cb::t_4f2f80238f75a8 501-524,526-547,550-566,569,571-603,615-616,618,632,643-644,646-648
+  s_54b80c92daa9cb::t_bd3b66f42f5fdd 548-549,567-568,570
+  s_54b80c92daa9cb::t_a5ae1b17ac904d 18,23,55,157-164
+docs/start/contributor.md
+  s_54b80c92daa9cb::t_bd3b66f42f5fdd 30-31
+  s_54b80c92daa9cb::t_a519d4916cd5ed 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1716048fdd73ecf1204db7f4f222d755308a43d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
