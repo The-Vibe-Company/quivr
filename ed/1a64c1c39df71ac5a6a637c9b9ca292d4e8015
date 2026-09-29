@@ -1,0 +1,45 @@
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_3e931509db4acb 119
+internal/transport/httpapi/extensions_test.go
+  s_54b80c92daa9cb::t_439b18835506e0 1-70
+internal/transport/httpapi/content.go
+  s_54b80c92daa9cb::t_3e931509db4acb 29-30
+internal/content/registry_test.go
+  s_54b80c92daa9cb::t_5172b338aea782 44,46
+  s_54b80c92daa9cb::t_53d9b16d258eca 1-37,40,47-48,52,55-102
+  s_54b80c92daa9cb::t_c30a5868642a06 38-39,41-43,45,49-51,53-54
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_6189e87618df4c 12-14,16-40
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_23753d13f63d0a 140-165
+  s_54b80c92daa9cb::t_817bc54ead0cde 100
+  s_54b80c92daa9cb::t_b32dfa6d3bec60 101-104
+  s_54b80c92daa9cb::t_3412c1920205af 9-10
+  s_54b80c92daa9cb::t_ef75fb067c78ae 17-19
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_3e931509db4acb 40-43
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_69464dff3d5fb1 123-146
+  s_54b80c92daa9cb::t_208c8cdcc79de4 79-80
+  s_54b80c92daa9cb::t_df7aebc1908b5f 98-99
+internal/app/run.go
+  s_54b80c92daa9cb::t_e077edea89b035 119-124,203
+internal/content/registry.go
+  s_54b80c92daa9cb::t_eba823bd8fa409 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed1a64c1c39df71ac5a6a637c9b9ca292d4e8015",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
