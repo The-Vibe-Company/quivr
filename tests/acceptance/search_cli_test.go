@@ -67,9 +67,14 @@ func TestCLISearch(t *testing.T) {
 	run := monitoringRun()
 	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "CLI search", "idempotency_key": "cli-corpus-" + run}, 201)["corpus_id"].(string)
 	text := "Aurora borealis 🌌 over the northern fjords."
+	start := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
 	r := request(t, "POST", "/v0/records", admin, inlineCommand(c, "cli-first-"+run, "aurora", text), 202)
 	r = awaitReceipt(t, r["receipt_id"].(string))
 	awaitSearchable(t, r)
+	// Enrichment attaches vector provenance to the hit once it lands. Wait for it
+	// so every search below, from the CLI or the API, sees the same final answer
+	// (THE-754): the --json comparison must not straddle that moment.
+	awaitEnriched(t, admin, c, start, r["record_id"].(string))
 	env := []string{"QUIVR_API_URL=" + os.Getenv("QUIVR_TEST_URL"), "QUIVR_API_KEY=" + admin}
 	dir := t.TempDir()
 
@@ -110,6 +115,9 @@ func TestCLISearch(t *testing.T) {
 	fromAPI := request(t, "POST", "/v0/search", admin, map[string]any{"query": "aurora borealis", "corpus_ids": []string{c}, "mode": "lexical"}, 200)
 	if a, b := canonicalJSON(t, fromCLI), canonicalJSON(t, fromAPI); a != b {
 		t.Fatalf("--json differs from the API response\ncli: %s\napi: %s", a, b)
+	}
+	if hit := fromCLI["items"].([]any)[0].(map[string]any); hit["embedding_artifact_id"] == nil || hit["vector_space_id"] == nil {
+		t.Fatalf("compared a search taken before enrichment: %v", hit)
 	}
 
 	unused, err := net.Listen("tcp", "127.0.0.1:0")
