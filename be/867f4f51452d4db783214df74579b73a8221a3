@@ -1,0 +1,82 @@
+internal/connectors/xcompliance.go
+  s_54b80c92daa9cb::t_21fceaaae4c026 1-163
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_e84c380585a05a 79-82
+internal/connectors/xlist_test.go
+  s_54b80c92daa9cb::t_70217897cdab90 158
+  s_54b80c92daa9cb::t_12331ee77abb21 32-33,116
+migrations/20260929T0934Z_connector_recheck_usage.sql
+  s_54b80c92daa9cb::t_44a854703291e2 1-6
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_17e8fe42d163b6 2157-2164,2169-2170
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_c1b7633ef12e6b 31-32,49,53,71,406-407,410,414-432
+  s_54b80c92daa9cb::t_d6c336929b10f8 433-434
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_4dabe3f5e91ded 76-77
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_56511cbbde40b6 825-830
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_962c120357a553 362-365
+internal/transport/httpapi/connectors_test.go
+  s_54b80c92daa9cb::t_583f69dc93f87b 226
+  s_54b80c92daa9cb::t_7bc0ca9b4a1518 235
+internal/connectors/xlist.go
+  s_54b80c92daa9cb::t_c45fa54671258a 22-24,62-63,92-96,172-173,218,239-240,245-246,262-269,389-390,398,407
+internal/connectors/acquire_test.go
+  s_54b80c92daa9cb::t_12331ee77abb21 21-22,33
+docs/quivr-v2-ingestion-contracts.md
+  s_54b80c92daa9cb::t_962c120357a553 501-507
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_36123b6555b6c1 51-59,73-77,107-110,173,175-176,219,234-248
+  s_54b80c92daa9cb::t_2ec34dee0373b4 249
+internal/connectors/retained_test.go
+  s_54b80c92daa9cb::t_73882f56994f1b 1-8,10-18,23-114
+  s_54b80c92daa9cb::t_07d70325251006 9,22
+  s_54b80c92daa9cb::t_36123b6555b6c1 19-21
+internal/adapters/postgres/connectors_test.go
+  s_54b80c92daa9cb::t_d0ec166ff044aa 128
+  s_54b80c92daa9cb::t_8e24153f266990 358-401
+  s_54b80c92daa9cb::t_f889e9b124c68b 113
+  s_54b80c92daa9cb::t_1203094206fe19 125
+  s_54b80c92daa9cb::t_19010cdf39131c 118
+  s_54b80c92daa9cb::t_c454266e25b13b 131
+internal/app/run.go
+  s_54b80c92daa9cb::t_7b70504ddfdfa1 267
+quivr-search/src/lib/connectors.ts
+  s_54b80c92daa9cb::t_642e45794ea212 71-72
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_a9d2c0bde651da 5-6
+  s_54b80c92daa9cb::t_f915fde023d521 51-53
+  s_54b80c92daa9cb::t_71bddb9c90469f 38-39
+  s_54b80c92daa9cb::t_608f934562a7f4 90-116,122-124,126-139,146-149,152-155,165-182,187-192,195-197,227-235
+internal/connectors/xcompliance_test.go
+  s_54b80c92daa9cb::t_6ff9a6081e3fc5 1-214
+scripts/fake_x.py
+  s_54b80c92daa9cb::t_d27af62ba783f6 11-12
+  s_54b80c92daa9cb::t_e29fd49413b000 67-68
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_ff699a33f2c8c4 959-961,968-973
+tests/acceptance/connectors_x_test.go
+  s_54b80c92daa9cb::t_498011dab78658 183-242
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_e2dc11b88b3a6f 101-125,137-143
+quivr-search/src/components/connectors/ConnectorDetail.tsx
+  s_54b80c92daa9cb::t_dda80d6d0b8fcc 95-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "be867f4f51452d4db783214df74579b73a8221a3",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
