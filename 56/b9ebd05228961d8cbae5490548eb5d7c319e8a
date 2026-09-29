@@ -55,6 +55,7 @@ contracts/plugins/v0/subscription-request.schema.json
 internal/transport/httpapi/public_codes_test.go
   s_54b80c92daa9cb::t_7dd91d0f11fa75 85-86,97-108
   s_54b80c92daa9cb::t_e674d09e4ec875 79-83,109-110
+  s_54b80c92daa9cb::t_19d7ae8e887502 84
 internal/transport/httpapi/monitoring.go
   s_54b80c92daa9cb::t_e301ac94e0297c 46-56
 internal/adapters/pluginhttp/subscription.go
