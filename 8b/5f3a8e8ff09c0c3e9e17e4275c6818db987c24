@@ -1,0 +1,58 @@
+internal/app/run.go
+  s_54b80c92daa9cb::t_5cace4eb47199f 33,68-71,201-203,304,374-376,489-499
+  s_54b80c92daa9cb::t_48be2a2e5ed98d 500-501
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 76-80,116-119,202,243-246
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_e92eee5df8ba16 1342-1345,1347-1349,1357-1372,1374-1377,1385-1398,2453-2454,2461-2511,2563-2567
+  s_54b80c92daa9cb::t_c30de5a1f2773b 1346
+  s_54b80c92daa9cb::t_c49054ee058df2 1373
+  s_54b80c92daa9cb::t_936ed5e2907585 1350-1356,1378-1384
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_350a5d74915366 45,84-101,196,205,216,227,238,335
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_350a5d74915366 64-65,170-174
+internal/connectors/push.go
+  s_54b80c92daa9cb::t_b20adf6abe462b 1-286
+internal/connectors/health.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 49-51,56-58,63
+internal/transport/httpapi/webhooks.go
+  s_54b80c92daa9cb::t_a8ce13eceaa19d 1-108
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 151-155,182-184
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_936ed5e2907585 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1880-1885,2188-2239,3591-3592,3788-3871,5552-5557,5823-5874
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 72-73
+  s_54b80c92daa9cb::t_350a5d74915366 117-129
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_936ed5e2907585 67-68,952-995,3328,3339,3372-3373,3377-3455,3479,3624-3627
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_8364e8fefc6edb 31-32,50-52,55-56,79-94,113,398-429,431,456-470,475-484,488-529,557-559
+internal/adapters/pluginhttp/receive.go
+  s_54b80c92daa9cb::t_4d26ba85cb460a 1-62,64-80
+  s_54b80c92daa9cb::t_5cdd2251b1d9f7 63
+client/client.gen.go
+  s_54b80c92daa9cb::t_936ed5e2907585 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1959-1968,2394-2423,3640-3707,5687-5700,6335-6402,8478-8503,9461-9488,9490-9491
+  s_54b80c92daa9cb::t_cdaccc7e2fa4cc 9489,9492
+migrations/20260929T2133Z_connector_push.sql
+  s_54b80c92daa9cb::t_560220992b2e68 1-18
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_63d38ea3d6ff1f 111,202-204,229-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8b5f3a8e8ff09c0c3e9e17e4275c6818db987c24",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
