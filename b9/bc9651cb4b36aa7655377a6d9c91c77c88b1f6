@@ -1,0 +1,19 @@
+tests/acceptance/search_cli_test.go
+  s_8f4c241d1841d9::t_0313c6fff72690 70,107-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9bc9651cb4b36aa7655377a6d9c91c77c88b1f6",
+  "prompts": {},
+  "sessions": {
+    "s_8f4c241d1841d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0e900f10ab3d5252",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
