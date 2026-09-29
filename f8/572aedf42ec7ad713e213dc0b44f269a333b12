@@ -1,0 +1,285 @@
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_cd7ced2aac0e9c 85
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 174-177
+contracts/plugins/v0/fixtures/requests/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-30
+contracts/plugins/v0/fixtures/requests/connector/receive-put.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-30
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_350a5d74915366 117-129
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 72-73
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_63d38ea3d6ff1f 111,202-204,229-231
+contracts/plugins/v0/fixtures/responses/connector/receive-undeclared-namespace.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-21
+sdks/go/quivrplugin/conformance_test.go
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 43-44
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_452f9d4cb8950c 149-150,189-197,200
+contracts/plugins/v0/fixtures/responses/connector/receive-checkpoint.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-10
+internal/adapters/postgres/connector_push_test.go
+  s_54b80c92daa9cb::t_9a94691ab70074 1-135
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_8364e8fefc6edb 31-32,50-52,55-56,79-94,113,398-429,431,456-470,475-484,488-529,557-559
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_ec80971c3ebeff 67-72
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_936ed5e2907585 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1880-1885,2188-2239,3591-3592,3788-3871,5552-5557,5823-5874
+contracts/plugins/v0/fixtures/manifests/valid/connector-push.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-36
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 67-72
+contracts/plugins/v0/fixtures/requests/connector/receive-uppercase-header.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-34
+docs/connectors/x-webhooks.md
+  s_54b80c92daa9cb::t_60de194ba3ff68 1-87
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_f47156327e7dd6 5,7,30-35,57-63,144-177
+  s_54b80c92daa9cb::t_132362292dacf3 178
+sdks/go/quivrplugin/receive.go
+  s_54b80c92daa9cb::t_4523f7f654c737 1-251
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 67-72
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_a1ff8990c4e523 6,11-12,21-22,79-80,84-115,123-129,137,206,208-211,230-234,240-242,267-313
+  s_54b80c92daa9cb::t_8304d441b51620 314
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_ec80971c3ebeff 48-49,97-104
+internal/connectors/push_test.go
+  s_54b80c92daa9cb::t_a40a444e804c30 68-71
+  s_54b80c92daa9cb::t_af998a77b37d99 206,210
+  s_54b80c92daa9cb::t_af07b94c67c137 1-67,72-205,207-209,211-228
+contracts/plugins/v0/fixtures/responses/connector/push-active.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 47-49,163-198
+  s_54b80c92daa9cb::t_3ef33af4351725 199
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_d4943cb6a23634 75-79
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 4,136-245
+  s_54b80c92daa9cb::t_b60caef08df6e1 246-248
+client/client.gen.go
+  s_54b80c92daa9cb::t_936ed5e2907585 62-66,72,74,76,78,80,126-167,725,738-740,764,772-775,840-868,1959-1968,2394-2423,3640-3707,5687-5700,6335-6402,8478-8503,9461-9488,9490-9491
+  s_54b80c92daa9cb::t_cdaccc7e2fa4cc 9489,9492
+contracts/plugins/v0/fixtures/requests/connector/receive-no-request.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-2xx.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-6
+contracts/plugins/v0/fixtures/requests/connector/receive.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-37
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_97fa7e13b05f4f 400-403
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_f47156327e7dd6 2-34,37-56,58-106
+contracts/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_b59b7315d97a94 1-58
+contracts/plugins/v0/fixtures/responses/connector/push-failed.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-12
+plugins/x-list/xlist.go
+  s_54b80c92daa9cb::t_fa9110fddeefc6 44-49,86-87,216-225,228,234-237,242-244,266,318-321
+plugins/x-list/xapi.go
+  s_54b80c92daa9cb::t_970613f4429d14 4,47-70,72,76-78,81,84-100,112,114
+contracts/plugins/v0/fixtures/responses/connector/receive-refused.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-8
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_d78bb46d74b35f 160-161
+contracts/plugins/v0/fixtures/responses/connector/receive-attachments.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-32
+internal/app/run.go
+  s_54b80c92daa9cb::t_5cace4eb47199f 33,68-71,201-203,304,374-376,489-499
+  s_54b80c92daa9cb::t_48be2a2e5ed98d 500-501
+contracts/plugins/v0/fixtures/connectors/push.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-70
+plugins/x-list/webhook.go
+  s_54b80c92daa9cb::t_bdb27d459e9f85 1-125
+README.md
+  s_54b80c92daa9cb::t_058c3582ed7aca 143-145
+contracts/plugins/v0/fixtures/requests/connector/fetch-push.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-26
+internal/transport/httpapi/webhooks.go
+  s_54b80c92daa9cb::t_a8ce13eceaa19d 1-52,56-101
+  s_54b80c92daa9cb::t_0cc532eb4136f3 53-55
+contracts/plugins/v0/fixtures/connectors/push-body-twice.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-17
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_ec80971c3ebeff 1-142
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_99dcc9b7b5820e 4,6-8,25,45,60,62,65-66,92,122,447-499,660
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_ec80971c3ebeff 480,527-536,548,608-640,643,653,735-790,814-815,824-825,834-835,855-857,862
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-mode.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 151-155,182-184
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-25
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_29bb07b670264a 129-133,164-166,355,376-377
+contracts/plugins/v0/fixtures/responses/connector/push-active-with-error.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-12
+internal/plugins/push.go
+  s_54b80c92daa9cb::t_2a72af79f6a745 1-170
+internal/adapters/pluginhttp/receive_test.go
+  s_54b80c92daa9cb::t_e90fed9652fab4 95
+  s_54b80c92daa9cb::t_2ee17605884d6b 1-94,96-102
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_49bcd76a1acf5b 117,129-131
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_78e9b9d1b37f8b 31-33,36,119-122,126-130,136-137,143,209-211,213
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_29bb07b670264a 19,23,75-83,179-183
+  s_54b80c92daa9cb::t_70dcbf8616a649 65-67,70-72
+  s_54b80c92daa9cb::t_a942043c20a836 73-74
+internal/connectors/health.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 49-51,56-58,63
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_350a5d74915366 64-65,170-174
+tests/acceptance/connectors_x_push_test.go
+  s_54b80c92daa9cb::t_bb3d68a05002de 75-76,90-95,99-102,109-110,117-118,120,122,127-129,135-140,142-144,146,149-156
+  s_54b80c92daa9cb::t_e6d9aeebaba0c4 1-74,77-89,96-98,103-108,111-116,119,121,123-126,130-134,141,145,147-148,157-160
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_f9b5b8c234b713 115-117,119-120,137,139-140
+sdks/go/README.md
+  s_54b80c92daa9cb::t_c151e3092122be 114-122,138-139
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_936ed5e2907585 67-68,952-995,3328,3339,3372-3373,3377-3455,3479,3624-3627
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 1-58
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_ec80971c3ebeff 402
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_f575bb824418cf 35-36
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_79eb7d9c575df4 77
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 402
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-without-pull.yaml
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-13
+contracts/plugins/v0/fixtures/responses/connector/push-pending.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+contracts/plugins/v0/fixtures/responses/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-8
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_d5ca3238fd734b 25-26
+sdks/go/quivrplugin/testdata/push.yaml
+  s_54b80c92daa9cb::t_b1df8ccac1fe55 1-21
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_ec80971c3ebeff 4,136-245
+  s_54b80c92daa9cb::t_3690618db2f4e7 246-248
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-with-items.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+docs/plugins/run-a-connector-plugin.md
+  s_54b80c92daa9cb::t_3d759e45f628f0 57-68
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 554,556,1100-1355
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_350a5d74915366 45,84-101,196,205,216,227,238,335
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_78e9b9d1b37f8b 74-82
+scripts/local.py
+  s_54b80c92daa9cb::t_61d281d25b4374 95-96
+  s_54b80c92daa9cb::t_f9b5b8c234b713 474,542-543
+sdks/go/quivrplugin/connector.go
+  s_54b80c92daa9cb::t_29bb07b670264a 33-37,123-160,255
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_6fdb4c34330ee1 22,28,40-43,97,628-639,643-653,683-684,702-704
+internal/plugins/runner/receive.go
+  s_54b80c92daa9cb::t_6d90885d857bac 1-157
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 402
+migrations/20260929T2133Z_connector_push.sql
+  s_54b80c92daa9cb::t_560220992b2e68 1-18
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_d78bb46d74b35f 35,38-40,334-337,365-369,410
+internal/adapters/pluginhttp/receive.go
+  s_54b80c92daa9cb::t_4d26ba85cb460a 1-62,64-80
+  s_54b80c92daa9cb::t_5cdd2251b1d9f7 63
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted-4xx.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-24
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_3a44b314c070e1 105-110
+  s_54b80c92daa9cb::t_79eb7d9c575df4 177
+plugins/x-list/stream.go
+  s_54b80c92daa9cb::t_ed206f5680b4a5 101-102,126,288,343
+  s_54b80c92daa9cb::t_ba6a43518ccc0f 1-100,103-125,127-287,289-342,344-372
+contracts/plugins/v0/fixtures/responses/connector/push-pending-with-interval.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_8af631e6e1df98 199
+  s_54b80c92daa9cb::t_ec80971c3ebeff 47-49,163-198
+contracts/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_34cedf9966974f 1-142
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_769d07a6e0c45d 13-22,33
+plugins/x-list/fixtures/webhook.json
+  s_54b80c92daa9cb::t_15dd54d966623c 1-68
+contracts/plugins/v0/fixtures/responses/connector/receive-header-injection.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-7
+docs/inventory.toml
+  s_54b80c92daa9cb::t_3d759e45f628f0 125
+  s_54b80c92daa9cb::t_c151e3092122be 133
+  s_54b80c92daa9cb::t_d5ca3238fd734b 76,120
+docs/start/functional.md
+  s_54b80c92daa9cb::t_5ee8291b1cc4a1 20
+contracts/plugins/v0/fixtures/responses/connector/push-failed-without-class.json
+  s_54b80c92daa9cb::t_7bdae0f808b2a9 1-11
+internal/connectors/push.go
+  s_54b80c92daa9cb::t_b20adf6abe462b 1-78,81,85,91,93-97,101,104-291
+  s_54b80c92daa9cb::t_af998a77b37d99 79-80,82-84,86-90,92,98-100,102-103
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_f47156327e7dd6 183,189-197
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_c30de5a1f2773b 1346
+  s_54b80c92daa9cb::t_c49054ee058df2 1373
+  s_54b80c92daa9cb::t_e92eee5df8ba16 1342-1345,1347-1349,1357-1372,1374-1377,1385-1398,2453-2454,2461-2511,2563-2567
+  s_54b80c92daa9cb::t_936ed5e2907585 1350-1356,1378-1384
+plugins/x-list/fakex_test.go
+  s_54b80c92daa9cb::t_f234af667241bd 40-49,54,82-86,100-102,157-238,272,303,322,342-347
+  s_54b80c92daa9cb::t_fd96c411efa9dc 348-349
+scripts/fake_x.py
+  s_54b80c92daa9cb::t_af998a77b37d99 148-153
+  s_54b80c92daa9cb::t_73e0ed36405a92 7-8,11-24,28,32-34,43-48,51-55,62-101,117-139,143,147,162-163,168-169,172-216,236-237,240-248,267
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_9d2cc4a98c2e9b 76-80,116-119,202,243-246
+sdks/go/quivrplugin/receive_test.go
+  s_54b80c92daa9cb::t_b59ac7949d5862 1-153
+scripts/connector_x_push.py
+  s_54b80c92daa9cb::t_d81c3ceb38cf9b 1-91
+plugins/x-list/webhook_test.go
+  s_54b80c92daa9cb::t_45621099262760 1-243
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_0f3cf1cfc3e3dc 1-142
+internal/transport/httpapi/webhooks_test.go
+  s_54b80c92daa9cb::t_6be88392bf4204 1-96
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_ec80971c3ebeff 1-58
+plugins/x-list/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_87d63191ea7679 3-5,12,53-83,93,97-99
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 47-49,163-191,198
+  s_54b80c92daa9cb::t_fbdcd1f15a3c88 199
+  s_54b80c92daa9cb::t_94a344b85ec437 192-197
+contracts/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_7e6f5f03e1ef6e 246-248
+  s_54b80c92daa9cb::t_9a6a9feac24b50 4,136-245
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f47156327e7dd6 9,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f8572aedf42ec7ad713e213dc0b44f269a333b12",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
