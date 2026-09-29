@@ -10,6 +10,7 @@ README.md
   s_54b80c92daa9cb::t_f43a40754a66e3 186-193
   s_54b80c92daa9cb::t_c6ae58e8409dfd 234-236
   s_54b80c92daa9cb::t_5b2568d1bfc563 213
+  s_54b80c92daa9cb::t_9de5cd6409ec0f 200
 plugins/pdf-text/tests/test_normalizer.py
   s_54b80c92daa9cb::t_83beeae277f383 1-58,65-114,119-120,128-129,134-146
   s_54b80c92daa9cb::t_c6b1656589883e 115-118,121-127,130-133
@@ -49,6 +50,8 @@ tests/acceptance/pdf_test.go
   s_54b80c92daa9cb::t_dbc9783886bad7 1-55,59-80,87-96,102-107,109-110,113,115-116,124-125,134-135,137,140-141
   s_54b80c92daa9cb::t_ec05e7e88bb810 81-86
   s_54b80c92daa9cb::t_79a734ab6a35a6 56-58,136,138-139
+  s_54b80c92daa9cb::t_148b5350a0f4fd 121,133
+  s_54b80c92daa9cb::t_11587d52cdfe12 97-101,108,111-112,114,117-120,122-123,126-132
 plugins/pdf-text/README.md
   s_54b80c92daa9cb::t_25051b69bb0430 15-17
   s_54b80c92daa9cb::t_4c1f3e6d4fb827 109
@@ -60,6 +63,7 @@ plugins/pdf-text/fixtures/sample.json
 docs/api-walkthrough.md
   s_54b80c92daa9cb::t_6c077b750353f9 210-222
   s_54b80c92daa9cb::t_32408dd63cf202 204-209,225-226
+  s_54b80c92daa9cb::t_fa6d784cd5771d 201-203,223-224
 scripts/local.py
   s_54b80c92daa9cb::t_48ffc6854eb2ab 476
   s_54b80c92daa9cb::t_d02e653996013d 88-89
@@ -68,6 +72,8 @@ scripts/local.py
 docs/quivr-v2-local-harness.md
   s_54b80c92daa9cb::t_b925b642f2fe11 392,396-401,403-408,430,432,436-437
   s_54b80c92daa9cb::t_feed0b77503e4d 393-395,402
+  s_54b80c92daa9cb::t_56ef86cdb62c8c 433-435
+  s_54b80c92daa9cb::t_9de5cd6409ec0f 429,431
 plugins/pdf-text/pdf_text/normalizer.py
   s_54b80c92daa9cb::t_ef64afc71fd05c 1-11,14-22,24-26,28-38,42,44,47-115,117-124,126-160,164
   s_54b80c92daa9cb::t_90dcaccf4888b4 12-13
