@@ -1,0 +1,95 @@
+README.md
+  s_54b80c92daa9cb::t_e93cd528b83684 111-117,207,222
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_88852c0073ac2a 211-215,305-309
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_ff13818116431b 330,334-339
+docs/described-alerts.md
+  s_54b80c92daa9cb::t_52418380c88e7f 1-140
+docs/inventory.toml
+  s_54b80c92daa9cb::t_91c748ac4450e0 71,102
+docs/keyword-alerts.md
+  s_54b80c92daa9cb::t_254b9413ab9385 7-8,81
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_a795574baa37c9 521,529-539
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_7fabae03d940a9 105-112
+internal/adapters/pluginhttp/subscription.go
+  s_54b80c92daa9cb::t_4d873d514667a1 48-49,51-56
+internal/adapters/pluginhttp/subscription_test.go
+  s_54b80c92daa9cb::t_b769f97cbc83d2 242-274
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_8508594e5e41d1 132-136,144-146,175-199,203-205,220-221,226
+internal/adapters/postgres/evaluation_batch.go
+  s_54b80c92daa9cb::t_b16666940f348e 25
+internal/adapters/postgres/evaluation_test.go
+  s_54b80c92daa9cb::t_9f8fb5bd9f1d9f 147-154,165-166,168,170-185,297-333
+internal/monitoring/batch.go
+  s_54b80c92daa9cb::t_84f80b2c44aaf7 208-212
+internal/monitoring/batch_test.go
+  s_54b80c92daa9cb::t_b4a08b11921af0 271-290
+internal/monitoring/engine.go
+  s_54b80c92daa9cb::t_9940fd080f7e12 67-69
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_474ab8142f0233 285
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_53c0459594b1d1 39-45,65-67,118,153-228
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_f63031f3eb2fdd 165-209
+migrations/20260929T1427Z_evaluation_intents_by_subscription_version.sql
+  s_54b80c92daa9cb::t_240373a78f49ae 1-7
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_6a053acce5627b 5-6,8-16,20,120-121,133-134,140-148,178-255,298-300,303-320
+plugins/alerts/alerts/__main__.py
+  s_54b80c92daa9cb::t_0f7bd962dae0de 2,4-7
+plugins/alerts/alerts/described.py
+  s_54b80c92daa9cb::t_b05fdb88859444 1-154
+plugins/alerts/alerts/fake_system_one.py
+  s_54b80c92daa9cb::t_fcaf6e55648979 1-131
+plugins/alerts/alerts/jev.py
+  s_54b80c92daa9cb::t_1a762a1010bebb 1-128
+plugins/alerts/alerts/rule.py
+  s_54b80c92daa9cb::t_af83a10544f14d 6-7,12,16-17,25-29,40-45,50-71
+plugins/alerts/calibration/calibrate.py
+  s_54b80c92daa9cb::t_49ee2a6c16db44 1-50
+plugins/alerts/calibration/set.json
+  s_54b80c92daa9cb::t_c79b945d765b68 1-26
+plugins/alerts/pyproject.toml
+  s_54b80c92daa9cb::t_0c731cb56cf2ee 7-8
+plugins/alerts/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_5f27d6b7ca98dd 5-6,13-14,27-39,191-196,198-199,227-240
+plugins/alerts/tests/data/described.json
+  s_54b80c92daa9cb::t_93975db6f7e97d 1-17
+plugins/alerts/tests/test_described.py
+  s_54b80c92daa9cb::t_5daf4ec2cb537e 1-195
+quivr-search/README.md
+  s_54b80c92daa9cb::t_88a16db98eec63 87
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_75ae0204e2532e 75
+scripts/local.py
+  s_54b80c92daa9cb::t_05256d23c957b2 104-105,124-125,335,454-455,522
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_2bf04cf1dfd969 16-19,117-119,126-137
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_27215cf387d6fc 7-14,31,35-36,47-55,57,61-66,85-88,95,103-109,136-172,176-177,180-181,196,206,210-214,227-232
+scripts/test_subscription_plugin.py
+  s_54b80c92daa9cb::t_64727a3bea8f48 27,49-83
+tests/acceptance/described_alerts_test.go
+  s_54b80c92daa9cb::t_07d166b7c8cab5 1-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "88009e81a79a702a3afb7341cd0f6a7cd12fd17d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
