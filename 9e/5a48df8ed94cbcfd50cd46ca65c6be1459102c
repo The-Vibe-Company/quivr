@@ -1,0 +1,23 @@
+Makefile
+  s_54b80c92daa9cb::t_b07489ef76bb1d 15
+quivr-search/tests/access.spec.ts
+  s_54b80c92daa9cb::t_3cc60e75260596 6
+tests/acceptance/corpora_test.go
+  s_54b80c92daa9cb::t_771024e9dda719 147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e5a48df8ed94cbcfd50cd46ca65c6be1459102c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
