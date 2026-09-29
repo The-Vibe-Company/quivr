@@ -1,0 +1,34 @@
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_954053db639a60 30-33,46-54,71-73,92-94,111-153
+README.md
+  s_54b80c92daa9cb::t_1f8144adde1b83 205-207
+tests/acceptance/search_mcp_test.go
+  s_54b80c92daa9cb::t_ff4b23ef3fdee4 16-18,20,50-69,126-129,181,195,201-264,273-282
+  s_54b80c92daa9cb::t_14c5ebdab8d925 265-272
+internal/online/mcp.go
+  s_54b80c92daa9cb::t_6a5e5efd204fa2 235
+  s_54b80c92daa9cb::t_218a4b7ea883f8 5-6,19,47-48,53-54,118-119,125-131,214-234,236-271
+  s_54b80c92daa9cb::t_35aba292355431 272
+docs/connect-an-ai-agent.md
+  s_54b80c92daa9cb::t_49b056cef49e71 6-8,18,47-48,50-51,66-79,83-84
+docs/start/functional.md
+  s_54b80c92daa9cb::t_0a0f5e37f30078 16
+docs/inventory.toml
+  s_54b80c92daa9cb::t_0a0f5e37f30078 72,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74c1721cfb2036d37586153727096d9e22941c96",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
