@@ -1,0 +1,53 @@
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/rule.py
+  s_54b80c92daa9cb::t_186830dba3cfe9 1-2,4-5,20,35-44,47-48,50,67-68
+internal/plugins/scaffold/templates/subscription/README.md
+  s_54b80c92daa9cb::t_186830dba3cfe9 5-24
+sdks/python/src/quivr_plugin/subscription.py
+  s_54b80c92daa9cb::t_af0de99198342d 92-109
+  s_54b80c92daa9cb::t_e32ea452241b80 60-80
+  s_54b80c92daa9cb::t_8bf5ad7415f93a 30
+internal/plugins/scaffold/templates/subscription/tests/test_rule.py
+  s_54b80c92daa9cb::t_186830dba3cfe9 28,33-35
+internal/plugins/scaffold/templates/subscription/fixtures/sample.json
+  s_54b80c92daa9cb::t_186830dba3cfe9 2,8-10,15-17
+sdks/python/src/quivr_plugin/schemas/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_fffb2ae522f8a0 4,34-45
+sdks/python/src/quivr_plugin/testing.py
+  s_54b80c92daa9cb::t_b6305bbcb8b9fb 30-31,41-42
+  s_54b80c92daa9cb::t_4c41fc4385588d 115-116,122,124-128
+  s_54b80c92daa9cb::t_dae629b898eedd 43
+internal/plugins/scaffold/templates/subscription/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_186830dba3cfe9 27-40
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_fffb2ae522f8a0 300-337,347-350,371,409-412,425
+  s_54b80c92daa9cb::t_6139bd88f53418 438,458,470-471
+sdks/python/tests/test_subscription.py
+  s_54b80c92daa9cb::t_cab1f9bdd26e08 15
+  s_54b80c92daa9cb::t_254b287d5d1e57 143-170
+internal/plugins/scaffold/scaffold_test.go
+  s_54b80c92daa9cb::t_5d36d9043bacb5 68
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_6ec40b13354435 92,95
+sdks/python/src/quivr_plugin/schemas/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_fffb2ae522f8a0 4,91-196
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_087a91585aa61d 63-66
+sdks/python/src/quivr_plugin/__init__.py
+  s_54b80c92daa9cb::t_28067dff13e714 22,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a48c0dc7691b69e5838a49a8dacfdb986074602c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
