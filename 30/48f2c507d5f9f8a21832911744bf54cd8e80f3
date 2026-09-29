@@ -1,0 +1,43 @@
+README.md
+  s_54b80c92daa9cb::t_f1fa8a1d43a3b1 215-219,239
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_6d8a0d431fb41f 1-123
+tests/acceptance/search_mcp_test.go
+  s_54b80c92daa9cb::t_dd8b75a3cc67a0 66-68,118-119
+  s_54b80c92daa9cb::t_a3217c9a2675e7 1-65,69-117,120-186
+internal/online/mcp.go
+  s_54b80c92daa9cb::t_fe9fc477df5b18 1-20,39-72,74-125,128-131,133-234
+  s_54b80c92daa9cb::t_6fdf9811b2fbd3 21-38,73
+  s_54b80c92daa9cb::t_3e0da486ab5bcd 126-127,132
+docs/inventory.toml
+  s_54b80c92daa9cb::t_f1fa8a1d43a3b1 60
+docs/connect-an-ai-agent.md
+  s_54b80c92daa9cb::t_91edb0abd8e15e 1-67
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_9010f9d102a22f 324-328
+go.mod
+  s_54b80c92daa9cb::t_37c65f4f1a8ef9 11,34,46-47,50,52
+  s_54b80c92daa9cb::t_b80cbc9e4e9c0f 56
+cmd/quivr/main.go
+  s_54b80c92daa9cb::t_37c65f4f1a8ef9 25
+internal/online/online.go
+  s_54b80c92daa9cb::t_37c65f4f1a8ef9 69,80,98
+go.sum
+  s_54b80c92daa9cb::t_a142639d9b9dd1 42-43,50-51,77-78,94-97,106-107,142-143,163-164,170-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3048f2c507d5f9f8a21832911744bf54cd8e80f3",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
