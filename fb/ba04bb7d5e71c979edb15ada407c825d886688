@@ -1,0 +1,48 @@
+quivr-search/tests/feed.spec.ts
+  s_54b80c92daa9cb::t_1089a61adac0a4 19-20,22,32,35,51,89,96-100,103,110,112-115,117-120,141,154,171
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_8b8366b16716e3 5-6,16-24,28-142,144-286,293,295,300,302-314
+  s_54b80c92daa9cb::t_a443cce2b4054b 143
+quivr-search/README.md
+  s_54b80c92daa9cb::t_d7ceae79a20852 54-60,62,66
+  s_54b80c92daa9cb::t_a64396e8de704f 3
+  s_54b80c92daa9cb::t_dd43f7de6e24dc 15-21,28-29,32-33,38
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_61751dcfa66a70 149-151,153-156
+quivr-search/tests/pages.spec.ts
+  s_54b80c92daa9cb::t_2cb33cad54bd09 33-34,36-37,57
+  s_54b80c92daa9cb::t_e2558f40096401 3,15,35,38
+quivr-search/tests/sources.spec.ts
+  s_54b80c92daa9cb::t_f47dc6cd5cbab3 25,27,30,33-37,59-60,63-65,80,89,100-101,148-149,158,162,192,213
+quivr-search/src/components/feed/FeedPage.tsx
+  s_54b80c92daa9cb::t_7027c9fba8c2f7 579-582
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_629f3a44da1b08 385,387-389
+quivr-search/tests/states.spec.ts
+  s_54b80c92daa9cb::t_5077458684202d 61,63-64,75-77
+quivr-search/tests/alerts.spec.ts
+  s_54b80c92daa9cb::t_df11ecadbde94a 65,68-71,95,122-123,148-149,151-154,156-157,160,181-183,185-186,194-195,226,231-233,242-243,252-253,299,313-317
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_54b80c92daa9cb::t_f47dc6cd5cbab3 293
+quivr-search/tests/demo.spec.ts
+  s_54b80c92daa9cb::t_5077458684202d 48,50,52,57,66
+quivr-search/src/components/connectors/AddSource.tsx
+  s_54b80c92daa9cb::t_a443cce2b4054b 79,116,139,143
+  s_54b80c92daa9cb::t_7027c9fba8c2f7 183-194,208,210,236-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbba04bb7d5e71c979edb15ada407c825d886688",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
