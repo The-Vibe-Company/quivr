@@ -79,7 +79,7 @@ test("upstream read failures remain retryable; out-of-corpus resources stay hidd
   }
 });
 
-async function startDemo(t, upstreamPort) {
+async function startDemo(t, upstreamPort, env = {}) {
   const demo = spawn(process.execPath, ["server.mjs"], {
     env: {
       ...process.env,
@@ -89,6 +89,7 @@ async function startDemo(t, upstreamPort) {
       QUIVR_API_URL: `http://127.0.0.1:${upstreamPort}`,
       QUIVR_API_KEY: "fixture-server-key",
       QUIVR_DEMO_CORPUS_ID: "demo",
+      ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -249,4 +250,159 @@ test("connector routes are fenced to the demo corpus and mutations must be same-
     (await call("/v0/connectors/connector_demo/checkpoint")).status,
     404,
   );
+});
+
+test("sources: suggestions, guarded discovery and creation, removal hides every instance", async (t) => {
+  const seen = [];
+  const instances = {
+    connector_a1: { source_namespace: "Example news", enabled: false },
+    connector_a2: { source_namespace: "Example news", enabled: true },
+    connector_b: { source_namespace: "Other", enabled: true },
+    connector_outside: {
+      source_namespace: "Example news",
+      enabled: true,
+      corpus_id: "private-corpus",
+    },
+  };
+  const view = (id) => ({
+    connector_id: id,
+    corpus_id: "demo",
+    ...instances[id],
+  });
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({
+      method: req.method,
+      url: req.url,
+      body: Buffer.concat(chunks).toString("utf8"),
+    });
+    let data = { ok: true };
+    const disable = req.url.match(/^\/v0\/connectors\/([\w-]+)\/disable$/);
+    const one = req.url.match(/^\/v0\/connectors\/([\w-]+)$/);
+    if (req.url.startsWith("/v0/connectors?"))
+      data = {
+        items: Object.keys(instances)
+          .map(view)
+          .filter((c) => c.corpus_id === "demo"),
+      };
+    else if (disable) {
+      instances[disable[1]].enabled = false;
+      data = view(disable[1]);
+    } else if (one) data = view(one[1]);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(data));
+  });
+  const site = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/rss+xml" });
+    res.end(
+      '<rss version="2.0"><channel><title>Local feed</title></channel></rss>',
+    );
+  });
+  upstream.listen(0, "127.0.0.1");
+  site.listen(0, "127.0.0.1");
+  await Promise.all([once(upstream, "listening"), once(site, "listening")]);
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+    site.close();
+  });
+  const feed = `http://127.0.0.1:${site.address().port}/feed.xml`;
+  const base = await startDemo(t, upstream.address().port, {
+    DEMO_FEED_SUGGESTIONS: JSON.stringify([
+      { title: "Example news", url: "https://news.example.org/rss" },
+      { title: "Broken" },
+    ]),
+    DEMO_FEED_PRIVATE_ORIGINS: new URL(feed).origin,
+  });
+  const origin = { Origin: base, "Content-Type": "application/json" };
+  const post = (path, body, headers = origin) =>
+    fetch(base + path, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+  const listed = await (await fetch(base + "/demo/feeds/suggestions")).json();
+  assert.deepEqual(listed, {
+    items: [{ title: "Example news", url: "https://news.example.org/rss" }],
+  });
+
+  const found = await post("/demo/feeds/discover", { url: feed });
+  assert.equal(found.status, 200);
+  assert.deepEqual(await found.json(), {
+    feeds: [{ url: feed, title: "Local feed" }],
+  });
+  const refused = await post("/demo/feeds/discover", {
+    url: "http://10.0.0.1/feed",
+  });
+  assert.equal(refused.status, 422);
+  assert.equal((await refused.json()).code, "private_address");
+  assert.equal(
+    (
+      await post(
+        "/demo/feeds/discover",
+        { url: feed },
+        {
+          "Content-Type": "application/json",
+          Origin: "https://untrusted.example",
+        },
+      )
+    ).status,
+    403,
+  );
+
+  // An rss instance is only relayed when its URL passes the same guard.
+  const before = seen.length;
+  const privateCreate = await post("/v0/connectors", {
+    corpus_id: "demo",
+    source_namespace: "Private",
+    kind: "rss",
+    config: { url: "http://169.254.169.254/latest" },
+  });
+  assert.equal(privateCreate.status, 422);
+  assert.equal((await privateCreate.json()).code, "private_address");
+  assert.equal(seen.length, before, "a private feed must not reach the core");
+  assert.equal(
+    (
+      await post("/v0/connectors", {
+        corpus_id: "demo",
+        source_namespace: "Local",
+        kind: "rss",
+        config: { url: feed },
+      })
+    ).status,
+    200,
+  );
+
+  // Removal disables the enabled instances of the namespace and hides them all.
+  assert.equal(
+    (await post("/demo/sources/remove", { connector_id: "connector_outside" }))
+      .status,
+    404,
+  );
+  const removed = await post("/demo/sources/remove", {
+    connector_id: "connector_a1",
+  });
+  assert.equal(removed.status, 200);
+  assert.deepEqual((await removed.json()).removed.sort(), [
+    "connector_a1",
+    "connector_a2",
+  ]);
+  const disables = seen.filter((r) => r.url.endsWith("/disable"));
+  assert.deepEqual(
+    disables.map((r) => r.url),
+    ["/v0/connectors/connector_a2/disable"],
+  );
+  assert.equal(
+    JSON.parse(disables[0].body).idempotency_key,
+    "demo-remove:connector_a2",
+  );
+  const after = await (await fetch(base + "/v0/connectors")).json();
+  assert.deepEqual(
+    after.items.map((c) => c.connector_id),
+    ["connector_b"],
+  );
+  assert.equal((await fetch(base + "/v0/connectors/connector_a2")).status, 404);
+  assert.equal((await fetch(base + "/v0/connectors/connector_b")).status, 200);
 });

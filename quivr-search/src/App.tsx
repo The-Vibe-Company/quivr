@@ -22,7 +22,9 @@ type View = "search" | "connectors";
 function urlState() {
   const p = new URLSearchParams(location.search);
   return {
-    view: (p.get("view") === "connectors" ? "connectors" : "search") as View,
+    view: (["sources", "connectors"].includes(p.get("view") || "")
+      ? "connectors"
+      : "search") as View,
     query: p.get("q") || "",
     mode: (["hybrid", "lexical", "semantic"].includes(p.get("mode") || "")
       ? p.get("mode")
@@ -105,7 +107,7 @@ export default function App() {
   }, [query, mode, corpus, auth, attempt]);
   useEffect(() => {
     const p = new URLSearchParams();
-    if (view === "connectors") p.set("view", "connectors");
+    if (view === "connectors") p.set("view", "sources");
     if (query) p.set("q", query);
     if (mode !== "hybrid") p.set("mode", mode);
     if (doc) {
@@ -119,7 +121,7 @@ export default function App() {
     );
     document.title =
       view === "connectors"
-        ? "Connecteurs — Quivr Search"
+        ? "Sources — Quivr Search"
         : query
           ? `${query} — Quivr Search`
           : "Quivr Search";
@@ -291,7 +293,7 @@ export default function App() {
             Recherche
           </a>
           <a
-            href="/?view=connectors"
+            href="/?view=sources"
             aria-current={view === "connectors" ? "page" : undefined}
             onClick={(event) => {
               event.preventDefault();
@@ -299,7 +301,7 @@ export default function App() {
               setView("connectors");
             }}
           >
-            Connecteurs
+            Sources
           </a>
         </nav>
         <div className="topbar-spacer" />

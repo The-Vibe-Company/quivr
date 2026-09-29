@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "start": "node server.mjs",
-    "test": "node --test tests/server.test.mjs && playwright test"
+    "test": "node --test tests/server.test.mjs tests/feeds.test.mjs && playwright test"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

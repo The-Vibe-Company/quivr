@@ -159,10 +159,12 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
   Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval, and
   validation errors name the offending field as a JSON Pointer.
-- **Connectors page in the web app** (`quivr-search`, **Connecteurs** tab): list,
-  create, change the interval, rotate credentials and disable Connector Instances,
-  with health following the change feed. Forms are generated from the kind schemas,
-  so new kinds need no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
+- **Sources page in the web app** (`quivr-search`, **Sources** tab): paste a site
+  or feed address and the web app finds its RSS or Atom feed (refusing private
+  addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.
+  Each source shows its health and last article, and can be paused, resumed or
+  removed. Other kinds keep forms generated from their schemas, so new kinds need
+  no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
 - **Operational metrics and correlated logs** on each process's private probe
   listener (`/metrics`, Prometheus text, bounded labels):
   - API: accepted commands and the pending-ingestion backlog;

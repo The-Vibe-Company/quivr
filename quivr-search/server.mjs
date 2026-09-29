@@ -1,9 +1,10 @@
 // Same-origin demo entrypoint. Core credentials and corpus scope stay server-side.
 import http from "node:http";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { feedGuard, parseSuggestions } from "./feeds.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -17,6 +18,35 @@ if (!core || !key || (!password && host !== "127.0.0.1"))
     "Configure QUIVR_API_URL, QUIVR_API_KEY and DEMO_PASSWORD for public serving",
   );
 let corpusID = process.env.QUIVR_DEMO_CORPUS_ID;
+// Sources (THE-732): feed discovery under the private-address refusal,
+// deployment-provided suggestions, and removed sources hidden from lists.
+const feeds = feedGuard({
+  privateOrigins: (process.env.DEMO_FEED_PRIVATE_ORIGINS || "").split(","),
+});
+const suggestions = parseSuggestions(
+  process.env.DEMO_FEED_SUGGESTIONS,
+  console.warn,
+);
+const stateFile = process.env.DEMO_STATE_FILE;
+let removed = new Set();
+if (stateFile)
+  try {
+    removed = new Set(JSON.parse(await readFile(stateFile, "utf8")).removed);
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      console.warn("DEMO_STATE_FILE is unreadable; starting empty.");
+  }
+async function saveRemoved() {
+  if (!stateFile) return;
+  const data = JSON.stringify({ removed: [...removed] });
+  try {
+    await writeFile(stateFile + ".tmp", data);
+    await rename(stateFile + ".tmp", stateFile);
+  } catch {
+    // The removal still holds in memory until the next restart.
+    console.warn("DEMO_STATE_FILE could not be written.");
+  }
+}
 const equal = (a, b) =>
   timingSafeEqual(
     createHash("sha256").update(a).digest(),
@@ -118,13 +148,19 @@ async function connectorRoute(req, path, url, corpus) {
       const value = url.searchParams.get(name);
       if (value) query.set(name, value);
     }
-    return upstream(`${path}?${query}`);
+    const page = await upstream(`${path}?${query}`);
+    if (page.status === 200 && Array.isArray(page.data.items))
+      page.data.items = page.data.items.filter(
+        (item) => !removed.has(item.connector_id),
+      );
+    return page;
   }
   if (path === "/v0/connectors" && req.method === "POST") {
     const body = await jsonBody(req);
     if (body.corpus_id !== corpus) throw fail(403, "Corpus non autorisé.");
     if (body.source_namespace === "web-demo")
       throw fail(422, "Cet espace de noms est réservé aux textes ajoutés.");
+    if (body.kind === "rss") await feeds.check(body.config?.url);
     return upstream(path, "POST", body);
   }
   const match = path.match(
@@ -135,11 +171,56 @@ async function connectorRoute(req, path, url, corpus) {
   ];
   if (!match || req.method !== (method || "GET")) return undefined;
   const body = method ? await jsonBody(req) : undefined;
-  const current = await upstream(`/v0/connectors/${match[1]}`);
+  const current = await ownConnector(match[1], corpus);
   if (current.status >= 500) return current;
-  if (current.status !== 200 || current.data.corpus_id !== corpus)
-    throw fail(404, "Connecteur introuvable.");
   return method ? upstream(path, method, body) : current;
+}
+// A connector of the demo corpus that was not removed, or a 404.
+async function ownConnector(id, corpus) {
+  const current = await upstream(`/v0/connectors/${encodeURIComponent(id)}`);
+  if (current.status >= 500) return current;
+  if (
+    current.status !== 200 ||
+    current.data.corpus_id !== corpus ||
+    removed.has(current.data.connector_id)
+  )
+    throw fail(404, "Connecteur introuvable.");
+  return current;
+}
+// Removing a source disables every instance of its Source Namespace (a
+// resumed source has several) and hides them. The core keeps the Records.
+async function removeSource(req, corpus) {
+  const body = await jsonBody(req);
+  if (typeof body.connector_id !== "string")
+    throw fail(400, "Requête invalide.");
+  const current = await ownConnector(body.connector_id, corpus);
+  if (current.status >= 500) return current;
+  const namespace = current.data.source_namespace;
+  const siblings = [];
+  let cursor = "";
+  for (let page = 0; page < 50; page++) {
+    const query = new URLSearchParams({ corpus_id: corpus });
+    if (cursor) query.set("page_cursor", cursor);
+    const list = await upstream(`/v0/connectors?${query}`);
+    if (list.status !== 200) return list;
+    siblings.push(
+      ...list.data.items.filter((c) => c.source_namespace === namespace),
+    );
+    cursor = list.data.next_page_cursor;
+    if (!cursor) break;
+  }
+  for (const c of siblings.filter((c) => c.enabled)) {
+    const done = await upstream(
+      `/v0/connectors/${encodeURIComponent(c.connector_id)}/disable`,
+      "POST",
+      { idempotency_key: `demo-remove:${c.connector_id}` },
+    );
+    if (done.status !== 200) return done;
+  }
+  for (const c of siblings) removed.add(c.connector_id);
+  removed.add(current.data.connector_id);
+  await saveRemoved();
+  return { status: 200, data: { removed: siblings.map((c) => c.connector_id) } };
 }
 const server = http.createServer(async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -183,7 +264,12 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, { authenticated: true });
       return;
     }
-    if (path === "/demo/session" || path.startsWith("/v0/")) {
+    if (
+      path === "/demo/session" ||
+      path.startsWith("/v0/") ||
+      path.startsWith("/demo/feeds/") ||
+      path === "/demo/sources/remove"
+    ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
       const id = await readyCorpus();
@@ -192,7 +278,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       let response;
-      if (path === "/v0/search" && req.method === "POST") {
+      if (path === "/demo/feeds/suggestions" && req.method === "GET")
+        response = { status: 200, data: { items: suggestions } };
+      else if (path === "/demo/feeds/discover" && req.method === "POST") {
+        const body = await jsonBody(req);
+        response = { status: 200, data: await feeds.discover(body.url) };
+      } else if (path === "/demo/sources/remove" && req.method === "POST")
+        response = await removeSource(req, id);
+      else if (path === "/v0/search" && req.method === "POST") {
         const body = await jsonBody(req);
         if (
           !Array.isArray(body.corpus_ids) ||
@@ -270,7 +363,12 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     const status = error.status || 503;
     send(res, status, {
-      code: status === 503 ? "demo_unavailable" : "demo_request_failed",
+      code:
+        error.status && error.code
+          ? error.code
+          : status === 503
+            ? "demo_unavailable"
+            : "demo_request_failed",
       message: error.status
         ? error.message
         : "Le moteur est momentanément indisponible. Réessayez.",

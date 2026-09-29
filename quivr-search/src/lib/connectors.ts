@@ -134,6 +134,28 @@ export const rotateCredential = (
 export const disableConnector = (id: string, key: string) =>
   request<Connector>(`${connectorPath(id)}/disable`, { idempotency_key: key });
 
+// Sources (THE-732): feed discovery, suggestions and removal are facade
+// routes; the facade fetches the address under the private-address refusal.
+export interface FeedChoice {
+  url: string;
+  title: string;
+}
+
+export const discoverFeeds = (url: string, signal?: AbortSignal) =>
+  request<{ feeds: FeedChoice[] }>("/demo/feeds/discover", { url }, signal);
+
+export const fetchSuggestions = (signal?: AbortSignal) =>
+  request<{ items: FeedChoice[] }>(
+    "/demo/feeds/suggestions",
+    undefined,
+    signal,
+  );
+
+export const removeSource = (id: string) =>
+  request<{ removed: string[] }>("/demo/sources/remove", {
+    connector_id: id,
+  });
+
 export const pollChanges = (cursor: string | null, signal?: AbortSignal) =>
   request<{ items: ChangeEvent[]; next_cursor: string; has_more?: boolean }>(
     `/v0/changes${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,

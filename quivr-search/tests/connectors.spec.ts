@@ -11,9 +11,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openConnectors(page: Page) {
-  await page.goto("/?view=connectors");
+  await page.goto("/?view=sources");
   await expect(
-    page.getByRole("heading", { name: "Connecteurs", level: 1 }),
+    page.getByRole("heading", { name: "Sources", level: 1 }),
   ).toBeVisible();
 }
 
@@ -116,10 +116,14 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   ).toHaveCount(0);
   await detail.getByRole("button", { name: "Fermer le connecteur" }).click();
 
-  const disabled = page.getByRole("list", { name: "Connecteurs désactivés" });
-  await expect(
-    disabled.getByRole("button", { name: `wire-${run}` }),
-  ).toBeVisible();
+  // The disabled instance stays listed as a paused source; a credentialed
+  // one cannot be resumed from the list (its secret is never read back).
+  const row = page
+    .getByRole("list", { name: "Sources" })
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("button", { name: `wire-${run}` }) });
+  await expect(row.locator('[data-state="paused"]')).toBeVisible();
+  await expect(row.getByRole("button", { name: /^Reprendre/ })).toHaveCount(0);
   await expectNoSecret(page, revoked);
   await expectNoSecret(page, valid);
   await page.screenshot({
@@ -274,7 +278,7 @@ test("mobile sombre : liste et détail lisibles", async ({ page }, info) => {
   });
   await detail.getByRole("button", { name: "Fermer le connecteur" }).click();
   await expect(
-    page.getByRole("button", { name: `mobile-${run}` }),
+    page.getByRole("button", { name: `mobile-${run}`, exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(

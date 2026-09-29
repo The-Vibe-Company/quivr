@@ -52,14 +52,20 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 
 ## Connectors in the web app (optional)
 
-The web app has a **Connecteurs** view (THE-679). By default the demo key cannot use
+The web app has a **Sources** view (THE-679, THE-732). By default the demo key cannot use
 it, so the view shows "Les connecteurs ne sont pas activés sur ce déploiement". To
 enable it, set `QUIVR_DEMO_CONNECTORS=1` on api and worker, then redeploy them. The
 demo key then also gets `connectors:read`, `connectors:write` and `changes:read`
 (live health). Without `QUIVR_CREDENTIAL_KEY` only credential-free kinds, such as
 public RSS, can be created, and the view says so. Unset the variable and redeploy to
-turn it off again. Instances created meanwhile keep polling; disable them first from
-the view if they should stop.
+turn it off again. Instances created meanwhile keep polling; pause or remove them
+first from the view if they should stop.
+
+Optional web variables for the Sources view (see `quivr-search/README.md`):
+`DEMO_FEED_SUGGESTIONS` sets the one-click suggested feeds (JSON array of
+`{"title", "url"}`), and `DEMO_STATE_FILE` keeps the list of removed sources on a
+volume. Without a volume, removed sources come back as paused after a web restart.
+Set the real feed list in the Railway variables, never in this repository.
 
 ## Provision and deploy
 

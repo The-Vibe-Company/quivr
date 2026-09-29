@@ -140,22 +140,48 @@ already collected are unaffected.
 
 ## From the web interface
 
-The reference web app (`quivr-search/`) has a **Connecteurs** tab for the Corpus it
+The reference web app (`quivr-search/`) has a **Sources** tab for the Corpus it
 serves. There you can:
 
-- **List** instances with their kind, source, interval, health badge, last success,
-  last new item, last error and credential version and expiry. Disabled instances are
-  listed separately.
-- **Create** an instance. First pick a kind, then fill a form generated from that
-  kind's schemas (`GET /v0/connector-kinds`). A kind added to the core, including a
-  future plugin-provided one, appears with its form and needs no UI change. Settings
-  the form cannot render as fields, such as nested lists, get a JSON text box.
+- **Add a feed in a couple of clicks.** Paste a site address or a feed address. The
+  web app's server fetches it and either recognises a feed (RSS, Atom or JSON Feed)
+  or reads the feeds the page advertises with
+  `<link rel="alternate" type="application/rss+xml">` (or Atom). If there are
+  several, you pick one. The name, taken from the feed title, and the kind's default
+  interval come prefilled. Confirming creates an [`rss`](rss.md) instance whose
+  Source Namespace is that name.
+- **Add a suggested feed in one click.** The suggestions come from the web app's
+  `DEMO_FEED_SUGGESTIONS` setting, a JSON array of `{"title", "url"}`, for example
+  `[{"title":"Example News","url":"https://news.example.org/rss.xml"}]`. The
+  repository ships none: each deployment sets its own list.
+- **List** sources, one per Source Namespace, with a health badge (active, silent,
+  failing when the latest run failed, paused), the last article, the interval and
+  the last error in plain words.
+- **Pause, resume or remove** a source. Pausing disables the instance. Because
+  [disabling is final](#disable), resuming creates a new instance on the same Source
+  Namespace, so the Records already collected keep their identity. Resuming is only
+  offered for instances without a credential (the secret is never read back).
+  Removing disables every instance of the source and hides them from the page;
+  collected Records stay searchable. The web app's server keeps that list of removed
+  sources in `DEMO_STATE_FILE` when it is set, and in memory otherwise.
+- **Add another kind.** Pick a kind, then fill a form generated from that kind's
+  schemas (`GET /v0/connector-kinds`). A kind added to the core, including a future
+  plugin-provided one, appears with its form and needs no UI change. Settings the
+  form cannot render as fields, such as nested lists, get a JSON text box.
 - **Open** an instance to see its health and configuration, change its interval,
   deposit or replace its credential, or disable it (after a confirmation).
 
+The web app's server refuses to fetch or collect private, loopback, link-local and
+other non-public addresses, like the core's `rss` kind does. The address is checked
+after DNS resolution and again on every redirect. A refused, broken or feedless
+address gets a clear message. Test harnesses exempt their local feed server with
+`DEMO_FEED_PRIVATE_ORIGINS`; production never sets it.
+
 Health follows the change feed: the page polls `connector.*` events every 5 seconds
-and rereads the instances they name, so it updates without a reload. Rejected values
-are shown next to the field the API's `field` pointer names.
+and rereads the instances they name, so it updates without a reload. It also rereads
+the list when Records arrive and every 15 seconds, because a new article does not
+change the health state. Rejected values are shown next to the field the API's
+`field` pointer names.
 
 Secrets typed in the form are sent once, in the submit request, then erased from the
 page. They are never shown again: only the credential's version, deposit date and

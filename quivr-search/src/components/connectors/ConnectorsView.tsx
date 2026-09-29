@@ -1,23 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Key, Plugs, Plus } from "@phosphor-icons/react";
+import { ArrowClockwise, Key, Plugs } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import {
   connectorMessage,
+  createConnector,
+  disableConnector,
   fetchConnector,
   fetchConnectors,
   fetchKinds,
-  formatAbsolute,
-  formatInterval,
-  formatRelative,
+  fetchSuggestions,
   pollChanges,
+  removeSource,
   type Connector,
-  type ConnectorKind,
+  type FeedChoice,
   type KindCatalog,
 } from "../../lib/connectors";
-import { HealthBadge, healthLabel } from "./HealthBadge";
+import { healthLabel } from "./HealthBadge";
 import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
-import { sourceSummary } from "./summary";
+import { AddSource } from "./AddSource";
+import { SourceList, groupSources } from "./SourceList";
 
 const LIVE_INTERVAL = 5000;
 
@@ -40,7 +42,10 @@ export function ConnectorsView({
   const [announcement, setAnnouncement] = useState("");
   const [, setNow] = useState(Date.now());
   const [attempt, setAttempt] = useState(0);
+  const [suggestions, setSuggestions] = useState<FeedChoice[]>([]);
+  const [highlight, setHighlight] = useState<string | null>(null);
   const states = useRef(new Map<string, string>());
+  const listHeading = useRef<HTMLHeadingElement>(null);
 
   const failed = useCallback(
     (e: unknown) => {
@@ -90,12 +95,22 @@ export function ConnectorsView({
     [track],
   );
 
+  const drop = useCallback((ids: string[]) => {
+    setConnectors((list) => list.filter((c) => !ids.includes(c.connector_id)));
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     setStatus("loading");
-    Promise.all([fetchKinds(controller.signal), reload(controller.signal)])
-      .then(([kinds]) => {
+    Promise.all([
+      fetchKinds(controller.signal),
+      reload(controller.signal),
+      // Suggestions are optional: the page works without them.
+      fetchSuggestions(controller.signal).catch(() => ({ items: [] })),
+    ])
+      .then(([kinds, , offered]) => {
         setCatalog(kinds);
+        setSuggestions(offered.items);
         setStatus("ready");
       })
       .catch((e) => {
@@ -111,6 +126,7 @@ export function ConnectorsView({
     const controller = new AbortController();
     let cursor: string | null = null;
     let feed = true;
+    let refreshed = Date.now();
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       if (!document.hidden) {
@@ -119,28 +135,45 @@ export function ConnectorsView({
           else {
             // Drain the feed; advance the cursor only once the instances named
             // by a page were reread, so a failed refetch retries that page.
+            // Health events only mark state changes; a new article or a
+            // successful run of an already active source changes no state.
+            // Other events of the corpus (Records arriving) and a slow
+            // timer reread the list so "last article" stays current.
+            let arrivals = false;
             for (let pages = 0; pages < 10; pages++) {
               const page = await pollChanges(cursor, controller.signal);
               const started = cursor !== null;
               const ids = new Set<string>();
               let created = !started;
               for (const event of page.items) {
-                if (!event.type.startsWith("connector.")) continue;
+                if (!event.type.startsWith("connector.")) {
+                  arrivals ||= started;
+                  continue;
+                }
                 if (event.type === "connector.created") created = true;
                 else ids.add(event.resource.id);
               }
-              if (created) await reload(controller.signal);
+              if (created) {
+                await reload(controller.signal);
+                refreshed = Date.now();
+              }
               for (const id of ids)
                 await fetchConnector(id, controller.signal).then(
                   upsert,
                   (e) => {
-                    // An instance no longer visible must not stall the feed.
+                    // An instance no longer visible (removed elsewhere) leaves
+                    // the list and must not stall the feed.
                     if (!(e instanceof APIError && e.status === 404)) throw e;
+                    drop([id]);
                   },
                 );
               cursor = page.next_cursor;
               setLive(true);
               if (!page.has_more) break;
+            }
+            if (arrivals || Date.now() - refreshed > LIVE_INTERVAL * 3) {
+              await reload(controller.signal);
+              refreshed = Date.now();
             }
           }
         } catch (e) {
@@ -165,35 +198,66 @@ export function ConnectorsView({
       clearTimeout(timer);
       clearInterval(clock);
     };
-  }, [status, reload, upsert, onUnauthorized]);
+  }, [status, reload, upsert, drop, onUnauthorized]);
 
   const kindOf = (name: string) => catalog?.items.find((k) => k.kind === name);
   const current = connectors.find((c) => c.connector_id === selected);
-  const enabled = connectors.filter((c) => c.enabled);
-  const disabled = connectors.filter((c) => !c.enabled);
+  const sources = groupSources(connectors);
+
+  // Row actions report failures in plain words; a lost session logs out.
+  const guarded = async (action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch (e) {
+      if (e instanceof APIError && e.status === 401) onUnauthorized();
+      throw new Error(connectorMessage(e, catalog?.min_interval_seconds));
+    }
+  };
+  const onPause = (c: Connector) =>
+    guarded(async () => {
+      upsert(await disableConnector(c.connector_id, `pause:${c.connector_id}`));
+      setAnnouncement(`${c.source_namespace} : en pause.`);
+    });
+  // The core cannot re-enable an instance: resuming creates a new one on the
+  // same Source Namespace, so collected Records keep their identity.
+  const onResume = (c: Connector) =>
+    guarded(async () => {
+      const next = await createConnector({
+        idempotency_key: `resume:${c.connector_id}`,
+        corpus_id: corpus,
+        source_namespace: c.source_namespace,
+        kind: c.kind,
+        config: c.config,
+        schedule: c.schedule,
+      });
+      upsert(next);
+      setAnnouncement(`${c.source_namespace} : collecte reprise.`);
+    });
+  const onRemove = (c: Connector) =>
+    guarded(async () => {
+      const { removed } = await removeSource(c.connector_id);
+      drop([...removed, c.connector_id]);
+      setAnnouncement(`${c.source_namespace} retirée des sources.`);
+      // The row is gone: land keyboard focus on the list heading.
+      listHeading.current?.focus();
+    });
 
   return (
     <main className="connectors-page">
       <div className="connectors-head">
         <div>
-          <h1>Connecteurs</h1>
+          <h1>Sources</h1>
           <p className="muted">
-            Des sources collectées automatiquement dans l’espace démo.
+            Les sites et flux collectés automatiquement dans l’espace démo.
           </p>
         </div>
-        {status === "ready" && catalog && catalog.items.length > 0 && (
-          <button className="button primary" onClick={() => setCreating(true)}>
-            <Plus size={17} weight="bold" aria-hidden="true" />
-            Ajouter un connecteur
-          </button>
-        )}
       </div>
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </p>
       {status === "loading" && (
         <p role="status" className="muted">
-          Chargement des connecteurs…
+          Chargement des sources…
         </p>
       )}
       {status === "unavailable" && (
@@ -207,7 +271,7 @@ export function ConnectorsView({
       )}
       {status === "error" && (
         <div className="notice" role="alert">
-          <h2>Les connecteurs n’ont pas pu être chargés.</h2>
+          <h2>Les sources n’ont pas pu être chargées.</h2>
           <p>{error}</p>
           <button className="button" onClick={() => setAttempt((n) => n + 1)}>
             <ArrowClockwise size={16} aria-hidden="true" /> Réessayer
@@ -216,53 +280,73 @@ export function ConnectorsView({
       )}
       {status === "ready" && catalog && (
         <>
+          <AddSource
+            catalog={catalog}
+            corpus={corpus}
+            suggestions={suggestions}
+            existing={connectors}
+            onCreated={(c, message) => {
+              upsert(c);
+              setHighlight(c.connector_id);
+              setAnnouncement(message);
+            }}
+          />
+          <div className="sources-head">
+            <h2 ref={listHeading} tabIndex={-1}>
+              Vos sources
+              {sources.length > 0 && (
+                <span className="count"> {sources.length}</span>
+              )}
+            </h2>
+            <span className="live-line muted">
+              {live ? (
+                <>
+                  <span className="status-dot" aria-hidden="true" /> Santé
+                  suivie en direct
+                </>
+              ) : (
+                "Santé actualisée régulièrement"
+              )}
+            </span>
+          </div>
+          {sources.length === 0 ? (
+            <div className="empty sources-empty">
+              <Plugs size={30} aria-hidden="true" />
+              <h2>Aucune source pour l’instant.</h2>
+              <p>
+                {catalog.items.length
+                  ? "Collez l’adresse d’un site d’actualité ci-dessus, ou choisissez une suggestion."
+                  : "Aucun type de source n’est disponible sur ce déploiement."}
+              </p>
+            </div>
+          ) : (
+            <SourceList
+              sources={sources}
+              kindOf={kindOf}
+              highlight={highlight}
+              onOpen={setSelected}
+              onPause={onPause}
+              onResume={onResume}
+              onRemove={onRemove}
+            />
+          )}
+          {catalog.items.length > 0 && (
+            <p className="other-kinds">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setCreating(true)}
+              >
+                Ajouter un connecteur d’un autre type
+              </button>
+            </p>
+          )}
           {catalog.credential_deposits === "unavailable" && (
             <p className="inline-note">
               <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants est
               désactivé sur ce déploiement : seules les sources sans identifiant
               peuvent être ajoutées.
             </p>
-          )}
-          <div className="live-line muted">
-            {live ? (
-              <>
-                <span className="status-dot" aria-hidden="true" /> Santé suivie
-                en direct
-              </>
-            ) : (
-              "Santé actualisée régulièrement"
-            )}
-          </div>
-          {connectors.length === 0 ? (
-            <div className="empty">
-              <Plugs size={30} aria-hidden="true" />
-              <h2>Aucun connecteur pour l’instant.</h2>
-              <p>
-                {catalog.items.length
-                  ? "Ajoutez une source à collecter, par exemple un flux RSS."
-                  : "Aucun type de connecteur n’est disponible sur ce déploiement."}
-              </p>
-            </div>
-          ) : (
-            <>
-              <ConnectorList
-                label="Connecteurs actifs"
-                items={enabled}
-                kindOf={kindOf}
-                onOpen={setSelected}
-              />
-              {disabled.length > 0 && (
-                <>
-                  <h2 className="list-heading">Désactivés</h2>
-                  <ConnectorList
-                    label="Connecteurs désactivés"
-                    items={disabled}
-                    kindOf={kindOf}
-                    onOpen={setSelected}
-                  />
-                </>
-              )}
-            </>
           )}
         </>
       )}
@@ -288,102 +372,5 @@ export function ConnectorsView({
         />
       )}
     </main>
-  );
-}
-
-function ConnectorList({
-  label,
-  items,
-  kindOf,
-  onOpen,
-}: {
-  label: string;
-  items: Connector[];
-  kindOf: (kind: string) => ConnectorKind | undefined;
-  onOpen: (id: string) => void;
-}) {
-  if (!items.length) return null;
-  return (
-    <ul className="connector-list" aria-label={label}>
-      {items.map((c) => {
-        const kind = kindOf(c.kind);
-        const h = c.health;
-        const source = sourceSummary(c, kind);
-        return (
-          <li
-            key={c.connector_id}
-            className="connector-row"
-            data-connector={c.connector_id}
-          >
-            <div className="connector-main">
-              <button
-                type="button"
-                className="connector-link"
-                onClick={() => onOpen(c.connector_id)}
-              >
-                {c.source_namespace}
-              </button>
-              <span className="connector-kind">
-                {kind?.title || c.kind}
-                {source && (
-                  <span className="connector-source"> · {source}</span>
-                )}
-              </span>
-            </div>
-            <HealthBadge state={h.state} />
-            <dl className="connector-meta">
-              <div>
-                <dt>Intervalle</dt>
-                <dd>{formatInterval(c.schedule.interval_seconds)}</dd>
-              </div>
-              <div>
-                <dt>Dernier succès</dt>
-                <dd>
-                  {h.last_success_at ? (
-                    <Time value={h.last_success_at} />
-                  ) : (
-                    "Jamais"
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt>Dernier élément</dt>
-                <dd>
-                  {h.last_item_at ? <Time value={h.last_item_at} /> : "Aucun"}
-                </dd>
-              </div>
-              {h.last_error && (
-                <div>
-                  <dt>Dernière erreur</dt>
-                  <dd>
-                    <code>{h.last_error.code}</code>{" "}
-                    <Time value={h.last_error.at} />
-                  </dd>
-                </div>
-              )}
-              {c.credential && (
-                <div>
-                  <dt>Identifiant</dt>
-                  <dd>
-                    v{c.credential.version}
-                    {c.credential.expires_at
-                      ? ` · expire le ${formatAbsolute(c.credential.expires_at)}`
-                      : ""}
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function Time({ value }: { value: string }) {
-  return (
-    <time dateTime={value} title={formatAbsolute(value)}>
-      {formatRelative(value)}
-    </time>
   );
 }

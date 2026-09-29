@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.request
 import uuid
+import fake_feeds
 from local import ROOT, Stack, port, run
 
 
@@ -40,7 +41,14 @@ def main():
         env = {**os.environ, 'HOST': '127.0.0.1', 'PORT': str(demo_port),
                'QUIVR_API_URL': f"http://127.0.0.1:{stack.state['api_port']}",
                'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
-               'DEMO_SECURE_COOKIE': 'false'}
+               'DEMO_SECURE_COOKIE': 'false', 'DEMO_STATE_FILE': str(stack.directory / 'demo-state.json')}
+        feeds_url = None
+        if verify:
+            # Browser tests add feeds from a local test site, never from the internet.
+            feeds_server, feeds_url = fake_feeds.start(port=port())
+            env.update(DEMO_FEED_PRIVATE_ORIGINS=feeds_url, DEMO_FEED_SUGGESTIONS=json.dumps([
+                {'title': 'Fil continu exemple', 'url': feeds_url + '/feeds/ticker.xml?run=suggested'},
+                {'title': 'La Revue exemple — Monde', 'url': feeds_url + '/feeds/world.xml?run=suggested'}]))
         base = f'http://127.0.0.1:{demo_port}'
         with (stack.directory / 'demo-server.log').open('w') as log:
             process = subprocess.Popen(['node', str(ROOT / 'quivr-search/server.mjs')], env=env, stdout=log, stderr=log)
@@ -56,7 +64,7 @@ def main():
                     raise RuntimeError('demo readiness timed out')
                 time.sleep(.1)
         if verify:
-            test_env = {**os.environ, 'QUIVR_DEMO_URL': base, 'QUIVR_DEMO_PASSWORD': demo_password,
+            test_env = {**os.environ, 'QUIVR_DEMO_URL': base, 'QUIVR_DEMO_PASSWORD': demo_password, 'QUIVR_DEMO_FEEDS_URL': feeds_url,
                         'QUIVR_DEMO_ARTIFACTS': str(stack.directory / 'browser')}
             with (stack.directory / 'browser.log').open('w') as log:
                 run(['npm', 'test', '--prefix', 'quivr-search'], env=test_env, stdout=log, stderr=log)

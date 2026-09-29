@@ -14,13 +14,33 @@ Open http://127.0.0.1:5183. The command builds the frontend, starts isolated rea
 
 Click **Ajouter du texte**, paste a note, submit, follow search availability, then open the source or search for it. Hybrid search is the default; lexical and semantic modes are selectable. Inline text is limited to 256 KiB; whitespace and Unicode are preserved. Drafts and retry identity survive reloads within the same browser tab. Ambiguous network failures reuse the same ingestion identity.
 
-### Connectors
+### Sources
 
-The **Connecteurs** tab lists, creates and monitors Connector Instances of the demo
-corpus (see [From the web interface](../docs/connectors/README.md#from-the-web-interface)).
-`make demo` enables the test `fixture` kind. Its token field accepts any value, except
-values starting with `fixture-revoked`, which produce an access error. The demo uses
-its own key and Organization, so texts added before this change are not shown.
+The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (see
+[From the web interface](../docs/connectors/README.md#from-the-web-interface)):
+
+1. Paste a site address or a feed address and press **Ajouter**. The server fetches
+   the address, recognises a feed or finds the feeds the page advertises
+   (`<link rel="alternate" type="application/rss+xml">`, Atom or JSON Feed), and
+   refuses private, loopback and link-local addresses.
+2. If the page advertises several feeds, pick one. The name (the feed title) and
+   the polling interval come prefilled.
+3. **Commencer la collecte** creates an `rss` Connector Instance whose Source
+   Namespace is that name. Its articles become searchable after the first poll.
+
+Suggested feeds, set by the deployment, add in one click. Each source shows its
+health (active, silent, failing, paused), its last article and its interval, and
+can be paused, resumed or removed. Pausing disables the instance. Resuming creates
+a new instance on the same Source Namespace, because the core cannot re-enable one;
+articles already collected keep their identity. Removing disables every instance
+of the source and hides them; collected articles stay searchable.
+
+`make demo` also enables the test `fixture` kind, under **Ajouter un connecteur
+d’un autre type**. Its token field accepts any value, except values starting with
+`fixture-revoked`, which produce an access error. The demo uses its own key and
+Organization, so texts added before this change are not shown. The local stack lets
+the core reach private addresses; the web server still refuses them, so private
+feeds get the same error as in production.
 
 ## Frontend development and checks
 
@@ -31,7 +51,7 @@ npm run typecheck --prefix quivr-search
 make verify-demo
 ```
 
-`make verify` also runs these browser/HTTP tests against an isolated real core. Chromium system dependencies can be installed with `npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium`. Screenshots and reports live under `.scratch/quivr-demo-verify-*/`. Browser traces may contain demo passwords/texts and remain local; CI uploads only screenshots and reports. Test data are synthetic.
+`make verify` also runs these browser/HTTP tests against an isolated real core. Feeds come from a local test site (`scripts/fake_feeds.py`), so no test reaches the internet. Chromium system dependencies can be installed with `npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium`. Screenshots and reports live under `.scratch/quivr-demo-verify-*/`. Browser traces may contain demo passwords/texts and remain local; CI uploads only screenshots and reports. Test data are synthetic.
 
 ## Server configuration
 
@@ -40,11 +60,22 @@ make verify-demo
 | Variable | Meaning |
 | --- | --- |
 | `QUIVR_API_URL` | Private core URL, no trailing route |
-| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Connecteurs tab |
+| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab |
 | `QUIVR_DEMO_CORPUS_ID` | Optional existing demo corpus; otherwise created idempotently |
 | `DEMO_PASSWORD` | Shared demo password, required on public binds |
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |
 | `DEMO_SECURE_COOKIE` | Set `true` behind HTTPS; cookie is always HttpOnly and SameSite=Strict |
+| `DEMO_FEED_SUGGESTIONS` | Optional one-click feeds on the Sources tab: a JSON array of `{"title", "url"}` (at most 12; invalid entries are skipped with a warning). Empty by default |
+| `DEMO_STATE_FILE` | Optional file keeping removed sources across restarts; without it they come back as paused after a restart. `make demo` keeps it in the stack directory |
+| `DEMO_FEED_PRIVATE_ORIGINS` | Tests only: comma-separated exact origins (`http://127.0.0.1:8080`) exempt from the private-address refusal, for a local test feed server. Never set it in production |
+
+Example, with placeholder addresses to replace with the feeds you want to offer:
+
+```sh
+DEMO_FEED_SUGGESTIONS='[{"title":"Example News — World","url":"https://news.example.org/world/rss.xml"},{"title":"Example Tech","url":"https://tech.example.com/feed"}]'
+```
+
+Keep the real list in the deployment's settings, not in this repository.
 
 Only the Node facade should be public. It serves the bundle, authenticates the shared demo session, and restricts core requests to the demo corpus and necessary routes. Core credentials never enter frontend build variables. Deploy behind HTTPS, with the original Host preserved, and use a dedicated core identity/organization for the demo. This is an evaluation space shared by everyone with its password, not individual user accounts.
 
