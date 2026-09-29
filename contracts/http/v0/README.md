@@ -4,6 +4,8 @@
 Design and scope are recorded in [ingestion](../../../docs/dated/design/quivr-v2-ingestion-contracts.md)
 [thin monitoring](../../../docs/dated/design/quivr-v2-monitoring-tracer.md), and
 [search/rebuild](../../../docs/dated/design/quivr-v2-search-contracts.md).
+The [HTTP API reference](../../../docs/reference/http-api.md) is generated from this
+contract by `make generate` and checked for freshness by `make contracts`.
 Generated code belongs in transport/SDK packages when implementation starts;
 it is deliberately not checked into this design change.
 

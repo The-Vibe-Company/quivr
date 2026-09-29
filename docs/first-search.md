@@ -7,7 +7,8 @@ Every command and output on this page is replayed against a real Quivr by
 `make verify`, so they work on this version. Outputs show only the fields this
 guide relies on; `"..."` stands for a value that changes on every run, such as an
 identifier. [`openapi.yaml`](../contracts/http/v0/openapi.yaml) is the complete
-contract for every request and response, and the
+contract for every request and response, listed per endpoint in the
+[HTTP API reference](reference/http-api.md), and the
 [API walkthrough](api-walkthrough.md) covers what comes next: batches, uploads,
 plugins, monitoring and connectors.
 
@@ -39,7 +40,7 @@ export QUIVR_KEY=$(jq -r '.keys | to_entries[]
 | `make down` | Stop the stack, keep development volumes |
 | `make reset` | Stop the stack and delete its volumes |
 | `make migrate` | Apply versioned migrations to the running stack |
-| `make generate` | Regenerate transport bindings and the Go client after a contract change |
+| `make generate` | Regenerate transport bindings, the Go client and the API reference after a contract change |
 | `GO=/path/to/go make …` | Use a specific Go toolchain |
 
 Local logs are capped at four 1 MiB files per process; Compose services keep three

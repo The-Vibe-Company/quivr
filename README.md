@@ -211,6 +211,7 @@ listed here, not in "What works today".
 | [Your first search](docs/first-search.md) | Create a Corpus, add a Record and search it, step by step |
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [Keyword alerts](docs/keyword-alerts.md) | Writing alert queries and setting up metadata filters |
+| [HTTP API reference](docs/reference/http-api.md) | Every endpoint, field and example, generated from the contract |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
 | [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
 | [Write a normalizer](docs/plugins/write-a-normalizer.md) | From `quivr plugin init` to a searchable, observable Record |

@@ -5,7 +5,8 @@ beyond a first search. Start with [Your first search](first-search.md): it start
 local stack, creates a Corpus, adds a Record, follows its Ingestion Receipt, reads
 its Version and searches it, with commands that `make verify` replays.
 [`contracts/http/v0/openapi.yaml`](../contracts/http/v0/openapi.yaml) is authoritative
-for request and response shapes; this page explains the semantics around them.
+for request and response shapes, listed per endpoint in the generated
+[HTTP API reference](reference/http-api.md); this page explains the semantics around them.
 
 ## Corpora
 

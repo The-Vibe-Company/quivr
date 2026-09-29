@@ -44,6 +44,7 @@ excluded = [
     ".agents/skills/*",                                    # vendored coding-agent skills
     "internal/plugins/scaffold/templates/*",               # files copied into new plugins
     "contracts/plugins/v0/fixtures/*",                     # protocol test fixtures
+    "internal/reference/*/testdata/*",                     # reference generator test fixtures
     "third_party/*/NOTICE.md",                             # upstream notices
     "third_party/*/MODEL_CARD.md",                         # upstream model card
 ]
@@ -72,6 +73,7 @@ excluded = [
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
+"docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference" }
 "docs/runnable-guides.md" = { audience = "contributor", kind = "guide" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }

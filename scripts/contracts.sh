@@ -13,10 +13,13 @@ python3 -m venv "$work/venv"
 if [ "${1:-check}" = generate ]; then
   cp "$work/transport.gen.go" internal/transport/generated/transport.gen.go
   cp "$work/client.gen.go" client/client.gen.go
+  "$GO" run ./cmd/quivr-reference
   exit
 fi
 cmp "$work/transport.gen.go" internal/transport/generated/transport.gen.go
 cmp "$work/client.gen.go" client/client.gen.go
+# The generated reference pages (THE-707) come from the same contract; see cmd/quivr-reference.
+"$GO" run ./cmd/quivr-reference -check
 "$work/venv/bin/python" contracts/http/v0/checks/validate.py
 "$work/venv/bin/python" contracts/plugins/v0/checks/validate.py
 node contracts/http/v0/checks/webhook.cjs
