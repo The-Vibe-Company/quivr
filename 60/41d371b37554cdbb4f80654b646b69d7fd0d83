@@ -1,0 +1,100 @@
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_220565d641aece 97-114,177-180,184-185,187-188,196,212,220,229,281
+internal/adapters/postgres/evaluation_test.go
+  s_54b80c92daa9cb::t_6fd5340bc704fe 98
+internal/adapters/postgres/evaluation_batch.go
+  s_54b80c92daa9cb::t_c3139d4eb94f5c 1-36,38,89
+  s_54b80c92daa9cb::t_c3291a16929d3b 37,39-88
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_d9e2e643bdc1d3 34-36,192-193,296,308-320,350-352,399,401
+  s_54b80c92daa9cb::t_fb94425ddd4b7a 400
+internal/plugins/subscription.go
+  s_54b80c92daa9cb::t_3044dc06a598b4 266-269
+internal/adapters/postgres/evaluation_batch_test.go
+  s_54b80c92daa9cb::t_fd8edfc3f479ce 1-163
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_ab32b0e31fa56a 30-33,96-101
+  s_54b80c92daa9cb::t_c0897de192992e 229-238
+internal/app/run.go
+  s_54b80c92daa9cb::t_c9e738e69b20e2 78-79,81-88,125-128,130,132,136,218-219,230,318,325-330,332,340,367-368
+internal/monitoring/evaluation.go
+  s_54b80c92daa9cb::t_dc29c6d8969a2b 9-11,30-45,48-72,78-156,159-160,172-180,182-198,202-203,212-228,249,264
+internal/monitoring/engine_test.go
+  s_54b80c92daa9cb::t_0b853abcd16865 287
+  s_54b80c92daa9cb::t_8e5e7747deb4ea 16-18,20,24-26,31,43-52,54-56,70,72,75,77,93-94,97,100-107,113,247
+internal/monitoring/engine.go
+  s_54b80c92daa9cb::t_03329b703a3e42 91-94
+internal/plugins/pins_test.go
+  s_54b80c92daa9cb::t_8fb2a8ac6704b2 1-122
+internal/monitoring/evaluation_test.go
+  s_54b80c92daa9cb::t_f5e3df2e2ff9cf 11-24,27-30,32,55,61,71,83,86,90-91
+internal/adapters/postgres/prune_test.go
+  s_54b80c92daa9cb::t_6fd5340bc704fe 165
+internal/monitoring/batch.go
+  s_54b80c92daa9cb::t_f017893f54a657 1-377
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_c1d41533a6176a 43-80
+internal/adapters/postgres/corrections_test.go
+  s_54b80c92daa9cb::t_6fd5340bc704fe 429
+internal/telemetry/telemetry.go
+  s_54b80c92daa9cb::t_fb8dcc92d6ae87 60,81-89
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_0b853abcd16865 168
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_0b853abcd16865 6,139-164,168-170,288-332
+  s_54b80c92daa9cb::t_b188d920d754d2 333
+internal/adapters/pluginhttp/subscription_test.go
+  s_54b80c92daa9cb::t_f6c912773dafc7 1-228
+internal/adapters/postgres/monitoring_test.go
+  s_54b80c92daa9cb::t_6fd5340bc704fe 97,196
+internal/monitoring/batch_test.go
+  s_54b80c92daa9cb::t_bd676e953c4df3 1-127,129-148,150-211
+  s_54b80c92daa9cb::t_cb40504300dcfa 128,149
+contracts/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_27bf570eacdd28 4,91-196
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_7dd91d0f11fa75 84-85,96-107
+  s_54b80c92daa9cb::t_e674d09e4ec875 79-83,108-109
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_e301ac94e0297c 41-51
+internal/adapters/pluginhttp/subscription.go
+  s_54b80c92daa9cb::t_8b19a75db8af36 1-223
+migrations/20260929T1125Z_evaluation_intents_by_record_version.sql
+  s_54b80c92daa9cb::t_1cc83c36665611 1-5
+internal/plugins/pins.go
+  s_54b80c92daa9cb::t_80e7317a6c86e4 1-159
+contracts/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_27bf570eacdd28 4,34-45
+internal/adapters/postgres/delivery_fixture_test.go
+  s_54b80c92daa9cb::t_6fd5340bc704fe 46
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_d8ce0394f0d8f7 361,384-390,526-532
+contracts/plugins/v0/fixtures/requests/subscription/unknown-origin.json
+  s_54b80c92daa9cb::t_eac0eab1a0436c 1-87
+contracts/plugins/v0/fixtures/requests/subscription/valid.json
+  s_54b80c92daa9cb::t_df0fe45b1b452c 14-25
+contracts/plugins/v0/fixtures/subscriptions/metadata.json
+  s_54b80c92daa9cb::t_a607e1a8f2e463 1-39
+internal/app/monitoring.go
+  s_54b80c92daa9cb::t_2c68e296af2ea7 11,16,19-26,28,31,39-70
+internal/monitoring/metrics.go
+  s_54b80c92daa9cb::t_06e15dc2ebfae4 93-136
+internal/plugins/devhost/subscription.go
+  s_54b80c92daa9cb::t_c3dea949ee8b42 44-49,84-87,90-93,110-111,182-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6041d371b37554cdbb4f80654b646b69d7fd0d83",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
