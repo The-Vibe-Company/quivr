@@ -8,6 +8,13 @@ creation, credentials, health, disable.
 
 ## What you bring
 
+- **The x-list plugin pinned.** `x_list` comes from the first-party connector
+  plugin [`plugins/x-list`](../../plugins/x-list/README.md). `make dev`, `make verify` and the
+  Railway image pin it; elsewhere [pin it](../plugins/run-a-connector-plugin.md).
+  Coming from the former built-in kind: until it is pinned, instances report
+  `unsupported_connector_kind` and keep their checkpoint, then resume without
+  duplicates. The engine setting `x.api_endpoint` is gone; the pin's
+  `configuration.api_endpoint` replaces it, for test fakes only.
 - **An X developer account and app.** Create a Project and App in the X
   Developer Console. The account owner pays for API usage; check X's pricing
   page and your console for current rates, deduplication rules and plan caps.
@@ -45,7 +52,7 @@ POST /v0/connectors
 | Config field | Default | Meaning |
 | --- | --- | --- |
 | `list_id` | required | Numeric X list id |
-| `backfill_since` | none | Also collect posts created since this instant. It must be within the 7 days before creation (`422 invalid_config` otherwise). Without it, collection starts at the first poll ("start now") |
+| `backfill_since` | none | Also collect posts created since this instant. It must be within the 7 days before the first poll; otherwise that poll fails with `invalid_config` and nothing is collected. Without it, collection starts at the first poll ("start now") |
 | `max_reads_per_day` | none | Daily spend guard in posts read (minimum 100), see [Spend](#interval-and-spend) |
 | `recheck_window_seconds` | 86400 (24 h) | How long collected posts are rechecked for deletion and protection (1 h to 7 days) |
 | `recheck_interval_seconds` | 600 (10 min) | How often that recheck runs (minimum 60 s) |
@@ -158,6 +165,7 @@ does not multiply cost. Controls:
 | `daily_read_cap_reached` | unchanged | `max_reads_per_day` reached | Raise the cap or wait for the next UTC day |
 | `source_unavailable` | unchanged | Network error, timeout or 5xx | Nothing, unless it persists |
 | `invalid_response` | unchanged | X returned an unreadable body | Report it if it persists |
+| `invalid_config` | unchanged | `backfill_since` is more than 7 days before the first poll | Disable the instance and create one with a later `backfill_since` |
 | `item_rejected` | unchanged | A post could not be accepted (e.g. a withdrawn post reappeared) | Usually harmless; the rest of the list is still collected |
 
 `access_error` lasts until a later successful poll.

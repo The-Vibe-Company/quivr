@@ -80,27 +80,6 @@ var declaredExtensionSchemas = map[string]map[string]string{
   "additionalProperties": false
 }`,
 	},
-	// connector.x_list carries X post metadata collected by the x_list connector.
-	"connector.x_list": {
-		"1": `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["post_id", "edit_history_post_ids"],
-  "properties": {
-    "post_id": {"type": "string"},
-    "edit_history_post_ids": {"type": "array", "items": {"type": "string"}},
-    "url": {"type": "string"},
-    "author": {"type": "object", "properties": {"id": {"type": "string"}, "username": {"type": "string"}, "name": {"type": "string"}}},
-    "created_at": {"type": "string"},
-    "lang": {"type": "string"},
-    "conversation_id": {"type": "string"},
-    "entities": {"type": "object"},
-    "referenced_posts": {"type": "array", "items": {"type": "object", "properties": {"type": {"type": "string"}, "id": {"type": "string"}}}},
-    "media": {"type": "array", "items": {"type": "object", "properties": {"media_key": {"type": "string"}, "type": {"type": "string"}, "url": {"type": "string"}, "preview_image_url": {"type": "string"}, "alt_text": {"type": "string"}}}}
-  },
-  "additionalProperties": true
-}`,
-	},
 	"example.editorial": {
 		"1": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -1,0 +1,169 @@
+{
+ "runs": [
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T11:00:00Z",
+    "sweep": {
+     "top": "",
+     "token": "expired"
+    }
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T11:00:00Z",
+      "sweep": {
+       "top": ""
+      }
+     },
+     "diagnostics": {
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 0,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": true,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 0,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026pagination_token=expired\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T11:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:00Z",
+        "latest": "3000000000000000001",
+        "read": "2026-09-28",
+        "root": "3000000000000000001"
+       }
+      ],
+      "watermark": "3000000000000000001"
+     },
+     "diagnostics": {
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Fresh"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:00Z",
+          "edit_history_post_ids": [
+           "3000000000000000001"
+          ],
+          "lang": "fr",
+          "post_id": "3000000000000000001",
+          "url": "https://x.com/newsdesk/status/3000000000000000001"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "3000000000000000001",
+       "revision": "3000000000000000001",
+       "source_position": "3000000000000000001"
+      }
+     ],
+     "more": true,
+     "notice": "",
+     "page_in_run": 1,
+     "reads": 1,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T11:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:00Z",
+        "latest": "3000000000000000001",
+        "read": "2026-09-28",
+        "root": "3000000000000000001"
+       }
+      ],
+      "recheck": {
+       "after": "3000000000000000001",
+       "started": "2026-09-28T12:00:00Z"
+      },
+      "watermark": "3000000000000000001"
+     },
+     "diagnostics": {
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": true,
+     "notice": "",
+     "page_in_run": 2,
+     "reads": 0,
+     "x_requests": [
+      "/2/tweets?ids=3000000000000000001\u0026tweet.fields=id%2Cedit_history_tweet_ids"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T11:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:00Z",
+        "latest": "3000000000000000001",
+        "read": "2026-09-28",
+        "root": "3000000000000000001"
+       }
+      ],
+      "watermark": "3000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 3,
+     "reads": 0,
+     "x_requests": []
+    }
+   ],
+   "reads_today": 0,
+   "step": 1
+  }
+ ],
+ "scenario": "expired_token_restarts_sweep"
+}

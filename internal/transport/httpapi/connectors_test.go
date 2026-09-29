@@ -101,6 +101,16 @@ const (
 	contentKey     = "content-only-key-0123456789abcdef01234"
 )
 
+// bearerSource is a kind that needs a credential, as plugin kinds such as
+// x_list do.
+type bearerSource struct{ connectors.Fixture }
+
+func (bearerSource) Kind() string             { return "bearer_source" }
+func (bearerSource) CredentialRequired() bool { return true }
+func (bearerSource) CredentialSchema() []byte {
+	return []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
+}
+
 func connectorAPI(t *testing.T) http.Handler {
 	t.Helper()
 	return connectorAPIWith(t, &memoryConnectors{items: map[string]connectors.Instance{}})
@@ -114,7 +124,7 @@ func connectorAPIWith(t *testing.T, store *memoryConnectors) http.Handler {
 
 func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors.Sealer) http.Handler {
 	t.Helper()
-	registry, err := connectors.NewRegistry(connectors.Fixture{}, connectors.XList{})
+	registry, err := connectors.NewRegistry(connectors.Fixture{}, bearerSource{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,12 +262,12 @@ func TestConnectorKindsPublishSchemasAndCredentialDepositAvailability(t *testing
 	if len(items) != 2 {
 		t.Fatalf("enabled kinds only: %v", items)
 	}
-	fixture, x := items[0].(map[string]any), items[1].(map[string]any)
+	bearer, fixture := items[0].(map[string]any), items[1].(map[string]any)
 	if fixture["kind"] != "fixture" || fixture["credential"] != "optional" || fixture["default_interval_seconds"].(float64) != 300 || fixture["title"] != "Test fixture" {
 		t.Fatalf("fixture %v", fixture)
 	}
-	if x["kind"] != "x_list" || x["credential"] != "required" || x["credential_schema"].(map[string]any)["properties"].(map[string]any)["bearer_token"].(map[string]any)["writeOnly"] != true {
-		t.Fatalf("x_list %v", x)
+	if bearer["kind"] != "bearer_source" || bearer["credential"] != "required" || bearer["credential_schema"].(map[string]any)["properties"].(map[string]any)["bearer_token"].(map[string]any)["writeOnly"] != true {
+		t.Fatalf("bearer_source %v", bearer)
 	}
 	if fixture["config_schema"].(map[string]any)["required"].([]any)[0] != "script" {
 		t.Fatalf("config schema %v", fixture["config_schema"])

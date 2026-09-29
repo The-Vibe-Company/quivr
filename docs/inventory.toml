@@ -93,6 +93,7 @@ excluded = [
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
+"plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources and live feed" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify a source collector in Go" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run a Python normalizer" }
@@ -125,6 +126,7 @@ excluded = [
 "docs/what-quivr-can-do.md" = 60
 "plugins/pdf-text/README.md" = 120
 "plugins/rss/README.md" = 60
+"plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 104
 "sdks/go/README.md" = 153
 "sdks/python/README.md" = 125

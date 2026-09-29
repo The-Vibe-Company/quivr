@@ -64,18 +64,19 @@ class CoreEntrypointTest(unittest.TestCase):
         # Instances of their kinds keep polling once created: an unpinned kind would fail them.
         for env in (ENV, {**ENV, 'QUIVR_DEMO_PLUGINS': '1'}):
             pins = core_entrypoint.build_config(env)['plugins']
-            rss = [p for p in pins if p['endpoint'] == 'http://127.0.0.1:9920']
-            self.assertEqual(rss, [{'manifest': '/app/plugins/rss/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9920', 'configuration': {}}])
+            connectors = [p for p in pins if p['endpoint'] in ('http://127.0.0.1:9920', 'http://127.0.0.1:9930')]
+            self.assertEqual(connectors, [{'manifest': '/app/plugins/rss/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9920', 'configuration': {}},
+                                          {'manifest': '/app/plugins/x-list/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9930', 'configuration': {}}])
         commands = {name: argv for name, argv, _, _ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'})}
-        self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss']})
+        self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss'], 'x-list': ['/usr/local/bin/quivr-x-list']})
         both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
-        self.assertEqual(both, {'rss', 'pdf-text', 'alerts'})
+        self.assertEqual(both, {'rss', 'x-list', 'pdf-text', 'alerts'})
 
     def test_pinned_manifests_are_the_repository_plugins(self):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
         pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['plugins']
-        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920'])
+        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920', 'http://127.0.0.1:9930'])
         ids = set()
         for pin in pins:
             source = pathlib.PurePosixPath(pin['manifest']).relative_to('/app')
@@ -85,7 +86,7 @@ class CoreEntrypointTest(unittest.TestCase):
             else:
                 self.assertIn(f'COPY {source.parent} /app/{source.parent}', dockerfile)
             ids.add(re.search(r'^id: (\S+)$', (ROOT / source).read_text(), re.M).group(1))
-        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss'})
+        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss', 'connector.x_list'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
 
@@ -121,8 +122,8 @@ class CoreEntrypointTest(unittest.TestCase):
         def kinds(env):
             pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1', **env})['plugins']
             return {pathlib.PurePosixPath(p['manifest']).parent.name: p.get('kinds') for p in pins}
-        self.assertEqual(kinds({}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None})
-        self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None})
+        self.assertEqual(kinds({}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None, 'x-list': None})
+        self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None, 'x-list': None})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])
 
 

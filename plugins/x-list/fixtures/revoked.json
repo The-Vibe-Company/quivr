@@ -1,0 +1,10 @@
+{
+  "description": "X refuses a revoked bearer token: an access error at the first fetch. The credential check calls nothing, because X bills every request.",
+  "connector": {"kind": "x_list", "config": {"list_id": "77"}},
+  "credential": {"bearer_token": "x-revoked-test-token"},
+  "now": "2026-01-01T00:00:00Z",
+  "expect": {
+    "error": {"error_class": "access", "code": "unauthorized"},
+    "check_credential": {"status": "ok"}
+  }
+}

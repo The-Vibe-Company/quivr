@@ -7,6 +7,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 
 - [Plugin Protocol v0](../../contracts/plugins/v0/README.md): the plugin manifest, routes, schemas and fixtures
 - [alerts](../../plugins/alerts/README.md): the first-party keyword alert plugin
+- [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests
 
 ## Guides
 

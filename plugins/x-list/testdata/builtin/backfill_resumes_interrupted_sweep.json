@@ -1,0 +1,292 @@
+{
+ "runs": [
+  {
+   "checkpoint": null,
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T07:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T10:00:00Z",
+        "latest": "2000000000000000008",
+        "read": "2026-09-28",
+        "root": "2000000000000000008"
+       },
+       {
+        "at": "2026-09-28T09:00:00Z",
+        "latest": "2000000000000000007",
+        "read": "2026-09-28",
+        "root": "2000000000000000007"
+       },
+       {
+        "at": "2026-09-28T08:00:00Z",
+        "latest": "2000000000000000006",
+        "read": "2026-09-28",
+        "root": "2000000000000000006"
+       }
+      ],
+      "sweep": {
+       "token": "p3",
+       "top": "2000000000000000008"
+      }
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 3,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 8"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T10:00:00Z",
+          "edit_history_post_ids": [
+           "2000000000000000008"
+          ],
+          "lang": "fr",
+          "post_id": "2000000000000000008",
+          "url": "https://x.com/newsdesk/status/2000000000000000008"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "2000000000000000008",
+       "revision": "2000000000000000008",
+       "source_position": "2000000000000000008"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 7"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T09:00:00Z",
+          "edit_history_post_ids": [
+           "2000000000000000007"
+          ],
+          "lang": "fr",
+          "post_id": "2000000000000000007",
+          "url": "https://x.com/newsdesk/status/2000000000000000007"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "2000000000000000007",
+       "revision": "2000000000000000007",
+       "source_position": "2000000000000000007"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 6"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T08:00:00Z",
+          "edit_history_post_ids": [
+           "2000000000000000006"
+          ],
+          "lang": "fr",
+          "post_id": "2000000000000000006",
+          "url": "https://x.com/newsdesk/status/2000000000000000006"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "2000000000000000006",
+       "revision": "2000000000000000006",
+       "source_position": "2000000000000000006"
+      }
+     ],
+     "more": true,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 3,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 0,
+   "step": 8
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T07:00:00Z",
+    "sweep": {
+     "top": "2000000000000000008",
+     "token": "p3"
+    },
+    "recent": [
+     {
+      "root": "2000000000000000008",
+      "latest": "2000000000000000008",
+      "at": "2026-09-28T10:00:00Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "2000000000000000007",
+      "latest": "2000000000000000007",
+      "at": "2026-09-28T09:00:00Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "2000000000000000006",
+      "latest": "2000000000000000006",
+      "at": "2026-09-28T08:00:00Z",
+      "read": "2026-09-28"
+     }
+    ],
+    "last_recheck_at": "2026-09-28T12:00:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T07:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T10:00:00Z",
+        "latest": "2000000000000000008",
+        "read": "2026-09-28",
+        "root": "2000000000000000008"
+       },
+       {
+        "at": "2026-09-28T09:00:00Z",
+        "latest": "2000000000000000007",
+        "read": "2026-09-28",
+        "root": "2000000000000000007"
+       },
+       {
+        "at": "2026-09-28T08:00:00Z",
+        "latest": "2000000000000000006",
+        "read": "2026-09-28",
+        "root": "2000000000000000006"
+       },
+       {
+        "at": "2026-09-28T07:00:00Z",
+        "latest": "2000000000000000005",
+        "read": "2026-09-28",
+        "root": "2000000000000000005"
+       }
+      ],
+      "watermark": "2000000000000000008"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 4,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 5"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T07:00:00Z",
+          "edit_history_post_ids": [
+           "2000000000000000005"
+          ],
+          "lang": "fr",
+          "post_id": "2000000000000000005",
+          "url": "https://x.com/newsdesk/status/2000000000000000005"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "2000000000000000005",
+       "revision": "2000000000000000005",
+       "source_position": "2000000000000000005"
+      }
+     ],
+     "more": false,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 3,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026pagination_token=p3\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 3,
+   "step": 9
+  }
+ ],
+ "scenario": "backfill_resumes_interrupted_sweep"
+}

@@ -93,7 +93,7 @@ class Stack:
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
             # The m365_mail kind talks to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
-            x=dict(api_endpoint=f"http://127.0.0.1:{s['fake_x_port']}"),m365=dict(login_endpoint=f"http://127.0.0.1:{s['graph_port']}",graph_endpoint=f"http://127.0.0.1:{s['graph_port']}/v1.0"),keys={
+            m365=dict(login_endpoint=f"http://127.0.0.1:{s['graph_port']}",graph_endpoint=f"http://127.0.0.1:{s['graph_port']}/v1.0"),keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
@@ -432,7 +432,8 @@ def journey(stack,steps):
 def connectors(stack):
     # Connector acquisition keeps polling on its schedule; run it after every
     # timed scenario, in its own Organization, then prove restart resumption.
-    # The x_list kind polls a local fake X API served from this process.
+    # The x_list kind (plugins/x-list, pinned with the fake's api_endpoint)
+    # polls a local fake X API served from this process.
     import fake_x
     fake_x.start(stack.state['fake_x_port'])
     stack.tests('TestConnector')

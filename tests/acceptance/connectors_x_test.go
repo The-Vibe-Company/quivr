@@ -94,12 +94,12 @@ func TestConnectorXListCollectsPostsCorrectsEditsAndWithdrawsDeletions(t *testin
 	corpusID, cursor := connectorCorpus(t, token, "x-list")
 	// A post published before the instance exists is not collected (start now).
 	xControl(t, base, list, map[string]any{"posts": []any{map[string]any{"id": "1800000000000000001", "text": "Before creation", "created_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}}})
-	if e := request(t, "POST", "/v0/connectors", token, xConnector("x-bad-window", corpusID, "x-bad", list, map[string]any{"backfill_since": time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)}), 422); e["code"] != "invalid_config" {
-		t.Fatal(e)
-	}
+	// A backfill beyond 7 days is refused at the first poll (the plugin checks it).
+	badWindow := request(t, "POST", "/v0/connectors", token, xConnector("x-bad-window", corpusID, "x-bad", list, map[string]any{"backfill_since": time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)}), 201)
 	created := request(t, "POST", "/v0/connectors", token, xConnector("x-list", corpusID, "x", list, map[string]any{"recheck_interval_seconds": 60}), 201)
 	noXSecret(t, created)
 	id := created["connector_id"].(string)
+	awaitXHealth(t, token, badWindow["connector_id"].(string), lastError("invalid_config"))
 	awaitXHealth(t, token, id, func(h map[string]any) bool { return h["last_success_at"] != nil })
 
 	// Initial page, then an incremental poll down to the watermark.

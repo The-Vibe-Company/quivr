@@ -1,0 +1,252 @@
+{
+ "runs": [
+  {
+   "checkpoint": null,
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 0,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 0,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 0,
+   "step": 0
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T12:00:00Z",
+    "last_recheck_at": "2026-09-28T12:00:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:01Z",
+        "latest": "8000000000000000001",
+        "read": "2026-09-28",
+        "root": "8000000000000000001"
+       }
+      ],
+      "watermark": "8000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:01Z",
+          "edit_history_post_ids": [
+           "8000000000000000001"
+          ],
+          "lang": "fr",
+          "post_id": "8000000000000000001",
+          "url": "https://x.com/newsdesk/status/8000000000000000001"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "8000000000000000001",
+       "revision": "8000000000000000001",
+       "source_position": "8000000000000000001"
+      }
+     ],
+     "more": true,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 1,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:01Z",
+        "latest": "8000000000000000001",
+        "read": "2026-09-28",
+        "root": "8000000000000000001"
+       }
+      ],
+      "recheck": {
+       "after": "8000000000000000001",
+       "started": "2026-09-28T12:01:00Z"
+      },
+      "watermark": "8000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": true,
+     "notice": "",
+     "page_in_run": 1,
+     "reads": 0,
+     "x_requests": [
+      "/2/tweets?ids=8000000000000000001\u0026tweet.fields=id%2Cedit_history_tweet_ids"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:01:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:01Z",
+        "latest": "8000000000000000001",
+        "read": "2026-09-28",
+        "root": "8000000000000000001"
+       }
+      ],
+      "watermark": "8000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:01:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 1,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 2,
+     "reads": 0,
+     "x_requests": []
+    }
+   ],
+   "reads_today": 0,
+   "step": 2
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T12:00:00Z",
+    "watermark": "8000000000000000001",
+    "recent": [
+     {
+      "root": "8000000000000000001",
+      "latest": "8000000000000000001",
+      "at": "2026-09-28T12:00:01Z",
+      "read": "2026-09-28"
+     }
+    ],
+    "last_recheck_at": "2026-09-28T12:01:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:01:00Z",
+      "list_read_day": "2026-09-28",
+      "recheck": {
+       "after": "8000000000000000001",
+       "started": "2026-09-28T12:03:00Z"
+      },
+      "watermark": "8000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:01:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 0,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "record_key": "8000000000000000001",
+       "revision": "x:withdrawn",
+       "withdraw": true
+      }
+     ],
+     "more": true,
+     "notice": "daily_read_cap_reached",
+     "page_in_run": 0,
+     "reads": 0,
+     "x_requests": [
+      "/2/tweets?ids=8000000000000000001\u0026tweet.fields=id%2Cedit_history_tweet_ids"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:03:00Z",
+      "list_read_day": "2026-09-28",
+      "watermark": "8000000000000000001"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:03:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 60,
+      "recheck_tracked_posts": 0,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "daily_read_cap_reached",
+     "page_in_run": 1,
+     "reads": 0,
+     "x_requests": []
+    }
+   ],
+   "reads_today": 100,
+   "step": 5
+  }
+ ],
+ "scenario": "daily_cap_stops_polling_keeps_rechecking"
+}

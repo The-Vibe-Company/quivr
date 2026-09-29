@@ -10,7 +10,7 @@ import (
 // validate owns the JSON Pointer of a schema failure and the registry's
 // acceptance: every row is one registry call as Create and rotation make it.
 func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
-	registry, err := NewRegistry(Fixture{}, XList{})
+	registry, err := NewRegistry(Fixture{}, bearerSource{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,12 +22,12 @@ func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
 	}{
 		{"valid config and secret", "fixture", `{"script":[]}`, `{"token":"fixture-test-token"}`, nil, ""},
 		{"kind not enabled here", "m365_mail", `{}`, "", ErrUnsupportedKind, ""},
-		{"pattern mismatch", "x_list", `{"list_id":"list"}`, "", ErrInvalidConfig, "/config/list_id"},
-		{"missing required property", "x_list", `{}`, "", ErrInvalidConfig, "/config/list_id"},
-		{"unexpected property", "x_list", `{"list_id":"1","extra":1}`, "", ErrInvalidConfig, "/config/extra"},
-		{"reserved characters are escaped", "x_list", `{"list_id":"1","a/b~c":1}`, "", ErrInvalidConfig, "/config/a~1b~0c"},
+		{"pattern mismatch", "bearer_source", `{"list_id":"list"}`, "", ErrInvalidConfig, "/config/list_id"},
+		{"missing required property", "bearer_source", `{}`, "", ErrInvalidConfig, "/config/list_id"},
+		{"unexpected property", "bearer_source", `{"list_id":"1","extra":1}`, "", ErrInvalidConfig, "/config/extra"},
+		{"reserved characters are escaped", "bearer_source", `{"list_id":"1","a/b~c":1}`, "", ErrInvalidConfig, "/config/a~1b~0c"},
 		{"nested type mismatch", "fixture", `{"script":[{"items":"x"}]}`, "", ErrInvalidConfig, "/config/script/0/items"},
-		{"secret missing property", "x_list", `{"list_id":"1"}`, `{}`, ErrInvalidCredential, "/credential/secret/bearer_token"},
+		{"secret missing property", "bearer_source", `{"list_id":"1"}`, `{}`, ErrInvalidCredential, "/credential/secret/bearer_token"},
 	} {
 		var secret json.RawMessage
 		if c.secret != "" {
@@ -41,17 +41,16 @@ func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
 }
 
 func TestRegistryDescribesEnabledKindsFromTheirSchemas(t *testing.T) {
-	registry, err := NewRegistry(XList{}, Fixture{})
+	registry, err := NewRegistry(bearerSource{}, Fixture{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	kinds := registry.Describe()
-	if len(kinds) != 2 || kinds[0].Kind != "fixture" || kinds[1].Kind != "x_list" {
+	if len(kinds) != 2 || kinds[0].Kind != "bearer_source" || kinds[1].Kind != "fixture" {
 		t.Fatalf("kinds %+v", kinds)
 	}
-	want := map[string]string{"fixture": CredentialOptional, "x_list": CredentialRequired}
-	// Documented per-kind defaults (docs/connectors/x.md).
-	interval := map[string]time.Duration{"fixture": 5 * time.Minute, "x_list": 2 * time.Minute}
+	want := map[string]string{"fixture": CredentialOptional, "bearer_source": CredentialRequired}
+	interval := map[string]time.Duration{"fixture": 5 * time.Minute, "bearer_source": 2 * time.Minute}
 	for _, k := range kinds {
 		if k.Title == "" || k.Title == k.Kind || k.Description == "" {
 			t.Errorf("%s: missing title/description annotations", k.Kind)
@@ -77,6 +76,20 @@ func TestKindWithoutCredentialSchemaTakesNone(t *testing.T) {
 }
 
 type noCredential struct{ Fixture }
+
+// bearerSource is a kind that needs a credential, as plugin kinds such as
+// x_list do.
+type bearerSource struct{ Fixture }
+
+func (bearerSource) Kind() string                   { return "bearer_source" }
+func (bearerSource) DefaultInterval() time.Duration { return 2 * time.Minute }
+func (bearerSource) CredentialRequired() bool       { return true }
+func (bearerSource) ConfigSchema() []byte {
+	return []byte(`{"title":"Bearer source","description":"A source that needs a bearer token.","type":"object","additionalProperties":false,"required":["list_id"],"properties":{"list_id":{"type":"string","pattern":"^[0-9]+$"}}}`)
+}
+func (bearerSource) CredentialSchema() []byte {
+	return []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
+}
 
 func (noCredential) Kind() string             { return "noop" }
 func (noCredential) ConfigSchema() []byte     { return []byte(`{"type":"object"}`) }

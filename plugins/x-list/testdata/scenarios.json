@@ -1,0 +1,138 @@
+{
+  "description": "Scenarios ported from the built-in x_list tests. Each step changes the fake X API or runs the connector like the engine's Acquirer: pages from the checkpoint, the checkpoint fed back, reads added to the day's count, until more is false, max_pages or an error. Times are seconds after 2026-09-28T12:00:00Z. testdata/builtin/<name>.json is what the built-in kind returned for each run, captured before it was deleted.",
+  "scenarios": [
+    {
+      "name": "start_now_then_watermark",
+      "steps": [
+        {"post": {"id": "1000000000000000001", "text": "Old post", "at": -3600}},
+        {"post": {"id": "1000000000000000002", "text": "Older still visible", "at": -60}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"post": {"id": "1000000000000000003", "text": "Post 3", "at": 3}},
+        {"post": {"id": "1000000000000000004", "text": "Post 4", "at": 4}},
+        {"post": {"id": "1000000000000000005", "text": "Post 5", "at": 5}},
+        {"post": {"id": "1000000000000000006", "text": "Post 6", "at": 6}},
+        {"post": {"id": "1000000000000000007", "text": "Post 7", "at": 7}},
+        {"post": {"id": "1000000000000000008", "text": "Post 8", "at": 8}},
+        {"post": {"id": "1000000000000000009", "text": "Post 9", "at": 9}},
+        {"run": {"now": 60, "config": {"list_id": "77"}}},
+        {"run": {"now": 60, "config": {"list_id": "77"}}},
+        {"run": {"now": 46800, "config": {"list_id": "77"}, "reads_today": 0}}
+      ]
+    },
+    {
+      "name": "backfill_resumes_interrupted_sweep",
+      "steps": [
+        {"post": {"id": "2000000000000000001", "text": "Post 1", "at": -32400}},
+        {"post": {"id": "2000000000000000002", "text": "Post 2", "at": -28800}},
+        {"post": {"id": "2000000000000000003", "text": "Post 3", "at": -25200}},
+        {"post": {"id": "2000000000000000004", "text": "Post 4", "at": -21600}},
+        {"post": {"id": "2000000000000000005", "text": "Post 5", "at": -18000}},
+        {"post": {"id": "2000000000000000006", "text": "Post 6", "at": -14400}},
+        {"post": {"id": "2000000000000000007", "text": "Post 7", "at": -10800}},
+        {"post": {"id": "2000000000000000008", "text": "Post 8", "at": -7200}},
+        {"run": {"now": 0, "config": {"list_id": "77", "backfill_since": "2026-09-28T07:00:00Z"}, "max_pages": 1}},
+        {"run": {"now": 0, "config": {"list_id": "77", "backfill_since": "2026-09-28T07:00:00Z"}, "max_pages": 1}}
+      ]
+    },
+    {
+      "name": "expired_token_restarts_sweep",
+      "steps": [
+        {"post": {"id": "3000000000000000001", "text": "Fresh", "at": 0}},
+        {"run": {"now": 0, "config": {"list_id": "77"}, "checkpoint": {"floor": "2026-09-28T11:00:00Z", "sweep": {"top": "", "token": "expired"}}}}
+      ]
+    },
+    {
+      "name": "maps_posts_and_edits",
+      "steps": [
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"media": {"media_key": "3_1", "type": "photo", "url": "https://pbs.example/1.jpg", "alt_text": "A photo"}},
+        {"post": {"id": "5000000000000000001", "text": "Original", "at": 1, "conversation_id": "5000000000000000000",
+          "note_tweet": {"text": "the full long text"},
+          "referenced_tweets": [{"type": "quoted", "id": "4000000000000000001"}, {"type": "replied_to", "id": "4000000000000000002"}, {"type": "retweeted", "id": "4000000000000000003"}, {"type": "unknown", "id": "4000000000000000004"}],
+          "attachments": {"media_keys": ["3_1", "3_2"]}, "entities": {"hashtags": [{"tag": "news"}]}}},
+        {"post": {"id": "4900000000000000009", "text": "   ", "at": 2, "author_id": "77"}},
+        {"run": {"now": 60, "config": {"list_id": "77"}}},
+        {"post": {"id": "5000000000000000003", "text": "Edited", "at": 120, "history": ["5000000000000000001", "5000000000000000003"]}},
+        {"run": {"now": 180, "config": {"list_id": "77"}}}
+      ]
+    },
+    {
+      "name": "recheck_withdraws_deleted_and_protected",
+      "steps": [
+        {"run": {"now": 0, "config": {"list_id": "77", "recheck_interval_seconds": 600}}},
+        {"post": {"id": "6000000000000000001", "text": "Post 1", "at": 1}},
+        {"post": {"id": "6000000000000000002", "text": "Post 2", "at": 2}},
+        {"post": {"id": "6000000000000000003", "text": "Post 3", "at": 3}},
+        {"post": {"id": "6000000000000000004", "text": "Post 4", "at": 4}},
+        {"post": {"id": "6000000000000000005", "text": "Post 5", "at": 5}},
+        {"run": {"now": 60, "config": {"list_id": "77", "recheck_interval_seconds": 600}}},
+        {"delete": "6000000000000000002"},
+        {"protect": "6000000000000000004"},
+        {"run": {"now": 300, "config": {"list_id": "77", "recheck_interval_seconds": 600}}},
+        {"run": {"now": 720, "config": {"list_id": "77", "recheck_interval_seconds": 600}}},
+        {"run": {"now": 720, "config": {"list_id": "77"}}},
+        {"run": {"now": 90000, "config": {"list_id": "77", "recheck_interval_seconds": 600}}}
+      ]
+    },
+    {
+      "name": "source_failures",
+      "steps": [
+        {"fail": {"status": 401}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 403}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 402}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 404}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 503}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 429, "reset": 420}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 429}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {"status": 429, "reset": 10800}},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"fail": {}},
+        {"list_error": "resource-not-found"},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"list_error": "not-authorized-for-resource"},
+        {"run": {"now": 0, "config": {"list_id": "77"}}},
+        {"list_error": ""},
+        {"run": {"now": 0, "config": {"list_id": "77"}, "token": "wrong"}},
+        {"run": {"now": 0, "config": {"list_id": "77"}, "checkpoint": "not a checkpoint"}}
+      ]
+    },
+    {
+      "name": "daily_cap_stops_polling_keeps_rechecking",
+      "steps": [
+        {"run": {"now": 0, "config": {"list_id": "77", "max_reads_per_day": 100, "recheck_interval_seconds": 60}}},
+        {"post": {"id": "8000000000000000001", "text": "Post", "at": 1}},
+        {"run": {"now": 60, "config": {"list_id": "77", "max_reads_per_day": 100, "recheck_interval_seconds": 60}}},
+        {"post": {"id": "8000000000000000002", "text": "Over the cap", "at": 2}},
+        {"delete": "8000000000000000001"},
+        {"run": {"now": 180, "config": {"list_id": "77", "max_reads_per_day": 100, "recheck_interval_seconds": 60}, "reads_today": 100}}
+      ]
+    },
+    {
+      "name": "cutover_mid_life",
+      "steps": [
+        {"run": {"now": 0, "config": {"list_id": "77", "recheck_interval_seconds": 60}}},
+        {"post": {"id": "9000000000000000001", "text": "Post 1", "at": 1}},
+        {"post": {"id": "9000000000000000002", "text": "Post 2", "at": 2}},
+        {"post": {"id": "9000000000000000003", "text": "Post 3", "at": 3}},
+        {"post": {"id": "9000000000000000004", "text": "Post 4", "at": 4}},
+        {"run": {"now": 60, "config": {"list_id": "77", "recheck_interval_seconds": 60}}},
+        {"delete": "9000000000000000002"},
+        {"post": {"id": "9000000000000000005", "text": "Post 5", "at": 90}},
+        {"post": {"id": "9000000000000000006", "text": "Post 6", "at": 91}},
+        {"post": {"id": "9000000000000000007", "text": "Post 7", "at": 92}},
+        {"post": {"id": "9000000000000000008", "text": "Post 8", "at": 93}},
+        {"post": {"id": "9000000000000000009", "text": "Post 9", "at": 94}},
+        {"post": {"id": "9000000000000000010", "text": "Post 10", "at": 95}},
+        {"run": {"now": 150, "config": {"list_id": "77", "recheck_interval_seconds": 60}, "max_pages": 1}},
+        {"run": {"now": 180, "config": {"list_id": "77", "recheck_interval_seconds": 60}}}
+      ]
+    }
+  ]
+}

@@ -18,7 +18,7 @@ Delivered kinds:
 
 - [RSS and Atom feeds (`rss`)](rss.md), from the first-party plugin `plugins/rss`
 - [Microsoft 365 mailbox (`m365_mail`)](microsoft-365.md)
-- [X lists (`x_list`)](x.md)
+- [X lists (`x_list`)](x.md), from the first-party plugin `plugins/x-list`
 
 A pinned plugin can add kinds of its own; see
 [Run a connector plugin](../plugins/run-a-connector-plugin.md).

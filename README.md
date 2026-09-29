@@ -138,8 +138,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
   deposited credentials and health, through the same ingestion path as pushed content.
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
-  and `x_list`, which polls an X list: edits become corrections, deleted or protected
-  posts are withdrawn, and health shows daily reads ([guide](docs/connectors/x.md)).
+  and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become
+  corrections, deleted or protected posts are withdrawn, and health shows daily reads
+  ([guide](docs/connectors/x.md)).
   The deployment `credential_key` is optional. Without it, credential deposits are
   refused with `503 credentials_unavailable`, and everything else works.
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON

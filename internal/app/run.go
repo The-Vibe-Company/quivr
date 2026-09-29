@@ -31,7 +31,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -72,8 +71,6 @@ type Config struct {
 		LoginEndpoint string `json:"login_endpoint"`
 		GraphEndpoint string `json:"graph_endpoint"`
 	} `json:"m365"`
-	// X configures the x_list connector kind.
-	X XConfig `json:"x"`
 	// Plugin pins one external plugin; it is shorthand for a one-item
 	// Plugins list and may be combined with it (it comes first).
 	Plugin *plugins.PinConfig `json:"plugin"`
@@ -93,12 +90,6 @@ type Config struct {
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
-}
-
-// XConfig points the x_list connector at the X API; api_endpoint defaults to
-// https://api.x.com and is overridden only for local fakes.
-type XConfig struct {
-	APIEndpoint string `json:"api_endpoint"`
 }
 
 // connectorSealer builds the Deposited Credential sealer. credential_key is
@@ -192,12 +183,7 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	if cfg.X.APIEndpoint != "" {
-		if u, err := url.Parse(cfg.X.APIEndpoint); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return errors.New("x.api_endpoint must be an http(s) URL")
-		}
-	}
-	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.XList{BaseURL: cfg.X.APIEndpoint}}
+	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil)}
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}

@@ -31,6 +31,7 @@ PLUGINS = [
 # configuration (default {}); the private-address refusal stays on.
 CONNECTORS = [
     {'id': 'rss', 'port': 9920},
+    {'id': 'x-list', 'port': 9930},
 ]
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
