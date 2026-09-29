@@ -110,6 +110,10 @@ stay visible. The Spec 1 obligation map is in
 - Described alerts send article text to TypeSafe. A TypeSafe outage delays the
   keyword alerts of the same articles too, because the core retries a plugin's
   batch as one.
+- One article's due alerts are decided in one plugin call: one worker at a time
+  claims a Record Version's intents. After a failed call, each intent retries on
+  its own jittered schedule, so the retries of one article can cost more than one
+  call until they succeed.
 - A pin names one plugin version at startup. Changing it restarts the api and
   worker; Subscription Versions pinned to a version no longer installed stay
   pending with `evaluator_unavailable`.

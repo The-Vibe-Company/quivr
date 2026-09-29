@@ -185,31 +185,97 @@ func evaluatingSibling(t string) string {
     AND o.record_version_id=` + t + `.record_version_id AND o.sequence<>` + t + `.sequence AND o.kind='evaluation' AND o.state='pending' AND o.lease_until>=now()))`
 }
 
-// evaluatingArticle is true for an evaluation intent of table alias t whose
-// Record Version another worker is evaluating (a leased evaluation intent of
-// it), or is claiming at this instant (the per-Version advisory lock). One
-// worker takes the due intents of a Version together (Claim, then
-// ClaimRelated), so its Subscriptions share one batch and one plugin call
-// instead of being split between workers.
-func evaluatingArticle(t string) string {
-	return `(` + t + `.kind='evaluation' AND (EXISTS(SELECT 1 FROM evaluation_intents o WHERE o.organization=` + t + `.organization AND o.record_version_id=` + t + `.record_version_id
-    AND (o.subscription_version_id,o.sequence)<>(` + t + `.subscription_version_id,` + t + `.sequence) AND o.kind='evaluation' AND o.state='pending' AND o.lease_until>=now())
-    OR NOT pg_try_advisory_xact_lock(hashtextextended('evaluation:' || ` + t + `.organization || ':' || ` + t + `.record_version_id, 0))))`
+// errArticleBusy reports a claim candidate whose Record Version another worker
+// is claiming or evaluating; errClaimLost one another worker leased first.
+var (
+	errArticleBusy = errors.New("record version busy")
+	errClaimLost   = errors.New("claim lost")
+)
+
+// claimAttempts bounds the candidates one Claim tries before reporting no work.
+const claimAttempts = 8
+
+// Claim leases one due intent. An evaluation intent is claimed only while no
+// other worker claims or evaluates its Record Version: the claim takes a
+// per-Version advisory lock, then checks with a fresh snapshot that no
+// evaluation intent of that Version is leased. The winner then takes the
+// Version's other due intents with ClaimRelated, so one article's alerts are
+// decided in one batch (one plugin call) and never split between workers.
+// The lock is held until the lease is committed, so a later claimer that gets
+// the lock always sees the lease.
+func (s EvaluationStore) Claim(ctx context.Context, lease time.Duration) (monitoring.Intent, error) {
+	busy := []string{}
+	for attempt := 0; attempt < claimAttempts; attempt++ {
+		in, err := s.claimOnce(ctx, lease, busy)
+		switch {
+		case errors.Is(err, errArticleBusy):
+			busy = append(busy, in.Organization+":"+in.VersionID)
+		case errors.Is(err, errClaimLost):
+		default:
+			return in, err
+		}
+	}
+	return monitoring.Intent{}, monitoring.ErrNoWork
 }
 
-func (s EvaluationStore) Claim(ctx context.Context, lease time.Duration) (monitoring.Intent, error) {
+func (s EvaluationStore) claimOnce(ctx context.Context, lease time.Duration, busy []string) (monitoring.Intent, error) {
 	var in monitoring.Intent
-	err := s.Pool.QueryRow(ctx, `UPDATE evaluation_intents i SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT c.organization,c.subscription_version_id,c.sequence FROM evaluation_intents c
-  WHERE c.state='pending' AND c.available_at<=now() AND c.lease_until<now() AND NOT `+evaluatingArticle("c")+`
-  ORDER BY c.available_at,c.sequence LIMIT 1 FOR UPDATE OF c SKIP LOCKED) due
-WHERE (i.organization,i.subscription_version_id,i.sequence)=(due.organization,due.subscription_version_id,due.sequence)
-RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`, lease.Seconds()).Scan(
-		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
+	// Read committed: the check after the lock must see leases committed since
+	// the candidate was read, whatever the server's default isolation.
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return in, err
+	}
+	defer tx.Rollback(ctx)
+	// The candidate is only read: locking its row here would make a worker
+	// evaluating the same Version skip it in ClaimRelated.
+	err = tx.QueryRow(ctx, `SELECT c.kind,c.organization,c.subscription_version_id,c.sequence,c.record_version_id FROM evaluation_intents c
+WHERE c.state='pending' AND c.available_at<=now() AND c.lease_until<now()
+  AND NOT (c.kind='evaluation' AND (c.organization || ':' || c.record_version_id = ANY($1::text[]) OR `+leasedArticle("c")+`))
+ORDER BY c.available_at,c.sequence LIMIT 1`, busy).Scan(&in.Kind, &in.Organization, &in.SubscriptionVersionID, &in.Sequence, &in.VersionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, monitoring.ErrNoWork
 	}
-	return in, err
+	if err != nil {
+		return in, err
+	}
+	if in.Kind == monitoring.IntentEvaluation {
+		var locked bool
+		if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('evaluation:' || $1 || ':' || $2, 0))`, in.Organization, in.VersionID).Scan(&locked); err != nil {
+			return in, err
+		}
+		if !locked {
+			return in, errArticleBusy
+		}
+		// A new statement sees every lease committed before the lock was taken.
+		var leased bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM evaluation_intents c WHERE c.organization=$1 AND c.subscription_version_id=$2 AND c.sequence=$3 AND `+leasedArticle("c")+`)`,
+			in.Organization, in.SubscriptionVersionID, in.Sequence).Scan(&leased); err != nil {
+			return in, err
+		}
+		if leased {
+			return in, errArticleBusy
+		}
+	}
+	err = tx.QueryRow(ctx, `UPDATE evaluation_intents i SET lease_until=now()+make_interval(secs => $4::double precision)
+WHERE i.organization=$1 AND i.subscription_version_id=$2 AND i.sequence=$3 AND i.state='pending' AND i.available_at<=now() AND i.lease_until<now()
+RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`,
+		in.Organization, in.SubscriptionVersionID, in.Sequence, lease.Seconds()).Scan(
+		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return in, errClaimLost
+	}
+	if err != nil {
+		return in, err
+	}
+	return in, tx.Commit(ctx)
+}
+
+// leasedArticle is true for an intent of table alias t whose Record Version
+// has another evaluation intent leased: a worker is evaluating it.
+func leasedArticle(t string) string {
+	return `EXISTS(SELECT 1 FROM evaluation_intents o WHERE o.organization=` + t + `.organization AND o.record_version_id=` + t + `.record_version_id
+    AND (o.subscription_version_id,o.sequence)<>(` + t + `.subscription_version_id,` + t + `.sequence) AND o.kind='evaluation' AND o.state='pending' AND o.lease_until>=now())`
 }
 
 func (s EvaluationStore) Target(ctx context.Context, in monitoring.Intent) (monitoring.Target, error) {
