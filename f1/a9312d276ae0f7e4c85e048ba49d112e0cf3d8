@@ -1,0 +1,37 @@
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_ead3d7f245a641 171
+internal/processing/windows_test.go
+  s_54b80c92daa9cb::t_e24979d5f7adea 33-37
+scripts/local.py
+  s_54b80c92daa9cb::t_1a8c80692164ab 16-20,27,182-183,185
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_ead3d7f245a641 28-29
+tests/acceptance/delivery_retry_test.go
+  s_54b80c92daa9cb::t_1a8c80692164ab 19-26,190,225,233,253-254,278-279,286
+.github/workflows/measure-adapters.yml
+  s_54b80c92daa9cb::t_13d098dce2ea81 1-45
+internal/adapters/tokenizer/parity_test.go
+  s_54b80c92daa9cb::t_9d2e21a16525cc 65-71,74-75,78-80,83-110,112-135,137-138
+tests/acceptance/corrections_test.go
+  s_54b80c92daa9cb::t_1a8c80692164ab 345,355,367,381,408
+internal/adapters/tokenizer/cost_test.go
+  s_54b80c92daa9cb::t_09d993c0b5252f 46-48,50-52
+internal/adapters/weaviate/relevance_test.go
+  s_54b80c92daa9cb::t_65a54cafe937ac 44-45,49-53,87-97,101-102,104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1a9312d276ae0f7e4c85e048ba49d112e0cf3d8",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
