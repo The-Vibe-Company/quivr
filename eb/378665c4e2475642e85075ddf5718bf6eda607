@@ -2,6 +2,7 @@ internal/transport/generated/transport.gen.go
   s_54b80c92daa9cb::t_c9e19ebc3b2dab 924-964,1076-1085
   s_54b80c92daa9cb::t_eed59db86454fb 1400-1401
   s_54b80c92daa9cb::t_5a76ce39ad830e 1402
+  s_54b80c92daa9cb::t_34630a4c74af43 1003
 sdks/python/src/quivr_plugin/models.py
   s_54b80c92daa9cb::t_e0312030c8af3f 68-74,86,294
   s_54b80c92daa9cb::t_c02ac7b6362bbd 67
@@ -20,6 +21,7 @@ contracts/http/v0/openapi.yaml
   s_54b80c92daa9cb::t_c9e19ebc3b2dab 1480-1482
   s_54b80c92daa9cb::t_eed59db86454fb 1675
   s_54b80c92daa9cb::t_3e4be26a98728c 1366-1421,1667-1674
+  s_54b80c92daa9cb::t_16da9434bd9b45 1483-1485
 contracts/shared/v0/manifest.schema.json
   s_54b80c92daa9cb::t_3e4be26a98728c 249-269
 contracts/http/v0/examples.json
