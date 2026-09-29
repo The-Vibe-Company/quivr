@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector fetch response, v0",
+  "description": "200 body of POST /v0/contributions/connector/fetch. The engine validates every item as it validates a client submission before accepting it, and advances the checkpoint only after the items are durably accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "checkpoint",
+    "more"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "$ref": "#/$defs/Item"
+      },
+      "description": "At most the declared max_items."
+    },
+    "checkpoint": {
+      "description": "The opaque checkpoint that resumes after this page (any JSON value, at most 64 KiB serialized). Return the request's checkpoint unchanged when nothing moved."
+    },
+    "more": {
+      "type": "boolean",
+      "description": "true asks for another page in the same run; the checkpoint must then have moved."
+    },
+    "reads": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Source resources this page read; feeds the per-UTC-day usage counters."
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Kind-defined diagnostics exposed as Connector Health diagnostics (at most 16 KiB serialized); the latest page's value replaces the previous one."
+    },
+    "notice": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 64,
+      "description": "A condition to report on a run that completed normally, such as a spend cap; it ends the run."
+    },
+    "not_due": {
+      "type": "boolean",
+      "description": "true: the source asked not to be polled yet (for example an RSS ttl). The run is skipped: no items, more false and the request's checkpoint unchanged."
+    }
+  },
+  "$defs": {
+    "Item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_key"
+      ],
+      "description": "One source item that is new or changed since the checkpoint: the same ingestion command a client submits, with producer = the Connector Instance. Exactly one of content and withdraw: true.",
+      "properties": {
+        "record_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Stable source identity within the Source Namespace."
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Identifies the item content; absent derives it from the content. Set it when the item has attachments, so an unchanged item is recognised before anything is downloaded."
+        },
+        "source_position": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Optional monotonic Source Position."
+        },
+        "content": {
+          "oneOf": [
+            {
+              "$ref": "../../shared/v0/manifest.schema.json#/$defs/TextContent"
+            },
+            {
+              "$ref": "../../shared/v0/manifest.schema.json#/$defs/ManifestContent"
+            }
+          ],
+          "description": "Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments."
+        },
+        "extensions": {
+          "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+          "description": "Record Version extensions, only in namespaces the plugin declares."
+        },
+        "withdraw": {
+          "type": "boolean",
+          "description": "true asks for a Tombstone instead of a new version, for example a post deleted at the source."
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          }
+        }
+      }
+    },
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "role",
+        "media_type",
+        "ref"
+      ],
+      "description": "A binary Part of the item. The core asks for the bytes later through a core-issued upload grant (not part of Plugin API 0.3), only when the item is not already accepted.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "parent_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "maxLength": 255
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Announced size, when the source provides it."
+        },
+        "extensions": {
+          "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "Opaque handle the plugin understands, given back when the core asks for the bytes."
+        }
+      }
+    }
+  }
+}

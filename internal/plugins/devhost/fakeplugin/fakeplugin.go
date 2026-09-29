@@ -34,7 +34,8 @@ const (
 	// the first "." (so "terminal.1" answers like the terminal mode), letting
 	// one pinned plugin exercise every failure class through the public API.
 	// POST /v0/contributions/subscription answers with a substring rule; see
-	// decide for its broken modes.
+	// decide for its broken modes. The connector routes serve a static source;
+	// see connectorRoutes for their broken modes.
 	EnvMode   = "QUIVR_FAKE_PLUGIN_MODE"
 	EnvMarker = "QUIVR_FAKE_PLUGIN_MARKER" // file appended with "start\n" on every start
 )
@@ -303,6 +304,9 @@ func serve() error {
 		}
 		write(w, 200, decide(mode, body))
 	})
+	if report.Manifest.Contributions.Connector != nil {
+		connectorRoutes(mux, mode, report.Manifest, write)
+	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(os.Getenv("QUIVR_PLUGIN_HOST"), os.Getenv("QUIVR_PLUGIN_PORT")))
 	if err != nil {
 		return err

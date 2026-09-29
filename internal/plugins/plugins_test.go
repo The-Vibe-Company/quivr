@@ -1,6 +1,7 @@
 package plugins_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ type fixtureCase struct {
 	SchemaValid bool     `json:"schema_valid"`
 	Errors      []string `json:"errors"`
 	Request     string   `json:"request"`
+	Manifest    string   `json:"manifest"`
 }
 
 func loadIndex(t *testing.T) []fixtureCase {
@@ -92,6 +94,8 @@ func TestNormativeFixtures(t *testing.T) {
 					t.Fatal(err)
 				}
 				issues = plugins.CheckSubscriptionOutput(raw, view, nil)
+			case "connector-fetch-response.schema.json":
+				issues = checkConnectorFixture(t, c, raw)
 			default:
 				issues = plugins.ValidateDocument(c.Schema, raw)
 			}
@@ -156,7 +160,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.2.0" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.3.0" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer
@@ -279,4 +283,25 @@ func TestUnparsableEngineVersionIsNeverCompatible(t *testing.T) {
 	if report.Valid || codes(report.Errors)[0] != plugins.CodeIncompatibleEngine || report.Compatibility.Engine.Compatible {
 		t.Fatalf("report %+v", report)
 	}
+}
+
+// checkConnectorFixture judges a connector fetch response fixture against the
+// request (its checkpoint) and the manifest (limits and extensions) it names.
+func checkConnectorFixture(t *testing.T, c fixtureCase, raw []byte) []plugins.Issue {
+	t.Helper()
+	request, err := os.ReadFile(filepath.Join(fixtures, c.Request))
+	if err != nil {
+		t.Fatalf("connector response fixtures name their request: %v", err)
+	}
+	var r struct {
+		Checkpoint json.RawMessage `json:"checkpoint"`
+	}
+	if err := json.Unmarshal(request, &r); err != nil {
+		t.Fatal(err)
+	}
+	report := plugins.Inspect(filepath.Join(fixtures, c.Manifest))
+	if report.Manifest == nil {
+		t.Fatalf("connector response fixtures name a valid manifest: %+v", report.Errors)
+	}
+	return plugins.CheckConnectorOutput(context.Background(), raw, r.Checkpoint, report.Manifest)
 }

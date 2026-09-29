@@ -28,10 +28,9 @@ func (r *run) subscriptionFixtures(own []ownFixture) []subscriptionRequest {
 	check := Check{ID: CheckFixtures, Contribution: ContributionSubscription, Title: "subscription fixtures build valid requests"}
 	var out []subscriptionRequest
 	for _, f := range own {
-		if !f.subscription {
-			if r.m.Contributions.Normalizer == nil {
-				check.Issues = append(check.Issues, plugins.Issue{Code: CodeInvalidFixture, Path: "/contributions",
-					Message: f.label + ": an invocation fixture, but the manifest declares no normalizer Contribution"})
+		if f.contribution != ContributionSubscription {
+			if !r.declared(f.contribution) {
+				check.Issues = append(check.Issues, foreignFixture(f))
 			}
 			continue
 		}

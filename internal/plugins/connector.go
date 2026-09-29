@@ -1,0 +1,292 @@
+package plugins
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+)
+
+// Connector output bounds the schema cannot express. They mirror what the
+// core stores: an Acquisition Checkpoint and Connector Health diagnostics.
+const (
+	MaxCheckpointBytes  = 64 << 10
+	MaxDiagnosticsBytes = 16 << 10
+)
+
+// Connector error classes (error envelope class, since Plugin API 0.3). They
+// map one to one to the core connector error classes.
+const (
+	ClassAccess    = "access"
+	ClassTransient = "transient"
+	ClassSource    = "source"
+)
+
+// Issue codes for connector requests and output.
+const (
+	CodeInvalidItem         = "invalid_item"
+	CodeDuplicateRecordKey  = "duplicate_record_key"
+	CodeBlobPartNotAllowed  = "blob_part_not_allowed"
+	CodeTooManyItems        = "too_many_items"
+	CodeCheckpointTooLarge  = "checkpoint_too_large"
+	CodeDiagnosticsTooLarge = "diagnostics_too_large"
+	CodeInvalidNotDue       = "invalid_not_due"
+	CodeUnknownKind         = "unknown_kind"
+	CodeInvalidConfig       = "invalid_config"
+	CodeInvalidCredential   = "invalid_credential"
+	CodeWrongErrorClass     = "wrong_error_class"
+)
+
+// ConnectorMaxResponseBytes is the response bound for a connector: the declared
+// max_response_bytes (or its default), capped by EngineMaxResponseBytes.
+func ConnectorMaxResponseBytes(m *Manifest) int {
+	limit := DefaultMaxResponseBytes
+	if m != nil && m.Contributions.Connector != nil && m.Contributions.Connector.Limits.MaxResponseBytes > 0 {
+		limit = m.Contributions.Connector.Limits.MaxResponseBytes
+	}
+	return min(limit, EngineMaxResponseBytes)
+}
+
+// ConnectorMaxItems is the declared max_items, or its default.
+func ConnectorMaxItems(m *Manifest) int {
+	if m != nil && m.Contributions.Connector != nil && m.Contributions.Connector.Limits.MaxItems > 0 {
+		return m.Contributions.Connector.Limits.MaxItems
+	}
+	return DefaultMaxItems
+}
+
+// ConnectorItem is one decoded item of a valid fetch response.
+type ConnectorItem struct {
+	RecordKey      string                `json:"record_key"`
+	Revision       string                `json:"revision,omitempty"`
+	SourcePosition string                `json:"source_position,omitempty"`
+	Content        json.RawMessage       `json:"content,omitempty"`
+	Extensions     content.Extensions    `json:"extensions,omitempty"`
+	Withdraw       bool                  `json:"withdraw,omitempty"`
+	Attachments    []ConnectorAttachment `json:"attachments,omitempty"`
+}
+
+// ConnectorAttachment is an attachment descriptor: a binary Part whose bytes
+// the core asks for later.
+type ConnectorAttachment struct {
+	Key        string             `json:"key"`
+	ParentKey  string             `json:"parent_key,omitempty"`
+	Role       string             `json:"role"`
+	MediaType  string             `json:"media_type"`
+	SizeBytes  *int64             `json:"size_bytes,omitempty"`
+	Extensions content.Extensions `json:"extensions,omitempty"`
+	Ref        string             `json:"ref"`
+}
+
+// ConnectorPage is a decoded valid fetch response.
+type ConnectorPage struct {
+	Items       []ConnectorItem `json:"items"`
+	Checkpoint  json.RawMessage `json:"checkpoint"`
+	More        bool            `json:"more"`
+	Reads       int64           `json:"reads,omitempty"`
+	Diagnostics json.RawMessage `json:"diagnostics,omitempty"`
+	Notice      string          `json:"notice,omitempty"`
+	NotDue      bool            `json:"not_due,omitempty"`
+}
+
+// CheckConnectorOutput judges a 200 fetch response exactly as the engine does
+// before it accepts any item: the response bound, the response schema
+// (unknown fields are rejected), the declared max_items, the checkpoint and
+// diagnostics bounds, not_due coherence against the request's checkpoint,
+// then per item: exactly one of content and withdraw, unique Record Keys,
+// attachments only beside a Manifest, the engine's structural Manifest rules
+// with the attachments as Parts, no Blob Parts, and extensions only in
+// namespaces and schema versions the manifest declares.
+func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint json.RawMessage, m *Manifest) []Issue {
+	if limit := ConnectorMaxResponseBytes(m); len(raw) > limit {
+		return []Issue{{Code: CodeResponseTooLarge, Message: fmt.Sprintf("the response is %d bytes; the limit is %d (declared max_response_bytes, capped by the engine at %d)", len(raw), limit, EngineMaxResponseBytes)}}
+	}
+	if issues := ValidateDocument("connector-fetch-response.schema.json", raw); len(issues) > 0 {
+		return issues
+	}
+	var page ConnectorPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return []Issue{{Code: CodeSchema, Message: err.Error()}}
+	}
+	var issues []Issue
+	if limit := ConnectorMaxItems(m); len(page.Items) > limit {
+		issues = append(issues, Issue{Code: CodeTooManyItems, Path: "/items",
+			Message: fmt.Sprintf("%d items exceed the declared max_items %d; answer more: true and return the rest on the next page", len(page.Items), limit)})
+	}
+	if n := compactLen(page.Checkpoint); n > MaxCheckpointBytes {
+		issues = append(issues, Issue{Code: CodeCheckpointTooLarge, Path: "/checkpoint",
+			Message: fmt.Sprintf("the checkpoint serializes to %d bytes; the core stores at most %d", n, MaxCheckpointBytes)})
+	}
+	if n := compactLen(page.Diagnostics); n > MaxDiagnosticsBytes {
+		issues = append(issues, Issue{Code: CodeDiagnosticsTooLarge, Path: "/diagnostics",
+			Message: fmt.Sprintf("diagnostics serialize to %d bytes; the core stores at most %d", n, MaxDiagnosticsBytes)})
+	}
+	if page.NotDue && (len(page.Items) > 0 || page.More || !SameJSON(page.Checkpoint, requestCheckpoint)) {
+		issues = append(issues, Issue{Code: CodeInvalidNotDue, Path: "/not_due",
+			Message: "not_due: true skips the run: answer no items, more: false and the request's checkpoint unchanged"})
+	}
+	validator := NewDeclaredExtensions(m)
+	seen := map[string]int{}
+	for i, item := range page.Items {
+		path := fmt.Sprintf("/items/%d", i)
+		if first, dup := seen[item.RecordKey]; dup {
+			issues = append(issues, Issue{Code: CodeDuplicateRecordKey, Path: path + "/record_key",
+				Message: fmt.Sprintf("Record Key %q is also item %d of this page; return each item once per page", item.RecordKey, first)})
+			continue
+		}
+		seen[item.RecordKey] = i
+		if issue := checkConnectorItem(ctx, item, validator); issue != nil {
+			issue.Path = path + issue.Path
+			issues = append(issues, *issue)
+		}
+	}
+	return issues
+}
+
+func checkConnectorItem(ctx context.Context, item ConnectorItem, validator *DeclaredExtensions) *Issue {
+	hasContent := len(item.Content) > 0 && string(item.Content) != "null"
+	switch {
+	case item.Withdraw && hasContent:
+		return &Issue{Code: CodeInvalidItem, Message: fmt.Sprintf("item %q has content and withdraw: true; a withdrawal carries no content", item.RecordKey)}
+	case item.Withdraw && (len(item.Attachments) > 0 || len(item.Extensions) > 0):
+		return &Issue{Code: CodeInvalidItem, Message: fmt.Sprintf("item %q is withdrawn and carries attachments or extensions; a withdrawal carries only its Record Key", item.RecordKey)}
+	case item.Withdraw:
+		return nil
+	case !hasContent:
+		return &Issue{Code: CodeInvalidItem, Message: fmt.Sprintf("item %q has neither content nor withdraw: true", item.RecordKey)}
+	}
+	var text content.Text
+	if err := json.Unmarshal(item.Content, &text); err != nil {
+		return &Issue{Code: CodeSchema, Path: "/content", Message: err.Error()}
+	}
+	if text.Kind == "text" {
+		if len(item.Attachments) > 0 {
+			return &Issue{Code: CodeInvalidItem, Path: "/attachments",
+				Message: fmt.Sprintf("item %q has attachments beside text content; attachments are Parts of a Manifest, so answer content kind manifest", item.RecordKey)}
+		}
+		if !content.ValidText(text.Text) {
+			return &Issue{Code: CodeInvalidItem, Path: "/content/text", Message: fmt.Sprintf("item %q text must be valid UTF-8 without NUL", item.RecordKey)}
+		}
+	} else {
+		var manifest content.Manifest
+		if err := json.Unmarshal(item.Content, &manifest); err != nil {
+			return &Issue{Code: CodeSchema, Path: "/content", Message: err.Error()}
+		}
+		declared := len(manifest.Parts)
+		// The core appends each attachment as a Blob Part once its bytes are
+		// stored, so the combined Manifest must hold: unique keys, known and
+		// acyclic parents, the Part count bound.
+		for _, at := range item.Attachments {
+			manifest.Parts = append(manifest.Parts, content.Part{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role,
+				Content: content.Text{Kind: "blob", BlobID: "attachment", MediaType: at.MediaType}, Extensions: at.Extensions})
+		}
+		err := content.CheckManifest(&manifest, func(i int) error {
+			p := manifest.Parts[i]
+			prefix := fmt.Sprintf("/content/parts/%d", i)
+			if i >= declared {
+				prefix = fmt.Sprintf("/attachments/%d", i-declared)
+			} else if p.Content.Kind == "blob" {
+				return &Violation{Kind: content.ErrUnsupported, Code: CodeBlobPartNotAllowed, Path: prefix + "/content",
+					Detail: fmt.Sprintf("Part %q is a Blob Part; a connector has no Blob to reference, so return binary Parts as attachments", p.Key)}
+			}
+			return withPrefix(content.CheckExtensions(ctx, validator, p.Extensions), prefix+"/extensions")
+		})
+		if err != nil {
+			issue := issueFrom(err)
+			if issue.Path == "/manifest" {
+				issue.Path = "/content"
+			}
+			return &issue
+		}
+	}
+	if err := withPrefix(content.CheckExtensions(ctx, validator, item.Extensions), "/extensions"); err != nil {
+		issue := issueFrom(err)
+		return &issue
+	}
+	return nil
+}
+
+// CheckCredentialOutput judges a 200 check_credential response.
+func CheckCredentialOutput(raw []byte) []Issue {
+	return ValidateDocument("connector-check-credential-response.schema.json", raw)
+}
+
+// ConnectorErrorIssues judges a connector error envelope: a connector error
+// carries a class, and retryable agrees with it (transient is retryable;
+// access and source are terminal). The core maps the class to Connector
+// Health, so a missing or contradictory class cannot be interpreted.
+func ConnectorErrorIssues(class string, retryable bool) []Issue {
+	switch class {
+	case "":
+		return []Issue{{Code: CodeWrongErrorClass, Path: "/error_class",
+			Message: "a connector error envelope carries error_class access, transient or source, which the core maps to Connector Health"}}
+	case ClassTransient:
+		if !retryable {
+			return []Issue{{Code: CodeWrongErrorClass, Path: "/retryable", Message: "class transient is retryable: answer retryable true"}}
+		}
+	case ClassAccess, ClassSource:
+		if retryable {
+			return []Issue{{Code: CodeWrongErrorClass, Path: "/retryable", Message: fmt.Sprintf("class %s is terminal until the source or the operator changes something: answer retryable false", class)}}
+		}
+	}
+	return nil
+}
+
+// ValidateConnectorInstance validates a Connector Instance configuration and
+// credential (JSON objects, the credential possibly null) against the schemas
+// the manifest declares for kind, as the core does before it invokes the
+// plugin. Issue paths start with /connector/config or /credential.
+func ValidateConnectorInstance(m *Manifest, kind string, config, credential []byte) []Issue {
+	var c *Connector
+	if m != nil {
+		c = m.Contributions.Connector
+	}
+	if c == nil {
+		return []Issue{{Code: CodeInvalidManifest, Path: "/contributions/connector", Message: "the manifest declares no connector Contribution"}}
+	}
+	declared, ok := c.Kinds[kind]
+	if !ok {
+		return []Issue{{Code: CodeUnknownKind, Path: "/connector/kind", Message: fmt.Sprintf("kind %q is not declared under contributions.connector.kinds", kind)}}
+	}
+	issues := validateObject("connector/config", CodeInvalidConfig, config, declared.ConfigSchema)
+	nullCredential := len(credential) == 0 || string(credential) == "null"
+	switch {
+	case declared.CredentialSchema == nil && !nullCredential:
+		issues = append(issues, Issue{Code: CodeInvalidCredential, Path: "/credential", Message: fmt.Sprintf("kind %q takes no credential; send null", kind)})
+	case declared.CredentialSchema != nil && nullCredential:
+		issues = append(issues, Issue{Code: CodeInvalidCredential, Path: "/credential", Message: fmt.Sprintf("kind %q needs a credential", kind)})
+	case declared.CredentialSchema != nil:
+		issues = append(issues, validateObject("credential", CodeInvalidCredential, credential, declared.CredentialSchema)...)
+	}
+	return issues
+}
+
+// SameJSON reports whether two JSON documents are equal values; empty is null.
+func SameJSON(a, b json.RawMessage) bool {
+	var av, bv any
+	if len(a) > 0 && json.Unmarshal(a, &av) != nil {
+		return false
+	}
+	if len(b) > 0 && json.Unmarshal(b, &bv) != nil {
+		return false
+	}
+	ab, _ := json.Marshal(av)
+	bb, _ := json.Marshal(bv)
+	return string(ab) == string(bb)
+}
+
+func compactLen(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return len(raw)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return len(raw)
+	}
+	return len(b)
+}

@@ -1,8 +1,8 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.2.0`**, which adds the
-`subscription` Contribution to Plugin API `0.1.0`. JSON Schemas in this
+external plugin. It covers **Plugin API version `0.3.0`**: `0.2.0` added the
+`subscription` Contribution to Plugin API `0.1.0`, and `0.3.0` adds `connector`. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -17,9 +17,12 @@ and the glossary in [CONTEXT.md](../../../CONTEXT.md).
 | `normalizer-response.schema.json` | `POST /v0/contributions/normalizer` 200 response |
 | `subscription-request.schema.json` | `POST /v0/contributions/subscription` request (since 0.2) |
 | `subscription-response.schema.json` | `POST /v0/contributions/subscription` 200 response (since 0.2) |
+| `connector-fetch-request.schema.json`, `connector-fetch-response.schema.json` | `POST /v0/contributions/connector/fetch` request and 200 response (since 0.3) |
+| `connector-check-credential-request.schema.json`, `connector-check-credential-response.schema.json` | `POST /v0/contributions/connector/check_credential` request and 200 response (since 0.3) |
 | `error.schema.json` | Body of every non-2xx response |
 | `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
 | `subscription-fixture.schema.json` | Subscription fixture: a local test input that tools turn into subscription requests (since 0.2) |
+| `connector-fixture.schema.json` | Connector fixture: a local test input that tools turn into connector requests (since 0.3) |
 | `reports/contract-report.schema.json` | JSON report of `quivr plugin test --report` (tooling, not protocol) |
 
 The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
@@ -35,23 +38,24 @@ equivalent copies under other names out of both contracts.
 
 ## Contributions
 
-Plugin API 0.2 accepts two Contributions, and a manifest declares at least one:
+Plugin API 0.3 accepts three Contributions, and a manifest declares at least one:
 
 | Contribution | Since | Purpose |
 | --- | --- | --- |
 | **`normalizer`** | 0.1 | Turn one input Blob into the Parts, Relations and extensions of a Record Version |
 | **`subscription`** | 0.2 | An alert rule: decide whether one Record Version matches each Saved Query expression of a batch ([below](#subscription-contribution)) |
+| **`connector`** | 0.3 | A source collector: fetch pages of new or changed items after an opaque checkpoint ([below](#connector-contribution)) |
 
-The names `connector`, `enricher`, `validator`, `projector` and `retriever`
+The names `enricher`, `validator`, `projector` and `retriever`
 are **reserved**. A manifest that declares them is rejected
 (`reserved_contribution`).
 
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.2.0` and still serves every `0.1` plugin unchanged: a manifest
-is compatible when its `plugin_api` range admits any supported version
-(`0.1.0` or `0.2.0`), and the engine speaks the highest one the range admits.
+implements `0.3.0` and still serves every `0.1` and `0.2` plugin unchanged: a
+manifest is compatible when its `plugin_api` range admits any supported version
+(`0.1.0`, `0.2.0` or `0.3.0`), and the engine speaks the highest one the range admits.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
 a supported version inside the declared range that is at least the version
 each declared Contribution needs; SDKs serve the negotiated one. A
@@ -71,6 +75,8 @@ version.
 | `GET /v0/health` | 200 `{"status":"ok"}` | Ready to accept invocations; otherwise 503 with the error envelope |
 | `POST /v0/contributions/normalizer` | 200 normalizer response | Normalize one input Blob |
 | `POST /v0/contributions/subscription` | 200 subscription response | Decide a batch of evaluations for one Record Version |
+| `POST /v0/contributions/connector/fetch` | 200 fetch response | Fetch one page of items after a checkpoint |
+| `POST /v0/contributions/connector/check_credential` | 200 `{"status":"ok"}` | Check that the source accepts a credential |
 
 - **Errors.** Every non-2xx response carries the error envelope
   `{code, message, retryable}`. `retryable: true` asks the engine to retry
@@ -80,7 +86,8 @@ version.
 - **Manifest digest.** `manifest_digest` is `sha256:` followed by the lowercase
   hex SHA-256 of the exact bytes of the `quivr-plugin.yaml` the plugin was built
   from. `quivr plugin inspect` prints the same value.
-- **Future Contributions** use `/v0/contributions/<name>`.
+- **Future Contributions** use `/v0/contributions/<name>`, with one sub-route
+  per operation when a Contribution has several (`connector/fetch`).
 
 ## Manifest (`quivr-plugin.yaml`)
 
@@ -99,6 +106,9 @@ version.
 | `contributions.subscription.max_batch_size` | Most evaluations per request, 1–256, default 32; the core splits larger batches |
 | `contributions.subscription.timeout_ms`, `.retry.max_attempts`, `.limits.max_response_bytes` | As for the normalizer |
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
+| `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]` (`push` is `reserved_field`); `description` |
+| `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
+| `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB) and `max_items` per page (default 100, at most 1000) |
 | `configuration.schema` | JSON Schema 2020-12 for installer configuration |
 | `secrets[]` | Secret names (`^[A-Z][A-Z0-9_]*$`), description, `required` (default true). Values never appear in the manifest |
 | `extensions` | Owned extension namespaces: namespace, then schema version, then JSON Schema 2020-12 |
@@ -117,7 +127,7 @@ Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
 `>=0.3.0 <0.2.0`, is invalid. `fixtures/ranges.json` is normative for every
 implementation.
 
-This engine implements Plugin API `0.2.0` (and serves `0.1.0`) and reports
+This engine implements Plugin API `0.3.0` (and serves `0.1.0` and `0.2.0`) and reports
 engine version `0.1.0`. Release builds may override the engine version.
 `quivr plugin inspect --json` reports both, and the negotiated Plugin API
 version under `compatibility.plugin_api.version`.
@@ -150,6 +160,8 @@ same logical output.
 - reserved Contributions and reserved fields;
 - subscription expression and configuration schemas that compile as JSON
   Schema 2020-12 (`invalid_expression_schema`, `invalid_config_schema`);
+- connector kind config and credential schemas that compile
+  (`invalid_config_schema`, `invalid_credential_schema`);
 - extension namespaces equal to the plugin id or prefixed by `<id>.`;
 - configuration and extension schemas that compile as JSON Schema 2020-12;
 - duplicate secret names.
@@ -308,6 +320,81 @@ configuration (for example `["keywords"]`, when the plugin has no credentials
 for the backend of another kind) must name declared kinds, and the core
 refuses a Saved Query of any other kind with `invalid_expression`.
 
+## Connector Contribution
+
+A source collector (since Plugin API 0.3). The core keeps everything durable:
+Connector Instances, schedules and leases, Acquisition Checkpoints, Deposited
+Credentials and Connector Health. The plugin only fetches, and is stateless
+between invocations. Plugin API 0.3 defines the contract; the core starts
+calling connector plugins in a later release.
+
+**`fetch`** (`connector-fetch-request.schema.json`) carries `invocation_id`,
+`organization_id`, the installer `configuration`, the Connector Instance
+(`connector`: `instance_id`, `kind`, `config`), the decrypted `credential` (null
+for a kind without one), the opaque `checkpoint` the plugin returned last (null
+on a first run), `now`, `page_in_run` (0, then counting up while the plugin
+answers `more: true`) and `reads_today`. The response carries:
+
+- `items`, at most `max_items`. Each has a `record_key` (unique in the page), an
+  optional `revision` and `source_position`, and exactly one of `content` (the
+  shared `TextContent` or `ManifestContent`) and `withdraw: true` (a Tombstone,
+  such as a post deleted at the source). Extensions, on the item and its Parts,
+  use only namespaces the plugin declares. A Manifest has no Blob Parts
+  (`blob_part_not_allowed`): binary Parts are `attachments` (`key`,
+  `parent_key`, `role`, `media_type`, optional `size_bytes` and `extensions`,
+  and an opaque `ref`), which need Manifest content. The core asks for their
+  bytes later, only for an item it does not already have; that exchange is not
+  part of Plugin API 0.3;
+- `checkpoint` (required, any JSON value of at most 64 KiB), which resumes after
+  this page. The core persists it and advances it only after the page's items
+  are accepted, so a migrated plugin keeps reading the checkpoints it wrote;
+- `more`, which asks for another page in the same run and needs a checkpoint
+  that moved;
+- optional `reads` (source resources read, for usage counters), `diagnostics`
+  (an object of at most 16 KiB, shown as Connector Health diagnostics) and
+  `notice` (a code that ends a run that otherwise completed, such as a spend cap);
+- `not_due: true` when the source asked not to be polled yet, with no items,
+  `more: false` and the request's checkpoint unchanged; the core skips the run.
+
+There is no idempotency key: a fetch reads a changing source, and the core
+deduplicates items by Record Key and revision. `CheckConnectorOutput` in
+`internal/plugins` judges every answer: the rules above, `invalid_item`,
+`duplicate_record_key`, `too_many_items`, `checkpoint_too_large`,
+`diagnostics_too_large`, `invalid_not_due`, the engine's Manifest rules with
+the attachments as Parts, declared namespaces and `response_too_large`.
+
+**`check_credential`** (`connector-check-credential-request.schema.json`)
+carries the same Instance, credential and `now`, and answers
+`{"status": "ok"}` with an optional `expires_at`, which drives the
+`credential_expiring` health state. A refused credential is an access error.
+
+**Errors.** A connector error envelope carries `error_class`:
+
+| `error_class` | `retryable` | Meaning and Connector Health |
+| --- | --- | --- |
+| `access` | false | The source refuses the credential or the access: `access_error` until an operator acts |
+| `transient` | true | An outage, a timeout or a rate limit: retried with backoff. `retry_after_seconds` defers the next run |
+| `source` | false | The source returned data the plugin cannot use: a failed run |
+
+A connector error without `error_class`, or whose `retryable` disagrees with
+it, is `wrong_error_class`. Refusing an invalid request stays a terminal
+envelope, with or without a class.
+
+**Credentials** reach the plugin only in the invocation that needs them. A
+plugin never logs, returns or stores them; the Go SDK redacts them from its
+logs and error messages, and the Contract Runner checks that none appears in a
+response or in the plugin's output.
+
+**Connector fixtures** (`connector-fixture.schema.json`, a file with a
+top-level `connector` property) hold the `kind`, `config`, `credential`, an
+optional plugin `configuration`, a starting `checkpoint` (default null), `now`
+(default `2026-01-01T00:00:00Z`), `max_pages` (default 10) and what to `expect`:
+the Record Keys (and `more`) of each page, an `error` (`error_class`, optional
+`code`) or the `check_credential` answer. The Instance is
+`dev-connector-<digest>`, invocations `dev-invocation-<digest>-<page>`, from the
+first 16 hex digits of the SHA-256 of the fixture bytes.
+`fixtures/connectors/feed.json` is a normative example.
+
 ## Normative fixtures
 
 `fixtures/index.json` lists every fixture with its schema and two outcomes.
@@ -378,13 +465,15 @@ top-level `evaluations` property. A tool turns one into requests:
   validated against the manifest schemas, and Part keys must be unique.
 
 `fixtures/subscriptions/strike.json` and `fixtures/subscriptions/metadata.json`
-are normative examples.
+are normative examples. `quivr plugin dev` does not replay connector fixtures;
+`quivr plugin test` runs them.
 
 ## Try it
 
 ```bash
 go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/full.yaml
 go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/subscription.yaml
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/connector.yaml
 go run ./cmd/quivr plugin inspect --json contracts/plugins/v0/fixtures/manifests/invalid/reserved-contribution.yaml
 ```
 
@@ -453,12 +542,27 @@ report. When the manifest declares `subscription`, the runner adds checks with
 | `batch` (per batch) | The same evaluations sent in reverse order get the same decisions and evidence (`batch_dependent_decision`). Skipped for a single evaluation. |
 | `invalid_request` | A non-JSON body, an unknown field and the normative invalid requests in `fixtures/requests/subscription/` are refused with a terminal error envelope. |
 
+When the manifest declares `connector`, it adds checks with
+`"contribution": "connector"`, from the plugin's own connector fixtures:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | At least one connector fixture applies, and its config and credential match the kind's schemas. |
+| `invoke` (per fixture) | Pages are fetched from the fixture's checkpoint, each returned checkpoint fed back, until `more` is false or `max_pages`. Every answer is a 200 within `timeout_ms` that passes `CheckConnectorOutput` and the expected pages (`unexpected_items`), and a page with `more: true` moves the checkpoint (`stalled_checkpoint`). An expected error comes back with its class (`unexpected_error`); any connector error carries a coherent class (`wrong_error_class`). |
+| `resume` (per fixture) | A new run from the final checkpoint returns no item already returned with the same revision (`checkpoint_not_honoured`). |
+| `check_credential` (per fixture) | The answer is `ok` or a classified error, as the fixture expects. |
+| `invalid_request` | A non-JSON body, an unknown field, an undeclared kind and the normative invalid requests in `fixtures/requests/connector/` are refused on both routes with a terminal error envelope. |
+| `credentials` | No fixture credential string of 8 characters or more appears in any answer, or in the plugin's output when the runner launched it (`credential_leak`). |
+
 The human report goes to stdout; the plugin's own output goes to stderr.
 `--report <file>` writes the JSON report described by
 `reports/contract-report.schema.json`. Exit codes: `0` certified, `1` not
 certified, `2` usage error.
 
 The deliberately broken plugins in `tests/plugin-contract/` show one failure
-per rule, for both Contributions. CI certifies both `quivr plugin init`
-templates and publishes their reports as the `plugin-contract-report` and
-`subscription-plugin-contract-report` workflow artifacts.
+per rule, for every Contribution; the connector rules run one fake plugin in a
+broken mode each. CI certifies both `quivr plugin init` templates and the Go
+SDK's sample connector, and publishes their reports as the
+`plugin-contract-report`, `subscription-plugin-contract-report` and
+`go-connector-contract-report` workflow artifacts. Write a connector with the
+[Go SDK](../../../sdks/go/README.md).

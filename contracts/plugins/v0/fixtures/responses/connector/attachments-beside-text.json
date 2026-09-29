@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"record_key": "article-101", "content": {"kind": "text", "text": "Body"},
+     "attachments": [{"key": "photo", "role": "attachment", "media_type": "image/jpeg", "ref": "media/1"}]}
+  ],
+  "checkpoint": null,
+  "more": false
+}

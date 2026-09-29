@@ -1,5 +1,5 @@
 {
-  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) or the engine subscription output validation (subscription responses, judged against the request named by request) reports.",
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request) or the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) reports.",
   "cases": [
     {
       "file": "manifests/valid/full.yaml",
@@ -536,6 +536,360 @@
       "valid": false,
       "schema_valid": false,
       "description": "Every fixture evaluation carries an expression."
+    },
+    {
+      "file": "manifests/valid/connector.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.3 manifest: two kinds, with and without a credential."
+    },
+    {
+      "file": "manifests/invalid/connector-push-mode.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "reserved_field"
+      ],
+      "description": "The push mode is reserved for a later Plugin API version."
+    },
+    {
+      "file": "manifests/invalid/connector-plugin-api-0.2.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "connector needs a plugin_api range that admits 0.3."
+    },
+    {
+      "file": "manifests/invalid/connector-invalid-schemas.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema",
+        "invalid_credential_schema"
+      ],
+      "description": "Kind config and credential schemas must compile."
+    },
+    {
+      "file": "manifests/invalid/connector-no-kinds.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A connector declares at least one kind."
+    },
+    {
+      "file": "requests/connector/fetch.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A fetch resuming after a checkpoint."
+    },
+    {
+      "file": "requests/connector/fetch-first-run.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "The first fetch of a kind without a credential: null checkpoint and credential."
+    },
+    {
+      "file": "requests/connector/fetch-missing-checkpoint.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "checkpoint is required, null on a first run."
+    },
+    {
+      "file": "requests/connector/fetch-negative-page.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "page_in_run counts from 0."
+    },
+    {
+      "file": "requests/connector/fetch-bad-kind.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A kind name is lowercase letters, digits and underscores."
+    },
+    {
+      "file": "requests/connector/check-credential.json",
+      "schema": "connector-check-credential-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A credential check."
+    },
+    {
+      "file": "requests/connector/check-credential-with-checkpoint.json",
+      "schema": "connector-check-credential-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A credential check carries no checkpoint."
+    },
+    {
+      "file": "responses/connector/valid.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Text, a Manifest with an attachment, a withdrawal, declared extensions, more pages."
+    },
+    {
+      "file": "responses/connector/empty.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Nothing new: no items, the checkpoint unchanged."
+    },
+    {
+      "file": "responses/connector/not-due.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "The source asked not to be polled yet."
+    },
+    {
+      "file": "responses/connector/not-due-moved-checkpoint.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_not_due"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "not_due must return the request's checkpoint unchanged."
+    },
+    {
+      "file": "responses/connector/withdraw-with-content.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A withdrawal carries no content."
+    },
+    {
+      "file": "responses/connector/no-content.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "An item has content or withdraw: true."
+    },
+    {
+      "file": "responses/connector/duplicate-record-key.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Each Record Key appears once per page."
+    },
+    {
+      "file": "responses/connector/blob-part.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "blob_part_not_allowed"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A connector Manifest carries no Blob Parts; binary Parts are attachments."
+    },
+    {
+      "file": "responses/connector/attachments-beside-text.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Attachments are Parts of a Manifest, not of text content."
+    },
+    {
+      "file": "responses/connector/attachment-unknown-parent.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "An attachment's parent_key names a Part of the item."
+    },
+    {
+      "file": "responses/connector/undeclared-namespace.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Item extensions use only namespaces the plugin declares."
+    },
+    {
+      "file": "responses/connector/too-many-items.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_items"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "More items than the declared max_items (50)."
+    },
+    {
+      "file": "responses/connector/checkpoint-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "checkpoint_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A checkpoint over 64 KiB."
+    },
+    {
+      "file": "responses/connector/diagnostics-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "diagnostics_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Diagnostics over 16 KiB."
+    },
+    {
+      "file": "responses/connector/missing-checkpoint.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "checkpoint is required; return the request's when nothing moved."
+    },
+    {
+      "file": "responses/connector/unknown-field.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Unknown fields are rejected."
+    },
+    {
+      "file": "responses/connector/credential-ok.json",
+      "schema": "connector-check-credential-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "The source accepts the credential until expires_at."
+    },
+    {
+      "file": "responses/connector/credential-invalid-status.json",
+      "schema": "connector-check-credential-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A refused credential is an error envelope with error_class access, not a status."
+    },
+    {
+      "file": "protocol/error-connector-access.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector access error."
+    },
+    {
+      "file": "protocol/error-connector-rate-limited.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A transient connector error with a retry delay."
+    },
+    {
+      "file": "protocol/error-retry-after-without-class.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "retry_after_seconds comes with a class."
+    },
+    {
+      "file": "protocol/error-unknown-class.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "class is access, transient or source."
+    },
+    {
+      "file": "protocol/discovery-connector.json",
+      "schema": "discovery.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Discovery of a connector plugin."
+    },
+    {
+      "file": "connectors/feed.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture with expected pages and credential check."
+    },
+    {
+      "file": "connectors/refused-token.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture expecting an access error."
+    },
+    {
+      "file": "connectors/missing-kind.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A connector fixture names its kind."
     }
   ]
 }

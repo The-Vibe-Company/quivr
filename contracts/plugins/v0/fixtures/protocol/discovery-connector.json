@@ -1,0 +1,6 @@
+{
+  "plugin_api": "0.3.0",
+  "plugin": {"id": "example-feeds", "version": "1.0.0"},
+  "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+  "contributions": ["connector"]
+}

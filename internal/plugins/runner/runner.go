@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -44,12 +45,16 @@ const (
 	CheckReplay         = "replay"
 	CheckInvalidRequest = "invalid_request"
 	CheckBatch          = "batch"
+	CheckResume         = "resume"
+	CheckCredential     = "check_credential"
+	CheckCredentials    = "credentials"
 )
 
 // Contributions a check can concern.
 const (
 	ContributionNormalizer   = "normalizer"
 	ContributionSubscription = "subscription"
+	ContributionConnector    = "connector"
 )
 
 // Issue codes the runner adds to those of packages plugins and devhost.
@@ -66,6 +71,10 @@ const (
 	CodeWrongErrorClass    = "wrong_error_class"
 	CodeBatchDependent     = "batch_dependent_decision"
 	CodeUnexpectedDecision = devhost.CodeUnexpectedDecision
+	CodeUnexpectedItems    = "unexpected_items"
+	CodeStalledCheckpoint  = "stalled_checkpoint"
+	CodeCheckpointIgnored  = "checkpoint_not_honoured"
+	CodeCredentialLeak     = "credential_leak"
 	normativeFixturePrefix = "contracts:"
 )
 
@@ -146,6 +155,10 @@ type run struct {
 	m       *plugins.Manifest
 	baseURL string
 	tmp     string // extracted normative fixtures
+	// logs captures the launched plugin's output for the credential check.
+	logs *lockedBuffer
+	// seen collects every connector answer body for the credential check.
+	seen [][]byte
 }
 
 func (r *run) add(c Check, started time.Time) {
@@ -234,15 +247,36 @@ func (r *run) execute(ctx context.Context) {
 			r.invalidSubscriptionRequests(ctx, batches[0].body)
 		}
 	}
+	if r.m.Contributions.Connector != nil {
+		r.connector(ctx, own)
+	}
 }
 
 type ownFixture struct {
-	label, path  string
-	subscription bool
+	label, path string
+	// contribution is the Contribution the fixture exercises: normalizer
+	// (an invocation fixture), subscription or connector.
+	contribution string
+}
+
+// declared reports whether the manifest declares a Contribution.
+func (r *run) declared(contribution string) bool {
+	return slices.Contains(r.m.Contributions.Names(), contribution)
+}
+
+// foreignFixture reports a fixture for a Contribution the manifest does not
+// declare.
+func foreignFixture(f ownFixture) plugins.Issue {
+	kind := map[string]string{ContributionNormalizer: "an invocation fixture"}[f.contribution]
+	if kind == "" {
+		kind = "a " + f.contribution + " fixture"
+	}
+	return plugins.Issue{Code: CodeInvalidFixture, Path: "/contributions",
+		Message: fmt.Sprintf("%s: %s, but the manifest declares no %s Contribution", f.label, kind, f.contribution)}
 }
 
 // ownFixtures lists the plugin's own fixture files (<dir>/fixtures/*.json or
-// --fixture), each classified as a subscription fixture or an invocation
+// --fixture), each classified as a subscription, connector or invocation
 // fixture.
 func (r *run) ownFixtures() []ownFixture {
 	files := r.opts.Fixtures
@@ -258,12 +292,17 @@ func (r *run) ownFixtures() []ownFixture {
 			label = filepath.ToSlash(rel)
 		}
 		raw, err := os.ReadFile(file)
-		subscription := devhost.IsSubscriptionFixture(raw)
-		if (err != nil || !json.Valid(raw)) && r.m.Contributions.Normalizer == nil {
-			// Unreadable or not JSON: let the declared Contribution report the real error.
-			subscription = true
+		contribution := ContributionNormalizer
+		switch {
+		case err != nil || !json.Valid(raw):
+			// Unreadable or not JSON: let a declared Contribution report the real error.
+			contribution = r.m.Contributions.Names()[0]
+		case devhost.IsSubscriptionFixture(raw):
+			contribution = ContributionSubscription
+		case devhost.IsConnectorFixture(raw):
+			contribution = ContributionConnector
 		}
-		out = append(out, ownFixture{label: label, path: file, subscription: subscription})
+		out = append(out, ownFixture{label: label, path: file, contribution: contribution})
 	}
 	return out
 }
@@ -322,7 +361,16 @@ func (r *run) reach(ctx context.Context) (*devhost.Process, bool) {
 		return nil, false
 	} else {
 		dir := filepath.Dir(r.report.Plugin.ManifestPath)
-		proc, err = devhost.Start(devhost.Options{Dir: dir, Command: r.m.Run.Command, Manifest: r.report.Plugin.ManifestPath, Output: r.opts.Output})
+		output := r.opts.Output
+		if r.m.Contributions.Connector != nil {
+			r.logs = &lockedBuffer{}
+			if output == nil {
+				output = r.logs
+			} else {
+				output = io.MultiWriter(output, r.logs)
+			}
+		}
+		proc, err = devhost.Start(devhost.Options{Dir: dir, Command: r.m.Run.Command, Manifest: r.report.Plugin.ManifestPath, Output: output})
 		if err == nil {
 			r.baseURL = proc.BaseURL
 			r.report.Target.BaseURL = proc.BaseURL
@@ -392,10 +440,9 @@ func (r *run) fixtures(own []ownFixture) []fixtureRequest {
 	}
 	for _, f := range own {
 		label, file := f.label, f.path
-		if f.subscription {
-			if r.m.Contributions.Subscription == nil {
-				check.Issues = append(check.Issues, plugins.Issue{Code: CodeInvalidFixture, Path: "/contributions",
-					Message: label + ": a subscription fixture, but the manifest declares no subscription Contribution"})
+		if f.contribution != ContributionNormalizer {
+			if !r.declared(f.contribution) {
+				check.Issues = append(check.Issues, foreignFixture(f))
 			}
 			continue
 		}

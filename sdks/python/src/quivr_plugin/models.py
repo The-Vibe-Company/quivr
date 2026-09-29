@@ -167,7 +167,7 @@ class Discovery(Model):
     plugin_api: str
     plugin: PluginIdentity
     manifest_digest: str
-    contributions: list[Literal["normalizer", "subscription"]]
+    contributions: list[Literal["normalizer", "subscription", "connector"]]
 
 
 @dataclass(kw_only=True)
@@ -179,11 +179,13 @@ class Health(Model):
 
 @dataclass(kw_only=True)
 class ErrorEnvelope(Model):
-    "Body of every non-2xx plugin response. retryable is authoritative: true asks the engine to retry within the declared retry intent; false is terminal."
+    "Body of every non-2xx plugin response. retryable is authoritative: true asks the engine to retry within the declared retry intent; false is terminal. Connector errors (since Plugin API 0.3) also carry error_class, and optionally retry_after_seconds."
 
     code: str
     message: str
     retryable: bool
+    error_class: Literal["access", "transient", "source"] | None = None
+    retry_after_seconds: int | None = None
 
 
 @dataclass(kw_only=True)
@@ -231,11 +233,36 @@ class SubscriptionContribution(Model):
 
 
 @dataclass(kw_only=True)
+class ConnectorKind(Model):
+    description: str | None = None
+    config_schema: Any
+    credential_schema: Any | None = None
+    default_interval_seconds: int
+    modes: list[Literal["pull", "push"]] | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorLimits(Model):
+    max_response_bytes: int | None = None
+    max_items: int | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorContribution(Model):
+    "Source collectors, since Plugin API 0.3: fetch pages of new or changed items from a source after an opaque checkpoint. The core keeps Connector Instances, schedules, checkpoints, credentials and health."
+
+    kinds: dict[str, ConnectorKind]
+    timeout_ms: int | None = None
+    limits: ConnectorLimits | None = None
+
+
+@dataclass(kw_only=True)
 class ManifestContributions(Model):
-    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1) and subscription (since 0.2). The other names are reserved and rejected."
+    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2) and connector (since 0.3). The other names are reserved and rejected."
 
     normalizer: NormalizerContribution | None = None
     subscription: SubscriptionContribution | None = None
+    connector: ConnectorContribution | None = None
 
 
 @dataclass(kw_only=True)
@@ -431,11 +458,159 @@ class SubscriptionFixture(Model):
     evaluations: list[FixtureEvaluation]
 
 
+@dataclass(kw_only=True)
+class ConnectorInstanceRef(Model):
+    "The Connector Instance the core invokes the plugin for."
+
+    instance_id: str
+    kind: str
+    config: dict[str, Any]
+
+
+@dataclass(kw_only=True)
+class ConnectorFetchRequest(Model):
+    "POST /v0/contributions/connector/fetch, since Plugin API 0.3. Fetch one page of new or changed source items after the checkpoint. The plugin is stateless between invocations: the core persists the checkpoint and advances it only after the page's items are durably accepted."
+
+    invocation_id: str
+    contribution: Literal["connector"] = "connector"
+    organization_id: str
+    configuration: dict[str, Any]
+    connector: ConnectorInstanceRef
+    credential: Any
+    checkpoint: Any
+    now: str
+    page_in_run: int
+    reads_today: int
+
+
+@dataclass(kw_only=True)
+class ConnectorAttachment(Model):
+    "A binary Part of the item. The core asks for the bytes later through a core-issued upload grant (not part of Plugin API 0.3), only when the item is not already accepted."
+
+    key: str
+    parent_key: str | None = None
+    role: str
+    media_type: str
+    size_bytes: int | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
+    ref: str
+
+
+@dataclass(kw_only=True)
+class ConnectorItem(Model):
+    "One source item that is new or changed since the checkpoint: the same ingestion command a client submits, with producer = the Connector Instance. Exactly one of content and withdraw: true."
+
+    record_key: str
+    revision: str | None = None
+    source_position: str | None = None
+    content: TextContent | ManifestContent | None = None
+    extensions: dict[str, ExtensionEntry] | None = None
+    withdraw: bool | None = None
+    attachments: list[ConnectorAttachment] | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorFetchResponse(Model):
+    "200 body of POST /v0/contributions/connector/fetch. The engine validates every item as it validates a client submission before accepting it, and advances the checkpoint only after the items are durably accepted."
+
+    items: list[ConnectorItem]
+    checkpoint: Any
+    more: bool
+    reads: int | None = None
+    diagnostics: dict[str, Any] | None = None
+    notice: str | None = None
+    not_due: bool | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorCredentialRequest(Model):
+    "POST /v0/contributions/connector/check_credential, since Plugin API 0.3. Check that the source accepts the credential, without fetching items. Used for Connector Health."
+
+    invocation_id: str
+    contribution: Literal["connector"] = "connector"
+    organization_id: str
+    configuration: dict[str, Any]
+    connector: ConnectorInstanceRef
+    credential: Any
+    now: str
+
+
+@dataclass(kw_only=True)
+class ConnectorCredentialResponse(Model):
+    "200 body of POST /v0/contributions/connector/check_credential: the source accepts the credential. A refused credential is an error envelope with error_class access."
+
+    status: Literal["ok"] = "ok"
+    expires_at: str | None = None
+
+
+@dataclass(kw_only=True)
+class FixtureConnector(Model):
+    kind: str
+    config: dict[str, Any]
+
+
+@dataclass(kw_only=True)
+class ExpectedPage(Model):
+    record_keys: list[str]
+    more: bool | None = None
+
+
+@dataclass(kw_only=True)
+class ExpectedError(Model):
+    "The first fetch is expected to fail with this error class."
+
+    error_class: Literal["access", "transient", "source"]
+    code: str | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorExpectationCheckCredential(Model):
+    "The expected credential check: status ok, or an error_class (and optionally its code)."
+
+    status: Literal["ok"] | None = None
+    error_class: Literal["access", "transient", "source"] | None = None
+    code: str | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorExpectation(Model):
+    pages: list[ExpectedPage] | None = None
+    error: ExpectedError | None = None
+    check_credential: ConnectorExpectationCheckCredential | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorFixture(Model):
+    "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, and checks the credential. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs."
+
+    description: str | None = None
+    connector: FixtureConnector
+    credential: Any | None = None
+    configuration: dict[str, Any] | None = None
+    checkpoint: Any | None = None
+    now: str | None = None
+    max_pages: int | None = None
+    expect: ConnectorExpectation | None = None
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
     "BlobContent",
+    "ConnectorAttachment",
+    "ConnectorContribution",
+    "ConnectorCredentialRequest",
+    "ConnectorCredentialResponse",
+    "ConnectorExpectation",
+    "ConnectorExpectationCheckCredential",
+    "ConnectorFetchRequest",
+    "ConnectorFetchResponse",
+    "ConnectorFixture",
+    "ConnectorInstanceRef",
+    "ConnectorItem",
+    "ConnectorKind",
+    "ConnectorLimits",
     "ConnectorOrigin",
     "Decision",
     "Discovery",
@@ -443,9 +618,12 @@ __all__ = [
     "EvaluatedRecord",
     "Evaluation",
     "Evidence",
+    "ExpectedError",
+    "ExpectedPage",
     "ExtensionEntry",
     "Extensions",
     "FileReference",
+    "FixtureConnector",
     "FixtureEvaluation",
     "FixtureInput",
     "FixtureRecord",

@@ -1,0 +1,9 @@
+{
+  "description": "A revoked token is an access error.",
+  "connector": {"kind": "static", "config": {"items": [{"key": "item-1", "text": "First item"}]}},
+  "credential": {"token": "revoked-token-connector-valid"},
+  "expect": {
+    "error": {"error_class": "access", "code": "token_rejected"},
+    "check_credential": {"error_class": "access", "code": "token_rejected"}
+  }
+}

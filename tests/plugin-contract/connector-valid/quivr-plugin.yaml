@@ -1,0 +1,40 @@
+# Baseline connector test plugin for the Contract Runner (tests/plugin-contract).
+# A well-behaved static source. TestContractRunnerJudgesConnectors runs the same
+# plugin in each broken connector mode (QUIVR_FAKE_PLUGIN_MODE), so each rule
+# needs no directory of its own.
+id: certified.connector-valid
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      static:
+        config_schema:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key, text]
+                properties:
+                  key: {type: string, minLength: 1}
+                  text: {type: string, minLength: 1}
+            page_size: {type: integer, minimum: 1}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, minLength: 8}
+        default_interval_seconds: 300
+    timeout_ms: 5000
+    limits:
+      max_items: 3
+run:
+  command: [quivr-fake-plugin]

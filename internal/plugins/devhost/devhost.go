@@ -435,6 +435,9 @@ type Envelope struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
+	// Class and RetryAfterSeconds are carried by connector errors (Plugin API 0.3).
+	Class             string `json:"error_class,omitempty"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
 }
 
 // Result is one normalizer invocation as the engine would judge it.

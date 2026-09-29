@@ -1,0 +1,14 @@
+{
+  "description": "Two pages from the first run, then nothing new when resumed.",
+  "connector": {"kind": "feed", "config": {"feed_url": "https://feeds.example.com/news"}},
+  "credential": {"token": "test-token-0000"},
+  "now": "2026-09-29T09:00:00Z",
+  "max_pages": 5,
+  "expect": {
+    "pages": [
+      {"record_keys": ["article-101", "article-102"], "more": true},
+      {"record_keys": ["article-103"], "more": false}
+    ],
+    "check_credential": {"status": "ok"}
+  }
+}

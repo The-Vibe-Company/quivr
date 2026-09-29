@@ -19,18 +19,18 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.2.0"
+const PluginAPIVersion = "0.3.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
 // admits that version or a later supported one.
-var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0"}
+var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0"}
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
@@ -42,8 +42,8 @@ var EngineVersion = "0.1.0"
 const ManifestFile = "quivr-plugin.yaml"
 
 // ReservedContributions are Contribution names kept for later Plugin API
-// versions; Plugin API 0.2 rejects them.
-var ReservedContributions = []string{"connector", "enricher", "validator", "projector", "retriever"}
+// versions; Plugin API 0.3 rejects them.
+var ReservedContributions = []string{"enricher", "validator", "projector", "retriever"}
 
 // reservedFields are manifest fields (JSON Pointers) kept for a later Plugin
 // API version.
@@ -58,6 +58,7 @@ const (
 	DefaultMaxResponseBytes = 4 << 20
 	DefaultMaxParts         = 256
 	DefaultMaxBatchSize     = 32
+	DefaultMaxItems         = 100
 )
 
 // Stable issue codes.
@@ -77,6 +78,7 @@ const (
 	CodeInvalidConfiguration    = "invalid_configuration"
 	CodeInvalidExpressionSchema = "invalid_expression_schema"
 	CodeReservedField           = "reserved_field"
+	CodeInvalidCredentialSchema = "invalid_credential_schema"
 )
 
 // Issue is one actionable validation failure. Path is a JSON Pointer into the
@@ -108,6 +110,7 @@ type Compatibility struct {
 type Contributions struct {
 	Normalizer   *Normalizer   `json:"normalizer,omitempty"`
 	Subscription *Subscription `json:"subscription,omitempty"`
+	Connector    *Connector    `json:"connector,omitempty"`
 }
 
 // Names lists the declared Contributions in protocol order, as discovery
@@ -119,6 +122,9 @@ func (c Contributions) Names() []string {
 	}
 	if c.Subscription != nil {
 		names = append(names, "subscription")
+	}
+	if c.Connector != nil {
+		names = append(names, "connector")
 	}
 	return names
 }
@@ -135,6 +141,31 @@ type Subscription struct {
 	TimeoutMS           int                `json:"timeout_ms"`
 	Retry               Retry              `json:"retry"`
 	Limits              SubscriptionLimits `json:"limits"`
+}
+
+// Connector is a source collector (Plugin API 0.3): it fetches pages of new or
+// changed items after an opaque checkpoint, for one or more connector kinds.
+type Connector struct {
+	Kinds     map[string]ConnectorKind `json:"kinds"`
+	TimeoutMS int                      `json:"timeout_ms"`
+	Limits    ConnectorLimits          `json:"limits"`
+}
+
+// ConnectorKind is one connector kind a plugin provides.
+type ConnectorKind struct {
+	Description string `json:"description,omitempty"`
+	// ConfigSchema is the JSON Schema of a Connector Instance configuration.
+	ConfigSchema json.RawMessage `json:"config_schema"`
+	// CredentialSchema is the JSON Schema of the Deposited Credential; nil
+	// means the kind takes no credential.
+	CredentialSchema       json.RawMessage `json:"credential_schema,omitempty"`
+	DefaultIntervalSeconds int             `json:"default_interval_seconds"`
+	Modes                  []string        `json:"modes"`
+}
+
+type ConnectorLimits struct {
+	MaxResponseBytes int `json:"max_response_bytes"`
+	MaxItems         int `json:"max_items"`
 }
 
 type SubscriptionLimits struct {
@@ -293,6 +324,23 @@ func applyDefaults(m *Manifest) {
 			s.Limits.MaxResponseBytes = DefaultMaxResponseBytes
 		}
 	}
+	if c := m.Contributions.Connector; c != nil {
+		if c.TimeoutMS == 0 {
+			c.TimeoutMS = DefaultTimeoutMS
+		}
+		if c.Limits.MaxResponseBytes == 0 {
+			c.Limits.MaxResponseBytes = DefaultMaxResponseBytes
+		}
+		if c.Limits.MaxItems == 0 {
+			c.Limits.MaxItems = DefaultMaxItems
+		}
+		for name, kind := range c.Kinds {
+			if len(kind.Modes) == 0 {
+				kind.Modes = []string{"pull"}
+				c.Kinds[name] = kind
+			}
+		}
+	}
 	for i := range m.Secrets {
 		if m.Secrets[i].Required == nil {
 			required := true
@@ -330,7 +378,7 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 		for _, name := range ReservedContributions {
 			if _, declared := contributions[name]; declared {
 				issues = append(issues, Issue{Code: CodeReservedContribution, Path: "/contributions/" + name,
-					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer or subscription", name, PluginAPIVersion)})
+					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer, subscription or connector", name, PluginAPIVersion)})
 			}
 		}
 		if sub, ok := contributions["subscription"].(map[string]any); ok {
@@ -345,6 +393,9 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 					}
 				}
 			}
+		}
+		if connector, ok := contributions["connector"].(map[string]any); ok {
+			issues = append(issues, connectorKindIssues(connector)...)
 		}
 		for _, field := range reservedFields {
 			if pointerPresent(root, field.path) {
@@ -533,4 +584,35 @@ func pointerPresent(doc any, pointer string) bool {
 		}
 	}
 	return true
+}
+
+// connectorKindIssues checks what the schema cannot for each declared
+// connector kind: config and credential schemas that compile, and the push
+// mode, which is reserved for a later Plugin API version.
+func connectorKindIssues(connector map[string]any) []Issue {
+	kinds, _ := connector["kinds"].(map[string]any)
+	var issues []Issue
+	for _, name := range sortedKeys(kinds) {
+		kind, _ := kinds[name].(map[string]any)
+		path := "/contributions/connector/kinds/" + pointerToken(name)
+		for _, field := range []struct{ name, code, label string }{
+			{"config_schema", CodeInvalidConfigSchema, "configuration"},
+			{"credential_schema", CodeInvalidCredentialSchema, "credential"},
+		} {
+			if schema, present := kind[field.name]; present {
+				if _, err := compileUserSchema(schema); err != nil {
+					issues = append(issues, Issue{Code: field.code, Path: path + "/" + field.name,
+						Message: fmt.Sprintf("the %s schema of kind %q is not a valid JSON Schema: %v", field.label, name, err)})
+				}
+			}
+		}
+		modes, _ := kind["modes"].([]any)
+		for _, mode := range modes {
+			if mode == "push" {
+				issues = append(issues, Issue{Code: CodeReservedField, Path: path + "/modes",
+					Message: fmt.Sprintf("kind %q declares the push mode, which is reserved for a later Plugin API version; declare modes: [pull]", name)})
+			}
+		}
+	}
+	return issues
 }

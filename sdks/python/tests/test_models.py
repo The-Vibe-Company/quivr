@@ -23,6 +23,11 @@ MODELS = {
     "subscription-request.schema.json": models.SubscriptionRequest,
     "subscription-response.schema.json": models.SubscriptionResponse,
     "subscription-fixture.schema.json": models.SubscriptionFixture,
+    "connector-fetch-request.schema.json": models.ConnectorFetchRequest,
+    "connector-fetch-response.schema.json": models.ConnectorFetchResponse,
+    "connector-check-credential-request.schema.json": models.ConnectorCredentialRequest,
+    "connector-check-credential-response.schema.json": models.ConnectorCredentialResponse,
+    "connector-fixture.schema.json": models.ConnectorFixture,
 }
 
 

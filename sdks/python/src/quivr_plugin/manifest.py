@@ -150,6 +150,8 @@ def load_manifest(path: str | Path) -> LoadedManifest:
     problems = protocol_errors("plugin-manifest.schema.json", document)
     if problems:
         raise ManifestError(f"{path} does not match the plugin manifest schema: " + "; ".join(problems))
+    if "connector" in (document.get("contributions") or {}):
+        raise ManifestError(f"{path} declares a connector Contribution, which this SDK does not serve yet; write connectors with the Go SDK in sdks/go")
     return LoadedManifest(path=path.resolve(), raw=raw, model=PluginManifest.from_dict(document))
 
 

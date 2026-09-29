@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.2",
+  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.3",
   "description": "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md.",
   "type": "object",
   "additionalProperties": false,
@@ -42,7 +42,7 @@
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
-      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1) and subscription (since 0.2). The other names are reserved and rejected.",
+      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2) and connector (since 0.3). The other names are reserved and rejected.",
       "properties": {
         "normalizer": {
           "$ref": "#/$defs/Normalizer"
@@ -50,7 +50,9 @@
         "subscription": {
           "$ref": "#/$defs/Subscription"
         },
-        "connector": false,
+        "connector": {
+          "$ref": "#/$defs/Connector"
+        },
         "enricher": false,
         "validator": false,
         "projector": false,
@@ -270,6 +272,102 @@
           }
         },
         "vectors": false
+      }
+    },
+    "Connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kinds"
+      ],
+      "description": "Source collectors, since Plugin API 0.3: fetch pages of new or changed items from a source after an opaque checkpoint. The core keeps Connector Instances, schedules, checkpoints, credentials and health.",
+      "properties": {
+        "kinds": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/ConnectorKind"
+          },
+          "description": "Connector kinds this plugin provides, by kind name."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 30000
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            },
+            "max_items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          }
+        }
+      }
+    },
+    "ConnectorKind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config_schema",
+        "default_interval_seconds"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "config_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Connector Instance configuration (a JSON object)."
+        },
+        "credential_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Deposited Credential (a JSON object). Absent: the kind takes no credential."
+        },
+        "default_interval_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Polling interval of a new Connector Instance when it does not set one."
+        },
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "pull",
+              "push"
+            ]
+          },
+          "default": [
+            "pull"
+          ],
+          "description": "pull: the core schedules fetch. push (relayed webhook deliveries) is reserved for a later Plugin API version."
+        }
       }
     }
   }

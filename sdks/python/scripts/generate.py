@@ -36,6 +36,11 @@ FILES = {
     "subscription-request.schema.json": "SubscriptionRequest",
     "subscription-response.schema.json": "SubscriptionResponse",
     "subscription-fixture.schema.json": "SubscriptionFixture",
+    "connector-fetch-request.schema.json": "ConnectorFetchRequest",
+    "connector-fetch-response.schema.json": "ConnectorFetchResponse",
+    "connector-check-credential-request.schema.json": "ConnectorCredentialRequest",
+    "connector-check-credential-response.schema.json": "ConnectorCredentialResponse",
+    "connector-fixture.schema.json": "ConnectorFixture",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".
@@ -70,6 +75,16 @@ NAMES = {
     "plugins/v0/subscription-response.schema.json#/properties/decisions/items/properties/evidence": "Evidence",
     "plugins/v0/subscription-fixture.schema.json#/properties/record": "FixtureRecord",
     "plugins/v0/subscription-fixture.schema.json#/properties/evaluations/items": "FixtureEvaluation",
+    "plugins/v0/plugin-manifest.schema.json#/$defs/Connector": "ConnectorContribution",
+    "plugins/v0/plugin-manifest.schema.json#/$defs/Connector/properties/limits": "ConnectorLimits",
+    "plugins/v0/plugin-manifest.schema.json#/$defs/ConnectorKind": "ConnectorKind",
+    "plugins/v0/connector-fetch-request.schema.json#/properties/connector": "ConnectorInstanceRef",
+    "plugins/v0/connector-fetch-response.schema.json#/$defs/Item": "ConnectorItem",
+    "plugins/v0/connector-fetch-response.schema.json#/$defs/Attachment": "ConnectorAttachment",
+    "plugins/v0/connector-fixture.schema.json#/properties/connector": "FixtureConnector",
+    "plugins/v0/connector-fixture.schema.json#/properties/expect": "ConnectorExpectation",
+    "plugins/v0/connector-fixture.schema.json#/properties/expect/properties/pages/items": "ExpectedPage",
+    "plugins/v0/connector-fixture.schema.json#/properties/expect/properties/error": "ExpectedError",
 }
 
 HEADER = '''"""Typed Plugin Protocol v0 models.
@@ -123,8 +138,8 @@ class Generator:
         return node
 
     def type_of(self, rel: str, pointer: str, schema, name: str) -> str:
-        if schema is True or schema == {}:
-            return "Any"
+        if schema is True or not set(schema) - {"description", "title", "default", "examples"}:
+            return "Any"  # any JSON value, such as an opaque connector checkpoint
         if "$ref" in schema:
             target_rel, target_pointer = self.resolve(rel, schema["$ref"])
             target = self.at(target_rel, target_pointer)

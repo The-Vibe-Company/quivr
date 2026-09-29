@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector fixture, v0",
+  "description": "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, and checks the credential. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "connector"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "config"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "config": {
+          "type": "object"
+        }
+      }
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "description": "Validated against the kind's credential_schema."
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Plugin configuration; defaults to {}."
+    },
+    "checkpoint": {
+      "description": "Starting checkpoint; defaults to null (a first run)."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "default": "2026-01-01T00:00:00Z"
+    },
+    "max_pages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Most pages fetched in one run, like the core's page bound."
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "record_keys"
+            ],
+            "properties": {
+              "record_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "more": {
+                "type": "boolean"
+              }
+            }
+          },
+          "description": "Expected pages of the run, in order: the Record Keys of each page and optionally its more flag."
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error_class"
+          ],
+          "properties": {
+            "error_class": {
+              "enum": [
+                "access",
+                "transient",
+                "source"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 64
+            }
+          },
+          "description": "The first fetch is expected to fail with this error class."
+        },
+        "check_credential": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "not": {
+            "required": [
+              "status",
+              "error_class"
+            ]
+          },
+          "description": "The expected credential check: status ok, or an error_class (and optionally its code).",
+          "properties": {
+            "status": {
+              "const": "ok"
+            },
+            "error_class": {
+              "enum": [
+                "access",
+                "transient",
+                "source"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 64
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -153,7 +153,10 @@
             "invoke",
             "replay",
             "invalid_request",
-            "batch"
+            "batch",
+            "resume",
+            "check_credential",
+            "credentials"
           ]
         },
         "title": {
@@ -162,7 +165,8 @@
         "contribution": {
           "enum": [
             "normalizer",
-            "subscription"
+            "subscription",
+            "connector"
           ],
           "description": "Contribution the check exercises; absent for checks of the whole plugin."
         },

@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"record_key": "article-101", "content": {"kind": "text", "text": "Body"},
+     "extensions": {"another-plugin": {"schema_version": "1", "data": {}}}}
+  ],
+  "checkpoint": null,
+  "more": false
+}

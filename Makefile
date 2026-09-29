@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs start-pages denylist migrations migration migration-restamp image-context
+.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs start-pages denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -10,7 +10,7 @@ demo-reset:
 verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
 # Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
-check: docs denylist migrations contracts image-context test
+check: docs denylist migrations contracts image-context plugin-boundary test
 # make check, then every part of the stack verification one after another, then the demo.
 # make verify part=<name>[,<name>] runs only those parts, without make check; parts are listed
 # in scripts/local.py (parts) and CI runs them in parallel.
@@ -24,6 +24,7 @@ test:
 	$(GO) test ./...
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 	GO=$(GO) bash scripts/plugin_sdk.sh
+	GO=$(GO) bash scripts/plugin_sdk_go.sh
 # Explicit retrieval measurement (THE-661); not part of verify.
 measure:
 	GO=$(GO) python3 scripts/measure.py
@@ -42,6 +43,9 @@ start-pages:
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
 denylist:
 	python3 scripts/denylist.py
+# Fails when code under plugins/ or sdks/go/ imports the engine's internal/ packages.
+plugin-boundary:
+	python3 scripts/plugin_boundary.py
 # Fails when the core image build stage misses a Go package the binary imports.
 image-context:
 	GO=$(GO) python3 scripts/image_context.py

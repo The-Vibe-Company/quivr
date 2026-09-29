@@ -38,7 +38,8 @@ def _encode(value: Any) -> Any:
         out = {}
         for field in dataclasses.fields(value):
             item = getattr(value, field.name)
-            if item is not None:
+            # Unset optional fields are omitted; a required field keeps null.
+            if item is not None or field.default is dataclasses.MISSING:
                 out[field.name] = _encode(item)
         return out
     if isinstance(value, dict):

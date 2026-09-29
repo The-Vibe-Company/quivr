@@ -62,6 +62,13 @@ jobs:
           path: .scratch/plugin-sdk/alerts-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-connector-contract-report
+          path: .scratch/plugin-sdk/static-source-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
       # The public contracts this commit checked.
       - uses: actions/upload-artifact@v4
         if: always()

@@ -211,6 +211,11 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   ([Connect an AI agent](docs/connect-an-ai-agent.md)).
 - **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
   your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).
+- **Source collectors as plugins, in Go** (Plugin API 0.3): the connector contract
+  (`fetch` a page after an opaque checkpoint, `check_credential`, classified errors),
+  a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
+  `quivr plugin test` checks that pages resume from their checkpoint and that no
+  credential leaks. The core does not call connector plugins yet.
 
 ## What comes next
 
@@ -244,6 +249,7 @@ cmd/quivr/          single binary: API, worker, migrations
 internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
 contracts/http/v0/  OpenAPI contract, examples and checks
 contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
+sdks/go/            Go Plugin SDK for source collectors
 sdks/python/        Python Plugin SDK
 plugins/pdf-text/   reference normalizer: PDF text, one Part per page
 migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)

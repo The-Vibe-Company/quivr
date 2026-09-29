@@ -164,6 +164,56 @@ func TestContractRunnerCertifiesASubscriptionPlugin(t *testing.T) {
 	}
 }
 
+// TestContractRunnerJudgesConnectors owns the connector rules of the Contract
+// Runner: the well-behaved static source in connector-valid is certified with
+// every connector check passing, and each broken mode of the same fake plugin
+// fails exactly the check that owns its rule.
+func TestContractRunnerJudgesConnectors(t *testing.T) {
+	fakeOnPath(t)
+	code, out, r := runTest(t, "connector-valid")
+	if code != cli.ExitOK || !r.Certified {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	passed := map[string]int{}
+	for _, c := range r.Checks {
+		if c.Status == "pass" {
+			passed[c.Contribution+"/"+c.ID]++
+		}
+	}
+	for _, want := range []string{"connector/fixtures", "connector/invoke", "connector/resume", "connector/check_credential", "connector/invalid_request", "connector/credentials", "/discovery"} {
+		if passed[want] == 0 {
+			t.Errorf("no passing %s check:\n%s", want, out)
+		}
+	}
+	for mode, want := range map[string]expectation{
+		"connector-credential-leak":    {Check: "credentials", Code: "credential_leak"},
+		"connector-stalled-checkpoint": {Check: "invoke", Code: "stalled_checkpoint"},
+		"connector-ignores-checkpoint": {Check: "resume", Code: "checkpoint_not_honoured"},
+		"connector-wrong-error-class":  {Check: "invoke", Code: "wrong_error_class"},
+		"connector-blob-part":          {Check: "invoke", Code: "blob_part_not_allowed"},
+		"connector-too-many-items":     {Check: "invoke", Code: "too_many_items"},
+		"accept-invalid":               {Check: "invalid_request", Code: "accepted_invalid_request"},
+	} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv(fakeplugin.EnvMode, mode)
+			code, out, r := runTest(t, "connector-valid")
+			if code != cli.ExitInvalid || r.Certified {
+				t.Fatalf("want not certified, exit %d:\n%s", code, out)
+			}
+			for _, c := range r.Checks {
+				if c.ID == want.Check && c.Contribution == "connector" && c.Status == "fail" {
+					for _, issue := range c.Issues {
+						if issue.Code == want.Code {
+							return
+						}
+					}
+				}
+			}
+			t.Fatalf("no failed connector %s check with issue %s:\n%s", want.Check, want.Code, out)
+		})
+	}
+}
+
 func TestContractRunnerReportsABrokenSubscriptionFixture(t *testing.T) {
 	fakeOnPath(t)
 	bad := filepath.Join(t.TempDir(), "broken.json")

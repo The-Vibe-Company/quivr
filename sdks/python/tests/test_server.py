@@ -222,3 +222,11 @@ class Fixtures(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConnectorManifests(unittest.TestCase):
+    def test_a_connector_manifest_is_refused_with_a_pointer_to_the_go_sdk(self):
+        from quivr_plugin.manifest import ManifestError, load_manifest
+
+        with self.assertRaisesRegex(ManifestError, "Go SDK in sdks/go"):
+            load_manifest(REPO / "contracts/plugins/v0/fixtures/manifests/valid/connector.yaml")

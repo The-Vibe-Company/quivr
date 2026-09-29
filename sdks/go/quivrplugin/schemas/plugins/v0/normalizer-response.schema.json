@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "normalizer invocation response, v0",
+  "description": "200 body of POST /v0/contributions/normalizer. The Manifest uses the exact public Manifest shape; the engine applies the same semantic validation as for kind manifest submissions before anything is committed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest"
+  ],
+  "properties": {
+    "manifest": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/ManifestContent"
+    },
+    "extensions": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+      "description": "Record Version extensions, only in namespaces the plugin declares."
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$",
+      "description": "BCP 47 language tag of the normalized content."
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "maxLength": 64
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      }
+    }
+  }
+}

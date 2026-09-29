@@ -208,7 +208,10 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 		var err error
 		raw, readErr := os.ReadFile(s.fixture)
 		unparsable := readErr != nil || !json.Valid(raw)
-		if devhost.IsSubscriptionFixture(raw) || (unparsable && m.Contributions.Normalizer == nil) {
+		if devhost.IsConnectorFixture(raw) {
+			issues = []plugins.Issue{{Code: plugins.CodeInvalidManifest, Path: "/connector",
+				Message: "quivr plugin dev does not replay connector fixtures; run quivr plugin test, which fetches every page of a connector fixture"}}
+		} else if devhost.IsSubscriptionFixture(raw) || (unparsable && m.Contributions.Normalizer == nil) {
 			batches, issues, err = devhost.BuildSubscriptionRequests(s.fixture, m)
 		} else if m.Contributions.Normalizer == nil {
 			issues = []plugins.Issue{{Code: plugins.CodeInvalidManifest, Path: "/contributions/normalizer",

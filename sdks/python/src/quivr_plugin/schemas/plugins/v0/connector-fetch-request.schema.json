@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector fetch request, v0",
+  "description": "POST /v0/contributions/connector/fetch, since Plugin API 0.3. Fetch one page of new or changed source items after the checkpoint. The plugin is stateless between invocations: the core persists the checkpoint and advances it only after the page's items are durably accepted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "connector",
+    "credential",
+    "checkpoint",
+    "now",
+    "page_in_run",
+    "reads_today"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "contribution": {
+      "const": "connector"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The plugin configuration the installer supplies, valid against configuration.schema."
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "kind",
+        "config"
+      ],
+      "description": "The Connector Instance the core invokes the plugin for.",
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "config": {
+          "type": "object",
+          "description": "The Connector Instance configuration, already valid against the kind's config_schema."
+        }
+      }
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The decrypted Deposited Credential, valid against the kind's credential_schema; null for a kind without one. Sent only for this invocation: never log, echo or persist it."
+    },
+    "checkpoint": {
+      "description": "The opaque Acquisition Checkpoint the plugin returned last (any JSON value); null on the first run of a Connector Instance."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The core's clock for this invocation (RFC 3339, UTC). Use it instead of the local clock so runs are reproducible."
+    },
+    "page_in_run": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0 for the first page of a run, then counts up while the plugin answers more: true."
+    },
+    "reads_today": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Source resources read during the current UTC day, including earlier pages of this run, for sources that bill or rate-limit per resource."
+    }
+  }
+}

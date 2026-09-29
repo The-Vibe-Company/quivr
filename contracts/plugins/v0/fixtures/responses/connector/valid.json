@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "record_key": "article-101",
+      "revision": "etag-7",
+      "source_position": "2026-09-29T08:30:00Z",
+      "content": {"kind": "text", "text": "Harbour workers vote to strike over pay."},
+      "extensions": {"example-feeds": {"schema_version": "1", "data": {"author": "Desk"}}}
+    },
+    {
+      "record_key": "article-102",
+      "revision": "etag-2",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {"key": "title", "role": "title", "content": {"kind": "text", "text": "Port reopens"}},
+          {"key": "body", "role": "body", "content": {"kind": "text", "text": "The port reopened on Tuesday."}}
+        ]
+      },
+      "attachments": [
+        {"key": "photo", "parent_key": "body", "role": "attachment", "media_type": "image/jpeg", "size_bytes": 48213, "ref": "media/9f2c"}
+      ]
+    },
+    {"record_key": "article-099", "withdraw": true}
+  ],
+  "checkpoint": {"cursor": "2026-09-29T08:30:00Z"},
+  "more": true,
+  "reads": 3,
+  "diagnostics": {"feed_title": "News"}
+}

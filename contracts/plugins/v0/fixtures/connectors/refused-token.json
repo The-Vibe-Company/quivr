@@ -1,0 +1,8 @@
+{
+  "connector": {"kind": "feed", "config": {"feed_url": "https://feeds.example.com/news"}},
+  "credential": {"token": "revoked-token-0000"},
+  "expect": {
+    "error": {"error_class": "access", "code": "token_rejected"},
+    "check_credential": {"error_class": "access"}
+  }
+}
