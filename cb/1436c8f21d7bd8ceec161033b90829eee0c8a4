@@ -1,0 +1,176 @@
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 1-152
+sdks/python/src/quivr_plugin/_codec.py
+  s_54b80c92daa9cb::t_49984eb652cf9f 41-42
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-152
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 70
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_8a81c02e00d075 35,38,41
+  s_54b80c92daa9cb::t_c16b76c54a4b40 1-34,36-37,39-40,42-44
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-88
+sdks/go/quivrplugin/schemas/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-48
+sdks/go/quivrplugin/connector.go
+  s_54b80c92daa9cb::t_5d5fa15a8a3cce 39,78
+  s_54b80c92daa9cb::t_b2882bfd3b1fb8 1-38,40-77,79-208
+sdks/go/quivrplugin/conformance_test.go
+  s_54b80c92daa9cb::t_5d5fa15a8a3cce 14,27,43
+  s_54b80c92daa9cb::t_e0b5c77fa49a4e 1-13,15-26,28-42,44-86
+sdks/python/src/quivr_plugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 46-47
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 1-106,120,132,134-138
+  s_54b80c92daa9cb::t_e1e17e9e67d4cf 107-119,121-131,133
+contracts/plugins/v0/fixtures/protocol/error-unknown-class.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 1
+sdks/go/examples/static-source/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f12967cf3e7e44 1-51
+scripts/plugin_boundary.py
+  s_54b80c92daa9cb::t_ab392ab28bfd1c 1-87
+sdks/go/quivrplugin/schemas/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_a2cd47581f93dc 4
+  s_54b80c92daa9cb::t_9a26dff0917288 1-3,5-20
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-51
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_f965f66436d493 39-43,78-87
+  s_54b80c92daa9cb::t_c16b76c54a4b40 141-142
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_8a81c02e00d075 533
+  s_54b80c92daa9cb::t_c16b76c54a4b40 170,182,187-188,235-258,261,265,461-532,534-566,572-578,580-595,601-605,607-613,621-622,626
+  s_54b80c92daa9cb::t_e1e17e9e67d4cf 567-571,579,606
+sdks/python/tests/test_server.py
+  s_54b80c92daa9cb::t_ea8399c774568f 225-232
+contracts/plugins/v0/fixtures/protocol/error-connector-access.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 1
+sdks/go/quivrplugin/schemas/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-34,36-37,39-40,42-44
+  s_54b80c92daa9cb::t_8a81c02e00d075 35,38,41
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_3be88f7554c419 836
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 1-20
+sdks/go/quivrplugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-52
+sdks/go/quivrplugin/redact.go
+  s_54b80c92daa9cb::t_49e67e32a518ad 1-143
+sdks/go/quivrplugin/plugintest/plugintest.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 42,56
+  s_54b80c92daa9cb::t_6862c16e2e79a5 1-41,43-55,57-254
+scripts/test_plugin_boundary.py
+  s_54b80c92daa9cb::t_ab392ab28bfd1c 2-18,20-56
+  s_54b80c92daa9cb::t_dc316ae22f950f 1,19
+contracts/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 88,91
+  s_54b80c92daa9cb::t_e1e17e9e67d4cf 107-119,121-131,133
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 46,54
+sdks/go/quivrplugin/schema.go
+  s_54b80c92daa9cb::t_7176d7906d78c9 1-117
+sdks/go/examples/static-source/fixtures/pages.json
+  s_54b80c92daa9cb::t_f12967cf3e7e44 1-19
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-374
+tests/plugin-contract/connector-valid/fixtures/revoked.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 6-7
+sdks/go/examples/static-source/main.go
+  s_54b80c92daa9cb::t_f12967cf3e7e44 1-105
+sdks/go/quivrplugin/errors.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 70
+  s_54b80c92daa9cb::t_44098b6d971cdb 1-69,71-90
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 148
+  s_54b80c92daa9cb::t_8fd7d298853496 1-147,149-233
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_b3a2f0a488c424 1-28
+contracts/plugins/v0/fixtures/connectors/refused-token.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 5-6
+Makefile
+  s_54b80c92daa9cb::t_b3a2f0a488c424 2,13,27,46-48
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_a2cd47581f93dc 223
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 222
+sdks/go/go.mod
+  s_54b80c92daa9cb::t_f2a6fdf42d7029 9-10
+  s_54b80c92daa9cb::t_ef84bf88e01cff 1-8
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_954d362ff9e1cf 1-235
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 1-88
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_e443acec58c14a 1-383
+contracts/plugins/v0/fixtures/protocol/error-connector-rate-limited.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 1
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-response.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-69
+sdks/go/quivrplugin/schemas/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-3,5-25,27-31,33-37,39-42,44-46
+  s_54b80c92daa9cb::t_a2cd47581f93dc 4,26,32,38,43
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_a2cd47581f93dc 88,91
+  s_54b80c92daa9cb::t_9a26dff0917288 1-87,89-90,92-106,120,132,134-138
+  s_54b80c92daa9cb::t_e1e17e9e67d4cf 107-119,121-131,133
+sdks/go/examples/static-source/main_test.go
+  s_54b80c92daa9cb::t_f12967cf3e7e44 1-34
+contracts/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 26,43
+  s_54b80c92daa9cb::t_3be88f7554c419 4,32,38
+contracts/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_3be88f7554c419 4
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 3,45,53-55,276-371
+sdks/go/quivrplugin/schemas/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-283
+sdks/python/src/quivr_plugin/__init__.py
+  s_54b80c92daa9cb::t_234c3d1a58b02c 24
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-277
+sdks/python/src/quivr_plugin/schemas/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_c16b76c54a4b40 4,25-38,40-44
+sdks/go/quivrplugin/schemas/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-145
+sdks/python/pyproject.toml
+  s_54b80c92daa9cb::t_234c3d1a58b02c 7
+sdks/python/src/quivr_plugin/manifest.py
+  s_54b80c92daa9cb::t_234c3d1a58b02c 153-154
+sdks/go/scripts/sync_schemas.py
+  s_54b80c92daa9cb::t_9a26dff0917288 1-47
+sdks/go/quivrplugin/schemas/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-15
+contracts/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_8a81c02e00d075 35,38,41
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_b3a2f0a488c424 65-71
+sdks/go/quivrplugin/testdata/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_8fd7d298853496 1-27
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 439
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_49984eb652cf9f 26-30
+sdks/go/examples/static-source/fixtures/revoked.json
+  s_54b80c92daa9cb::t_08ef4ec50ac9f0 6-7
+  s_54b80c92daa9cb::t_f12967cf3e7e44 1-5,8-9
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_9a26dff0917288 1-84
+sdks/go/go.sum
+  s_54b80c92daa9cb::t_4a06be879ffc0e 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb1436c8f21d7bd8ceec161033b90829eee0c8a4",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+README.md
+  s_54b80c92daa9cb::t_31b18be12c922f 214-218,252
+docs/inventory.toml
+  s_54b80c92daa9cb::t_f57c48ceafd78e 95
+  s_54b80c92daa9cb::t_13826cce888ccd 125
+sdks/go/README.md
+  s_54b80c92daa9cb::t_f57c48ceafd78e 1-146
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_8720599abf5437 4-5,20-21,25,41,47,49,56-58,78-79,89-90,109-111,130,163-164,323-397,468-469,545-556,563-568
+  s_54b80c92daa9cb::t_f57c48ceafd78e 476
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_13826cce888ccd 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90f24d4d6c85a2e2ffb33bd75fdbfeb08a868393",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
