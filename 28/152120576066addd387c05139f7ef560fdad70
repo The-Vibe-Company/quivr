@@ -1,0 +1,31 @@
+scripts/local.py
+  s_54b80c92daa9cb::t_f39f159364083a 96-97,116-117,321,441-442,506
+tests/acceptance/described_alerts_test.go
+  s_54b80c92daa9cb::t_fdc5a1684d93f6 74-76
+  s_54b80c92daa9cb::t_4b168fb2fda40a 160-179
+  s_54b80c92daa9cb::t_ee33c4126b0387 1-73,77-159
+plugins/alerts/alerts/fake_system_one.py
+  s_54b80c92daa9cb::t_7d32b786e9aba8 13-14,81
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_f39f159364083a 7-14,31,35-36,47-55,57,61-66,85-88,95,103-109,136-172,176-177,180-181,196,206,210-214,227-230
+  s_54b80c92daa9cb::t_f6bdd53b725be1 231-232
+scripts/test_subscription_plugin.py
+  s_54b80c92daa9cb::t_34c78da0100d23 27,49-81
+  s_54b80c92daa9cb::t_3feaf4ec0fd440 82-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28152120576066addd387c05139f7ef560fdad70",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
