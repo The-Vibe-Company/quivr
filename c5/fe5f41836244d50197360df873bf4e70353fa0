@@ -26,6 +26,7 @@ internal/reference/openapi/openapi_test.go
   s_54b80c92daa9cb::t_05e4c9b3f0f705 1-30
 scripts/contracts.sh
   s_54b80c92daa9cb::t_382064f6c0a93e 16,22
+  s_54b80c92daa9cb::t_f4b28aae1e6056 21
 README.md
   s_54b80c92daa9cb::t_8177786f4e762d 212
 contracts/http/v0/README.md
@@ -38,6 +39,8 @@ docs/quivr-v2-monitoring-tracer.md
   s_54b80c92daa9cb::t_7da2aa2c0454ab 122-123
 docs/quivr-v2-search-contracts.md
   s_54b80c92daa9cb::t_328e96bbbe1e7f 5-6
+docs/first-search.md
+  s_54b80c92daa9cb::t_80d2a2ea045d7c 10-11
 ---
 {
   "schema_version": "authorship/3.0.0",
