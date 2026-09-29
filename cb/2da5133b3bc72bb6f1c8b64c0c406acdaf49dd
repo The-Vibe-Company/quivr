@@ -1,0 +1,51 @@
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_aad8c7d8aa7924 854-894
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_c05218f050142f 279-280,307-309
+docs/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_b23746f83f9b53 41-42,134,141-143,173-174,179,341-344,386-387,391-395,423-425,433-468,491,501-502,522-523
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_74c404da0f1fa7 108-113
+internal/adapters/postgres/corrections_test.go
+  s_54b80c92daa9cb::t_279ef262a5a5dd 35,40,207,210,214-216,221,251-252,260
+internal/adapters/postgres/delivery.go
+  s_54b80c92daa9cb::t_7842f99bddd682 75-77,105,191-193,198-199,203,231
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_c225d7fce3aac3 115-119,127-128,132,246-249,278-281,286-287,294,414-415,424-425,429,468-472
+internal/adapters/postgres/monitoring.go
+  s_54b80c92daa9cb::t_6755c2a19ed5a2 8,37-38,41,80,140,200-203,206,221-295
+internal/adapters/postgres/withdrawal_disabled_test.go
+  s_54b80c92daa9cb::t_091d6340f09221 1-214
+internal/monitoring/engine.go
+  s_54b80c92daa9cb::t_ebf35a5e57914c 99-102
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_573731f3f542d0 114,124,255-269
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_ee5090640a8650 56-62,245-256
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_973634dc4cba64 1536-1538,1852-1854,2945-2970,3219,4690-4729,4998-5000,6086-6118
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_2905c182ab3106 69,113,120-124
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_af50143ed64bbb 64-70,173-177,202-203
+migrations/20260929T0747Z_subscription_enable.sql
+  s_54b80c92daa9cb::t_e4ee829a301384 1-9
+tests/acceptance/corrections_test.go
+  s_54b80c92daa9cb::t_6ac19591f0103e 196-199,206-207,209,243-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb2da5133b3bc72bb6f1c8b64c0c406acdaf49dd",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
