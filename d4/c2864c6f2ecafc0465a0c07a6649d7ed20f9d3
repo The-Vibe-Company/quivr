@@ -1,0 +1,21 @@
+tests/acceptance/connectors_x_push_test.go
+  s_54b80c92daa9cb::t_a22bbf76a3a9c0 84-88
+scripts/connector_x_push.py
+  s_54b80c92daa9cb::t_a22bbf76a3a9c0 58-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4c2864c6f2ecafc0465a0c07a6649d7ed20f9d3",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
