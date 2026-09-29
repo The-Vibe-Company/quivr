@@ -3,6 +3,7 @@
 from prepare_tokenizer import prepare as prepare_tokenizer
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
+import guides
 import normalizer_plugin
 import ports
 import subscription_plugin
@@ -80,7 +81,9 @@ class Stack:
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*']),
             # Corpus writer without operations:write: cannot change retrieval configuration.
-            s['configurer']:scope('org_a',['corpora:read','corpora:write'],['*'])},
+            s['configurer']:scope('org_a',['corpora:read','corpora:write'],['*']),
+            # Each doc page with runnable blocks replays in its own Organization (scripts/guides.py).
+            **guides.keys(self)},
             # One deployment-configured webhook destination per Organization. These are obvious
             # local test values; real deployments reference the signing secret through secret_env.
             destinations={'local-receiver-org-a':dict(organization='org_a',url='http://127.0.0.1:9/local-receiver-org-a',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-a!').decode()),
@@ -432,6 +435,8 @@ def verify(stack,steps):
     steps.run('connector_restart',verify_connector_restart,stack)
     steps.run('m365_restart',verify_m365_restart,stack)
     steps.run('x_restart',verify_connector_x_restart,stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")
+    # Runnable guide blocks, after the timed scenarios, each page in its own Organization.
+    steps.run('runnable_guides',guides.verify,stack)
     # The keyless worker would fail credentialed instances of earlier scenarios.
     steps.run('keyless_core',stack.verify_keyless)
     steps.run('validate_captures',run,[os.environ.get('CONTRACT_PYTHON',str(ROOT/'.scratch/contracts/venv/bin/python')),'scripts/validate_captures.py',str(stack.directory)])

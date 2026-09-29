@@ -62,6 +62,7 @@ excluded = [
 "docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/x.md" = { audience = "functional", kind = "guide" }
+"docs/first-search.md" = { audience = "functional", kind = "guide" }
 "docs/keyword-alerts.md" = { audience = "functional", kind = "guide" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
 "docs/quivr-v2-architecture-overview.md" = { audience = "contributor", kind = "concept" }
@@ -73,6 +74,7 @@ excluded = [
 "docs/quivr-v2-monitoring-tracer.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
 "docs/quivr-v2-search-contracts.md" = { audience = "contributor", kind = "concept" }
+"docs/runnable-guides.md" = { audience = "contributor", kind = "guide" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide" }
@@ -91,13 +93,15 @@ excluded = [
 "docs/agents/issue-tracker.md" = 110
 "docs/agents/testing.md" = 85
 "docs/agents/triage-labels.md" = 15
-"docs/api-walkthrough.md" = 515
+"docs/api-walkthrough.md" = 475
 "docs/connectors/README.md" = 225
 "docs/connectors/microsoft-365.md" = 230
 "docs/connectors/rss.md" = 190
 "docs/connectors/x.md" = 190
+"docs/first-search.md" = 310
 "docs/keyword-alerts.md" = 155
 "docs/plugins/write-a-normalizer.md" = 360
+"docs/runnable-guides.md" = 85
 "plugins/pdf-text/README.md" = 120
 "quivr-search/README.md" = 90
 "sdks/python/README.md" = 125

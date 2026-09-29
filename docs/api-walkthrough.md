@@ -1,58 +1,25 @@
 # API walkthrough
 
-A guided tour of the implemented `v0` HTTP API and of the local stack's behaviour.
+A guided tour of the implemented `v0` HTTP API and of the local stack's behaviour,
+beyond a first search. Start with [Your first search](first-search.md): it starts the
+local stack, creates a Corpus, adds a Record, follows its Ingestion Receipt, reads
+its Version and searches it, with commands that `make verify` replays.
 [`contracts/http/v0/openapi.yaml`](../contracts/http/v0/openapi.yaml) is authoritative
 for request and response shapes; this page explains the semantics around them.
 
-## Local stack and API keys
-
-`make dev` builds a single `quivr` binary, starts PostgreSQL, Temporal, SeaweedFS
-(S3), Weaviate and TEI through Docker Compose, applies migrations and runs the API
-and worker as local processes. It prints the API address and the path of the
-generated `config.json`. Ports are dynamic and bound to loopback.
-
-Throwaway keys, settings and logs live in the private `.scratch/quivr-dev-…`
-directory. Never publish it: `state.json`, `config.json`, `worker.json` and `s3.json`
-contain credentials. The `keys` field of `config.json` maps each Bearer token to an
-Organization, a list of actions and a list of Corpora (`*` grants the whole
-Organization).
-
-| Command | Effect |
-| --- | --- |
-| `make down` | Stop the stack, keep development volumes |
-| `make reset` | Stop the stack and delete its volumes |
-| `make migrate` | Apply versioned migrations to the running stack |
-| `make generate` | Regenerate transport bindings and the Go client after a contract change |
-| `GO=/path/to/go make …` | Use a specific Go toolchain |
-
-Local logs are capped at four 1 MiB files per process; Compose services keep three
-1 MiB files each. The private `/healthz` and `/readyz` probes use a separate port and
-are not part of the public API. No hosted model service or external key is required.
-Hot migrations can break running processes during evaluation; restart API and
-workers after migrating.
-
 ## Corpora
 
-`POST /v0/corpora` with `name` and `idempotency_key` creates a Corpus; `GET /v0/corpora`
-and `GET /v0/corpora/{corpus_id}` read them. Replaying the same request under the same
-key returns the same Corpus; changing the request under that key is a conflict.
-Creating a Corpus requires `corpora:write` and the `*` Corpus scope, so a key bound to
-existing Corpora cannot create new ones. Explicit retrieval field mappings are
-validated and stored; an uninstalled `plugin_profile` is refused.
+`GET /v0/corpora` and `GET /v0/corpora/{corpus_id}` read Corpora. Explicit retrieval
+field mappings are validated and stored; an uninstalled `plugin_profile` is refused.
 
 ## Ingesting text
 
-`POST /v0/records` takes an `idempotency_key`, a `source` (`corpus_id`, `namespace`,
-`record_key`) and `content` (`{"kind": "text", "text": "…"}`). The API answers `202`
-once the Receipt and the work to dispatch are committed, even if Temporal or S3 are
-down. Follow the `Location` header to the Receipt, then read
-`/v0/records/{record_id}/versions/{version_id}` for the Manifest and its text.
-Permissions are `content:write` and `content:read`, limited to authorized Corpora.
+`POST /v0/records` submits one Record; [Your first search](first-search.md#2-add-a-record)
+shows the Receipt and Version path. Permissions are `content:write` and
+`content:read`, limited to authorized Corpora.
 
-- A Receipt resolves to `created`, `duplicate`, `withdrawal_applied` or `conflict`. It
-  never becomes "failed" because of an infrastructure outage; work is retried.
-- Without a `source_revision`, the canonical Manifest digest identifies the Version.
-  Reusing a revision with different content keeps history and reports a conflict.
+- Reusing a `source_revision` with different content keeps history and reports a
+  conflict.
 - `source_position` is an optional decimal string of 1 to 1000 digits; leading zeros
   are normalized.
 - A single command is limited to 1 MiB.
@@ -263,13 +230,8 @@ search. See [E5 provenance](../third_party/e5/NOTICE.md).
 
 ## Search
 
-```http
-POST /v0/search
-Authorization: Bearer <key with content:read and search:query>
-Content-Type: application/json
-
-{"query":"eclipse","corpus_ids":["<corpus_id>"],"mode":"lexical","profile":"balanced","limit":10}
-```
+`POST /v0/search` needs `content:read` and `search:query`;
+[Your first search](first-search.md#5-search) runs one.
 
 - Modes are `lexical`, `semantic` and `hybrid`. Defaults: `hybrid`, `balanced`, 10
   results; 50 maximum. Other profiles return 422.

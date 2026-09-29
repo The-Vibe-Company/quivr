@@ -24,6 +24,10 @@ Living documentation is written in English, with neutral examples: no customer n
 
 `AGENTS.md`, `CONTEXT.md` and every page of kind `guide` have a maximum number of lines under `[budgets]` in the inventory. A new budget is set about 5% above the page's size when it is added; `make docs` prints the line to paste. When a page reaches its budget, shorten it first: link to the authoritative source, remove repetition, split a guide by task. Raise a budget only in a pull request whose signal needs the extra lines, and say so in its description.
 
+## Runnable guide blocks
+
+A guide shows API requests and responses only as runnable blocks, which `make verify` replays against the local stack; link to the OpenAPI contract for the rest. See [Runnable guide blocks](../runnable-guides.md).
+
 ## Glossary form
 
 `CONTEXT.md` is the engine glossary. Each term is one paragraph: the term in bold followed by a colon, one or two sentences of definition, then an `_Avoid_:` line listing words not to use for it.

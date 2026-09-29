@@ -74,37 +74,10 @@ step, the pinned versions and the dependency inventory. Linux x86_64 is the only
 supported platform; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
 
 `make dev` prints the API address and the path of a generated `config.json` holding
-throwaway local keys. Export both, then create a Corpus, ingest a text and search it:
+throwaway local keys. Then follow [Your first search](docs/first-search.md): create a
+Corpus, add a text Record and search it, with commands that `make verify` replays
+against a real stack.
 
-```bash
-export QUIVR=http://127.0.0.1:<port>          # printed by make dev
-export CONFIG=<path printed by make dev>/config.json
-export KEY=$(jq -r '.keys | to_entries[]
-  | select(.value.organization == "org_a" and .value.corpora == ["*"]
-           and (.value.actions | index("corpora:write"))) | .key' "$CONFIG")
-
-# 1. Create a Corpus
-CORPUS=$(curl -s -X POST "$QUIVR/v0/corpora" \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"name": "Newsroom", "idempotency_key": "corpus-newsroom-1"}' | jq -r .corpus_id)
-
-# 2. Ingest a text (202 + Receipt; processing continues asynchronously)
-curl -s -X POST "$QUIVR/v0/records" \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{
-    "idempotency_key": "record-eclipse-1",
-    "source": {"corpus_id": "'"$CORPUS"'", "namespace": "demo", "record_key": "eclipse"},
-    "content": {"kind": "text", "text": "A total solar eclipse crossed northern Spain this afternoon."}
-  }' | jq
-
-# 3. Search (give processing a few seconds)
-curl -s -X POST "$QUIVR/v0/search" \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"query": "solar eclipse", "corpus_ids": ["'"$CORPUS"'"], "mode": "hybrid"}' \
-  | jq '.items[] | {rank, record_id, text: .excerpt.text}'
-```
-
-Run the same ingest command again: you get the same Receipt back, not a duplicate.
 For a browser UI over the same API, run `make demo` and open http://127.0.0.1:5183
 (see [`quivr-search/`](quivr-search/README.md)).
 
@@ -233,6 +206,7 @@ listed here, not in "What works today".
 
 | Read | For |
 | --- | --- |
+| [Your first search](docs/first-search.md) | Create a Corpus, add a Record and search it, step by step |
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [Keyword alerts](docs/keyword-alerts.md) | Writing alert queries and setting up metadata filters |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
@@ -280,6 +254,8 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
   with one line giving its audience and kind (the file's header explains both);
   `make docs` fails on an undeclared page, a broken relative link or a missing
   repository path, and names the fix.
+- Show API requests in guides as [runnable blocks](docs/runnable-guides.md), which
+  `make verify` replays.
 - Pull request titles follow Commitizen conventions, for example
   `feat(ingestion): accept record versions`.
 - Keep customer-specific formats and rules out of the core; they belong in plugins.

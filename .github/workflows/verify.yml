@@ -120,6 +120,7 @@ jobs:
             .scratch/quivr-verify-*/normalizer-startup.json
             .scratch/quivr-verify-*/outages.json
             .scratch/quivr-verify-*/keyless-report.json
+            .scratch/quivr-verify-*/guides.json
             .scratch/quivr-verify-*/keyless/*.log*
             .scratch/quivr-verify-*/tokenizer-provenance.json
             .scratch/quivr-verify-*/embedding-provenance.json
