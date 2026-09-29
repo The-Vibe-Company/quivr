@@ -45,16 +45,16 @@ test("ajouter du texte, le retrouver et lire la source exacte", async ({
   await expect(page.getByTestId("canonical-text")).toHaveText(source);
   expect(await page.getByTestId("canonical-text").textContent()).toBe(source);
   await page.keyboard.press("Escape");
+  // Search is typed in the top bar; results replace the feed.
   await page
-    .getByRole("searchbox", { name: "Rechercher dans vos textes" })
+    .getByRole("searchbox", { name: "Rechercher dans le fil" })
     .fill("ferries Corse");
-  await page.getByRole("button", { name: "Lancer la recherche" }).click();
-  await expect(page.locator(".result").first()).toBeVisible({ timeout: 45000 });
+  await expect(page.locator(".row").first()).toBeVisible({ timeout: 45000 });
   await page.screenshot({
     path: info.outputPath("desktop-results.png"),
     fullPage: true,
   });
-  await page.locator(".result-link").first().click();
+  await page.locator(".row-link").first().click();
   await expect(page.getByTestId("canonical-text")).toContainText(
     "ferries pour la Corse",
   );
@@ -63,5 +63,5 @@ test("ajouter du texte, le retrouver et lire la source exacte", async ({
     fullPage: true,
   });
   await page.keyboard.press("Escape");
-  await expect(page.locator(".result-link").first()).toBeFocused();
+  await expect(page.locator(".row-link").first()).toBeFocused();
 });

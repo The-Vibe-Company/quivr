@@ -146,13 +146,14 @@ already collected are unaffected.
 The reference web app (`quivr-search/`) has a **Sources** tab for the Corpus it
 serves. There you can:
 
-- **Add a feed in a couple of clicks.** Paste a site address or a feed address. The
-  web app's server fetches it and either recognises a feed (RSS, Atom or JSON Feed)
-  or reads the feeds the page advertises with
+- **Add a feed in a couple of clicks.** Paste a site address or a feed address. Once
+  you pause typing, the web app's server fetches it and either recognises a feed
+  (RSS, Atom or JSON Feed) or reads the feeds the page advertises with
   `<link rel="alternate" type="application/rss+xml">` (or Atom). If there are
-  several, you pick one. The name, taken from the feed title, and the kind's default
-  interval come prefilled. Confirming creates an [`rss`](rss.md) instance whose
-  Source Namespace is that name.
+  several, you pick one. The name comes prefilled from the feed title, and you
+  choose how often to check it (5 minutes to 1 hour, never below the deployment's
+  minimum interval). Confirming creates an [`rss`](rss.md) instance whose Source
+  Namespace is that name.
 - **Add a suggested feed in one click.** The suggestions come from the web app's
   `DEMO_FEED_SUGGESTIONS` setting, a JSON array of `{"title", "url"}`, for example
   `[{"title":"Example News","url":"https://news.example.org/rss.xml"}]`. The

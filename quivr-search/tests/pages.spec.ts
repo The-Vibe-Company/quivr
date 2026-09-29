@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// The three live pages share one navigation and one error state: a failure
+// The three pages share one navigation and one error state: a failure
 // reads as an alert with a retry, the retry recovers without reloading, and
 // the page fits a phone. The facade is made to fail with a route, so this runs
 // on any stack.
@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 
 const pages = [
   // The snapshot only: the live stream stays up, so nothing retries by itself.
-  { tab: "Veille", route: "**/demo/feed" },
+  { tab: "Fil", route: "**/demo/feed" },
   { tab: "Sources", route: "**/v0/connector-kinds" },
   { tab: "Alertes", route: "**/demo/alerts" },
 ];
@@ -21,7 +21,6 @@ test("chaque page annonce sa panne de la même façon et s’en remet, sur mobil
   page,
 }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Sections" });
   for (const { tab, route } of pages) {
     await page.route(route, (r) =>
@@ -31,10 +30,12 @@ test("chaque page annonce sa panne de la même façon et s’en remet, sur mobil
         body: JSON.stringify({ message: "Panne simulée." }),
       }),
     );
-    await nav.getByRole("link", { name: tab, exact: true }).click();
-    await expect(
-      nav.getByRole("link", { name: tab, exact: true }),
-    ).toHaveAttribute("aria-current", "page");
+    // A tab's name also carries its badge ("Alertes 3, …"). The feed is
+    // read when the app opens, so its failure shows on the first load.
+    const link = nav.getByRole("link", { name: new RegExp(`^${tab}`) });
+    if (tab === "Fil") await page.goto("/");
+    else await link.click();
+    await expect(link).toHaveAttribute("aria-current", "page");
     const alert = page.getByRole("alert");
     await expect(alert).toContainText("Panne simulée.");
     await page.screenshot({
@@ -53,7 +54,7 @@ test("chaque page annonce sa panne de la même façon et s’en remet, sur mobil
       page.getByRole("heading", { name: tab, level: 1 }),
     ).toBeVisible();
   }
-  // Between phone and desktop the header keeps one row and still fits.
+  // Between phone and desktop the header still fits.
   await page.setViewportSize({ width: 700, height: 900 });
   expect(
     await page.evaluate(

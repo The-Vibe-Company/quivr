@@ -22,13 +22,18 @@ async function openSources(page: Page) {
   ).toBeVisible();
 }
 
-const addressField = (page: Page) =>
-  page.getByLabel("Adresse d’un site ou d’un flux RSS");
+const addressField = (page: Page) => page.getByLabel("Adresse du site");
 
+// Entrée looks the address up at once (typing alone looks it up after a pause).
 async function discover(page: Page, address: string) {
   await addressField(page).fill(address);
-  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  await addressField(page).press("Enter");
 }
+
+const addForm = (page: Page) =>
+  page.getByRole("form", { name: "Ajouter une source" });
+const intervals = (page: Page) =>
+  page.getByRole("group", { name: "Vérifier les nouveautés toutes les…" });
 
 const row = (page: Page, name: string) =>
   page
@@ -51,11 +56,13 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
   await openSources(page);
   await page.screenshot({ path: info.outputPath("sources-empty.png") });
   await discover(page, `${FEEDS}/site/?run=${run}`);
-  const confirm = page.getByRole("form", { name: "Confirmer la source" });
-  await expect(confirm.getByText("Flux trouvé")).toBeVisible();
+  const confirm = addForm(page);
+  await expect(confirm.getByText("Fil trouvé")).toBeVisible();
   const name = `Le Journal exemple — À la une ${run}`;
   await expect(confirm.getByLabel("Nom de la source")).toHaveValue(name);
-  await expect(confirm.getByLabel("Relevé")).toHaveValue(/\d+/);
+  await expect(
+    intervals(page).locator('button[aria-pressed="true"]'),
+  ).toHaveCount(1);
   await page.screenshot({
     path: info.outputPath("sources-confirm.png"),
     fullPage: true,
@@ -70,7 +77,7 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
     timeout: 60000,
   });
   await expect(source.getByText("Dernier article")).toBeVisible();
-  await expect(source.getByText("aucun pour l’instant")).toHaveCount(0);
+  await expect(source.getByText("Aucun article pour l’instant")).toHaveCount(0);
   await page.screenshot({
     path: info.outputPath("sources-list.png"),
     fullPage: true,
@@ -79,7 +86,7 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
   // The articles are searchable within a minute.
   await expect(async () => {
     await page.goto("/?q=gardiens%20phare%20ocre&mode=lexical");
-    await expect(page.locator(".result").first()).toContainText("teinte ocre", {
+    await expect(page.locator(".row").first()).toContainText("teinte ocre", {
       timeout: 3000,
     });
   }).toPass({ timeout: 60000 });
@@ -90,8 +97,8 @@ test("un site qui annonce plusieurs flux laisse choisir lequel suivre", async ({
 }) => {
   await openSources(page);
   await discover(page, `${FEEDS}/multi/?run=${run}`);
-  const confirm = page.getByRole("form", { name: "Confirmer la source" });
-  const choices = confirm.getByRole("group", { name: /2 flux trouvés/ });
+  const confirm = addForm(page);
+  const choices = confirm.getByRole("group", { name: /2 fils trouvés/ });
   await expect(choices.getByRole("radio")).toHaveCount(2);
   await choices.getByRole("radio", { name: /Technologie/ }).check();
   const name = `La Revue exemple — Technologie ${run}`;
@@ -138,8 +145,8 @@ test("une adresse privée, cassée ou sans flux reçoit une erreur claire", asyn
   await discover(page, "http://");
   await expect(alert).toContainText("adresse web complète");
   await expect(
-    page.getByRole("form", { name: "Confirmer la source" }),
-  ).toHaveCount(0);
+    page.getByRole("button", { name: "Commencer la collecte" }),
+  ).toBeDisabled();
 });
 
 test("la pause arrête la collecte, la reprise la relance, le retrait masque la source", async ({
@@ -148,16 +155,11 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
   const feed = `${run}-pause`;
   await openSources(page);
   await discover(page, `${FEEDS}/feeds/ticker.xml?run=${feed}`);
-  const confirm = page.getByRole("form", { name: "Confirmer la source" });
+  const confirm = addForm(page);
   const name = `Fil continu exemple ${feed}`;
   await confirm.getByLabel("Nom de la source").fill(name);
   // The shortest interval this deployment allows (1 s in the test stack).
-  const shortest = await confirm
-    .getByLabel("Relevé")
-    .locator("option")
-    .first()
-    .getAttribute("value");
-  await confirm.getByLabel("Relevé").selectOption(shortest!);
+  await intervals(page).getByRole("button").first().click();
   await confirm.getByRole("button", { name: "Commencer la collecte" }).click();
   const source = row(page, name);
   await expect.poll(() => hits(page, feed), { timeout: 60000 }).toBeGreaterThan(2);
@@ -187,7 +189,7 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
   await source.getByRole("button", { name: `Retirer ${name}` }).click();
   await source
     .getByRole("group", { name: `Retirer ${name}` })
-    .getByRole("button", { name: "Retirer", exact: true })
+    .getByRole("button", { name: "Oui, retirer" })
     .click();
   await expect(row(page, name)).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /^Vos sources/ })).toBeFocused();
@@ -208,9 +210,7 @@ test("mobile sombre : ajout et liste lisibles", async ({ page }, info) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await openSources(page);
   await discover(page, `${FEEDS}/multi/?run=${run}-mobile`);
-  await expect(
-    page.getByRole("form", { name: "Confirmer la source" }),
-  ).toBeVisible();
+  await expect(page.getByRole("group", { name: /fils trouvés/ })).toBeVisible();
   await page.screenshot({
     path: info.outputPath("mobile-dark-sources-pick.png"),
     fullPage: true,

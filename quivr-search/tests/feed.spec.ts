@@ -16,11 +16,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-async function openVeille(page: Page) {
+// The old ?view=veille address still opens the feed.
+async function openFeed(page: Page) {
   await page.goto("/?view=veille");
-  await expect(
-    page.getByRole("heading", { name: "Veille", level: 1 }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fil", level: 1 })).toBeAttached();
 }
 
 test("un texte ajouté à la main puis un article RSS arrivent en direct, filtrables et lisibles", async ({
@@ -30,10 +29,10 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
   test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
   test.setTimeout(150000);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await openVeille(page);
+  await openFeed(page);
   // The badge reads "Reconnexion…" until the facade follows the change feed.
   try {
-    await expect(page.locator(".live-badge")).toHaveText("En direct", {
+    await expect(page.locator(".bar-live")).toHaveText("En direct", {
       timeout: 30000,
     });
   } catch (error) {
@@ -49,7 +48,7 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
   }
   // Scoped to the list: the live region also announces new titles.
   const list = page.getByRole("list", { name: "Derniers éléments" });
-  const items = list.locator(".feed-item");
+  const items = list.locator(".row");
 
   // 1. A text added by hand appears at the top without reloading.
   await page
@@ -86,33 +85,41 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
   try {
     await expect(items.first()).toContainText(rssTitle, { timeout: 90000 });
     await expect(items.first()).toContainText(namespace);
-    await expect(items.first()).toContainText(rssBody);
-    const titles = await items.locator(".feed-title").allTextContents();
+    // The test feed re-dates its item on every poll: a new Version with the
+    // same text is not a correction.
+    await expect(items.first().locator(".row-updated")).toHaveCount(0);
+    const titles = await items.locator(".row-title").allTextContents();
     expect(titles.indexOf(rssTitle)).toBeLessThan(titles.indexOf(handTitle));
     await page.screenshot({
       path: info.outputPath("veille-desktop.png"),
       fullPage: true,
     });
 
-    // 3. The source filter keeps one source at a time.
-    const filter = page.getByRole("group", { name: "Filtrer par source" });
-    await filter.getByRole("button", { name: /^Ajouté à la main/ }).click();
+    // 3. A source of the side column keeps one source at a time.
+    const sources = page.getByRole("complementary", {
+      name: "Alertes et sources",
+    });
+    await sources.getByRole("button", { name: /^Ajouté à la main/ }).click();
     await expect(list.getByText(handTitle)).toBeVisible();
     await expect(list.getByText(rssTitle)).toHaveCount(0);
-    await filter
+    await sources
       .getByRole("button", { name: new RegExp(`^${namespace}`) })
       .click();
     await expect(list.getByText(rssTitle)).toBeVisible();
     await expect(list.getByText(handTitle)).toHaveCount(0);
     await expect(items).toHaveCount(1);
 
-    // 4. An item opens in the document view, without its HTML source.
+    // 4. An item opens in the reader, without its HTML source.
     await page.getByRole("link", { name: rssTitle }).click();
-    await expect(page.getByTestId("canonical-text").first()).toBeVisible();
-    await expect(page.getByRole("dialog")).toContainText(rssBody);
-    await expect(page.getByRole("dialog")).not.toContainText("<");
+    const reader = page.getByRole("complementary", { name: rssTitle });
+    await expect(reader.getByTestId("canonical-text").first()).toBeVisible();
+    await expect(reader).toContainText(rssBody);
+    await expect(reader).not.toContainText("<");
     await page.keyboard.press("Escape");
-    await filter.getByRole("button", { name: /^Toutes les sources/ }).click();
+    await page
+      .getByRole("group", { name: "Filtrer le fil" })
+      .getByRole("button", { name: /^Tout/ })
+      .click();
 
     await page.setViewportSize({ width: 375, height: 812 });
     expect(
@@ -133,7 +140,7 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
 });
 
 // The verify Corpus is shared by every spec, so an empty feed is simulated.
-test("une veille vide explique comment ajouter une source ou un texte", async ({
+test("un fil vide explique comment ajouter une source ou un texte", async ({
   page,
 }, info) => {
   await page.route("**/demo/feed", (route) =>
@@ -146,7 +153,7 @@ test("une veille vide explique comment ajouter une source ou un texte", async ({
       body: "retry: 60000\n\n",
     }),
   );
-  await openVeille(page);
+  await openFeed(page);
   await expect(
     page.getByRole("heading", { name: "Rien n’est encore arrivé." }),
   ).toBeVisible();
@@ -163,5 +170,5 @@ test("une veille vide explique comment ajouter une source ou un texte", async ({
   await page.getByRole("button", { name: "Ajouter une source" }).click();
   await expect(
     page.getByRole("heading", { name: "Sources", level: 1 }),
-  ).toBeVisible();
+  ).toBeAttached();
 });

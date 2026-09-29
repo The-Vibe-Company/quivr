@@ -7,7 +7,8 @@ import {
   type Connector,
   type ConnectorKind,
 } from "../../lib/connectors";
-import { HealthBadge, displayState } from "./HealthBadge";
+import { displayState } from "./HealthBadge";
+import { sourceProblem, sourceState } from "../../lib/format";
 import { sourceSummary } from "./summary";
 
 // Plain words for the failure codes of the rss kind (docs/connectors/rss.md);
@@ -64,9 +65,17 @@ export function groupSources(connectors: Connector[]) {
 export const resumable = (c: Connector, kind?: ConnectorKind) =>
   !c.enabled && !c.credential && kind?.credential !== "required";
 
+export interface SourceStats {
+  /** Articles of the source in the feed. */
+  all: number;
+  /** Of which an alert caught. */
+  caught: number;
+}
+
 export function SourceList({
   sources,
   kindOf,
+  stats,
   highlight,
   onOpen,
   onPause,
@@ -75,6 +84,7 @@ export function SourceList({
 }: {
   sources: Connector[];
   kindOf: (kind: string) => ConnectorKind | undefined;
+  stats: Map<string, SourceStats>;
   highlight: string | null;
   onOpen: (id: string) => void;
   onPause: (c: Connector) => Promise<void>;
@@ -82,12 +92,13 @@ export function SourceList({
   onRemove: (c: Connector) => Promise<void>;
 }) {
   return (
-    <ul className="connector-list source-list" aria-label="Sources">
+    <ul className="source-items" aria-label="Sources">
       {sources.map((c) => (
         <SourceRow
           key={c.source_namespace}
           connector={c}
           kind={kindOf(c.kind)}
+          stats={stats.get(c.source_namespace)}
           highlight={highlight === c.connector_id}
           onOpen={onOpen}
           onPause={onPause}
@@ -102,6 +113,7 @@ export function SourceList({
 function SourceRow({
   connector: c,
   kind,
+  stats,
   highlight,
   onOpen,
   onPause,
@@ -110,6 +122,7 @@ function SourceRow({
 }: {
   connector: Connector;
   kind?: ConnectorKind;
+  stats?: SourceStats;
   highlight: boolean;
   onOpen: (id: string) => void;
   onPause: (c: Connector) => Promise<void>;
@@ -123,8 +136,10 @@ function SourceRow({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const h = c.health;
   const state = displayState(c);
+  const status = sourceState(state);
   const source = sourceSummary(c, kind);
-  const rss = c.kind === "rss";
+  const problem = sourceProblem(state);
+  const renew = state === "access_error" || state === "credential_expiring";
 
   useEffect(() => {
     if (highlight) row.current?.scrollIntoView({ block: "nearest" });
@@ -169,75 +184,98 @@ function SourceRow({
     }
   };
 
+  const meta = [
+    h.last_item_at ? (
+      <span key="last">
+        Dernier article <Time value={h.last_item_at} />
+      </span>
+    ) : (
+      <span key="last">
+        {state === "starting"
+          ? "Premier relevé en cours…"
+          : "Aucun article pour l’instant"}
+      </span>
+    ),
+    c.enabled ? (
+      <span key="every">
+        vérifié toutes les {formatInterval(c.schedule.interval_seconds)}
+      </span>
+    ) : (
+      c.disabled_at && (
+        <span key="paused">
+          en pause depuis <Time value={c.disabled_at} />
+        </span>
+      )
+    ),
+    stats && stats.all > 0 && (
+      <span key="count">
+        {stats.all} article{stats.all > 1 ? "s" : ""} dans le fil
+        {stats.caught > 0 &&
+          ` · ${stats.caught} attrapé${stats.caught > 1 ? "s" : ""} par une alerte`}
+      </span>
+    ),
+  ].filter(Boolean);
+
   return (
     <li
       ref={row}
-      className="connector-row source-row"
+      className="source-item"
       data-connector={c.connector_id}
       data-highlight={highlight || undefined}
+      data-enabled={c.enabled}
     >
-      <div className="connector-main">
-        <button
-          type="button"
-          className="connector-link"
-          onClick={() => onOpen(c.connector_id)}
-        >
-          {c.source_namespace}
-        </button>
-        <span className="connector-kind">
-          {rss ? "Flux RSS" : kind?.title || c.kind}
-          {source && <span className="connector-source"> · {source}</span>}
+      <div className="source-item-head">
+        <span className="state-dot" data-tone={status.tone} aria-hidden="true" />
+        <h3 className="source-item-name">
+          <button
+            type="button"
+            className="connector-link"
+            onClick={() => onOpen(c.connector_id)}
+          >
+            {c.source_namespace}
+          </button>
+        </h3>
+        <span className="source-state" data-state={state} data-tone={status.tone}>
+          {status.label}
         </span>
       </div>
-      <HealthBadge state={state} />
-      <dl className="connector-meta">
-        <div>
-          <dt>Dernier article</dt>
-          <dd>
-            {h.last_item_at ? (
-              <Time value={h.last_item_at} />
-            ) : (
-              "aucun pour l’instant"
-            )}
-          </dd>
-        </div>
-        {c.enabled ? (
-          <div>
-            <dt>Relevé</dt>
-            <dd>toutes les {formatInterval(c.schedule.interval_seconds)}</dd>
-          </div>
-        ) : (
-          c.disabled_at && (
-            <div>
-              <dt>En pause</dt>
-              <dd>
-                <Time value={c.disabled_at} />
-              </dd>
-            </div>
-          )
-        )}
-        {h.last_error && (
-          <div className={state === "failing" ? "meta-error" : undefined}>
-            <dt>Dernière erreur</dt>
-            <dd>
-              {FAILURES[h.last_error.code] || <code>{h.last_error.code}</code>}
-              {" · "}
-              <Time value={h.last_error.at} />
-            </dd>
-          </div>
-        )}
-      </dl>
-      <div className="source-actions">
+      <p className="source-item-meta">
+        {meta.map((part, i) => (
+          <span key={i}>
+            {i > 0 && " · "}
+            {part}
+          </span>
+        ))}
+      </p>
+      <p className="source-item-where">
+        {c.kind === "rss" ? "Fil RSS" : kind?.title || c.kind}
+        {source && <> · {source}</>}
+      </p>
+      {c.enabled && (problem || h.last_error) && state !== "active" && (
+        <p className="source-item-problem" data-tone={status.tone}>
+          {problem}
+          {h.last_error && (
+            <>
+              {problem && " "}
+              <span className="muted">
+                Dernière erreur :{" "}
+                {FAILURES[h.last_error.code] || <code>{h.last_error.code}</code>}
+                , <Time value={h.last_error.at} />.
+              </span>
+            </>
+          )}
+        </p>
+      )}
+      <div className="row-actions source-actions">
         {confirming ? (
           <div
-            className="remove-confirm"
+            className="row-actions"
             role="group"
             aria-label={`Retirer ${c.source_namespace}`}
           >
-            <p>
-              Retirer cette source ? La collecte s’arrête ; les articles déjà
-              collectés restent consultables.
-            </p>
+            <span className="row-confirm">
+              Retirer cette source ? Les articles déjà reçus restent.
+            </span>
             <button
               ref={confirmRef}
               type="button"
@@ -245,18 +283,29 @@ function SourceRow({
               disabled={busy}
               onClick={act(() => onRemove(c))}
             >
-              {busy ? "Retrait…" : "Retirer"}
+              {busy ? "Retrait…" : "Oui, retirer"}
             </button>
             <button
               type="button"
               className="button small"
               onClick={() => setConfirming(false)}
             >
-              Annuler
+              Non
             </button>
           </div>
         ) : (
           <>
+            {renew && c.enabled && (
+              <button
+                type="button"
+                className="button small"
+                data-tone={status.tone}
+                onClick={() => onOpen(c.connector_id)}
+              >
+                Renouveler la connexion
+                <span className="visually-hidden"> de {c.source_namespace}</span>
+              </button>
+            )}
             {c.enabled ? (
               <button
                 ref={toggleRef}
@@ -266,8 +315,8 @@ function SourceRow({
                 onClick={toggle(() => onPause(c))}
                 aria-label={`Mettre en pause ${c.source_namespace}`}
               >
-                <Pause size={15} weight="bold" aria-hidden="true" />
-                Pause
+                <Pause size={14} weight="bold" aria-hidden="true" />
+                Mettre en pause
               </button>
             ) : (
               resumable(c, kind) && (
@@ -279,7 +328,7 @@ function SourceRow({
                   onClick={toggle(() => onResume(c))}
                   aria-label={`Reprendre ${c.source_namespace}`}
                 >
-                  <Play size={15} weight="bold" aria-hidden="true" />
+                  <Play size={14} weight="bold" aria-hidden="true" />
                   Reprendre
                 </button>
               )
@@ -292,7 +341,7 @@ function SourceRow({
               onClick={() => setConfirming(true)}
               aria-label={`Retirer ${c.source_namespace}`}
             >
-              <Trash size={15} aria-hidden="true" />
+              <Trash size={14} aria-hidden="true" />
               Retirer
             </button>
           </>

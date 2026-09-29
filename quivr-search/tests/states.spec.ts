@@ -58,13 +58,12 @@ test("mobile sombre, clavier, brouillon et mouvement réduit", async ({
 test("recherche vide, panne réseau et reprise explicite", async ({
   page,
 }, info) => {
-  await page.getByRole("button", { name: "Mots-clés", exact: true }).click();
+  // Exact words only: "Idées proches" off.
   await page.getByRole("searchbox").fill("motintrouvable" + Date.now());
-  await page.getByRole("button", { name: "Lancer la recherche" }).click();
-  await expect(page.getByText("Aucun passage trouvé.")).toBeVisible();
+  await page.getByRole("switch", { name: "Idées proches" }).click();
+  await expect(page.getByText("Aucun article ne parle de ça.")).toBeVisible();
   await page.route("**/v0/search", (route) => route.abort());
   await page.getByRole("searchbox").fill("ferries");
-  await page.getByRole("button", { name: "Lancer la recherche" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.screenshot({
     path: info.outputPath("search-error.png"),
@@ -73,7 +72,9 @@ test("recherche vide, panne réseau et reprise explicite", async ({
   await page.unroute("**/v0/search");
   await page.getByRole("button", { name: "Réessayer", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.getByText(/passages? affichés?/)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /articles? sur « ferries »/ }),
+  ).toBeVisible();
 });
 
 test("un envoi dont la réponse est perdue se rejoue sans nouvel ajout", async ({

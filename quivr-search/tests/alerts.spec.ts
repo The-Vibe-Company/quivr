@@ -62,11 +62,13 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/?view=alerts");
   await expect(
-    page.getByRole("heading", { name: "Alertes", level: 1 }),
+    page.getByRole("heading", { name: "Nouvelle alerte" }),
   ).toBeVisible();
 
-  // The query is read as it is typed; a mistake is explained before saving.
-  const query = page.getByLabel("Mots-clés de l’alerte");
+  // A query with groups is written in the advanced field, read as it is
+  // typed; a mistake is explained before saving.
+  await page.getByRole("button", { name: "Écrire une requête avancée" }).click();
+  const query = page.getByLabel("Requête avancée");
   await query.fill("orage AND");
   await expect(page.locator("#alert-query-preview")).toHaveAttribute(
     "data-state",
@@ -90,7 +92,7 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await page.getByRole("button", { name: "Créer l’alerte" }).click();
   const row = alertRow(page, name);
   await expect(row.getByTestId("alert-count")).toHaveText("Aucun article");
-  await expect(query).toHaveValue("");
+  await expect(page.getByLabel("Mots à surveiller")).toHaveValue("");
 
   // Only articles arriving after the alert count: a text without the words,
   // then one with them, then an RSS source with one article of each kind.
@@ -117,8 +119,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await expect(row.getByTestId("alert-count")).toHaveText("2 articles", {
     timeout: 120000,
   });
-  await row.getByRole("button").click();
-  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  await row.getByRole("button", { name, exact: true }).click();
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   const caught = page.getByRole("list", { name: "Articles trouvés" });
   const typed = caught
     .locator(".caught")
@@ -143,15 +145,19 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     fullPage: true,
   });
 
-  // Opening an article shows the whole text.
+  // Opening an article shows the whole text in the feed's reader, with why
+  // the alert caught it.
   await fed.getByRole("button").first().click();
+  const reader = page.getByRole("complementary", {
+    name: new RegExp(`Grêle et orage sur le vignoble ${run}`),
+  });
+  await expect(reader).toContainText("couché les vignes");
   await expect(
-    page.getByRole("dialog", { name: "Document source" }),
-  ).toContainText("couché les vignes");
+    reader.getByRole("list", { name: "Pourquoi cet article" }),
+  ).toContainText(`Attrapé par votre alerte « ${name} »`);
   await page.keyboard.press("Escape");
 
-  // On the Veille feed, the caught articles carry the alert; the others do not.
-  await page.getByRole("link", { name: "Veille", exact: true }).click();
+  // In the feed, the caught articles carry the alert; the others do not.
   const feed = page.getByRole("list", { name: "Derniers éléments" });
   const marked = (text: string) =>
     feed
@@ -172,10 +178,12 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     path: info.outputPath("alerts-feed.png"),
     fullPage: true,
   });
-  await marked(`Orage de grêle sur le port ${run}`)
-    .getByRole("link", { name })
+  await page
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("link", { name: /^Alertes/ })
     .click();
-  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  await row.getByRole("button", { name, exact: true }).click();
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
 
   // Pause, resume, edit (applies to later articles) and delete.
   const actions = page.getByRole("group", { name: "Actions de l’alerte" });
@@ -183,8 +191,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await actions.getByRole("button", { name: "Mettre en pause" }).click();
   await expect(badge).toHaveText("En pause");
   await page.getByRole("button", { name: "Toutes les alertes" }).click();
-  await expect(row.locator(".health-badge")).toHaveText("En pause");
-  await row.getByRole("button").click();
+  await expect(row.locator(".alert-state")).toHaveText("En pause");
+  await row.getByRole("button", { name, exact: true }).click();
   await actions.getByRole("button", { name: "Reprendre" }).click();
   await expect(badge).toHaveText("Active");
 
@@ -215,12 +223,14 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   await page.goto("/?view=alerts");
   await page
     .getByRole("group", { name: "Type d’alerte" })
-    .getByRole("button", { name: "Décrite" })
+    .getByRole("button", { name: "Un sujet décrit" })
     .click();
   await expect(page.locator("#alert-described-note")).toContainText(
     "Le texte des articles est envoyé à ce service externe.",
   );
-  await page.getByRole("button", { name: "Des grèves dans les ports" }).click();
+  await page
+    .getByLabel("Décrivez le sujet en une phrase")
+    .fill("Des grèves dans les ports");
   const name = `Ports ${run}`;
   await page.getByLabel("Nom de l’alerte").fill(name);
   await page.screenshot({
@@ -229,8 +239,8 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   });
   await page.getByRole("button", { name: "Créer l’alerte" }).click();
   const row = alertRow(page, name);
-  await expect(row.locator(".alert-query")).toHaveText(
-    "Des grèves dans les ports",
+  await expect(row.locator(".alert-item-rule")).toHaveText(
+    "Décrite : « Des grèves dans les ports »",
   );
 
   // No shared keyword: the classifier judges the meaning of each new article.
@@ -239,8 +249,8 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
     page,
     `Les dockers cessent le travail au port ${run} : un débrayage bloque les navires.`,
   );
-  await row.getByRole("button").click();
-  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  await row.getByRole("button", { name, exact: true }).click();
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   const caught = page.getByRole("list", { name: "Articles trouvés" });
   const item = caught
     .locator(".caught")
@@ -286,7 +296,7 @@ test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", 
     });
   });
   await page.goto("/?view=alerts");
-  await expect(page.getByLabel("Mots-clés de l’alerte")).toBeVisible();
+  await expect(page.getByLabel("Mots à surveiller")).toBeVisible();
   await expect(page.getByRole("group", { name: "Type d’alerte" })).toHaveCount(
     0,
   );
@@ -300,11 +310,11 @@ test("la page des alertes tient sur mobile, en mode clair et sombre", async ({
 }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/?view=alerts");
-  await expect(page.getByLabel("Mots-clés de l’alerte")).toBeVisible();
-  await page.getByRole("button", { name: '"marché aux fleurs"' }).click();
-  await expect(page.locator("#alert-query-preview")).toHaveAttribute(
-    "data-state",
-    "valid",
+  const words = page.getByLabel("Mots à surveiller");
+  await words.fill("marché aux fleurs");
+  await words.press("Enter");
+  await expect(page.locator(".form-preview .keyword")).toHaveText(
+    "marché aux fleurs",
   );
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });

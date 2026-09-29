@@ -26,12 +26,27 @@ function clip(text, size) {
   const space = cut.lastIndexOf(" ");
   return (space > size * 0.6 ? cut.slice(0, space) : cut).trimEnd() + "…";
 }
+// Only a web address may become the reader's "Ouvrir l'original" link.
+function webLink(value) {
+  if (typeof value !== "string" || value.length > 2048) return undefined;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 const date = (value) =>
   typeof value === "string" && !Number.isNaN(Date.parse(value))
     ? new Date(value).toISOString()
     : undefined;
 
-/** The feed item of a Record's current Version: source, title and excerpt. */
+/**
+ * The feed item of a Record's current Version: source, title, excerpt, and
+ * the original article's address when its source gives one.
+ */
 export function describe(record, version, receivedAt) {
   const texts = (version.manifest?.parts || []).filter(
     (part) =>
@@ -66,6 +81,8 @@ export function describe(record, version, receivedAt) {
   };
   const published = date(rss?.published) || date(rss?.updated);
   if (published) item.published_at = published;
+  const link = webLink(rss?.link) || webLink(rss?.links?.[0]);
+  if (link) item.link = link;
   if (receivedAt) item.received_at = receivedAt;
   return item;
 }
@@ -162,7 +179,20 @@ export function createFeed({ core, key, corpus, upstream }) {
     );
     if (version.status === 404) return;
     if (version.status !== 200) throw failure(version.status, "version read");
-    upsert(describe(current, version.data, receivedAt || known?.received_at));
+    const item = describe(
+      current,
+      version.data,
+      receivedAt || known?.received_at,
+    );
+    // A new Version of an article already in the feed whose title or text
+    // changed is a correction: the reader says so, dated by the change event
+    // that revealed it. A feed that only re-dates its items (a new Version on
+    // every poll) corrects nothing.
+    const edited =
+      known && (known.title !== item.title || known.excerpt !== item.excerpt);
+    if (edited && receivedAt) item.updated_at = receivedAt;
+    else if (known?.updated_at) item.updated_at = known.updated_at;
+    upsert(item);
   }
 
   async function sync() {

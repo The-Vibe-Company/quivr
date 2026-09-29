@@ -434,7 +434,27 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
       extensions: {
         "connector.rss": {
           schema_version: "1",
-          data: { item: { published: "2026-09-01T08:00:00Z" } },
+          data: {
+            item: {
+              published: "2026-09-01T08:00:00Z",
+              link: "https://news.example.org/headline",
+            },
+          },
+        },
+      },
+    },
+    // A corrected article whose feed gives a link that is not a web address.
+    v_rss2: {
+      manifest: {
+        parts: [
+          text("title", "title", "Feed headline, corrected"),
+          text("body", "body", "Corrected body"),
+        ],
+      },
+      extensions: {
+        "connector.rss": {
+          schema_version: "1",
+          data: { item: { link: "javascript:alert(1)" } },
         },
       },
     },
@@ -515,6 +535,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
     title: "Feed headline",
     excerpt: "Body of the article",
     published_at: "2026-09-01T08:00:00.000Z",
+    link: "https://news.example.org/headline",
   });
   assert.equal(snapshot.items[1].title, "Pasted note");
   assert.equal(snapshot.items[1].excerpt, "Second line");
@@ -558,6 +579,29 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   assert.equal(after.items[0].received_at, "2026-09-29T10:00:00.000Z");
   assert.equal(after.items[0].title, "Fresh arrival");
   assert.equal(after.items[0].excerpt, "Its excerpt");
+  assert.equal(after.items[0].updated_at, undefined, "a first Version");
+
+  // A new Version with the same title and text (a feed re-dating its items)
+  // is not a correction.
+  versions.v_new2 = versions.v_new;
+  records.rec_new.version = "v_new2";
+  change("rec_new", "c1a");
+  await until(/event: item\ndata: [^\n]*"v_new2"/);
+  const redated = (await (await fetch(base + "/demo/feed")).json()).items[0];
+  assert.equal(redated.version_id, "v_new2");
+  assert.equal(redated.updated_at, undefined, "same text, no correction");
+
+  // A new Version of a known article whose text changed is a correction,
+  // dated by its event; a link that is not a web address is dropped.
+  records.rec_rss.version = "v_rss2";
+  change("rec_rss", "c1b");
+  await until(/event: item\ndata: [^\n]*"v_rss2"/);
+  const corrected = (await (await fetch(base + "/demo/feed")).json()).items.find(
+    (item) => item.record_id === "rec_rss",
+  );
+  assert.equal(corrected.title, "Feed headline, corrected");
+  assert.equal(corrected.updated_at, "2026-09-29T10:00:00.000Z");
+  assert.equal(corrected.link, undefined);
 
   // A withdrawal removes the item for every reader.
   records.rec_hand.withdrawn = true;

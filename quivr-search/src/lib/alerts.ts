@@ -2,7 +2,6 @@
 // The facade forces the demo corpus, the alerts evaluator and the webhook
 // destination; the browser only sends a name and an expression: keywords, or
 // a plain-language description when the deployment has a classifier.
-import { useEffect, useState } from "react";
 import { APIError, request } from "./search";
 import { pollChanges } from "./connectors";
 import type { KeywordExpression } from "./notation";
@@ -196,37 +195,4 @@ export function followMonitoring({
     controller.abort();
     clearTimeout(timer);
   };
-}
-
-/**
- * The alerts that caught each article (record id → alerts), kept current, for
- * marking caught articles elsewhere in the app. Empty when alerts are off.
- */
-export function useAlertMarks(onUnauthorized: () => void) {
-  const [marks, setMarks] = useState<Map<string, Alert[]>>(new Map());
-  useEffect(() => {
-    const load = async (signal?: AbortSignal) => {
-      const list = await fetchAlerts(signal);
-      const byId = new Map(list.items.map((a) => [a.alert_id, a]));
-      setMarks(
-        new Map(
-          Object.entries(list.matched).map(([record, ids]) => [
-            record,
-            ids.map((id) => byId.get(id)!).filter(Boolean),
-          ]),
-        ),
-      );
-    };
-    const controller = new AbortController();
-    load(controller.signal).catch(() => undefined);
-    const stop = followMonitoring({
-      onChange: (signal) => load(signal).catch(() => undefined),
-      onUnauthorized,
-    });
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [onUnauthorized]);
-  return marks;
 }

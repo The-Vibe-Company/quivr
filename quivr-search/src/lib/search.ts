@@ -52,10 +52,11 @@ export const search = (
   mode: Mode,
   corpus: string,
   signal?: AbortSignal,
+  limit = 10,
 ) =>
   request<SearchResponse>(
     "/v0/search",
-    { query, mode, profile: "balanced", limit: 10, corpus_ids: [corpus] },
+    { query, mode, profile: "balanced", limit, corpus_ids: [corpus] },
     signal,
   );
 export const fetchDocument = (

@@ -14,6 +14,10 @@ export interface FeedItem {
   received_at?: string;
   /** The source's own publication date, when it has one (RSS items). */
   published_at?: string;
+  /** The original article on its site (http/https only), when the source gives one. */
+  link?: string;
+  /** When the facade saw a new Version of an article it already had. */
+  updated_at?: string;
 }
 
 /** Texts added from this web app use this namespace. */

@@ -1,0 +1,275 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowSquareOut } from "@phosphor-icons/react";
+import { fetchDocument, search, tokenize } from "../../lib/search";
+import { fetchAlert, type Alert, type CaughtArticle } from "../../lib/alerts";
+import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
+import { hhmm, longTime } from "../../lib/format";
+import type { DocumentDetail } from "../../types";
+import type { Doc } from "../../App";
+import { Highlight } from "../Highlight";
+import { LoadingState, Notice } from "../ui";
+
+const NEIGHBOURS = 3;
+const SEED_CHARS = 400;
+
+const sourceLabel = (namespace?: string) =>
+  !namespace
+    ? "Source"
+    : namespace === HAND_NAMESPACE
+      ? "Ajouté à la main"
+      : namespace;
+
+/** Why an alert caught this article, in one sentence. */
+function why(alert: Alert, match?: CaughtArticle) {
+  if (!match) return "";
+  if (match.score !== null)
+    return `Quivr a jugé qu’il correspond à votre description (confiance ${Math.round(match.score * 100)} %).`;
+  const words = [...new Set(match.terms.map((t) => t.term))];
+  return words.length
+    ? `Il contient ${words.map((w) => `« ${w} »`).join(", ")}.`
+    : alert.kind === "keywords"
+      ? "Il correspond aux règles de l’alerte."
+      : "";
+}
+
+/**
+ * The built-in reader: the article's text as collected, why an alert caught
+ * it, a correction notice, articles on the same subject (a semantic search
+ * seeded by this one) and the original on its site.
+ */
+export function Reader({
+  doc,
+  item,
+  corpus,
+  terms,
+  caught,
+  feedById,
+  onClose,
+  onOpen,
+  onSimilar,
+}: {
+  doc: Doc;
+  item?: FeedItem;
+  corpus: string;
+  terms: string[];
+  caught: Alert[];
+  feedById: Map<string, FeedItem>;
+  onClose: () => void;
+  onOpen: (record: string, version: string) => void;
+  onSimilar: (text: string) => void;
+}) {
+  const [detail, setDetail] = useState<DocumentDetail | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [matches, setMatches] = useState<Map<string, CaughtArticle>>(
+    new Map(),
+  );
+  const [neighbours, setNeighbours] = useState<
+    { record_id: string; version_id: string; title: string; meta: string }[]
+  >([]);
+  const heading = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setError("");
+    fetchDocument(doc.record, doc.version, controller.signal)
+      .then(setDetail)
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      });
+    return () => controller.abort();
+  }, [doc.record, doc.version, attempt]);
+
+  // What each alert found in this article (its words, or its score).
+  const caughtIds = caught.map((a) => a.alert_id).join(",");
+  useEffect(() => {
+    if (!caughtIds) return;
+    const controller = new AbortController();
+    Promise.all(
+      caughtIds.split(",").map((id) =>
+        fetchAlert(id, controller.signal).then(
+          (d) =>
+            [id, d.matches.find((m) => m.record_id === doc.record)] as const,
+          () => [id, undefined] as const,
+        ),
+      ),
+    ).then((pairs) => {
+      if (controller.signal.aborted) return;
+      setMatches(
+        new Map(
+          pairs.filter((p): p is readonly [string, CaughtArticle] => !!p[1]),
+        ),
+      );
+    });
+    return () => controller.abort();
+  }, [caughtIds, doc.record]);
+
+  const parts = (detail?.manifest.parts || []).filter(
+    (part) => part.content.kind === "text" && part.role !== "source_html",
+  );
+  const titlePart = parts.find((part) => part.role === "title");
+  const texts = parts.filter((part) => part !== titlePart);
+  const title =
+    titlePart?.content.text.trim() ||
+    item?.title ||
+    texts[0]?.content.text.trim().split("\n")[0] ||
+    "Sans titre";
+
+  // "Sur le même sujet": a semantic search seeded by the article itself.
+  const seed = detail
+    ? `${title}\n${texts.map((p) => p.content.text).join("\n")}`.slice(
+        0,
+        SEED_CHARS,
+      )
+    : "";
+  useEffect(() => {
+    if (!seed) return;
+    const controller = new AbortController();
+    search(seed, "semantic", corpus, controller.signal, 12)
+      .then((data) => {
+        const seen = new Set([doc.record]);
+        const found = [];
+        for (const r of data.items) {
+          if (seen.has(r.record_id)) continue;
+          seen.add(r.record_id);
+          const known = feedById.get(r.record_id);
+          const at = known?.received_at || known?.published_at;
+          found.push({
+            record_id: r.record_id,
+            version_id: known?.version_id || r.version_id,
+            title: known?.title || r.excerpt.text.slice(0, 110),
+            meta: [sourceLabel(known?.namespace), at && longTime(at)]
+              .filter(Boolean)
+              .join(" · "),
+          });
+          if (found.length >= NEIGHBOURS) break;
+        }
+        setNeighbours(found);
+      })
+      // Semantic search may still be preparing: the section stays hidden.
+      .catch(() => setNeighbours([]));
+    return () => controller.abort();
+    // feedById changes with every arrival; the neighbours need not follow.
+  }, [seed, corpus, doc.record]);
+
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+  }, [doc.record]);
+
+  const highlight = useMemo(
+    () =>
+      terms.length
+        ? terms
+        : [...matches.values()].flatMap((m) =>
+            m.terms.flatMap((t) => tokenize(t.term)),
+          ),
+    [terms, matches],
+  );
+  const at = item?.received_at || item?.published_at;
+
+  return (
+    <aside className="panel reader" aria-labelledby="reader-title">
+      <div className="reader-top">
+        <span className="reader-source">{sourceLabel(item?.namespace)}</span>
+        {at && (
+          <span className="reader-when">
+            · {item?.received_at ? "Arrivé à" : "Publié à"} {hhmm(at)} ·{" "}
+            {longTime(at)}
+          </span>
+        )}
+        <button
+          type="button"
+          className="button small reader-close"
+          title="Fermer (Échap)"
+          onClick={onClose}
+        >
+          Fermer
+        </button>
+      </div>
+      <div className="reader-scroll">
+        <h2 id="reader-title" ref={heading} tabIndex={-1}>
+          {title}
+        </h2>
+        {caught.length > 0 && (
+          <ul className="reader-caught" aria-label="Pourquoi cet article">
+            {caught.map((a) => (
+              <li key={a.alert_id}>
+                <strong>Attrapé par votre alerte « {a.name} »</strong>
+                {why(a, matches.get(a.alert_id)) &&
+                  ` — ${why(a, matches.get(a.alert_id))}`}
+              </li>
+            ))}
+          </ul>
+        )}
+        {item?.updated_at && (
+          <p className="reader-updated">
+            Article corrigé {longTime(item.updated_at)} : Quivr a reçu une
+            nouvelle version et affiche celle-ci.
+          </p>
+        )}
+        {!detail && !error && <LoadingState label="Chargement de l’article…" rows={3} />}
+        {error && (
+          <Notice
+            title="L’article ne s’affiche pas."
+            onRetry={() => setAttempt((n) => n + 1)}
+          >
+            {error}
+          </Notice>
+        )}
+        {detail &&
+          texts.map((part) => (
+            <div
+              key={part.key}
+              className="reader-text"
+              data-testid="canonical-text"
+            >
+              <Highlight text={part.content.text} terms={highlight} />
+            </div>
+          ))}
+        {neighbours.length > 0 && (
+          <section className="reader-near" aria-labelledby="reader-near-title">
+            <h3 id="reader-near-title">Sur le même sujet</h3>
+            <ul>
+              {neighbours.map((n) => (
+                <li key={n.record_id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(n.record_id, n.version_id)}
+                  >
+                    <span className="reader-near-title">{n.title}</span>
+                    {n.meta && (
+                      <span className="reader-near-meta">{n.meta}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+      <div className="reader-foot">
+        <button
+          type="button"
+          className="button primary small"
+          onClick={() => onSimilar(title)}
+        >
+          Chercher le même sujet
+        </button>
+        {item?.link && (
+          <a
+            className="button small"
+            href={item.link}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Ouvrir l’original
+            <ArrowSquareOut size={15} aria-hidden="true" />
+          </a>
+        )}
+        <span className="reader-keys" aria-hidden="true">
+          ↑ ↓ article suivant · Échap fermer
+        </span>
+      </div>
+    </aside>
+  );
+}

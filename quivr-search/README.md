@@ -1,6 +1,6 @@
 # Quivr Search demo (THE-663)
 
-React/TypeScript frontend adapted from [Quivr PR #3714](https://github.com/The-Vibe-Company/quivr/pull/3714), directory `quivr-search/` at commit `63d7fc52035190732b2c810c63645a295ece672e`. The original visual identity is retained; ingestion, search and source reading now use the real V2 API. No simulated Agent answers, corpus, scores, totals or pagination remain.
+React/TypeScript frontend adapted from [Quivr PR #3714](https://github.com/The-Vibe-Company/quivr/pull/3714), directory `quivr-search/` at commit `63d7fc52035190732b2c810c63645a295ece672e`, now a monitoring dashboard (THE-765); ingestion, search and source reading now use the real V2 API. No simulated Agent answers, corpus, scores, totals or pagination remain.
 
 ## Run locally
 
@@ -12,24 +12,30 @@ make demo
 
 Open http://127.0.0.1:5183. The command builds the frontend, starts isolated real dependencies, migrates the database and serves the production bundle. First startup downloads the pinned E5 model (~958 MB). Ctrl+C stops services; texts persist across runs. `make demo-reset` deletes **only this demo's** volumes. Set `DEMO_PORT` to use another port. Optional `DEMO_PASSWORD` enables a shared demo password locally.
 
-Click **Ajouter du texte**, paste a note, submit, follow search availability, then open the source or search for it. Hybrid search is the default; lexical and semantic modes are selectable. Inline text is limited to 256 KiB; whitespace and Unicode are preserved. Drafts and retry identity survive reloads within the same browser tab. Ambiguous network failures reuse the same ingestion identity.
+The app is a monitoring dashboard with three tabs, **Fil**, **Alertes** and **Sources**, and a search box in the top bar (`/` or Ctrl+K). **Ajouter du texte** pastes a note: it is limited to 256 KiB, whitespace and Unicode are preserved, drafts and retry identity survive reloads within the same browser tab, and ambiguous network failures reuse the same ingestion identity.
+
+### Fil
+
+The **Fil** tab (default; `?view=veille` still works) lists everything entering the demo corpus, newest first, with source (namespace, or **Ajouté à la main**), time, title and the alerts that caught it. The server builds it from the change feed and catalog (`feed.mjs`; needs `changes:read`), with the RSS item's link (http/https only) and the date of a new Version of an article it already had. Time is when the server saw an item arrive; older items show their RSS date. New articles arrive live; while an article is open, the list is scrolled or arrivals are paused (**En direct** / **En pause**), they wait behind a **N nouveaux articles** button. **Non lus** is kept in this browser only (localStorage). Chips filter the unread and caught articles; each alert and source on the right filters the feed too.
+
+Search is lexical, or hybrid with **Idées proches**, which marks articles found by meaning only as **Même sujet, autres mots**; **Créer une alerte** turns the query into a keyword alert. The reader shows the text as collected, why an alert caught the article, a correction notice, **Sur le même sujet** (a semantic search seeded by the article) and **Ouvrir l’original**. ↑ ↓ open the next article and Échap closes it.
 
 ### Sources
 
 The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (see
 [From the web interface](../docs/connectors/README.md#from-the-web-interface)):
 
-1. Paste a site address or a feed address and press **Ajouter**. The server fetches
-   the address, recognises a feed or finds the feeds the page advertises
+1. Paste a site address or a feed address. Once you pause typing (or press Entrée), the
+   server fetches it, recognises a feed or finds the feeds the page advertises
    (`<link rel="alternate" type="application/rss+xml">`, Atom or JSON Feed), and
    refuses private, loopback and link-local addresses.
-2. If the page advertises several feeds, pick one. The name (the feed title) and
-   the polling interval come prefilled.
+2. If the page advertises several feeds, pick one. The name comes from the feed title;
+   choose how often to check it (5 min to 1 h, never below the deployment's minimum).
 3. **Commencer la collecte** creates an `rss` Connector Instance whose Source
    Namespace is that name. Its articles become searchable after the first poll.
 
 Suggested feeds, set by the deployment, add in one click. Each source shows its
-health (active, silent, failing, paused), its last article and its interval, and
+health in plain words, its last article, its interval and its counts in the feed, and
 can be paused, resumed or removed. Pausing disables the instance. Resuming creates
 a new instance on the same Source Namespace, because the core cannot re-enable one;
 articles already collected keep their identity. Removing disables every instance
@@ -42,28 +48,22 @@ Organization, so texts added before this change are not shown. The local stack l
 the core reach private addresses; the web server still refuses them, so private
 feeds get the same error as in production.
 
-### Veille
-
-The **Veille** tab (`?view=veille`) lists everything entering the demo corpus, newest
-first, with source (namespace, or **Ajouté à la main**), time, title and excerpt. New
-items arrive live, chips filter by source and an item opens in the document view. The
-server builds it from the change feed and catalog (`feed.mjs`; needs `changes:read`).
-Time is when the server saw an item arrive; older items show their RSS date or **Déjà présent**.
-
 ### Alertes
 
 The **Alertes** tab (`?view=alerts`) sets alerts on new articles, from RSS or added by hand.
-A [keyword alert](../docs/keyword-alerts.md) takes a query such as `orage AND (grêle OR vent) NOT football`,
-and the page shows how it reads it (`src/lib/notation.ts` ports the plugin's parser). With
-`DEMO_DESCRIBED_ALERTS`, the type **Décrite** offers [described alerts](../docs/described-alerts.md):
-a sentence judged by Jev, whose page says article text goes to TypeSafe and a catch can take a
-minute (it waits for enrichment); without it, a line says why the choice is missing. Each alert
+A [keyword alert](../docs/keyword-alerts.md) is written as words to watch (any or all of
+them), words to ignore (`NOT`) and the sources to watch (`source:` filters); any other query,
+such as `(port OR quai) AND grève`, goes in **Écrire une requête avancée**, and the form shows
+how Quivr reads it (`src/lib/alertForm.ts`; `src/lib/notation.ts` ports the plugin's parser).
+With `DEMO_DESCRIBED_ALERTS`, **Un sujet décrit** offers [described alerts](../docs/described-alerts.md):
+a sentence judged by Jev, whose note says article text goes to TypeSafe and a catch can take a
+minute; they watch every source. Without it, a line says why the choice is missing. Each alert
 lists what it caught, live, with the matched words or the score; it can be paused, resumed,
-edited and deleted. `alerts.mjs` explains how alerts are stored and read.
+edited (its name stays) and deleted. `alerts.mjs` explains how alerts are stored and read.
 
 ## Frontend development and checks
 
-With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`. Design tokens (colour, spacing, type, radii, motion) sit at the top of `src/styles.css`; every page builds its header, live badge and loading, empty and error states from `src/components/ui.tsx`.
+With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`. Design tokens sit at the top of `src/styles.css` and `src/dashboard.css` (the dashboard's layout); loading, empty and error states come from `src/components/ui.tsx`. `tests/dashboard.spec.ts` runs the dashboard's flows against a fake engine behind the facade routes (`tests/fake-engine.ts`).
 
 ```sh
 npm run typecheck --prefix quivr-search

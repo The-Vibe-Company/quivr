@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Key, RssSimple } from "@phosphor-icons/react";
+import { Key } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import {
   connectorMessage,
@@ -20,7 +20,11 @@ import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { AddSource } from "./AddSource";
 import { SourceList, groupSources } from "./SourceList";
-import { EmptyState, LiveBadge, LoadingState, Notice, PageHeader } from "../ui";
+import { LiveBadge, LoadingState, Notice } from "../ui";
+import type { FeedItem } from "../../lib/feed";
+import { needsCheck } from "../../lib/format";
+import { displayState } from "./HealthBadge";
+import type { SourceStats } from "./SourceList";
 
 const LIVE_INTERVAL = 5000;
 
@@ -28,16 +32,31 @@ type Status = "loading" | "ready" | "unavailable" | "error";
 
 export function ConnectorsView({
   corpus,
+  feedItems,
+  matched,
+  initialSelected,
+  onChanged,
+  onAdd,
+  notify,
   onUnauthorized,
 }: {
   corpus: string;
+  /** The feed, for each source's article counts. */
+  feedItems: FeedItem[];
+  /** Record id → alerts that caught it. */
+  matched: Record<string, string[]>;
+  /** A source to open on arrival (from the feed's "Renouveler"). */
+  initialSelected: string | null;
+  onChanged: () => void;
+  onAdd: () => void;
+  notify: (text: string) => void;
   onUnauthorized: () => void;
 }) {
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState("");
   const [catalog, setCatalog] = useState<KindCatalog | null>(null);
   const [connectors, setConnectors] = useState<Connector[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialSelected);
   const [creating, setCreating] = useState(false);
   const [live, setLive] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -217,7 +236,8 @@ export function ConnectorsView({
   const onPause = (c: Connector) =>
     guarded(async () => {
       upsert(await disableConnector(c.connector_id, `pause:${c.connector_id}`));
-      setAnnouncement(`${c.source_namespace} : en pause.`);
+      notify(`« ${c.source_namespace} » en pause : plus de nouveaux articles jusqu’à la reprise.`);
+      onChanged();
     });
   // The core cannot re-enable an instance: resuming creates a new one on the
   // same Source Namespace, so collected Records keep their identity.
@@ -232,105 +252,142 @@ export function ConnectorsView({
         schedule: c.schedule,
       });
       upsert(next);
-      setAnnouncement(`${c.source_namespace} : collecte reprise.`);
+      notify(`La collecte de « ${c.source_namespace} » reprend.`);
+      onChanged();
     });
   const onRemove = (c: Connector) =>
     guarded(async () => {
       const { removed } = await removeSource(c.connector_id);
       drop([...removed, c.connector_id]);
-      setAnnouncement(`${c.source_namespace} retirée des sources.`);
+      notify(`« ${c.source_namespace} » retirée. Les articles déjà reçus restent dans le fil.`);
+      onChanged();
       // The row is gone: land keyboard focus on the list heading.
       listHeading.current?.focus();
     });
 
+  const stats = new Map<string, SourceStats>();
+  for (const item of feedItems) {
+    const s = stats.get(item.namespace) || { all: 0, caught: 0 };
+    s.all += 1;
+    if (matched[item.record_id]?.length) s.caught += 1;
+    stats.set(item.namespace, s);
+  }
+  const toCheck = sources.filter((c) => needsCheck(displayState(c))).length;
+
   return (
-    <main className="page connectors-page">
-      <PageHeader
-        title="Sources"
-        description="Les sites et flux collectés automatiquement dans l’espace démo."
-        aside={status === "ready" && <LiveBadge live={live} />}
-      />
+    <main
+      className={`board ${status === "ready" && catalog ? "board-split" : "board-single"}`}
+    >
+      <h1 className="visually-hidden">Sources</h1>
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </p>
-      {status === "loading" && <LoadingState label="Chargement des sources…" />}
-      {status === "unavailable" && (
-        <Notice
-          tone="info"
-          title="Les connecteurs ne sont pas activés sur ce déploiement."
-        >
-          L’administrateur peut les activer côté serveur. La recherche et
-          l’ajout de textes restent disponibles.
-        </Notice>
-      )}
-      {status === "error" && (
-        <Notice
-          title="Les sources n’ont pas pu être chargées."
-          onRetry={() => setAttempt((n) => n + 1)}
-        >
-          {error}
-        </Notice>
+      {status !== "ready" && (
+        <section className="panel panel-pad">
+          {status === "loading" && (
+            <LoadingState label="Chargement des sources…" />
+          )}
+          {status === "unavailable" && (
+            <Notice
+              tone="info"
+              title="Les connecteurs ne sont pas activés sur ce déploiement."
+            >
+              L’administrateur peut les activer côté serveur. Le fil, la
+              recherche et l’ajout de textes restent disponibles.
+            </Notice>
+          )}
+          {status === "error" && (
+            <Notice
+              title="Les sources n’ont pas pu être chargées."
+              onRetry={() => setAttempt((n) => n + 1)}
+            >
+              {error}
+            </Notice>
+          )}
+        </section>
       )}
       {status === "ready" && catalog && (
         <>
-          <AddSource
-            catalog={catalog}
-            corpus={corpus}
-            suggestions={suggestions}
-            existing={connectors}
-            onCreated={(c, message) => {
-              upsert(c);
-              setHighlight(c.connector_id);
-              setAnnouncement(message);
-            }}
-          />
-          <div className="sources-head">
-            <h2 ref={listHeading} tabIndex={-1}>
-              Vos sources
-              {sources.length > 0 && (
-                <span className="count"> {sources.length}</span>
+          <section className="panel form-panel">
+            {catalog.items.some((k) => k.kind === "rss") ? (
+              <AddSource
+                catalog={catalog}
+                corpus={corpus}
+                suggestions={suggestions}
+                existing={connectors}
+                onCreated={(c, message) => {
+                  upsert(c);
+                  setHighlight(c.connector_id);
+                  notify(message);
+                  onChanged();
+                }}
+              />
+            ) : (
+              <div className="form-intro">
+                <h2>Ajouter une source</h2>
+                <p>Les fils d’actualités ne sont pas disponibles sur ce déploiement.</p>
+              </div>
+            )}
+            <div className="form-aside">
+              <p>
+                Vous pouvez aussi{" "}
+                <button type="button" className="link-button" onClick={onAdd}>
+                  ajouter un texte à la main
+                </button>
+                , par exemple une note ou un communiqué : il apparaîtra dans le
+                fil sous « Ajouté à la main ».
+              </p>
+              {catalog.items.length > 0 && (
+                <p>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => setCreating(true)}
+                  >
+                    Ajouter un connecteur d’un autre type
+                  </button>
+                </p>
               )}
-            </h2>
-          </div>
-          {sources.length === 0 ? (
-            <EmptyState
-              className="sources-empty"
-              icon={<RssSimple size={26} aria-hidden="true" />}
-              title="Aucune source pour l’instant."
-            >
-              {catalog.items.length
-                ? "Collez l’adresse d’un site d’actualité ci-dessus, ou choisissez une suggestion."
-                : "Aucun type de source n’est disponible sur ce déploiement."}
-            </EmptyState>
-          ) : (
-            <SourceList
-              sources={sources}
-              kindOf={kindOf}
-              highlight={highlight}
-              onOpen={setSelected}
-              onPause={onPause}
-              onResume={onResume}
-              onRemove={onRemove}
-            />
-          )}
-          {catalog.items.length > 0 && (
-            <p className="other-kinds">
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => setCreating(true)}
-              >
-                Ajouter un connecteur d’un autre type
-              </button>
-            </p>
-          )}
-          {catalog.credential_deposits === "unavailable" && (
-            <p className="inline-note">
-              <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants est
-              désactivé sur ce déploiement : seules les sources sans identifiant
-              peuvent être ajoutées.
-            </p>
-          )}
+              {catalog.credential_deposits === "unavailable" && (
+                <p className="inline-note">
+                  <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants
+                  est désactivé sur ce déploiement : seules les sources sans
+                  identifiant peuvent être ajoutées.
+                </p>
+              )}
+            </div>
+          </section>
+          <section className="panel list-panel" aria-labelledby="sources-title">
+            <div className="panel-head list-head">
+              <h2 id="sources-title" ref={listHeading} tabIndex={-1}>
+                Vos sources
+              </h2>
+              {sources.length > 0 && (
+                <span className="list-count" data-tone={toCheck ? "warn" : "ok"}>
+                  {toCheck ? `${toCheck} à vérifier` : "Tout est à jour"}
+                </span>
+              )}
+              <LiveBadge live={live} />
+            </div>
+            {sources.length === 0 ? (
+              <p className="list-empty">
+                {catalog.items.length
+                  ? "Aucune source pour l’instant. Collez l’adresse d’un site d’actualité, ou choisissez une suggestion."
+                  : "Aucun type de source n’est disponible sur ce déploiement."}
+              </p>
+            ) : (
+              <SourceList
+                sources={sources}
+                kindOf={kindOf}
+                stats={stats}
+                highlight={highlight}
+                onOpen={setSelected}
+                onPause={onPause}
+                onResume={onResume}
+                onRemove={onRemove}
+              />
+            )}
+          </section>
         </>
       )}
       {creating && catalog && (
@@ -342,6 +399,7 @@ export function ConnectorsView({
             upsert(c);
             setCreating(false);
             setSelected(c.connector_id);
+            onChanged();
           }}
         />
       )}
@@ -351,7 +409,10 @@ export function ConnectorsView({
           kind={kindOf(current.kind)}
           catalog={catalog}
           onClose={() => setSelected(null)}
-          onChanged={upsert}
+          onChanged={(c) => {
+            upsert(c);
+            onChanged();
+          }}
         />
       )}
     </main>

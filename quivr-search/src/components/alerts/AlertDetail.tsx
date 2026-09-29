@@ -24,8 +24,7 @@ import {
 import { Interpretation } from "./Interpretation";
 import { QueryPreview, useParsed } from "./QueryPreview";
 import { CaughtItem } from "./CaughtItem";
-import { DescribedError, describedState } from "./AlertComposer";
-import { DescribedNote } from "./DescribedNote";
+import { DescribedError, DescribedNote, describedState } from "./DescribedNote";
 import { EmptyState, LoadingState, Notice } from "../ui";
 
 export function StateBadge({ enabled }: { enabled: boolean }) {
@@ -134,9 +133,9 @@ export function AlertDetail({
       {back}
       <div className="alert-detail-head">
         <div>
-          <h1 id="alert-title" ref={heading} tabIndex={-1}>
+          <h2 id="alert-title" ref={heading} tabIndex={-1}>
             {detail.name}
-          </h1>
+          </h2>
           <QueryText alert={detail} />
         </div>
         <StateBadge enabled={detail.enabled} />
@@ -315,14 +314,14 @@ export function AlertDetail({
         </p>
       )}
       <div className="sources-head">
-        <h2>
+        <h3>
           Articles trouvés
           <span className="count">
             {" "}
             {detail.match_count}
             {detail.capped ? "+" : ""}
           </span>
-        </h2>
+        </h3>
         {!detail.enabled && (
           <span className="live-line muted">
             <BellSlash size={14} aria-hidden="true" /> En pause : les nouveaux

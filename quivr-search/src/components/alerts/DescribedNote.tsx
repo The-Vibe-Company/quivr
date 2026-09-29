@@ -1,4 +1,5 @@
 import { Info } from "@phosphor-icons/react";
+import { DESCRIPTION } from "../../lib/alerts";
 
 /**
  * What a described alert does with the articles: a classifier outside Quivr
@@ -15,6 +16,28 @@ export function DescribedNote({ id }: { id?: string }) {
         <strong>Le texte des articles est envoyé à ce service externe.</strong>{" "}
         Un article peut mettre une minute à apparaître.
       </span>
+    </p>
+  );
+}
+
+/** Whether a description can be sent, and what to say when it cannot. */
+export function describedState(text: string) {
+  const value = text.trim();
+  return value.length === 0
+    ? "empty"
+    : value.length < DESCRIPTION.min
+      ? "short"
+      : "valid";
+}
+
+export function DescribedError({ text }: { text: string }) {
+  const state = describedState(text);
+  if (state === "valid") return null;
+  return (
+    <p className="error-text" role="alert">
+      {state === "empty"
+        ? "Décrivez ce que l’alerte doit surveiller."
+        : `Écrivez au moins ${DESCRIPTION.min} caractères.`}
     </p>
   );
 }
