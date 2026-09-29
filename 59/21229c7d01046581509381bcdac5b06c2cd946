@@ -1,0 +1,31 @@
+internal/adapters/postgres/activation_order_test.go
+  s_ec117ba6cf48fd::t_9a1af5280ee0af 108-109
+  s_ec117ba6cf48fd::t_93166db0fb4b7e 1-107,110-142
+internal/adapters/postgres/rebuild.go
+  s_ec117ba6cf48fd::t_ee7a93170b66a0 240,247-281
+  s_ec117ba6cf48fd::t_5576b2fe9dd42b 230-235,238-239
+  s_ec117ba6cf48fd::t_034415f10324bb 212-215
+  s_ec117ba6cf48fd::t_9bce069535c0ba 46-62
+  s_ec117ba6cf48fd::t_a4465825e0b8a6 6
+  s_ec117ba6cf48fd::t_6f00dbe4e585c7 195-196,200
+migrations/20260928T2040Z_projection_order_and_purge.sql
+  s_ec117ba6cf48fd::t_744e130fa00b77 1-37
+internal/operations/operations.go
+  s_ec117ba6cf48fd::t_41e39d6858f9dd 56-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5921229c7d01046581509381bcdac5b06c2cd946",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
