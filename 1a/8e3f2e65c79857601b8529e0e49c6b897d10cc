@@ -1,0 +1,38 @@
+docs/keyword-alerts.md
+  s_54b80c92daa9cb::t_88b418d73375a8 7-8,81
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_715f875860f30c 5-6,8-16,20,120-121,133-134,140-148,178-254,297-299,302-319
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_88b418d73375a8 105-112
+plugins/alerts/tests/test_described.py
+  s_54b80c92daa9cb::t_9dea778290b5b5 40,43,48,166-167,170-171
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_b99bf1ace00b58 301-305
+docs/described-alerts.md
+  s_54b80c92daa9cb::t_60a58ef45024f3 1-138
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_88b418d73375a8 507,515-524
+  s_54b80c92daa9cb::t_f02463d1f07b17 525
+docs/inventory.toml
+  s_54b80c92daa9cb::t_b99bf1ace00b58 71
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_88b418d73375a8 330,334-339
+README.md
+  s_54b80c92daa9cb::t_88b418d73375a8 110-116,206,221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a8e3f2e65c79857601b8529e0e49c6b897d10cc",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
