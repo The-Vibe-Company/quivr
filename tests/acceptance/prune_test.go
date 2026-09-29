@@ -57,8 +57,14 @@ func TestChangePruneExpiresCursorsAndResyncConverges(t *testing.T) {
 		t.Fatal("pruned stream cursor before headers", s.body.StatusCode, e, err)
 	}
 	s.close()
-	if pruned := prunedEvents(t, probe); pruned <= 0 {
-		t.Fatal("worker metrics did not count pruned events", pruned)
+	// The cursor expires when the prune batch commits; the worker counts the
+	// pass only after its remaining batches return, so wait for the counter.
+	deadline = time.Now().Add(30 * time.Second)
+	for pruned := prunedEvents(t, probe); pruned <= 0; pruned = prunedEvents(t, probe) {
+		if time.Now().After(deadline) {
+			t.Fatal("worker metrics did not count pruned events", pruned)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	// Pruning removed journal events only: the catalog restart sees every Record.
