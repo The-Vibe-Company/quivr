@@ -1,6 +1,7 @@
 docs/inventory.toml
   s_54b80c92daa9cb::t_f746afa4b6fd6e 59-81,83-93,115
   s_54b80c92daa9cb::t_a519d4916cd5ed 12-16,27-28
+  s_54b80c92daa9cb::t_6b33ef9daa0c60 82
 docs/agents/documentation.md
   s_54b80c92daa9cb::t_98b5132ceab21f 3,21-24
 scripts/test_docs.py
@@ -10,6 +11,7 @@ scripts/test_docs.py
 docs/start/functional.md
   s_54b80c92daa9cb::t_bd3b66f42f5fdd 34
   s_54b80c92daa9cb::t_a519d4916cd5ed 1-23,28-33,35
+  s_54b80c92daa9cb::t_3feab60b619a10 24-27
 docs/what-quivr-can-do.md
   s_54b80c92daa9cb::t_bd31bdde0c178e 13,32-33,46-48
   s_54b80c92daa9cb::t_4dfbab7a8f6591 1-12,14-31,34-39,43-45,49-55
