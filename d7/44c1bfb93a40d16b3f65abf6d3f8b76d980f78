@@ -1,0 +1,69 @@
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_fb970c3a783612 23-25
+docs/inventory.toml
+  s_54b80c92daa9cb::t_d6339af33aae82 81,121
+docs/plugins/run-a-connector-plugin.md
+  s_54b80c92daa9cb::t_43d4d8ab8e7632 1-66
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_05ed891ac8845f 567-574
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_32ffb8ccf8f73c 13
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_5f95da68e80959 1-263
+internal/adapters/pluginhttp/connector_test.go
+  s_54b80c92daa9cb::t_6aac8e3d989ac9 1-229
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_88986c00a3a602 81-105
+internal/app/run.go
+  s_54b80c92daa9cb::t_771850ccfd66d2 8,84-86,207-209
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_c5f4139a9f6bf8 147-162,178
+internal/connectors/acquire_test.go
+  s_54b80c92daa9cb::t_6639e4f166e314 316-413
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_c3a23af30c32ff 92-99,137-173,189-191,195-197
+internal/connectors/kinds.go
+  s_54b80c92daa9cb::t_85ff8fa659d3bc 65-68
+internal/connectors/kinds_test.go
+  s_54b80c92daa9cb::t_a868b0b15d81a9 85
+internal/content/registry.go
+  s_54b80c92daa9cb::t_e01f5660e2da22 70-82,84,90,92-98,101
+internal/content/registry_test.go
+  s_54b80c92daa9cb::t_689da4daaea137 103-129
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_102f3cac28baf8 4,294-347
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_cd4fcb08c4ce60 160-164
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_22188bef10c664 6,105-107,261-270
+internal/plugins/pins.go
+  s_54b80c92daa9cb::t_12303230f2c587 15-17,24,29,33-35,37,81-94,159-177
+internal/plugins/pins_test.go
+  s_54b80c92daa9cb::t_b1cb2b23191066 26-63,120-121,130
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_820ebdbd54b789 370-372,375,395
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_46f6b00f9392ba 1-98
+scripts/local.py
+  s_54b80c92daa9cb::t_3b65149f5572b0 11,100,129-130,132,383,534-535,603
+sdks/go/README.md
+  s_54b80c92daa9cb::t_9570f391af2b17 137-138
+tests/acceptance/collector_plugin_test.go
+  s_54b80c92daa9cb::t_0add8c9b3149d6 1-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d744c1bfb93a40d16b3f65abf6d3f8b76d980f78",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
