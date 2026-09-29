@@ -1,0 +1,380 @@
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_9723617cc4efce 22
+  s_54b80c92daa9cb::t_48757dee448fde 116,141-146,157-161
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 47-49,163-192
+  s_54b80c92daa9cb::t_fbdcd1f15a3c88 193
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_9723617cc4efce 109,148,318-324
+  s_54b80c92daa9cb::t_48757dee448fde 327-347
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 402
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_6229419099f87e 107-111,163-184,186-190,192-194,197-200
+  s_54b80c92daa9cb::t_f7026d5c399f3e 6,202
+  s_54b80c92daa9cb::t_43b9a7d0303ed8 34-35,41-43,56-57,214,249-331,333-334,336,338-344,349-351,355,368-370,379-382
+  s_54b80c92daa9cb::t_03c361acf042bf 52-55,332,335,337
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_2380a8d3b23e8d 156
+  s_54b80c92daa9cb::t_6229419099f87e 148-155
+  s_54b80c92daa9cb::t_ba2a315f748a89 13
+  s_54b80c92daa9cb::t_e8d27756a56fc3 66-70,74,81-138
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_6229419099f87e 93-97,177-188
+  s_54b80c92daa9cb::t_9c229d015adc6b 189-191
+  s_7a0034b2b7cc69::t_5f108a99f7d1d8 66-69,197
+  s_54b80c92daa9cb::t_bd86cc66bc3b6e 224-280
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_6229419099f87e 194
+  s_54b80c92daa9cb::t_019ba096a034c1 35,39-50
+  s_54b80c92daa9cb::t_103f1b69f2195e 103-105,109-111
+  s_54b80c92daa9cb::t_8483a176e43df0 247
+  s_54b80c92daa9cb::t_3bd2a7d64b9786 9,15
+  s_54b80c92daa9cb::t_51d3fbcbe1056a 188,213
+  s_54b80c92daa9cb::t_2df740f68818c7 183-187
+  s_54b80c92daa9cb::t_a2fbeba02b181d 262-270,273,275-276,323-324,333-335,339-344,346,358-360,362-372,374-382,384-402,404-421,424
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_5836fb3f96f964 13-15,17-19,91-115,153-154,175,177
+  s_54b80c92daa9cb::t_68973db617223e 43-48,51-71
+  s_54b80c92daa9cb::t_f679a7f3fd3436 135
+  s_54b80c92daa9cb::t_8e1ca63fd16e8b 279-326
+  s_54b80c92daa9cb::t_e304f679f31d4b 72
+  s_54b80c92daa9cb::t_226349cc04caac 197-207
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_fb68f2445c2f0a 442-443
+  s_54b80c92daa9cb::t_2b4411a6c86b58 4-7,64-65,105,120,139,342-344,360-361
+  s_54b80c92daa9cb::t_c7a46db05b2a3d 43,58,60-63,87-88,337-338,355-359,379-412,604
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_5836fb3f96f964 200-202,371-372
+  s_54b80c92daa9cb::t_4968cb31d714d5 373
+  s_54b80c92daa9cb::t_cfcfdf6b9612c7 608-613
+  s_54b80c92daa9cb::t_ca01c73be2946d 28
+  s_54b80c92daa9cb::t_24705e28c1ca80 637
+  s_54b80c92daa9cb::t_d1ee7068fd54aa 22,35-39,67-72,163-174,374-381,603,614-622,626-636
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_9723617cc4efce 56-63,65-66
+  s_54b80c92daa9cb::t_42a9ec55500488 64
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 67-72
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_8f39e974a97c43 589-606,806-815
+  s_54b80c92daa9cb::t_910f0d97a423b4 664,755,767,866-1044
+contracts/plugins/v0/fixtures/requests/connector/fetch.json
+  s_54b80c92daa9cb::t_1dc8040d2589f8 6
+internal/adapters/pluginhttp/connector_test.go
+  s_54b80c92daa9cb::t_1c065bfaf2a2e4 54,64-68,266-297
+  s_54b80c92daa9cb::t_4399ce4b71ff2d 19
+  s_54b80c92daa9cb::t_35b3278f6bb45e 84-87,89-92,95
+  s_54b80c92daa9cb::t_db6174fb46f6ca 299-389
+  s_54b80c92daa9cb::t_7a35a2758ec1cc 12,99,101
+  s_54b80c92daa9cb::t_6287049ad842e9 100,298
+internal/adapters/pluginhttp/pluginhttp.go
+  s_54b80c92daa9cb::t_2e4d56314aea39 75-82,84,87,89
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_2c953a3825f7eb 235-241,244,247,250,262,274,302
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_d9370e1236f275 67
+  s_54b80c92daa9cb::t_8e234c6bae8373 149-157,177,209-211,245-247,342,345-349,358-368,373,381-382,384,386-395
+  s_54b80c92daa9cb::t_10dd22ea0fb5f0 205-208
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_aa5daf2561ee87 157-159,227,231
+sdks/go/README.md
+  s_54b80c92daa9cb::t_d84408a25de12a 85,94-95,99-100
+  s_54b80c92daa9cb::t_1ed01826ab8d24 82
+  s_54b80c92daa9cb::t_41d9ce18015de0 104-110
+sdks/go/quivrplugin/connector.go
+  s_54b80c92daa9cb::t_d09fa1b2104cc5 28-32,107
+  s_54b80c92daa9cb::t_86628b49afcaa9 188-192,199
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_42933a506fb11e 48-50,80-81,95,146-149
+  s_54b80c92daa9cb::t_86628b49afcaa9 19,23,52-60,83-84,150-157,165-166
+  s_54b80c92daa9cb::t_2b8b0ba4b5818c 167
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_323e32df27e551 366-367
+  s_54b80c92daa9cb::t_3516c4b385331a 42
+  s_54b80c92daa9cb::t_86628b49afcaa9 129-135,159-162,360-361
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_fcea811459cea2 56-66
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_3d42007bf21ee8 22
+  s_54b80c92daa9cb::t_b8eb67c424138b 113,138-143,154-158
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_4996cc01ee124a 109,148,318-324
+  s_54b80c92daa9cb::t_269342fdc5f748 327-347
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_818f0873cc94aa 249,478-479
+  s_54b80c92daa9cb::t_b1780b4dc56b46 253-259,267,501,508,697
+  s_54b80c92daa9cb::t_8753ca8de2f91f 252
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 610-688,693,700-701,712-713,764-765
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_cb26362b760c1d 56-66
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_d225c4768b4c5a 22
+  s_54b80c92daa9cb::t_b1780b4dc56b46 113,138-143,154-158
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_9d3cb03699939b 109,148,318-324
+  s_54b80c92daa9cb::t_b1780b4dc56b46 327-347
+contracts/plugins/v0/fixtures/manifests/invalid/connector-checkpoint-bound-too-large.yaml
+  s_7a0034b2b7cc69::t_5954432181d5f7 1-14
+contracts/plugins/v0/fixtures/manifests/valid/connector-scoped.yaml
+  s_7a0034b2b7cc69::t_755886dc38e03d 1-25
+sdks/go/quivrplugin/plugintest/plugintest.go
+  s_54b80c92daa9cb::t_898edfc282b8ea 127-133,136-139,143
+deploy/railway/core.Dockerfile
+  s_54b80c92daa9cb::t_ae2d9dc519c5fd 12-28,54-55
+scripts/local.py
+  s_54b80c92daa9cb::t_3be411e7d8362f 131,142,245,382,604-605,608
+  s_54b80c92daa9cb::t_c9ee2cd2fc5340 95
+scripts/demo.py
+  s_54b80c92daa9cb::t_35fd35766260b2 13
+  s_54b80c92daa9cb::t_7df86f63e9718c 50-51
+scripts/test_image_context.py
+  s_54b80c92daa9cb::t_35577a80a50199 40-80
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_3edd04d3d770d8 26-31
+  s_54b80c92daa9cb::t_eb61e9aae39d15 74-78
+  s_54b80c92daa9cb::t_33fefc5f2856b8 127-134
+  s_54b80c92daa9cb::t_1f3ac951e8cc07 108-109,111
+  s_54b80c92daa9cb::t_2f62a4e2a9e287 200-202
+  s_54b80c92daa9cb::t_96d2962f9085d6 32,35-37
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_1a699c7b95b8a6 39-40,50-149
+  s_54b80c92daa9cb::t_3535b79529596c 16-25
+  s_54b80c92daa9cb::t_96d2962f9085d6 41,46-49
+scripts/image_context.py
+  s_54b80c92daa9cb::t_818d60485ba3da 12-13,47-49,52-58,63,65-67,75,94-96,103-148
+plugins/m365-mail/fakegraph_test.go
+  s_54b80c92daa9cb::t_b5172eeb8f7d87 25-27,85-96,145-155,233-236
+  s_54b80c92daa9cb::t_65a8d15065c82f 58-59,62-66
+  s_54b80c92daa9cb::t_3d5c65fcece544 28
+  s_54b80c92daa9cb::t_1e95e34a8f6393 1-27,29-57,60-61,67-246
+plugins/m365-mail/testdata/golden/foreign_link_restarts.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-122
+plugins/m365-mail/testdata/golden/bodies_and_headers.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-2286
+plugins/m365-mail/testdata/golden/attachments.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-266
+plugins/m365-mail/testdata/golden/delta_paging.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-449
+plugins/m365-mail/testdata/golden/deleted_and_changed.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-300
+plugins/m365-mail/testdata/golden/expired_delta_resyncs.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-199
+plugins/m365-mail/testdata/golden/unknown_mailbox.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-29
+plugins/m365-mail/testdata/golden/no_backfill_starts_now.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-158
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_d9f768415be941 56
+  s_54b80c92daa9cb::t_c9ee2cd2fc5340 79,125-126
+  s_54b80c92daa9cb::t_95aa5bad1cc5e4 73
+  s_54b80c92daa9cb::t_615d09567fb5a8 71,89
+plugins/m365-mail/golden_test.go
+  s_54b80c92daa9cb::t_dc59c5f0593ef9 1-214
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_8f0cda6d16cd59 85
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_5b4d5a28831621 99-106
+  s_54b80c92daa9cb::t_d9124a1f2acd20 171
+plugins/m365-mail/mapping.go
+  s_54b80c92daa9cb::t_8077a73a2033fc 232
+  s_54b80c92daa9cb::t_5bb922b63ae19d 20
+  s_54b80c92daa9cb::t_117e6dbd66e802 1-4,7-13,15,17-19,21-61,63-64,66-67,69-70,72-74,77-78,80-84,87,89-118,123,125-138,157-158,162,164-167,173-175,177-183,185,187-203,205-213,215-217,223,225-227,233-313
+  s_54b80c92daa9cb::t_6e7a29a47d0f31 5-6,14,16
+  s_54b80c92daa9cb::t_a7035fd546d85e 62,65,68,71,75-76,79,85-86,88,119-122,124,139-156,159-161,163,168-172,176,184,186,204,214,218-222,224,228-231
+plugins/m365-mail/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_aa5526dff8e48f 71
+  s_54b80c92daa9cb::t_1f6833546357a8 1-70,72-140
+contracts/plugins/v0/fixtures/responses/connector/upload-uploaded.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-3
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-50
+plugins/m365-mail/go.sum
+  s_54b80c92daa9cb::t_7b3eede5bc84c9 1-12
+sdks/go/quivrplugin/attachment_test.go
+  s_54b80c92daa9cb::t_cb31d843d31958 1-166,168-184
+  s_54b80c92daa9cb::t_4b6d0b1c2e3091 167
+contracts/plugins/v0/fixtures/responses/connector/upload-other-status.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-3
+contracts/plugins/v0/fixtures/responses/connector/describe-size.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-4
+plugins/m365-mail/graph.go
+  s_54b80c92daa9cb::t_5bb922b63ae19d 39,43,46,48-49,70,72,81,86-87,90,99,111
+  s_54b80c92daa9cb::t_1e95e34a8f6393 21
+  s_54b80c92daa9cb::t_117e6dbd66e802 1-20,22-38,40-42,44-45,47,50-69,71,73-80,82-85,88-89,91-98,100-110,112-142
+plugins/m365-mail/main.go
+  s_54b80c92daa9cb::t_a0c259163b8e92 1-26
+plugins/m365-mail/go.mod
+  s_54b80c92daa9cb::t_725414901fc444 1-16
+contracts/plugins/v0/fixtures/responses/connector/describe-size-and-skip.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-5
+contracts/plugins/v0/fixtures/responses/connector/attachment-sha256-without-size.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-32
+contracts/plugins/v0/fixtures/responses/connector/describe-skip.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-13
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_f1098f07efcd98 183,189-196
+plugins/m365-mail/attachments.go
+  s_54b80c92daa9cb::t_725414901fc444 7,24
+  s_54b80c92daa9cb::t_08fb3100f9045e 1-6,8-23,25-72
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment-post.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-50
+docs/connectors/microsoft-365.md
+  s_54b80c92daa9cb::t_14c42f008f4024 120-123,226-230
+  s_54b80c92daa9cb::t_ba883d8a4a5f26 5-8,115-118
+  s_54b80c92daa9cb::t_5982c2771598ff 13,102-107,110-111,119,153,175-176,201-203,218-220
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_c8f53aa74e602f 77
+contracts/plugins/v0/fixtures/responses/connector/valid.json
+  s_54b80c92daa9cb::t_5531444910a113 19
+contracts/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-129
+contracts/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-80
+plugins/m365-mail/mail_test.go
+  s_54b80c92daa9cb::t_1038c7ae73648e 1-36,38-300
+  s_54b80c92daa9cb::t_9b91a7064f9e22 37
+sdks/go/quivrplugin/testdata/attachments.yaml
+  s_54b80c92daa9cb::t_5773cab9e606e5 1-23
+plugins/m365-mail/auth.go
+  s_54b80c92daa9cb::t_14cc8a8f788178 22
+  s_54b80c92daa9cb::t_5bb922b63ae19d 34,36,62,70-72,78-80,84,91,98,101,103,108,118,121-123,138,140,142,144,146,149
+  s_54b80c92daa9cb::t_117e6dbd66e802 1-21,23-33,35,37-61,63-69,73-77,81-83,85-90,92-97,99-100,102,104-107,109-117,119-120,124-137,139,141,143,145,147-148,150-190
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment-no-item.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-25
+contracts/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-15
+sdks/go/quivrplugin/conformance_test.go
+  s_54b80c92daa9cb::t_8f0cda6d16cd59 35-42
+contracts/plugins/v0/fixtures/responses/connector/attachments.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-59
+contracts/plugins/v0/fixtures/responses/connector/attachment-exact-too-large.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-33
+contracts/plugins/v0/fixtures/manifests/valid/connector-attachments.yaml
+  s_54b80c92daa9cb::t_88de456288eb43 1-36
+contracts/plugins/v0/fixtures/responses/connector/attachments-undeclared.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-35
+sdks/go/quivrplugin/attachment.go
+  s_54b80c92daa9cb::t_2a5463aafadc0d 1-373
+internal/plugins/runner/attachments.go
+  s_54b80c92daa9cb::t_28f4dacbf6f0fe 1-162
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_491312c545cc32 72-74,89-92
+  s_54b80c92daa9cb::t_deea72d7c96995 86-88
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-plugin-api-0.3.yaml
+  s_54b80c92daa9cb::t_c2031637a22796 1-13
+docs/plugins/run-a-connector-plugin.md
+  s_54b80c92daa9cb::t_648209dfab1a09 49-52,67-68
+internal/app/run.go
+  s_54b80c92daa9cb::t_c80c27811ce594 149-151
+  s_54b80c92daa9cb::t_08bf0dd35e499a 246
+  s_54b80c92daa9cb::t_e28c24ac30a850 67-69
+  s_54b80c92daa9cb::t_55bc980a804dd5 185
+internal/uploads/uploads.go
+  s_54b80c92daa9cb::t_6287049ad842e9 88
+  s_54b80c92daa9cb::t_add32a47195da3 134-155
+  s_54b80c92daa9cb::t_08bf0dd35e499a 87
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_88e3e8391b95ec 159-160
+internal/uploads/service_test.go
+  s_54b80c92daa9cb::t_5b8436d2b88fe4 96-123
+contracts/plugins/v0/fixtures/responses/connector/describe-undeclared-namespace.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-9
+internal/adapters/s3/uploads_test.go
+  s_54b80c92daa9cb::t_6e42e13b414aa6 99-104,112-116,118-120,122-125,128-138
+tests/acceptance/connectors_m365_test.go
+  s_54b80c92daa9cb::t_208b284e9946ab 130-131,134-140
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_c80c27811ce594 106-119
+  s_54b80c92daa9cb::t_5f5d4e4ed57d6e 87,91,101
+contracts/plugins/v0/fixtures/responses/connector/describe-too-large.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-4
+plugins/m365-mail/mail.go
+  s_54b80c92daa9cb::t_97402b7f269623 1-248
+internal/connectors/attachments_test.go
+  s_54b80c92daa9cb::t_6eabe2a69fead4 11,14-20,23-30,33-39,42-45,47-48,50-59,61-62,64-113,122-125,127-128,130-132,136,139-141,145-146,149-150,161-164,167-168,172-185,191-215,219-221,225-256,262-264,266-267,270-271,283-286,290-291,295-302,306-307,311,313-318
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-too-large.yaml
+  s_54b80c92daa9cb::t_8d057112bd7bde 1-14
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_f1098f07efcd98 5
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_f1098f07efcd98 4-6,25-30,37-39,50-58,112-117,131-169
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-37
+contracts/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-4,29-30,31-34,48-50,51-53,67-70
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 5-28,35-47,54-66
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f1098f07efcd98 9,28,40
+sdks/go/quivrplugin/schemas/plugins/v0/connector-describe-attachment-request.schema.json
+  s_5c87e69cfad0a2::t_a1aac318b790e5 1-80
+sdks/go/quivrplugin/schemas/plugins/v0/connector-describe-attachment-response.schema.json
+  s_5c87e69cfad0a2::t_eb8bf21c3f4601 1-4,29-30,31-34,48-50,51-53,67-70
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 5-28,35-47,54-66
+sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-request.schema.json
+  s_5c87e69cfad0a2::t_01c795b7aca9ef 1-129
+sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-response.schema.json
+  s_5c87e69cfad0a2::t_069adacacc247e 1-15
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_0066f4919426c0 2152-2154
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_b1780b4dc56b46 1-80
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_b1780b4dc56b46 1-15
+scripts/plugin_m365_mail_fixtures.py
+  s_54b80c92daa9cb::t_945e974dd23743 1-49
+plugins/m365-mail/fixtures/wrong-secret.json
+  s_54b80c92daa9cb::t_2cc780108771f6 1-10
+client/client.gen.go
+  s_54b80c92daa9cb::t_b1780b4dc56b46 690,707,745
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_b1780b4dc56b46 2803,2813
+plugins/m365-mail/fixtures/mailbox.json
+  s_54b80c92daa9cb::t_5baf31c4e99c77 1-10
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_b1780b4dc56b46 690,707,745
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_5f5d4e4ed57d6e 62-63
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_b1780b4dc56b46 1-4,29-30,31-34,48-50,51-53,67-70
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 5-28,35-47,54-66
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_b1780b4dc56b46 1-129
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 44-47,92-94
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_e46f34fc86e5b7 31-34
+contracts/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_34cedf9966974f 1-142
+contracts/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_b59b7315d97a94 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "edbf2ff42d76336ec34fecb60a6eda9fca920995",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_5c87e69cfad0a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aad5b34145213acc2",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_7a0034b2b7cc69": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-abb4766a9b240289d",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
