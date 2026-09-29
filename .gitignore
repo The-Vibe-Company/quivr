@@ -13,3 +13,8 @@ plans/
 
 __pycache__/
 *.egg-info/
+
+# Binaries that `go build` writes into a first-party connector plugin's directory.
+/plugins/rss/rss
+/plugins/x-list/x-list
+/plugins/m365-mail/m365-mail
