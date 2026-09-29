@@ -1,0 +1,53 @@
+quivr-search/src/components/FeedView.tsx
+  s_54b80c92daa9cb::t_41afbafa21bd7b 142,144,158-168
+  s_54b80c92daa9cb::t_e5f374d000e25f 40-41,89-93
+  s_54b80c92daa9cb::t_f3995e428ac67a 1-39,42-88,94-141,143,145-157,169-321
+quivr-search/tests/feed.spec.ts
+  s_54b80c92daa9cb::t_e97885aad230da 34
+  s_54b80c92daa9cb::t_6e1994d35a0c63 35-37,61,104-106
+  s_54b80c92daa9cb::t_9deead80b5371c 1-33,38-60,62-103,107-170
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_ab512f9d786c19 7,21,188-192,200-207
+  s_54b80c92daa9cb::t_88fc4e1ce83984 208-209
+quivr-search/src/App.tsx
+  s_54b80c92daa9cb::t_e5f374d000e25f 129-130
+  s_54b80c92daa9cb::t_26d65c4fde09ff 17,22,26-28,111,126-128,139,197-200,276,300-310,338-344
+quivr-search/src/components/DocumentPanel.tsx
+  s_54b80c92daa9cb::t_26d65c4fde09ff 56-59
+  s_54b80c92daa9cb::t_e5f374d000e25f 60-67
+deploy/railway/web.Dockerfile
+  s_54b80c92daa9cb::t_8b32f7669f7f6e 11
+quivr-search/src/lib/feed.ts
+  s_54b80c92daa9cb::t_69e19c4ac151d6 1-22,28-34
+  s_54b80c92daa9cb::t_e5f374d000e25f 23-27,35-36
+quivr-search/src/styles.css
+  s_54b80c92daa9cb::t_765239941cc786 1208-1402
+quivr-search/README.md
+  s_54b80c92daa9cb::t_e323bb9b4c1150 25-48
+  s_54b80c92daa9cb::t_db61b30c11fe58 67
+quivr-search/feed.mjs
+  s_54b80c92daa9cb::t_f400d023b84f3e 109-111,116
+  s_54b80c92daa9cb::t_e5f374d000e25f 112-115,170,178,187,198,233-234,308-310
+  s_54b80c92daa9cb::t_92f486dd377c2b 1-108,117-169,171-177,179-186,188-197,199-232,235-307,311-315
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_5add7a1aa712c3 253-422,428-440
+  s_54b80c92daa9cb::t_e5f374d000e25f 423-427
+README.md
+  s_54b80c92daa9cb::t_4fb0b0fe6bd960 156-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75be0a7133229bf0ffb57e2c93d3436572751093",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
