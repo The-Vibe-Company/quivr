@@ -1,0 +1,27 @@
+client/client.gen.go
+  s_54b80c92daa9cb::t_055d94f7b52a0c 690,707,745-746
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_b6d8503ea50eaa 2149-2154
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_3e898567910d32 2803,2805,2812-2813
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_b23b11dfdedc11 690,707,745-746
+internal/transport/httpapi/connectors_test.go
+  s_54b80c92daa9cb::t_ca5877c177fc28 164-166,332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "174df3f2889ee66f553bc3cbf8ecacd51750e0c4",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
