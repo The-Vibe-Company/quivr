@@ -466,19 +466,6 @@ func TestRSSSchemasValidateConfigAndCredential(t *testing.T) {
 	}
 }
 
-func TestRSSRefusesSpecialPurposeAndEmbeddedIPv4Destinations(t *testing.T) {
-	for _, addr := range []string{"127.0.0.1:80", "10.1.2.3:80", "169.254.169.254:80", "100.64.0.1:80", "192.0.0.8:80", "198.18.0.1:80", "240.0.0.1:80", "[::1]:80", "[fd00::1]:80", "[64:ff9b::a9fe:a9fe]:80", "[2002:a9fe:a9fe::1]:80", "[2001:0:4136:e378::1]:80"} {
-		if err := refusePrivate("tcp", addr, nil); !errors.Is(err, errAddressNotAllowed) {
-			t.Errorf("%s allowed", addr)
-		}
-	}
-	for _, addr := range []string{"93.184.216.34:443", "[2606:2800:220:1::1]:443"} {
-		if err := refusePrivate("tcp", addr, nil); err != nil {
-			t.Errorf("%s refused: %v", addr, err)
-		}
-	}
-}
-
 func TestRSSNeverDowngradesACredentialToPlainHTTP(t *testing.T) {
 	plain := newFeedServer(t, testdata(t, "rss2.xml"))
 	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

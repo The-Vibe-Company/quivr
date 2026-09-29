@@ -28,6 +28,12 @@ This is a single-node evaluation deployment, with the accepted Temporal dev serv
 and no high availability. Redeploying a volume-backed service can interrupt requests.
 No Railway TCP proxies or public dependency domains are needed.
 
+Webhook delivery and the RSS connector refuse private and internal addresses
+(checked after DNS resolution, so Railway's private network is unreachable
+through them). The generated configuration never sets
+`delivery.allow_private_destinations` or `connector_rss_allow_private_addresses`;
+those allowances exist for the local harness only.
+
 ## Credential key (optional)
 
 The demo runs without `QUIVR_CREDENTIAL_KEY`. Ingestion, search and connectors that

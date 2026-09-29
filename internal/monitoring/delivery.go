@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
 )
 
 // Attempt outcomes. An attempt without an outcome fact reads as in_flight.
@@ -107,15 +109,27 @@ type Deliverer struct {
 	// Poll is the initial idle poll interval, doubled up to MaxPoll while idle.
 	Poll, MaxPoll time.Duration
 	Now           func() time.Time
-	client        *http.Client
+	// AllowPrivateAddresses lifts the dial-time refusal of loopback, private,
+	// link-local and other non-public receivers. Local and test deployments only.
+	AllowPrivateAddresses bool
+	client                *http.Client
 }
 
 const maxReceiverBody = 64 << 10
 
 // NewWebhookClient returns the delivery HTTP client: bounded time, no
-// redirects, no cookies.
-func NewWebhookClient(timeout time.Duration) *http.Client {
+// redirects, no cookies, no proxy. Unless allowPrivate is set, every
+// connection is refused when the address actually dialed (after DNS
+// resolution) is not public, so a destination cannot resolve or rebind to an
+// internal address.
+func NewWebhookClient(timeout time.Duration, allowPrivate bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	if !allowPrivate {
+		dialer.Control = netguard.Control
+	}
+	// A proxy would be the dialed address, hiding the receiver from the guard.
+	transport.Proxy, transport.DialContext = nil, dialer.DialContext
 	transport.MaxResponseHeaderBytes = 16 << 10
 	return &http.Client{
 		Timeout:   timeout,
@@ -150,7 +164,7 @@ func (d Deliverer) now() time.Time {
 // Run delivers until ctx ends. Idle workers back off from Poll to MaxPoll and
 // reset on work, keeping database load low.
 func (d Deliverer) Run(ctx context.Context) {
-	d.client = NewWebhookClient(d.timeout())
+	d.client = NewWebhookClient(d.timeout(), d.AllowPrivateAddresses)
 	poll, maxPoll := d.Poll, d.MaxPoll
 	if poll <= 0 {
 		poll = 200 * time.Millisecond
@@ -260,7 +274,7 @@ func (d Deliverer) attempt(ctx context.Context, a AdmittedAttempt) (AttemptOutco
 	}
 	client := d.client
 	if client == nil {
-		client = NewWebhookClient(d.timeout())
+		client = NewWebhookClient(d.timeout(), d.AllowPrivateAddresses)
 	}
 	ctx, cancel := context.WithTimeout(ctx, d.timeout())
 	defer cancel()
@@ -276,6 +290,12 @@ func (d Deliverer) attempt(ctx context.Context, a AdmittedAttempt) (AttemptOutco
 	req.Header.Set("webhook-signature", Sign(key, a.EventID, timestamp, a.Body))
 	resp, err := client.Do(req)
 	if err != nil {
+		var refused *netguard.RefusedError
+		if errors.As(err, &refused) {
+			// The refused IP is for operators only; the recorded outcome stays address-free.
+			slog.Warn("delivery destination address refused", "organization", a.Organization, "delivery_id", a.DeliveryID, "destination_id", a.DestinationID, "address", refused.Address)
+			return AttemptOutcome{Outcome: AttemptPermanentError, ErrorCode: "destination_address_refused", ErrorMessage: "destination address is not allowed"}, nil
+		}
 		var netErr net.Error
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 			return AttemptOutcome{Outcome: AttemptRetryableError, ErrorCode: "webhook_timeout", ErrorMessage: "receiver did not respond before the request timeout"}, err

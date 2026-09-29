@@ -91,7 +91,7 @@ func receiver(t *testing.T, status int, header map[string]string) (*httptest.Ser
 func deliverOnce(t *testing.T, url string, fake *deliveryFake) monitoring.AttemptOutcome {
 	t.Helper()
 	fake.work = append(fake.work, monitoring.DeliveryWork{Organization: "org_a", DeliveryID: "delivery_1"})
-	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: url, Secret: testSecret}}, Timeout: 500 * time.Millisecond}
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: url, Secret: testSecret}}, Timeout: 500 * time.Millisecond}
 	progressed, err := d.Step(context.Background())
 	if !progressed || err != nil {
 		t.Fatal("step", progressed, err)
@@ -178,13 +178,13 @@ func TestDeliveryNetworkFailuresAreRetryableAndBounded(t *testing.T) {
 func TestDeliveryRefusedAdmissionMakesNoRequest(t *testing.T) {
 	srv, got := receiver(t, 204, nil)
 	fake := &deliveryFake{refuse: "subscription_disabled", work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
-	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}}
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}}
 	if progressed, err := d.Step(context.Background()); !progressed || err != nil {
 		t.Fatal(progressed, err)
 	}
 	// A destination configured for another Organization is not usable.
 	fake2 := &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
-	d2 := monitoring.Deliverer{Store: fake2, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_b", URL: srv.URL, Secret: testSecret}}}
+	d2 := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake2, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_b", URL: srv.URL, Secret: testSecret}}}
 	if progressed, err := d2.Step(context.Background()); !progressed || err != nil {
 		t.Fatal(progressed, err)
 	}
@@ -201,7 +201,7 @@ func TestDeliveryTimestampRefreshesPerAttempt(t *testing.T) {
 	srv, got := receiver(t, 503, nil)
 	fake := &deliveryFake{}
 	now := time.Unix(1789387200, 0)
-	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}, Now: func() time.Time { now = now.Add(time.Second); return now }}
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}, Now: func() time.Time { now = now.Add(time.Second); return now }}
 	for i := 0; i < 2; i++ {
 		fake.work = append(fake.work, monitoring.DeliveryWork{Organization: "org_a", DeliveryID: "delivery_1"})
 		if _, err := d.Step(context.Background()); err != nil {
@@ -239,7 +239,7 @@ func TestDeliveryShutdownRecordsNoFalseOutcome(t *testing.T) {
 	defer slow.Close()
 	defer close(release)
 	fake := &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
-	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: slow.URL, Secret: testSecret}}}
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: slow.URL, Secret: testSecret}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { <-started; cancel() }()
 	if progressed, err := d.Step(ctx); !progressed || err != nil {
@@ -258,7 +258,7 @@ func TestDeliverySchedulesRetriesFromPolicy(t *testing.T) {
 	step := func(status int, header map[string]string) (monitoring.AttemptOutcome, monitoring.Retry, *deliveryFake) {
 		srv, _ := receiver(t, status, header)
 		fake := &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
-		d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}, Retry: policy, Metrics: &monitoring.DeliveryMetrics{}, Timeout: time.Second}
+		d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}, Retry: policy, Metrics: &monitoring.DeliveryMetrics{}, Timeout: time.Second}
 		if progressed, err := d.Step(context.Background()); !progressed || err != nil {
 			t.Fatal(progressed, err)
 		}
@@ -289,8 +289,37 @@ func TestDeliverySchedulesRetriesFromPolicy(t *testing.T) {
 	// Defaults apply when no policy is configured.
 	srv, _ := receiver(t, 503, nil)
 	fake = &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
-	d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}}
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: srv.URL, Secret: testSecret}}}
 	if _, err := d.Step(context.Background()); err != nil || fake.retries[0].Window != 24*time.Hour || fake.retries[0].Delay > time.Second {
 		t.Fatalf("defaults: %+v %v", fake.retries, err)
+	}
+}
+
+// Without the private-address allowance the worker refuses, at dial time,
+// a receiver on loopback whether addressed by IP or by a name resolving to it.
+func TestDeliveryRefusesPrivateDestinationsWithoutSending(t *testing.T) {
+	srv, got := receiver(t, 204, nil)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	for _, target := range []string{srv.URL + "/hook", "http://localhost:" + port + "/hook"} {
+		fake := &deliveryFake{work: []monitoring.DeliveryWork{{Organization: "org_a", DeliveryID: "delivery_1"}}}
+		d := monitoring.Deliverer{Store: fake, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: target, Secret: testSecret}}, Timeout: 2 * time.Second}
+		if progressed, err := d.Step(context.Background()); !progressed || err != nil {
+			t.Fatal("step", progressed, err)
+		}
+		if len(fake.recorded) != 1 {
+			t.Fatalf("%s: outcomes %+v", target, fake.recorded)
+		}
+		o := fake.recorded[0]
+		if o.Outcome != monitoring.AttemptPermanentError || o.ErrorCode != "destination_address_refused" || o.HTTPStatus != 0 || fake.retries[0].Delay != 0 {
+			t.Fatalf("%s: %+v %+v", target, o, fake.retries[0])
+		}
+		for _, leak := range []string{"127.0.0.1", "::1", "localhost", port} {
+			if strings.Contains(o.ErrorMessage, leak) {
+				t.Fatalf("error text leaks the address: %q", o.ErrorMessage)
+			}
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("%d requests reached a private receiver", len(*got))
 	}
 }

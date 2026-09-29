@@ -162,16 +162,8 @@ func Run(command string) error {
 			return errors.New("invalid scoped credential configuration")
 		}
 	}
-	for id, d := range cfg.Destinations {
-		if d.SecretEnv != "" {
-			d.Secret = os.Getenv(d.SecretEnv)
-		}
-		target, err := url.Parse(d.URL)
-		_, secretErr := monitoring.ParseSecret(d.Secret)
-		if id == "" || d.Organization == "" || secretErr != nil || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
-			return errors.New("invalid webhook destination configuration")
-		}
-		cfg.Destinations[id] = d
+	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {
+		return err
 	}
 	retryPolicy, deliveryTimeout, err := cfg.Delivery.parse()
 	if err != nil {
@@ -369,7 +361,7 @@ func Run(command string) error {
 		// outcome facts commit around, never inside, the network attempt.
 		go func() {
 			defer close(deliveryDone)
-			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics}.Run(ctx)
+			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics, AllowPrivateAddresses: cfg.Delivery.AllowPrivateDestinations}.Run(ctx)
 		}()
 		pruneDone := make(chan struct{})
 		defer func() {

@@ -143,7 +143,7 @@ func TestDeliveryAdmissionAndAppendOnlyAttempts(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer receiver.Close()
-	engine := monitoring.Deliverer{Store: ds, Destinations: map[string]monitoring.Destination{"dest": {Organization: org, URL: receiver.URL, Secret: "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}}
+	engine := monitoring.Deliverer{AllowPrivateAddresses: true, Store: ds, Destinations: map[string]monitoring.Destination{"dest": {Organization: org, URL: receiver.URL, Secret: "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}}
 	if progressed, err := engine.Step(ctx); !progressed || err != nil {
 		t.Fatal("engine step", progressed, err)
 	}

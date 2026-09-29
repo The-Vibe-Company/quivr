@@ -14,7 +14,6 @@ stay visible. The Spec 1 obligation map is in
 
 | Limit | Impact | Ticket |
 | --- | --- | --- |
-| Webhook destinations are not filtered against private or internal addresses | Server-side request forgery from the worker's network | [THE-695](https://linear.app/thevibecompany/issue/THE-695) |
 | No withdrawal notice for a Subscription disabled when the withdrawal is dispatched | A paused consumer keeps an alert for withdrawn content | [THE-696](https://linear.app/thevibecompany/issue/THE-696) |
 | PostgreSQL adapter tests need the whole Linux stack | Slow feedback off Linux | [THE-699](https://linear.app/thevibecompany/issue/THE-699) |
 | Hybrid search ranks below semantic search on the FR/EN fixture | Relevance, kept separate from this list | [THE-641](https://linear.app/thevibecompany/issue/THE-641) |
@@ -107,6 +106,12 @@ stay visible. The Spec 1 obligation map is in
 - Delivery is at least once: a crash after sending can resend the same
   event id and bytes.
 - Deliveries exhausted by the retry migration emitted no `delivery.updated`.
+- Delivery refuses private and internal receiver addresses after DNS
+  resolution ([THE-695](https://linear.app/thevibecompany/issue/THE-695)), but
+  a public hostname the operator configures is trusted: there is no egress
+  proxy or per-destination allowlist. The harness lifts the refusal
+  (`delivery.allow_private_destinations`, reported under `timing_overrides`)
+  because its receivers listen on loopback.
 
 **Observability**
 

@@ -276,12 +276,14 @@ Current authorization is checked again before exposing explanations or content.
 - **Request:** HTTP POST of the stored notice bytes, unchanged, with
   `webhook-id` (the notice `event_id`), a fresh `webhook-timestamp` and its
   `webhook-signature`. The client has a ten-second timeout, follows no
-  redirects, keeps no cookies and discards at most 64 KiB of the response,
-  which is never stored.
+  redirects, keeps no cookies, uses no proxy, refuses to connect to private or
+  internal addresses (see "Security and limitations") and discards at most
+  64 KiB of the response, which is never stored.
 - **Outcome after I/O:** an append-only outcome fact per attempt. 2xx is
   `acknowledged` and marks the Delivery `delivered`. Network errors, timeouts,
   408, 429 and 5xx are `retryable_error`; other statuses, including an
-  unfollowed 3xx or a status outside 100-599, are `permanent_error`. A failure
+  unfollowed 3xx or a status outside 100-599, and a refused destination
+  address (`destination_address_refused`), are `permanent_error`. A failure
   is never reported as delivered; retry scheduling and exhaustion are
   described under "Implemented retries" below. The Delivery keeps the latest
   outcome (`last_outcome`). Error text is a fixed, bounded message per code
@@ -521,13 +523,31 @@ Exhausted work remains inspectable; retry administration is later work.
   never from the API, and are validated at startup (http/https URL with a
   host, `whsec_` secret of 24 to 64 bytes). Subscriptions only name a
   configured destination of their own Organization.
-- **Residual SSRF exposure.** Delivery does not filter private, loopback or
-  link-local addresses and does not pin DNS resolution: an operator-configured
-  destination is trusted, and the local harness itself delivers to loopback.
-  Refusing redirects keeps a receiver from bouncing requests to another
-  address, and response bodies never reach the API. A hosted multi-tenant
-  deployment in which tenants influence destination URLs needs an egress
-  policy (address filtering after resolution, or an egress proxy) first.
+- **Private destinations are refused.** The delivery client checks the
+  address it actually dials, after DNS resolution and for every connection,
+  so a destination cannot resolve or later rebind to an internal address.
+  Unspecified, loopback, private (RFC 1918), ULA, link-local (including
+  169.254.169.254 and other cloud metadata addresses), multicast,
+  carrier-grade NAT, documentation, benchmarking and reserved ranges are
+  refused, as are IPv6 forms that embed an IPv4 address (IPv4-mapped,
+  IPv4-compatible, NAT64, 6to4, Teredo). The client uses no proxy, so the
+  check always applies to the receiver itself. A refused attempt makes no
+  request and records `permanent_error` with code
+  `destination_address_refused` and a fixed message; the Delivery ends
+  `exhausted`. The refused address appears only in the worker's operator
+  log. A destination hostname must resolve only to public addresses: when it
+  also resolves to a refused one, an attempt whose public addresses all fail
+  can be recorded as refused rather than retryable. At startup, a destination whose host is a literal non-public IP or a
+  `localhost` name is rejected with an error naming the destination; other
+  hostnames are judged at dial time. The deployment allowance
+  `delivery.allow_private_destinations` (default `false`) lifts the refusal
+  for the local harness, whose receivers listen on loopback; hosted
+  deployments must not set it. RSS feed fetching shares the same guard.
+- **Remaining exposure.** A public hostname that the operator configures is
+  trusted: the guard does not stop delivery to a public host an attacker
+  controls, and there is no egress proxy or per-destination allowlist.
+  Refusing redirects keeps a receiver from bouncing requests elsewhere, and
+  response bodies never reach the API.
 - **Signatures.** Attempts are signed with the destination's own key; the key
   and signatures are never stored in attempt facts or returned by the API.
   Key rotation remains outside this tracer.

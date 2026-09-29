@@ -3,11 +3,15 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
 )
 
 // versionParts reads a Record Version's canonical text Parts for evaluation,
@@ -37,6 +41,9 @@ type DeliveryConfig struct {
 	RetryMax     string `json:"retry_max"`
 	Window       string `json:"window"`
 	Timeout      string `json:"timeout"`
+	// AllowPrivateDestinations lets delivery reach loopback, private and
+	// link-local receivers. Off by default; local and CI harnesses only.
+	AllowPrivateDestinations bool `json:"allow_private_destinations"`
 }
 
 func (c DeliveryConfig) parse() (monitoring.RetryPolicy, time.Duration, error) {
@@ -60,4 +67,26 @@ func (c DeliveryConfig) parse() (monitoring.RetryPolicy, time.Duration, error) {
 		timeout = 10 * time.Second
 	}
 	return policy, timeout, nil
+}
+
+// validateDestinations resolves each destination's secret_env and checks its
+// URL and signing secret. Without the private-address allowance, a host that
+// is plainly not public (a literal private IP or a localhost name) stops
+// startup; hostnames are judged at dial time, after DNS resolution.
+func validateDestinations(destinations map[string]monitoring.Destination, allowPrivate bool) error {
+	for id, d := range destinations {
+		if d.SecretEnv != "" {
+			d.Secret = os.Getenv(d.SecretEnv)
+		}
+		target, err := url.Parse(d.URL)
+		_, secretErr := monitoring.ParseSecret(d.Secret)
+		if id == "" || d.Organization == "" || secretErr != nil || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+			return errors.New("invalid webhook destination configuration")
+		}
+		if !allowPrivate && netguard.CheckLiteral(target.Hostname()) != nil {
+			return fmt.Errorf("webhook destination %q targets a private or internal address; only local test deployments may set delivery.allow_private_destinations", id)
+		}
+		destinations[id] = d
+	}
+	return nil
 }

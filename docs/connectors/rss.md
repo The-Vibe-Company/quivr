@@ -69,10 +69,13 @@ content, and never use this to bypass the publisher's access controls.
   - At most 5 redirects are followed.
   - At most the first 1,000 items of a feed are considered, and at most 250
     new or changed items are submitted per page.
-- **Network policy.** Loopback, private, link-local, carrier-grade NAT, other
-  special-purpose ranges and IPv6 prefixes that embed an IPv4 address (NAT64,
-  6to4, Teredo) are refused (`address_not_allowed`). The check runs on the resolved
-  address. Only a local test deployment should set
+- **Network policy.** Unspecified, loopback, private, ULA, link-local (including
+  cloud metadata), multicast, carrier-grade NAT, documentation, benchmarking,
+  reserved and other special-purpose ranges, and IPv6 prefixes that embed an IPv4
+  address (IPv4-mapped, IPv4-compatible, NAT64, 6to4, Teredo), are refused
+  (`address_not_allowed`). The check runs on the address actually dialed, after
+  DNS resolution, for every connection and redirect hop; webhook delivery shares
+  the same guard (`internal/netguard`). Only a local test deployment should set
   `connector_rss_allow_private_addresses: true`.
 
 ## What is collected

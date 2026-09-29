@@ -11,16 +11,15 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/rss"
 )
@@ -108,9 +107,8 @@ func (RSS) CredentialSchema() []byte {
 }
 
 var (
-	errAddressNotAllowed = errors.New("address_not_allowed")
-	errTooManyRedirects  = errors.New("too_many_redirects")
-	errInsecureRedirect  = errors.New("insecure_redirect")
+	errTooManyRedirects = errors.New("too_many_redirects")
+	errInsecureRedirect = errors.New("insecure_redirect")
 )
 
 func (r RSS) Fetch(ctx context.Context, req FetchRequest) (Page, error) {
@@ -245,7 +243,7 @@ func (r RSS) get(ctx context.Context, rawURL string, cred *rssCredential, cp rss
 	}
 	dialer := &net.Dialer{Timeout: timeout}
 	if !r.AllowPrivateAddresses {
-		dialer.Control = refusePrivate
+		dialer.Control = netguard.Control
 	}
 	transport := &http.Transport{}
 	if r.transport != nil {
@@ -324,44 +322,6 @@ func retryAfter(v string) time.Duration {
 	return 0
 }
 
-// refusePrivate rejects non-public destinations at dial time, after DNS
-// resolution, so a hostname cannot rebind to an internal address.
-func refusePrivate(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return errAddressNotAllowed
-	}
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return errAddressNotAllowed
-	}
-	ip = ip.Unmap()
-	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-		return errAddressNotAllowed
-	}
-	for _, p := range nonPublic {
-		if p.Contains(ip) {
-			return errAddressNotAllowed
-		}
-	}
-	return nil
-}
-
-// nonPublic lists special-purpose ranges that IsGlobalUnicast accepts but a
-// feed fetch must not reach, including IPv6 prefixes embedding IPv4 targets.
-var nonPublic = []netip.Prefix{
-	netip.MustParsePrefix("100.64.0.0/10"),  // carrier-grade NAT
-	netip.MustParsePrefix("192.0.0.0/24"),   // IETF protocol assignments
-	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking
-	netip.MustParsePrefix("240.0.0.0/4"),    // reserved
-	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64
-	netip.MustParsePrefix("64:ff9b:1::/48"), // local NAT64
-	netip.MustParsePrefix("2002::/16"),      // 6to4
-	netip.MustParsePrefix("2001::/32"),      // Teredo
-	netip.MustParsePrefix("2001:db8::/32"),  // documentation
-	netip.MustParsePrefix("100::/64"),       // discard
-}
-
 func classifyTransport(ctx context.Context, err error) error {
 	var dns *net.DNSError
 	var certInvalid x509.CertificateInvalidError
@@ -372,7 +332,7 @@ func classifyTransport(ctx context.Context, err error) error {
 	var alert tls.AlertError
 	var netErr net.Error
 	switch {
-	case errors.Is(err, errAddressNotAllowed):
+	case errors.Is(err, netguard.ErrRefused):
 		return SourceError("address_not_allowed")
 	case errors.Is(err, errTooManyRedirects):
 		return SourceError("too_many_redirects")
