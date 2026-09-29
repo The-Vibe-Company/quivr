@@ -120,6 +120,6 @@ excluded = [
 "docs/runnable-guides.md" = 85
 "docs/what-quivr-can-do.md" = 60
 "plugins/pdf-text/README.md" = 120
-"quivr-search/README.md" = 100
+"quivr-search/README.md" = 104
 "sdks/python/README.md" = 125
 "tests/acceptance/README.md" = 50

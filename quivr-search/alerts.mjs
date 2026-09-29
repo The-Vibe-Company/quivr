@@ -1,9 +1,11 @@
-// Keyword alerts of the demo (THE-734), behind facade-owned /demo/alerts routes.
+// Alerts of the demo (THE-734, THE-763), behind facade-owned /demo/alerts routes.
 //
-// An alert is a Saved Query holding a keyword expression (plugins/alerts) and
+// An alert is a Saved Query holding an alerts expression (plugins/alerts) and
 // the Subscription that pins it to the alerts evaluator. The facade forces the
 // demo corpus, the evaluator, the deployment's webhook destination and one
-// opaque Subscription Owner, so the browser only chooses a name and a query.
+// opaque Subscription Owner, so the browser only chooses a name and either a
+// keyword query or, when the deployment offers them, a plain-language
+// description judged by a classifier (`described`, see DEMO_DESCRIBED_ALERTS).
 // Every /demo/alerts/:id route first checks that the Subscription has that
 // owner and that its Saved Query targets the demo corpus; anything else is 404.
 //
@@ -15,6 +17,8 @@
 const MATCH_PAGES = 10; // 1,000 Matches per alert at most, counted and shown
 const SHOWN = 30; // newest caught articles returned by an alert's page
 const PARALLEL = 6;
+// Bounds of a described alert's description, as in the plugin's schema.
+const DESCRIPTION = { min: 3, max: 1000 };
 const ACTION = /^\/demo\/alerts\/([\w-]+)(?:\/(pause|resume|edit|delete))?$/;
 
 async function mapLimit(items, limit, fn) {
@@ -71,6 +75,7 @@ export function alertRoutes({
   evaluator,
   owner,
   registry,
+  described = false,
 }) {
   const [pluginID, pluginVersion] = (evaluator || "alerts@0.2.0").split("@");
   const pin = {
@@ -89,8 +94,25 @@ export function alertRoutes({
       throw fail(400, "Requête invalide.");
     return value;
   };
+  // The core validates the keyword tree against the plugin's schema; the
+  // facade only lets through the two kinds, and described ones when offered.
   const expression = (body) => {
     const value = body?.expression;
+    if (value?.kind === "described") {
+      if (!described)
+        throw fail(
+          400,
+          "Les alertes décrites ne sont pas activées sur ce déploiement.",
+        );
+      const text =
+        typeof value.description === "string" ? value.description.trim() : "";
+      if (text.length < DESCRIPTION.min || text.length > DESCRIPTION.max)
+        throw fail(
+          400,
+          `Décrivez l’alerte en ${DESCRIPTION.min} à ${DESCRIPTION.max} caractères.`,
+        );
+      return { kind: "described", description: text };
+    }
     if (
       value?.kind !== "keywords" ||
       typeof value.match !== "object" ||
@@ -190,6 +212,10 @@ export function alertRoutes({
     const details = match.evidence?.details || {};
     const roles = (keys) =>
       (keys || []).map((key) => parts.find((p) => p.key === key)?.role || key);
+    // A described alert's evidence carries the classifier's score instead of terms.
+    const score = typeof details.score === "number" ? details.score : null;
+    const threshold =
+      typeof details.threshold === "number" ? details.threshold : null;
     const terms = Array.isArray(details.terms)
       ? details.terms.map((t) => ({ term: t.term, parts: roles(t.part_keys) }))
       : [];
@@ -217,6 +243,8 @@ export function alertRoutes({
       explanation: match.evidence?.explanation || "",
       terms,
       fields: Array.isArray(details.fields) ? details.fields : [],
+      score,
+      threshold,
     };
   }
 
@@ -231,7 +259,7 @@ export function alertRoutes({
       if (response.status === 403)
         return {
           status: 200,
-          data: { available: false, items: [], matched: {} },
+          data: { available: false, described, items: [], matched: {} },
         };
       if (response.status !== 200) return response;
       active.push(...response.data.items.map((s) => s.subscription_id));
@@ -262,7 +290,12 @@ export function alertRoutes({
         (matched[m.record_id] ||= []).push(alert.alert_id);
     return {
       status: 200,
-      data: { available: true, items: found.map((f) => f.alert), matched },
+      data: {
+        available: true,
+        described,
+        items: found.map((f) => f.alert),
+        matched,
+      },
     };
   }
 
@@ -381,7 +414,10 @@ export function alertRoutes({
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
     if (!destination)
       return path === "/demo/alerts" && req.method === "GET"
-        ? { status: 200, data: { available: false, items: [], matched: {} } }
+        ? {
+            status: 200,
+            data: { available: false, described, items: [], matched: {} },
+          }
         : undefined;
     try {
       if (path === "/demo/alerts")

@@ -6,6 +6,43 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--text-md);
 }
+/* Described alerts (THE-763): a sentence, not a query. */
+.alert-kind {
+  margin: 0 0 10px;
+}
+.alert-kind-off {
+  margin: 0 4px 10px;
+  font-size: var(--text-sm);
+}
+.alert-field[data-kind="described"] .source-input {
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+.described-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 4px 0;
+  max-width: 680px;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.described-note > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.described-note strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.alert-query[data-kind="described"] {
+  font-style: italic;
+}
+.alert-query[data-kind="described"] svg {
+  vertical-align: -2px;
+  color: var(--accent);
+}
 .query-preview {
   display: flex;
   align-items: flex-start;

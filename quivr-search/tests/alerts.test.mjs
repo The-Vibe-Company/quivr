@@ -1,4 +1,4 @@
-// The demo facade's keyword alert routes (alerts.mjs) against a small fake
+// The demo facade's alert routes (alerts.mjs) against a small fake
 // core. The real flow, with the alerts plugin deciding, is tests/alerts.spec.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -383,6 +383,7 @@ test("without monitoring rights or a destination, the page learns that alerts ar
   forbidden.core.forbid();
   assert.deepEqual((await forbidden.call("/demo/alerts")).data, {
     available: false,
+    described: false,
     items: [],
     matched: {},
   });
@@ -395,4 +396,86 @@ test("without monitoring rights or a destination, the page learns that alerts ar
   });
   assert.equal(create.status, 404);
   assert.equal(unconfigured.core.seen.length, 0);
+});
+
+test("a described alert reaches the core only where the deployment offers it, and its page shows the classifier's score", async (t) => {
+  const off = await start(t);
+  assert.equal((await off.call("/demo/alerts")).data.described, false);
+  const refused = await off.call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "Ports",
+    expression: { kind: "described", description: "Des grèves dans les ports" },
+  });
+  assert.equal(refused.status, 400);
+  assert.ok(
+    off.core.seen.every((r) => r.method === "GET"),
+    "nothing is created without a classifier",
+  );
+
+  const { core, call } = await start(t, { DEMO_DESCRIBED_ALERTS: "1" });
+  assert.equal((await call("/demo/alerts")).data.described, true);
+  const tooShort = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "x",
+    expression: { kind: "described", description: "  a " },
+  });
+  assert.equal(tooShort.status, 400);
+  const created = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "Ports",
+    expression: {
+      kind: "described",
+      description: "  Des grèves dans les ports ",
+      threshold: 0.01,
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.kind, "described");
+  // Only the description goes through; the deployment keeps the threshold.
+  const [saved] = core.seen.filter((r) => r.url === "/v0/saved-queries");
+  assert.deepEqual(saved.body.definition.expression, {
+    kind: "described",
+    description: "Des grèves dans les ports",
+  });
+  const [sub] = core.seen.filter(
+    (r) => r.url === "/v0/subscriptions" && r.method === "POST",
+  );
+  assert.deepEqual(sub.body.evaluator.configuration, {});
+  assert.equal(sub.body.owner, OWNER);
+
+  const id = created.data.alert_id;
+  core.records.set("r1", {
+    source: { corpus_id: "demo", namespace: "web-demo" },
+    version: {
+      record_id: "r1",
+      version_id: "r1v",
+      manifest: {
+        parts: [
+          {
+            key: "b",
+            role: "body",
+            content: { kind: "text", text: "Les dockers cessent le travail." },
+          },
+        ],
+      },
+    },
+  });
+  core.matches.push({
+    match_id: "m1",
+    subscription_id: id,
+    record_id: "r1",
+    record_version_id: "r1v",
+    evidence: {
+      explanation: "Jev judged that the article fits the description.",
+      part_keys: ["b"],
+      details: { kind: "described", score: 0.92, threshold: 0.5 },
+    },
+  });
+  const page = await call(`/demo/alerts/${id}`);
+  assert.equal(page.status, 200);
+  assert.equal(page.data.expression.description, "Des grèves dans les ports");
+  assert.deepEqual(
+    page.data.matches.map((m) => [m.title, m.score, m.threshold, m.terms]),
+    [["Les dockers cessent le travail.", 0.92, 0.5, []]],
+  );
 });

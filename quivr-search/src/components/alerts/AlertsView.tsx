@@ -10,7 +10,7 @@ import {
   type AlertDetail as Detail,
 } from "../../lib/alerts";
 import { AlertComposer } from "./AlertComposer";
-import { AlertDetail, StateBadge, queryText } from "./AlertDetail";
+import { AlertDetail, QueryText, StateBadge } from "./AlertDetail";
 import { EmptyState, LiveBadge, LoadingState, Notice, PageHeader } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
@@ -21,7 +21,7 @@ const articles = (n: number, capped = false) =>
     : `${n}${capped ? "+" : ""} article${n === 1 ? "" : "s"}`;
 
 /**
- * The Alertes tab: write a keyword alert, see every alert with what it caught,
+ * The Alertes tab: write a keyword or described alert, see every alert with what it caught,
  * and open one to read its articles. Matches arrive live: the change feed's
  * match.* and subscription.* events trigger a reread.
  */
@@ -39,6 +39,7 @@ export function AlertsView({
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState("");
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [described, setDescribed] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [live, setLive] = useState(false);
@@ -81,6 +82,7 @@ export function AlertsView({
       setAnnouncement(`Nouvel article pour ${names.join(", ")}.`);
     }
     setAlerts(list.items);
+    setDescribed(list.described === true);
     setStatus("ready");
   }, []);
 
@@ -153,7 +155,7 @@ export function AlertsView({
       {!selected && (
         <PageHeader
           title="Alertes"
-          description="Soyez prévenu dès qu’un article correspond à vos mots-clés, qu’il vienne d’un flux RSS ou d’un texte ajouté à la main."
+          description={`Soyez prévenu dès qu’un article correspond à vos mots-clés${described ? " ou à ce que vous décrivez" : ""}, qu’il vienne d’un flux RSS ou d’un texte ajouté à la main.`}
           aside={status === "ready" && <LiveBadge live={live} />}
         />
       )}
@@ -205,6 +207,7 @@ export function AlertsView({
       {status === "ready" && !selected && (
         <>
           <AlertComposer
+            described={described}
             onUnauthorized={onUnauthorized}
             onCreated={(alert) => {
               upsert(alert);
@@ -226,8 +229,10 @@ export function AlertsView({
               icon={<Bell size={26} aria-hidden="true" />}
               title="Aucune alerte pour l’instant."
             >
-              Écrivez des mots-clés ci-dessus : chaque nouvel article qui
-              correspond s’affichera ici.
+              {described
+                ? "Écrivez des mots-clés ou une description"
+                : "Écrivez des mots-clés"}{" "}
+              ci-dessus : chaque nouvel article qui correspond s’affichera ici.
             </EmptyState>
           ) : (
             <ul className="alert-list" aria-label="Alertes">
@@ -245,7 +250,7 @@ export function AlertsView({
                   >
                     <span className="alert-row-main">
                       <span className="alert-row-name">{alert.name}</span>
-                      <code className="alert-query">{queryText(alert)}</code>
+                      <QueryText alert={alert} />
                     </span>
                     <span className="alert-row-side">
                       <StateBadge enabled={alert.enabled} />

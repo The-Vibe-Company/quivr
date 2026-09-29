@@ -52,11 +52,14 @@ Time is when the server saw an item arrive; older items show their RSS date or *
 
 ### Alertes
 
-The **Alertes** tab (`?view=alerts`) sets [keyword alerts](../docs/keyword-alerts.md) on new
-articles, from RSS or added by hand. Type a query such as `orage AND (grêle OR vent) NOT
-football` and the page shows how it reads it. Each alert lists what it caught, live, with the
-matched words and where; it can be paused, resumed, edited and deleted. `src/lib/notation.ts`
-ports the plugin's parser; `alerts.mjs` explains how alerts are stored and read.
+The **Alertes** tab (`?view=alerts`) sets alerts on new articles, from RSS or added by hand.
+A [keyword alert](../docs/keyword-alerts.md) takes a query such as `orage AND (grêle OR vent) NOT football`,
+and the page shows how it reads it (`src/lib/notation.ts` ports the plugin's parser). With
+`DEMO_DESCRIBED_ALERTS`, the type **Décrite** offers [described alerts](../docs/described-alerts.md):
+a sentence judged by Jev, whose page says article text goes to TypeSafe and a catch can take a
+minute (it waits for enrichment); without it, a line says why the choice is missing. Each alert
+lists what it caught, live, with the matched words or the score; it can be paused, resumed,
+edited and deleted. `alerts.mjs` explains how alerts are stored and read.
 
 ## Frontend development and checks
 
@@ -84,7 +87,8 @@ make verify-demo
 | `DEMO_FEED_SUGGESTIONS` | Optional one-click feeds on the Sources tab: a JSON array of `{"title", "url"}` (at most 12; invalid entries are skipped with a warning). Empty by default |
 | `DEMO_STATE_FILE` | Optional file keeping removed sources and paused alerts across restarts. `make demo` keeps it in the stack directory |
 | `QUIVR_DEMO_DESTINATION_ID` | Webhook destination of the demo's Organization; enables the Alertes tab with the `monitoring:read` and `monitoring:write` permissions |
-| `QUIVR_DEMO_ALERTS_EVALUATOR` | Keyword alerts evaluator, `plugin@version`; default `alerts@0.2.0` |
+| `QUIVR_DEMO_ALERTS_EVALUATOR` | Alerts evaluator, `plugin@version`; default `alerts@0.2.0` |
+| `DEMO_DESCRIBED_ALERTS` | `true` offers described alerts in the Alertes tab. Set it only where the core's `alerts` pin accepts the `described` kind (a classifier key is configured); otherwise the core refuses them at creation |
 | `DEMO_FEED_PRIVATE_ORIGINS` | Tests only: comma-separated exact origins (`http://127.0.0.1:8080`) exempt from the private-address refusal, for a local test feed server. Never set it in production |
 
 Example, with placeholder addresses to replace with the feeds you want to offer:

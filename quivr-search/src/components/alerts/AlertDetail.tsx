@@ -5,12 +5,14 @@ import {
   Pause,
   PencilSimple,
   Play,
+  Sparkle,
   Trash,
   Tray,
 } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import { print } from "../../lib/notation";
 import {
+  DESCRIPTION,
   alertMessage,
   deleteAlert,
   editAlert,
@@ -22,6 +24,8 @@ import {
 import { Interpretation } from "./Interpretation";
 import { QueryPreview, useParsed } from "./QueryPreview";
 import { CaughtItem } from "./CaughtItem";
+import { DescribedError, describedState } from "./AlertComposer";
+import { DescribedNote } from "./DescribedNote";
 import { EmptyState, LoadingState, Notice } from "../ui";
 
 export function StateBadge({ enabled }: { enabled: boolean }) {
@@ -40,7 +44,20 @@ export function StateBadge({ enabled }: { enabled: boolean }) {
 export const queryText = (alert: Alert) =>
   alert.kind === "keywords"
     ? (print(alert.expression.match) ?? "Requête avancée")
-    : "Alerte d’un autre type";
+    : alert.kind === "described"
+      ? alert.expression.description
+      : "Alerte d’un autre type";
+
+/** The query of a keyword alert, or the description of a described one. */
+export function QueryText({ alert }: { alert: Alert }) {
+  return alert.kind === "described" ? (
+    <span className="alert-query" data-kind="described">
+      <Sparkle size={14} weight="fill" aria-hidden="true" /> {queryText(alert)}
+    </span>
+  ) : (
+    <code className="alert-query">{queryText(alert)}</code>
+  );
+}
 
 export function AlertDetail({
   detail,
@@ -82,7 +99,7 @@ export function AlertDetail({
       await action();
     } catch (e) {
       if (e instanceof APIError && e.status === 401) onUnauthorized();
-      setActionError(alertMessage(e));
+      setActionError(alertMessage(e, detail?.kind));
     } finally {
       setBusy(false);
     }
@@ -108,6 +125,10 @@ export function AlertDetail({
     );
 
   const text = queryText(detail);
+  const isDescribed = detail.kind === "described";
+  const draftValid = isDescribed
+    ? describedState(draft) === "valid"
+    : parsed.state === "valid";
   return (
     <section className="alert-detail" aria-labelledby="alert-title">
       {back}
@@ -116,7 +137,7 @@ export function AlertDetail({
           <h1 id="alert-title" ref={heading} tabIndex={-1}>
             {detail.name}
           </h1>
-          <code className="alert-query">{text}</code>
+          <QueryText alert={detail} />
         </div>
         <StateBadge enabled={detail.enabled} />
       </div>
@@ -128,45 +149,71 @@ export function AlertDetail({
           </span>
         </p>
       )}
+      {isDescribed && !editing && <DescribedNote />}
       {editing ? (
         <form
           className="alert-edit"
-          aria-label="Modifier la requête"
+          aria-label={
+            isDescribed ? "Modifier la description" : "Modifier la requête"
+          }
           noValidate
           onSubmit={(event) => {
             event.preventDefault();
-            if (busy || parsed.state !== "valid") return;
+            if (busy || !draftValid) return;
             void run(async () => {
-              const next = await editAlert(detail.alert_id, parsed.expression);
+              const next = await editAlert(
+                detail.alert_id,
+                isDescribed
+                  ? { kind: "described", description: draft.trim() }
+                  : parsed.state === "valid"
+                    ? parsed.expression
+                    : detail.expression,
+              );
               setEditing(false);
-              onChanged(next, `${next.name} : requête modifiée.`);
+              onChanged(
+                next,
+                `${next.name} : ${isDescribed ? "description" : "requête"} modifiée.`,
+              );
             });
           }}
         >
           <label className="field-label" htmlFor="alert-edit-query">
-            Nouvelle requête
+            {isDescribed ? "Nouvelle description" : "Nouvelle requête"}
           </label>
-          <div className="source-field alert-field">
+          <div
+            className="source-field alert-field"
+            data-kind={isDescribed ? "described" : undefined}
+          >
             <input
               id="alert-edit-query"
               className="source-input"
               value={draft}
+              maxLength={isDescribed ? DESCRIPTION.max : undefined}
               onChange={(event) => setDraft(event.target.value)}
               autoComplete="off"
-              spellCheck={false}
-              aria-describedby="alert-edit-preview alert-edit-note"
+              spellCheck={!isDescribed ? false : undefined}
+              aria-describedby={
+                isDescribed
+                  ? "alert-edit-note"
+                  : "alert-edit-preview alert-edit-note"
+              }
               autoFocus
             />
           </div>
-          <QueryPreview id="alert-edit-preview" parsed={parsed} />
+          {isDescribed ? (
+            <DescribedError text={draft} />
+          ) : (
+            <QueryPreview id="alert-edit-preview" parsed={parsed} />
+          )}
           <p id="alert-edit-note" className="field-help">
-            Les articles déjà trouvés restent. La nouvelle requête s’applique
-            aux articles qui arrivent ensuite.
+            Les articles déjà trouvés restent. La nouvelle{" "}
+            {isDescribed ? "description" : "requête"} s’applique aux articles
+            qui arrivent ensuite.
           </p>
           <div className="alert-actions">
             <button
               className="button primary small"
-              disabled={busy || parsed.state !== "valid"}
+              disabled={busy || !draftValid}
             >
               Enregistrer
             </button>
@@ -239,7 +286,7 @@ export function AlertDetail({
             )}
             {detail.enabled ? "Mettre en pause" : "Reprendre"}
           </button>
-          {detail.kind === "keywords" && (
+          {(detail.kind === "keywords" || isDescribed) && (
             <button
               type="button"
               className="button small"
@@ -289,8 +336,10 @@ export function AlertDetail({
           icon={<Tray size={26} aria-hidden="true" />}
           title="Rien pour l’instant."
         >
-          Les articles qui arrivent à partir de maintenant et correspondent à la
-          requête s’afficheront ici, en direct.
+          Les articles qui arrivent à partir de maintenant et correspondent à la{" "}
+          {isDescribed
+            ? "description s’afficheront ici. L’examen d’un article peut prendre une minute."
+            : "requête s’afficheront ici, en direct."}
         </EmptyState>
       ) : (
         <ul className="caught-list" aria-label="Articles trouvés">

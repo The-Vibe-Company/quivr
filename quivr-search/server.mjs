@@ -31,7 +31,7 @@ const suggestions = parseSuggestions(
 );
 const stateFile = process.env.DEMO_STATE_FILE;
 let removed = new Set();
-// Keyword alerts (THE-734) created by the demo, oldest first.
+// Alerts (THE-734) created by the demo, oldest first.
 let alertIDs = [];
 if (stateFile)
   try {
@@ -61,6 +61,10 @@ const alerts = alertRoutes({
   destination: process.env.QUIVR_DEMO_DESTINATION_ID,
   evaluator: process.env.QUIVR_DEMO_ALERTS_EVALUATOR,
   owner: "quivr-web-demo",
+  // Described alerts (THE-763) need a classifier behind the alerts plugin; the
+  // deployment says so here rather than the facade probing the core with a
+  // throwaway Subscription.
+  described: ["1", "true"].includes(process.env.DEMO_DESCRIBED_ALERTS || ""),
   registry: {
     ids: () => [...alertIDs],
     add: async (ids) => {

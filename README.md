@@ -114,7 +114,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - one classifier call per article covers all described alerts;
   - the Match evidence carries the classifier's score;
   - they are off without a TypeSafe key, because article text is sent to TypeSafe
-    ([guide](docs/described-alerts.md)).
+    ([guide](docs/described-alerts.md));
+  - the browser demo's **Alertes** tab offers them next to keyword alerts when the
+    deployment has a classifier, and shows each caught article's score
+    ([`quivr-search/`](quivr-search/README.md#alertes)).
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list

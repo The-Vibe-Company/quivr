@@ -41,8 +41,11 @@ def main():
         run(['npm', 'run', 'build', '--prefix', 'quivr-search'])
         if verify:
             run(['quivr-search/node_modules/.bin/playwright', 'install', 'chromium'])
-        # The Alertes tab needs the keyword alerts plugin, whatever QUIVR_ALERTS says.
-        subscription_plugin.select(stack, True)
+        # The Alertes tab needs the alerts plugin, whatever QUIVR_ALERTS says. Described
+        # alerts are judged by the fake System One server in verification, by TypeSafe
+        # in `make demo` when TYPESAFE_API_KEY is set, and are not offered otherwise.
+        described = subscription_plugin.described_mode(verify)
+        subscription_plugin.select(stack, True, described)
         stack.up()
         demo_port = port() if verify else int(os.environ.get('DEMO_PORT', '5183'))
         demo_password = secrets.token_hex(24) if verify else os.environ.get('DEMO_PASSWORD', '')
@@ -51,7 +54,8 @@ def main():
                'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
                'DEMO_SECURE_COOKIE': 'false', 'DEMO_STATE_FILE': str(stack.directory / 'demo-state.json'),
                # Keyword alerts (THE-734): the pinned alerts plugin and org_d's webhook destination.
-               'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR}
+               'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR,
+               'DEMO_DESCRIBED_ALERTS': 'true' if described != 'off' else ''}
         feeds_url = None
         if verify:
             # Browser tests add feeds from a local test site, never from the internet.

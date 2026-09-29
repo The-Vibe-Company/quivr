@@ -1,15 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Keyword alerts on the real local stack: the alerts plugin decides every new
-// article of the demo corpus. Each run writes its own id into its query and
-// its articles, so other tests' texts never match.
+// Alerts on the real local stack: the alerts plugin decides every new article
+// of the demo corpus. Each run writes its own id into its query and its
+// articles, so other tests' texts never match. Described alerts are judged by
+// the fake System One server (alerts.fake_system_one), never by TypeSafe.
 const FEEDS = process.env.QUIVR_DEMO_FEEDS_URL || "";
 const run = `r${Date.now().toString(36)}`;
 
 test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
 
 test.beforeEach(async ({ page }) => {
-  // Matches arrive through real ingestion and connector polls.
+  // Matches arrive through real ingestion and connector polls; described
+  // alerts also wait for each article's enrichment (its embeddings).
   test.setTimeout(240000);
   await page.request.post("/demo/login", {
     data: { password: process.env.QUIVR_DEMO_PASSWORD || "local-browser-demo" },
@@ -204,6 +206,93 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     page.getByRole("heading", { name: "Alertes", level: 1 }),
   ).toBeVisible();
   await expect(alertRow(page, name)).toHaveCount(0);
+});
+
+test("une alerte décrite en langage courant trouve un article formulé autrement, avec son score", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/?view=alerts");
+  await page
+    .getByRole("group", { name: "Type d’alerte" })
+    .getByRole("button", { name: "Décrite" })
+    .click();
+  await expect(page.locator("#alert-described-note")).toContainText(
+    "Le texte des articles est envoyé à ce service externe.",
+  );
+  await page.getByRole("button", { name: "Des grèves dans les ports" }).click();
+  const name = `Ports ${run}`;
+  await page.getByLabel("Nom de l’alerte").fill(name);
+  await page.screenshot({
+    path: info.outputPath("alerts-described-compose.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Créer l’alerte" }).click();
+  const row = alertRow(page, name);
+  await expect(row.locator(".alert-query")).toHaveText(
+    "Des grèves dans les ports",
+  );
+
+  // No shared keyword: the classifier judges the meaning of each new article.
+  await addText(page, `Le marché aux fleurs ${run} rouvre samedi.`);
+  await addText(
+    page,
+    `Les dockers cessent le travail au port ${run} : un débrayage bloque les navires.`,
+  );
+  await row.getByRole("button").click();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+  const caught = page.getByRole("list", { name: "Articles trouvés" });
+  const item = caught
+    .locator(".caught")
+    .filter({ hasText: `Les dockers cessent le travail au port ${run}` });
+  await expect(item.getByTestId("caught-score")).toHaveText(
+    /score 0,92\s*seuil 0,50/,
+    { timeout: 120000 },
+  );
+  await expect(caught).not.toContainText(`marché aux fleurs ${run}`);
+  await page.screenshot({
+    path: info.outputPath("alerts-described-detail.png"),
+    fullPage: true,
+  });
+
+  // A described alert is edited and deleted like a keyword alert.
+  const actions = page.getByRole("group", { name: "Actions de l’alerte" });
+  await actions.getByRole("button", { name: "Modifier" }).click();
+  const edit = page.getByRole("form", { name: "Modifier la description" });
+  await edit
+    .getByLabel("Nouvelle description")
+    .fill("Des inondations après de fortes pluies");
+  await edit.getByRole("button", { name: "Enregistrer" }).click();
+  await expect(page.locator(".alert-detail-head .alert-query")).toHaveText(
+    "Des inondations après de fortes pluies",
+  );
+  await actions.getByRole("button", { name: "Supprimer" }).click();
+  await page
+    .getByRole("group", { name: "Confirmer la suppression" })
+    .getByRole("button", { name: "Supprimer définitivement" })
+    .click();
+  await expect(alertRow(page, name)).toHaveCount(0);
+});
+
+test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", async ({
+  page,
+}) => {
+  // The deployment's answer as a facade without DEMO_DESCRIBED_ALERTS gives it.
+  await page.route("**/demo/alerts", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: { ...(await response.json()), described: false },
+    });
+  });
+  await page.goto("/?view=alerts");
+  await expect(page.getByLabel("Mots-clés de l’alerte")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Type d’alerte" })).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".alert-kind-off")).toContainText(
+    "ne sont pas activées sur ce déploiement",
+  );
 });
 
 test("la page des alertes tient sur mobile, en mode clair et sombre", async ({

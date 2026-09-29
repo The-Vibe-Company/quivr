@@ -1,11 +1,16 @@
 import { useMemo } from "react";
 import { Highlight } from "../Highlight";
 import { tokenize } from "../../lib/search";
-import { sourceLabel, whereFound, type CaughtArticle } from "../../lib/alerts";
+import {
+  score,
+  sourceLabel,
+  whereFound,
+  type CaughtArticle,
+} from "../../lib/alerts";
 
 const FIELDS: Record<string, string> = { source: "source", author: "auteur" };
 
-/** One article an alert caught: where it comes from, and why it matched. */
+/** One article an alert caught: where it comes from, and why it matched (words, or a score). */
 export function CaughtItem({
   article,
   fresh,
@@ -39,29 +44,39 @@ export function CaughtItem({
           <Highlight text={article.excerpt} terms={terms} />
         </p>
       )}
-      <div className="caught-why">
-        <span className="muted">Mots trouvés :</span>
-        <ul aria-label="Mots trouvés">
-          {article.terms.map((t) => (
-            <li key={t.term}>
-              <span className="keyword">{t.term}</span>
-              {t.parts.length > 0 && (
-                <span className="muted"> dans {whereFound(t.parts)}</span>
-              )}
-            </li>
-          ))}
-          {article.fields.map((f) => (
-            <li key={f.field}>
-              <span className="keyword keyword-field">
-                {FIELDS[f.field] || f.field} = {String(f.value)}
-              </span>
-            </li>
-          ))}
-          {article.terms.length === 0 && article.fields.length === 0 && (
-            <li className="muted">aucun des mots exclus</li>
+      {article.score !== null ? (
+        <p className="caught-why" data-testid="caught-score">
+          <span className="muted">Jugé pertinent par Jev :</span>
+          <span className="keyword">score {score(article.score)}</span>
+          {article.threshold !== null && (
+            <span className="muted">seuil {score(article.threshold)}</span>
           )}
-        </ul>
-      </div>
+        </p>
+      ) : (
+        <div className="caught-why">
+          <span className="muted">Mots trouvés :</span>
+          <ul aria-label="Mots trouvés">
+            {article.terms.map((t) => (
+              <li key={t.term}>
+                <span className="keyword">{t.term}</span>
+                {t.parts.length > 0 && (
+                  <span className="muted"> dans {whereFound(t.parts)}</span>
+                )}
+              </li>
+            ))}
+            {article.fields.map((f) => (
+              <li key={f.field}>
+                <span className="keyword keyword-field">
+                  {FIELDS[f.field] || f.field} = {String(f.value)}
+                </span>
+              </li>
+            ))}
+            {article.terms.length === 0 && article.fields.length === 0 && (
+              <li className="muted">aucun des mots exclus</li>
+            )}
+          </ul>
+        </div>
+      )}
     </li>
   );
 }

@@ -80,7 +80,8 @@ on web, then redeploy api, worker and web. `core-entrypoint.py` then:
   any worker process exits, the container stops and Railway restarts it;
 - offers [described alerts](../../docs/described-alerts.md) (the pin's `kinds`) only when
   `TYPESAFE_API_KEY` is set, with the same value on api and worker; only the alerts
-  sidecar receives it. Without it, only keyword alerts can be created;
+  sidecar receives it. Without it, only keyword alerts can be created. With it, also set
+  `DEMO_DESCRIBED_ALERTS=true` on web so the **Alertes** tab offers them;
 - gives the demo key `monitoring:read` and `monitoring:write`;
 - declares the webhook destination `demo-alerts-sink`, which every Subscription needs.
   The web app reads Matches through the API, so it points at `http://alerts-sink.invalid/`,
