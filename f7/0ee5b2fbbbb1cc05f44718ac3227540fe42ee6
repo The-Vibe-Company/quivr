@@ -1,0 +1,38 @@
+internal/connectors/m365mail/fakegraph_test.go
+  s_54b80c92daa9cb::t_b5172eeb8f7d87 25-27,80-91,140-150,228-231
+plugins/m365-mail/testdata/golden/foreign_link_restarts.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-122
+internal/connectors/m365mail/golden_test.go
+  s_54b80c92daa9cb::t_b8ceb574a672a3 1-111,117-306
+  s_54b80c92daa9cb::t_89350d27dbbb45 112-116
+plugins/m365-mail/testdata/golden/bodies_and_headers.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-2286
+plugins/m365-mail/testdata/golden/attachments.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-266
+plugins/m365-mail/testdata/golden/delta_paging.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-449
+plugins/m365-mail/testdata/golden/deleted_and_changed.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-300
+plugins/m365-mail/testdata/golden/expired_delta_resyncs.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-199
+plugins/m365-mail/testdata/golden/unknown_mailbox.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-29
+plugins/m365-mail/testdata/golden/no_backfill_starts_now.json
+  s_54b80c92daa9cb::t_89350d27dbbb45 1-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f70ee5b2fbbbb1cc05f44718ac3227540fe42ee6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

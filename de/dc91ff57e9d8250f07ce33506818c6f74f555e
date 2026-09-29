@@ -1,0 +1,130 @@
+contracts/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-46
+contracts/plugins/v0/fixtures/responses/connector/attachments-undeclared.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-35
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_1a9af66e55e0ca 690,707,745
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 327-347
+contracts/plugins/v0/fixtures/manifests/valid/connector-attachments.yaml
+  s_54b80c92daa9cb::t_88de456288eb43 1-36
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment-no-item.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-25
+client/client.gen.go
+  s_54b80c92daa9cb::t_1a9af66e55e0ca 690,707,745
+contracts/plugins/v0/fixtures/responses/connector/describe-size-and-skip.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-5
+contracts/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-80
+contracts/plugins/v0/fixtures/responses/connector/upload-other-status.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-3
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_43b9a7d0303ed8 34-35,41-43,56-57,209,244-326,328-329,331,333-339,344-346,350,363-365,374-377
+  s_54b80c92daa9cb::t_03c361acf042bf 52-55,327,330,332
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-too-large.yaml
+  s_54b80c92daa9cb::t_8d057112bd7bde 1-14
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 664,755,767,866-1044
+internal/app/run.go
+  s_54b80c92daa9cb::t_08bf0dd35e499a 263
+  s_54b80c92daa9cb::t_e28c24ac30a850 68-70,188-190,202
+internal/adapters/s3/uploads_test.go
+  s_54b80c92daa9cb::t_6e42e13b414aa6 99-104,112-116,118-120,122-125,128-138
+contracts/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-129
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_c8f53aa74e602f 77
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-50
+internal/connectors/attachments_test.go
+  s_54b80c92daa9cb::t_6eabe2a69fead4 11,14-20,23-30,33-39,42-45,47-48,50-59,61-62,64-113,122-125,127-128,130-132,136,139-141,145-146,149-150,161-164,167-168,172-185,191-215,219-221,225-256,262-264,266-267,270-271,283-286,290-291,295-302,306-307,311,313-318
+contracts/plugins/v0/fixtures/responses/connector/upload-uploaded.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-3
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_5b4d5a28831621 99-106
+  s_54b80c92daa9cb::t_d9124a1f2acd20 171
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment-post.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-50
+contracts/plugins/v0/fixtures/responses/connector/attachment-exact-too-large.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-33
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_cfcfdf6b9612c7 600-605
+  s_54b80c92daa9cb::t_d1ee7068fd54aa 22,35-39,67-72,163-174,366-373,595,606-614,618-628
+  s_54b80c92daa9cb::t_24705e28c1ca80 629
+  s_54b80c92daa9cb::t_ca01c73be2946d 28
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_68973db617223e 43-48,51-71
+  s_54b80c92daa9cb::t_8e1ca63fd16e8b 279-326
+  s_54b80c92daa9cb::t_f679a7f3fd3436 135
+  s_54b80c92daa9cb::t_226349cc04caac 197-207
+  s_54b80c92daa9cb::t_e304f679f31d4b 72
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-37
+contracts/plugins/v0/fixtures/responses/connector/attachment-sha256-without-size.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-32
+contracts/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 1-15
+contracts/plugins/v0/fixtures/responses/connector/describe-skip.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-13
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_019ba096a034c1 35,39-50
+  s_54b80c92daa9cb::t_103f1b69f2195e 103-105,109-111
+  s_54b80c92daa9cb::t_2df740f68818c7 183-187
+  s_54b80c92daa9cb::t_51d3fbcbe1056a 188,213
+  s_54b80c92daa9cb::t_8483a176e43df0 247
+  s_54b80c92daa9cb::t_a2fbeba02b181d 262-270,273,275-276,323-324,333-335,339-344,346,358-360,362-372,374-382,384-402,404-421,424
+  s_54b80c92daa9cb::t_3bd2a7d64b9786 9,15
+contracts/plugins/v0/fixtures/responses/connector/describe-size.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-4
+contracts/plugins/v0/fixtures/responses/connector/valid.json
+  s_54b80c92daa9cb::t_5531444910a113 19
+internal/uploads/service_test.go
+  s_54b80c92daa9cb::t_5b8436d2b88fe4 96-123
+internal/adapters/pluginhttp/connector_test.go
+  s_54b80c92daa9cb::t_4399ce4b71ff2d 19
+  s_54b80c92daa9cb::t_35b3278f6bb45e 84-87,89-92,95
+  s_54b80c92daa9cb::t_db6174fb46f6ca 248,281-371
+  s_54b80c92daa9cb::t_7a35a2758ec1cc 12,99,101
+  s_54b80c92daa9cb::t_6287049ad842e9 100,280
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_bd86cc66bc3b6e 224-280
+internal/adapters/postgres/connectors_test.go
+  s_54b80c92daa9cb::t_9d0d9ae2c16856 259,263,265-266,269
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_79f736467264b7 2153-2154
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-plugin-api-0.3.yaml
+  s_54b80c92daa9cb::t_c2031637a22796 1-13
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_e8d27756a56fc3 66-70,74,81-138
+  s_54b80c92daa9cb::t_ba2a315f748a89 13
+contracts/plugins/v0/fixtures/responses/connector/describe-undeclared-namespace.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-9
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_1a9af66e55e0ca 2803,2813
+contracts/plugins/v0/fixtures/responses/connector/describe-too-large.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-4
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_48757dee448fde 113,138-143,154-158
+contracts/plugins/v0/fixtures/responses/connector/attachments.json
+  s_54b80c92daa9cb::t_910f0d97a423b4 1-59
+internal/uploads/uploads.go
+  s_54b80c92daa9cb::t_add32a47195da3 134-155
+  s_54b80c92daa9cb::t_08bf0dd35e499a 87
+  s_54b80c92daa9cb::t_6287049ad842e9 88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dedc91ff57e9d8250f07ce33506818c6f74f555e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
