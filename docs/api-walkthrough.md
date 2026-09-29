@@ -22,7 +22,7 @@ Organization).
 | `make down` | Stop the stack, keep development volumes |
 | `make reset` | Stop the stack and delete its volumes |
 | `make migrate` | Apply versioned migrations to the running stack |
-| `make generate` | Regenerate transport bindings after a contract change |
+| `make generate` | Regenerate transport bindings and the Go client after a contract change |
 | `GO=/path/to/go make …` | Use a specific Go toolchain |
 
 Local logs are capped at four 1 MiB files per process; Compose services keep three
@@ -282,6 +282,44 @@ Content-Type: application/json
   excerpts and rechecks access, current Version, quarantine and withdrawal.
 - Excerpt coordinates are Unicode code points. No raw score, physical collection name
   or vector is exposed. A dependency outage returns 503, never an empty success.
+
+### From the command line
+
+`quivr search` sends the same request from a terminal. It needs a running server and
+reads its address and key from the environment; `--api-url` and `--api-key` override
+them:
+
+```sh
+export QUIVR_API_URL=http://127.0.0.1:<api_port>
+export QUIVR_API_KEY=<key with content:read and search:query>
+quivr search --corpus <corpus_id> --mode lexical --limit 5 "eclipse"
+```
+
+```text
+1 hit (profile balanced, version balanced.e5-token-windows.v1)
+
+1. record <record_id>  version <version_id>  part body  [0,18)
+   Éclipse 🌞 à Paris.
+```
+
+Repeat `--corpus` (or separate IDs with commas) to search several Corpora; `--profile`
+selects the retrieval profile. `--json` prints the API response unchanged. The command
+talks only to the public API, through the Go client generated from the contract in
+[`client/`](../client/) (`make generate` refreshes it; `make verify` fails when it is
+stale). Exit codes are the same for every online command:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Unexpected failure |
+| 2 | Invalid arguments, or a missing or malformed API URL |
+| 3 | API key rejected (401) or not allowed on a requested resource (403) |
+| 4 | Request rejected as invalid (400, 404, 409, 422) |
+| 5 | Server unreachable or unavailable (connection error, timeout, 5xx) |
+| 130 | Interrupted (Ctrl-C or SIGTERM) |
+
+Errors print the public code and message, for example
+`quivr: forbidden: …`, with a hint for common codes.
 
 `POST /v0/corpora/{corpus_id}/rebuilds` starts an asynchronous projection rebuild from
 durable artifacts and returns an Operation readable at `/v0/operations/{operation_id}`.

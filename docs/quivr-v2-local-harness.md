@@ -311,7 +311,8 @@ it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE
 **Steps and report.**
 - Every scenario is a named step:
   - persistence, core acceptance, adapters and outages;
-  - changes/catalog/rebuild, monitoring and delivery restart;
+  - changes/catalog/rebuild, monitoring, the `quivr` CLI (`TestCLI*`, run with the
+    stack's built binary as `QUIVR_TEST_BINARY`) and delivery restart;
   - the three journey phases, connectors, keyless, capture validation and lifecycle.
 - On success, failure or interrupt (SIGINT or SIGTERM), the run captures service
   logs and `services.json`, writes `dependency-inventory.json`, then removes only

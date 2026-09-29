@@ -3,16 +3,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 GO=${GO:-go}
 work="$PWD/.scratch/contracts"
-mkdir -p "$work" internal/transport/generated
+mkdir -p "$work" internal/transport/generated client
 python3 -m venv "$work/venv"
 "$work/venv/bin/pip" -q install -r contracts/http/v0/checks/requirements.txt
 "$work/venv/bin/python" contracts/http/v0/client_schema.py > "$work/client-openapi.yaml"
 "$GO" run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -generate types,std-http,strict-server -package transport "$work/client-openapi.yaml" > "$work/transport.gen.go"
+# The Go client (THE-702) comes from the same schema and generator; online commands use it only.
+"$GO" run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -generate types,client -package client "$work/client-openapi.yaml" > "$work/client.gen.go"
 if [ "${1:-check}" = generate ]; then
   cp "$work/transport.gen.go" internal/transport/generated/transport.gen.go
+  cp "$work/client.gen.go" client/client.gen.go
   exit
 fi
 cmp "$work/transport.gen.go" internal/transport/generated/transport.gen.go
+cmp "$work/client.gen.go" client/client.gen.go
 "$work/venv/bin/python" contracts/http/v0/checks/validate.py
 "$work/venv/bin/python" contracts/plugins/v0/checks/validate.py
 node contracts/http/v0/checks/webhook.cjs

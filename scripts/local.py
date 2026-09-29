@@ -210,7 +210,7 @@ class Stack:
                 if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         with (self.directory/'acceptance.log').open('a') as log:
             result=subprocess.run([GO,'test','-count=1','-v','-run',pattern,'./tests/acceptance'],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         if result.returncode:raise RuntimeError('acceptance failed; inspect '+str(self.directory/'acceptance.log'))
@@ -405,6 +405,8 @@ def verify(stack,steps):
     steps.run('changes_catalog_rebuild',stack.tests,'TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions')
     # Monitoring definitions use their own Corpora and light ingestion; run after timed scenarios.
     steps.run('monitoring',stack.tests,'TestMonitoring')
+    # The built quivr binary searches through the public API and keeps its offline plugin tools (THE-702).
+    steps.run('cli',stack.tests,'^TestCLI')
     # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
     # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
     steps.run('normalizer',stack.tests,'TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings')

@@ -203,6 +203,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   encrypted or damaged PDFs are quarantined with a diagnostic naming the plugin.
   `make dev` pins it by default; there is no OCR
   ([walkthrough](docs/api-walkthrough.md#pdf-documents)).
+- **`quivr search` from the command line**: set `QUIVR_API_URL` and `QUIVR_API_KEY`,
+  then `quivr search --corpus <corpus_id> "query"` prints ranked hits with their
+  excerpt and Record / Version / Part provenance, or the unchanged API response with
+  `--json`. Failures exit with one code per class (rejected key or scope, invalid
+  request, unreachable server). It uses a Go client generated from the contract
+  (package [`client`](client/)) and never touches the stack's storage
+  ([walkthrough](docs/api-walkthrough.md#from-the-command-line)).
 - **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
   your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).
 
