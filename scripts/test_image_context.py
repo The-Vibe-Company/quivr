@@ -31,5 +31,26 @@ class ImageContextTest(unittest.TestCase):
         self.assertIsNone(image_context.check(root, root / 'Dockerfile', GO))
 
 
+class WebImageContextTest(unittest.TestCase):
+    def repo(self, copy_line):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / 'web').mkdir()
+        (root / 'web' / 'server.mjs').write_text('import { a } from "./a.mjs";\nimport x from "node:fs";\n')
+        (root / 'web' / 'a.mjs').write_text("import { b } from './b.mjs';\n")
+        (root / 'web' / 'b.mjs').write_text('export const b = 1;\n')
+        (root / 'Dockerfile').write_text(f'FROM node AS build\nCOPY web ./\nFROM node\n{copy_line}\n')
+        return root
+
+    def test_module_missing_from_runtime_stage_fails_and_names_it(self):
+        root = self.repo('COPY web/server.mjs web/a.mjs ./')
+        failure = image_context.check_web(root, root / 'Dockerfile', entry='web/server.mjs')
+        self.assertIn('web/b.mjs', failure)
+        self.assertIn('COPY every server module', failure)
+
+    def test_glob_copy_covers_transitive_imports(self):
+        root = self.repo('COPY web/*.mjs ./')
+        self.assertIsNone(image_context.check_web(root, root / 'Dockerfile', entry='web/server.mjs'))
+
+
 if __name__ == '__main__':
     unittest.main()
