@@ -56,6 +56,9 @@ type ConnectorKind struct {
 	Description            string          `json:"description,omitempty"`
 	ConfigSchema           json.RawMessage `json:"config_schema"`
 	CredentialSchema       json.RawMessage `json:"credential_schema,omitempty"`
+	// CredentialRequired false makes the declared credential optional: an
+	// instance without one is invoked with a null credential (default true).
+	CredentialRequired *bool `json:"credential_required,omitempty"`
 	DefaultIntervalSeconds int             `json:"default_interval_seconds"`
 	Modes                  []string        `json:"modes,omitempty"`
 }

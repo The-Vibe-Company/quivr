@@ -283,9 +283,9 @@ func ValidateConnectorInstance(m *Manifest, kind string, config, credential []by
 	switch {
 	case declared.CredentialSchema == nil && !nullCredential:
 		issues = append(issues, Issue{Code: CodeInvalidCredential, Path: "/credential", Message: fmt.Sprintf("kind %q takes no credential; send null", kind)})
-	case declared.CredentialSchema != nil && nullCredential:
+	case declared.NeedsCredential() && nullCredential:
 		issues = append(issues, Issue{Code: CodeInvalidCredential, Path: "/credential", Message: fmt.Sprintf("kind %q needs a credential", kind)})
-	case declared.CredentialSchema != nil:
+	case declared.CredentialSchema != nil && !nullCredential:
 		issues = append(issues, validateObject("credential", CodeInvalidCredential, credential, declared.CredentialSchema)...)
 	}
 	return issues

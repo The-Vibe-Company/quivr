@@ -23,6 +23,15 @@ PLUGINS = [
     # Only this plugin receives it, and its pin offers "described" only when it is set.
     {'id': 'alerts', 'module': 'alerts', 'port': 9910, 'secrets': ['TYPESAFE_API_KEY']},
 ]
+# First-party Go connector plugins: core.Dockerfile builds every plugins/<id> with a
+# go.mod into /usr/local/bin/quivr-<id> and keeps its manifest in /app/plugins/<id>.
+# They are always pinned, and the worker always runs them, whatever QUIVR_DEMO_PLUGINS
+# says: a Connector Instance of their kind keeps polling once created, and an unpinned
+# kind would fail it with unsupported_connector_kind. ``configuration`` is the pin
+# configuration (default {}); the private-address refusal stays on.
+CONNECTORS = [
+    {'id': 'rss', 'port': 9920},
+]
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
 # resolves and every delivery attempt fails without leaving the container. The
@@ -59,6 +68,11 @@ def plugin_pins(env):
     return pins
 
 
+def connector_pins():
+    return [{'manifest': str(PLUGIN_ROOT / c['id'] / 'quivr-plugin.yaml'), 'endpoint': f"http://127.0.0.1:{c['port']}",
+             'configuration': c.get('configuration', {})} for c in CONNECTORS]
+
+
 def build_config(env):
     """Build the core configuration from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
@@ -88,8 +102,10 @@ def build_config(env):
                        'actions': actions,
                        'corpora': ['*']}},
     }
+    if CONNECTORS:
+        config['plugins'] = connector_pins()
     if plugins_enabled(env):
-        config['plugins'] = plugin_pins(env)
+        config['plugins'] = config.get('plugins', []) + plugin_pins(env)
         config['destinations'] = {DESTINATION_ID: {'organization': 'quivr-demo', 'url': SINK_URL,
                                                    'secret': sink_secret(env['QUIVR_CURSOR_KEY'])}}
     # Optional: without it the core starts and refuses only credential deposits.
@@ -105,6 +121,14 @@ def sidecar_commands(env):
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
     commands = []
+    for connector in CONNECTORS:
+        directory = PLUGIN_ROOT / connector['id']
+        child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
+                 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
+                 'QUIVR_PLUGIN_MANIFEST': str(directory / 'quivr-plugin.yaml')}
+        commands.append((connector['id'], ['/usr/local/bin/quivr-' + connector['id']], str(directory), child))
+    if not plugins_enabled(env):
+        return commands
     for plugin in PLUGINS:
         directory = PLUGIN_ROOT / plugin['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'PYTHONUNBUFFERED': '1',
@@ -170,8 +194,9 @@ def main():
     if mode == 'api':
         subprocess.run(['quivr', 'migrate'], check=True)
     # The worker is the only process that calls plugins, so it runs them beside itself.
-    if mode == 'worker' and plugins_enabled(os.environ):
-        sys.exit(supervise(sidecar_commands(os.environ) + [('quivr worker', ['quivr', 'worker'], None, None)]))
+    sidecars = sidecar_commands(os.environ) if mode == 'worker' else []
+    if sidecars:
+        sys.exit(supervise(sidecars + [('quivr worker', ['quivr', 'worker'], None, None)]))
     os.execvp('quivr', ['quivr', mode])
 
 

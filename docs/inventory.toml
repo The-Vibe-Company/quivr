@@ -92,6 +92,7 @@ excluded = [
 "docs/what-quivr-can-do.md" = { audience = "functional", kind = "concept", summary = "what Quivr does, in plain words, for non-developers" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
+"plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources and live feed" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify a source collector in Go" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run a Python normalizer" }
@@ -102,7 +103,7 @@ excluded = [
 [budgets]
 "AGENTS.md" = 45
 "CONTEXT.md" = 315
-"deploy/railway/README.md" = 185
+"deploy/railway/README.md" = 195
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
 "docs/agents/fleet-workflow.md" = 65
@@ -123,6 +124,7 @@ excluded = [
 "docs/runnable-guides.md" = 85
 "docs/what-quivr-can-do.md" = 60
 "plugins/pdf-text/README.md" = 120
+"plugins/rss/README.md" = 60
 "quivr-search/README.md" = 104
 "sdks/go/README.md" = 153
 "sdks/python/README.md" = 125

@@ -1,0 +1,9 @@
+{
+  "description": "With the default configuration a feed on a loopback address is refused before any request; the credential check leaves the refusal to the fetch.",
+  "connector": {"kind": "rss", "config": {"url": "http://127.0.0.1:9/feed.xml"}},
+  "credential": {"token": "test-token-rss-fixture"},
+  "expect": {
+    "error": {"error_class": "source", "code": "address_not_allowed"},
+    "check_credential": {"status": "ok"}
+  }
+}

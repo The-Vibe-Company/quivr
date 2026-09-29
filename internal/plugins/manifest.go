@@ -158,9 +158,17 @@ type ConnectorKind struct {
 	ConfigSchema json.RawMessage `json:"config_schema"`
 	// CredentialSchema is the JSON Schema of the Deposited Credential; nil
 	// means the kind takes no credential.
-	CredentialSchema       json.RawMessage `json:"credential_schema,omitempty"`
-	DefaultIntervalSeconds int             `json:"default_interval_seconds"`
-	Modes                  []string        `json:"modes"`
+	CredentialSchema json.RawMessage `json:"credential_schema,omitempty"`
+	// CredentialRequired false makes the credential optional (default true).
+	CredentialRequired     *bool    `json:"credential_required,omitempty"`
+	DefaultIntervalSeconds int      `json:"default_interval_seconds"`
+	Modes                  []string `json:"modes"`
+}
+
+// NeedsCredential reports whether an instance of the kind runs only with a
+// Deposited Credential: it declares one and does not make it optional.
+func (k ConnectorKind) NeedsCredential() bool {
+	return k.CredentialSchema != nil && (k.CredentialRequired == nil || *k.CredentialRequired)
 }
 
 type ConnectorLimits struct {

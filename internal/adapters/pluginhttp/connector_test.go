@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -205,6 +206,24 @@ func TestPluginFailuresMapToConnectorHealth(t *testing.T) {
 			t.Fatalf("unreachable plugin: %v", err)
 		}
 	})
+}
+
+// credential_required: false makes a declared credential optional: the kind
+// is described as optional, so an instance without one runs.
+func TestAnOptionalCredentialKindDoesNotRequireOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
+	manifest := strings.Replace(sourceManifest, "        modes: [pull]", "        credential_required: false\n        modes: [pull]", 1)
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: path, Endpoint: "http://127.0.0.1:9", Configuration: json.RawMessage(`{}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := pluginhttp.Connectors(set)[0].(pluginhttp.Connector)
+	if c.CredentialRequired() || c.CredentialSchema() == nil {
+		t.Fatalf("required %v schema %s", c.CredentialRequired(), c.CredentialSchema())
+	}
 }
 
 // check_credential sends the credential for the kind and maps a refusal like

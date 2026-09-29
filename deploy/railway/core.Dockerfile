@@ -9,6 +9,23 @@ COPY migrations ./migrations
 COPY contracts ./contracts
 RUN CGO_ENABLED=0 go build -trimpath -o /quivr ./cmd/quivr
 
+# First-party Go connector plugins, always pinned and run by the worker
+# (core-entrypoint.py CONNECTORS). Every plugins/<id> with a go.mod is built to
+# /out/bin/quivr-<id>, and its manifest is kept at /out/plugins/<id>. A plugin
+# module builds only on the Go SDK (make plugin-boundary), which it replaces
+# with ../../sdks/go; make image-context builds them from exactly these COPY sources.
+FROM golang:1.27.1-bookworm AS connectors
+WORKDIR /src
+COPY sdks/go ./sdks/go
+COPY plugins ./plugins
+RUN mkdir -p /out/bin /out/plugins \
+ && for mod in plugins/*/go.mod; do \
+      [ -e "$mod" ] || continue; \
+      dir=$(dirname "$mod"); id=$(basename "$dir"); \
+      (cd "$dir" && CGO_ENABLED=0 go build -trimpath -o "/out/bin/quivr-$id" .) || exit 1; \
+      mkdir -p "/out/plugins/$id" && cp "$dir/quivr-plugin.yaml" "/out/plugins/$id/"; \
+    done
+
 FROM python:3.12-slim-bookworm AS tokenizer
 WORKDIR /app
 COPY scripts/prepare_tokenizer.py scripts/token_offsets.py ./scripts/
@@ -34,6 +51,8 @@ COPY --from=build /quivr /usr/local/bin/quivr
 COPY --from=tokenizer /app /app
 COPY --from=plugins /opt/quivr-plugins /opt/quivr-plugins
 COPY --from=plugins /app/plugins /app/plugins
+COPY --from=connectors /out/bin/ /usr/local/bin/
+COPY --from=connectors /out/plugins/ /app/plugins/
 COPY deploy/railway/core-entrypoint.py /app/core-entrypoint.py
 USER 10001:10001
 ENTRYPOINT ["python", "/app/core-entrypoint.py"]

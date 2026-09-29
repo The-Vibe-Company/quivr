@@ -72,9 +72,6 @@ type Config struct {
 		LoginEndpoint string `json:"login_endpoint"`
 		GraphEndpoint string `json:"graph_endpoint"`
 	} `json:"m365"`
-	// ConnectorRSSAllowPrivateAddresses lets the rss kind reach loopback and
-	// private addresses (local/CI fake feeds only; refused by default).
-	ConnectorRSSAllowPrivateAddresses bool `json:"connector_rss_allow_private_addresses"`
 	// X configures the x_list connector kind.
 	X XConfig `json:"x"`
 	// Plugin pins one external plugin; it is shorthand for a one-item
@@ -200,7 +197,7 @@ func Run(command string) error {
 			return errors.New("x.api_endpoint must be an http(s) URL")
 		}
 	}
-	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.RSS{AllowPrivateAddresses: cfg.ConnectorRSSAllowPrivateAddresses}, connectors.XList{BaseURL: cfg.X.APIEndpoint}}
+	kinds := []connectors.Connector{m365mail.New(cfg.M365.LoginEndpoint, cfg.M365.GraphEndpoint, nil), connectors.XList{BaseURL: cfg.X.APIEndpoint}}
 	if cfg.ConnectorFixtures {
 		kinds = append(kinds, connectors.Fixture{})
 	}

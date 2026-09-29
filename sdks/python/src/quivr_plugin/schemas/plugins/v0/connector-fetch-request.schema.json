@@ -75,7 +75,7 @@
         "object",
         "null"
       ],
-      "description": "The decrypted Deposited Credential, valid against the kind's credential_schema; null for a kind without one. Sent only for this invocation: never log, echo or persist it."
+      "description": "The decrypted Deposited Credential, valid against the kind's credential_schema; null for a kind without one, or for an instance without one when the kind's credential_required is false. Sent only for this invocation: never log, echo or persist it."
     },
     "checkpoint": {
       "description": "The opaque Acquisition Checkpoint the plugin returned last (any JSON value); null on the first run of a Connector Instance."

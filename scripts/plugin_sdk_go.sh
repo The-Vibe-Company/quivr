@@ -5,7 +5,9 @@
 #     root `go test ./...` does not enter);
 #  3. the sample connector sdks/go/examples/static-source passes `quivr plugin
 #     inspect` and `quivr plugin test` (JSON report in
-#     .scratch/plugin-sdk/static-source-contract-report.json).
+#     .scratch/plugin-sdk/static-source-contract-report.json);
+#  4. every first-party Go connector plugin under plugins/ passes its own
+#     tests and `quivr plugin test`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -26,3 +28,20 @@ cd "$root/sdks/go/examples/static-source"
 grep -q "^CERTIFIED" "$work/static-source-contract.log" || { cat "$work/static-source-contract.log"; exit 1; }
 grep -q "PASS  credentials" "$work/static-source-contract.log" || { cat "$work/static-source-contract.log"; exit 1; }
 echo "quivr plugin test certified the Go SDK sample connector: $work/static-source-contract-report.json"
+
+# First-party Go connector plugins (plugins/<id> with a go.mod, each its own
+# module on the SDK): go vet, their unit tests (parity with the connector they
+# replace included), then `quivr plugin test` (JSON report in
+# .scratch/plugin-sdk/<id>-contract-report.json).
+for mod in "$root"/plugins/*/go.mod; do
+  [ -e "$mod" ] || continue
+  dir=$(dirname "$mod"); id=$(basename "$dir")
+  cd "$dir"
+  "$GO" vet ./... && "$GO" test ./...
+  "$GO" build -o /dev/null .
+  "$quivr" plugin inspect . > "$work/$id-inspect.log"
+  "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
+  grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  grep -q "PASS  credentials" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  echo "quivr plugin test certified the $id connector plugin: $work/$id-contract-report.json"
+done

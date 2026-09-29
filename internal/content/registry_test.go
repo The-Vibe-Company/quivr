@@ -20,7 +20,7 @@ func ownedRegistry(t *testing.T) *content.ExtensionRegistry {
 
 func TestRegistryDeclaresBuiltinAndOwnedNamespaces(t *testing.T) {
 	r := ownedRegistry(t)
-	for ns, want := range map[string]bool{"example.editorial": true, "connector.rss": true, "acme-md": true, "acme-md.outline": true, "acme-md.other": false, "undeclared": false} {
+	for ns, want := range map[string]bool{"example.editorial": true, "connector.rss": false, "acme-md": true, "acme-md.outline": true, "acme-md.other": false, "undeclared": false} {
 		if got := r.Declared(ns); got != want {
 			t.Errorf("Declared(%q) = %t, want %t", ns, got, want)
 		}

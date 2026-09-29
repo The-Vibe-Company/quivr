@@ -16,7 +16,7 @@ The design rationale is in [ingestion contracts](../dated/design/quivr-v2-ingest
 
 Delivered kinds:
 
-- [RSS and Atom feeds (`rss`)](rss.md)
+- [RSS and Atom feeds (`rss`)](rss.md), from the first-party plugin `plugins/rss`
 - [Microsoft 365 mailbox (`m365_mail`)](microsoft-365.md)
 - [X lists (`x_list`)](x.md)
 
@@ -175,7 +175,7 @@ serves. There you can:
   deposit or replace its credential, or disable it (after a confirmation).
 
 The web app's server refuses to fetch or collect private, loopback, link-local and
-other non-public addresses, like the core's `rss` kind does. The address is checked
+other non-public addresses, like the `rss` kind does. The address is checked
 after DNS resolution and again on every redirect. A refused, broken or feedless
 address gets a clear message. Test harnesses exempt their local feed server with
 `DEMO_FEED_PRIVATE_ORIGINS`; production never sets it.

@@ -237,6 +237,7 @@ class ConnectorKind(Model):
     description: str | None = None
     config_schema: Any
     credential_schema: Any | None = None
+    credential_required: bool | None = None
     default_interval_seconds: int
     modes: list[Literal["pull", "push"]] | None = None
 

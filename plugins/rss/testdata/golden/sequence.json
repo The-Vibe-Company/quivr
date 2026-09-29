@@ -1,0 +1,261 @@
+{
+ "steps": [
+  {
+   "feed": "rss2.xml",
+   "etag": "\"v1\"",
+   "now": "2026-09-28T12:00:00Z",
+   "checkpoint_in": "null",
+   "items": [
+    {
+     "record_key": "https://news.example.org/first",
+     "revision": "sha256:546884181590c511e11f464aee10df57f0dd7b08ae1e812ed3dd32e90c89c9d0",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "First story"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "Plain first story text."
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "rss",
+         "language": "fr",
+         "link": "https://news.example.org/",
+         "title": "Example Newsroom",
+         "version": "2.0"
+        },
+        "item": {
+         "link": "https://news.example.org/first",
+         "published": "2026-08-31T09:00:00Z"
+        }
+       }
+      }
+     }
+    },
+    {
+     "record_key": "example-2",
+     "revision": "sha256:5a7a367d18607feddd3d843c33baf86f0d2825e779b37d6a4b5346a44f9feeac",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "Second story"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "Full body text \u0026 details.\nSecond paragraph."
+        }
+       },
+       {
+        "key": "body_html",
+        "parent_key": "body",
+        "role": "source_html",
+        "content": {
+         "kind": "text",
+         "text": "\u003cp\u003eFull \u003cem\u003ebody\u003c/em\u003e text \u0026amp; details.\u003c/p\u003e\u003cscript\u003ealert(1)\u003c/script\u003e\u003cp\u003eSecond paragraph.\u003c/p\u003e"
+        }
+       },
+       {
+        "key": "summary",
+        "role": "summary",
+        "content": {
+         "kind": "text",
+         "text": "Short summary of the story."
+        }
+       },
+       {
+        "key": "summary_html",
+        "parent_key": "summary",
+        "role": "source_html",
+        "content": {
+         "kind": "text",
+         "text": "\u003cp\u003eShort \u003cb\u003esummary\u003c/b\u003e of the story.\u003c/p\u003e"
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "rss",
+         "language": "fr",
+         "link": "https://news.example.org/",
+         "title": "Example Newsroom",
+         "version": "2.0"
+        },
+        "item": {
+         "authors": [
+          {
+           "name": "Jane Reporter"
+          }
+         ],
+         "categories": [
+          "Economy",
+          "Europe"
+         ],
+         "enclosures": [
+          {
+           "length": "1234",
+           "type": "audio/mpeg",
+           "url": "https://news.example.org/audio.mp3"
+          }
+         ],
+         "guid": "example-2",
+         "link": "https://news.example.org/second",
+         "published": "2026-09-01T10:00:00Z"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "checkpoint": "{\"etag\":\"\\\"v1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:15:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"546884181590c511\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"}]}"
+  },
+  {
+   "feed": "rss2.xml",
+   "etag": "\"v1\"",
+   "now": "2026-09-28T12:05:00Z",
+   "checkpoint_in": "{\"etag\":\"\\\"v1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:15:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"546884181590c511\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"}]}",
+   "not_due": true
+  },
+  {
+   "feed": "rss2.xml",
+   "etag": "\"v1\"",
+   "now": "2026-09-28T12:20:00Z",
+   "checkpoint_in": "{\"etag\":\"\\\"v1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:15:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"546884181590c511\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"}]}",
+   "checkpoint": "{\"etag\":\"\\\"v1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:35:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"546884181590c511\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"}]}"
+  },
+  {
+   "feed": "rss2-v2.xml",
+   "etag": "\"v2\"",
+   "now": "2026-09-28T12:40:00Z",
+   "checkpoint_in": "{\"etag\":\"\\\"v1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:35:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"546884181590c511\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"}]}",
+   "items": [
+    {
+     "record_key": "https://news.example.org/first",
+     "revision": "sha256:2caadaeb48a977526a44d851cefcfc590a202c74ebe4d4a7d44cdda6409101f1",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "First story"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "Plain first story text, corrected."
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "rss",
+         "language": "fr",
+         "link": "https://news.example.org/",
+         "title": "Example Newsroom",
+         "version": "2.0"
+        },
+        "item": {
+         "link": "https://news.example.org/first",
+         "published": "2026-08-31T09:00:00Z"
+        }
+       }
+      }
+     }
+    },
+    {
+     "record_key": "example-3",
+     "revision": "sha256:9a1726a6dbedca415138919d78730acf62fcefd2837b6234d1a25ec1a836be93",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "Third story"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "A new story."
+        }
+       },
+       {
+        "key": "body_html",
+        "parent_key": "body",
+        "role": "source_html",
+        "content": {
+         "kind": "text",
+         "text": "\u003cp\u003eA \u003ca href=\"https://news.example.org/\"\u003enew\u003c/a\u003e story.\u003c/p\u003e"
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "rss",
+         "language": "fr",
+         "link": "https://news.example.org/",
+         "title": "Example Newsroom",
+         "version": "2.0"
+        },
+        "item": {
+         "guid": "example-3",
+         "link": "https://news.example.org/third",
+         "published": "2026-09-02T07:15:00Z"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "checkpoint": "{\"etag\":\"\\\"v2\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"ttl_seconds\":900,\"not_before\":\"2026-09-28T12:55:00Z\",\"seen\":[{\"k\":\"32c3b9364cde3e16\",\"r\":\"2caadaeb48a97752\"},{\"k\":\"6c9b19cb967b563d\",\"r\":\"5a7a367d18607fed\"},{\"k\":\"490f6f1d8571696c\",\"r\":\"9a1726a6dbedca41\"}]}"
+  }
+ ]
+}

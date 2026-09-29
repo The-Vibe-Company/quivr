@@ -31,8 +31,13 @@ No Railway TCP proxies or public dependency domains are needed.
 Webhook delivery and the RSS connector refuse private and internal addresses
 (checked after DNS resolution, so Railway's private network is unreachable
 through them). The generated configuration never sets
-`delivery.allow_private_destinations` or `connector_rss_allow_private_addresses`;
+`delivery.allow_private_destinations` or the rss pin's `allow_private_addresses`;
 those allowances exist for the local harness only.
+
+The RSS connector is the first-party plugin [`plugins/rss`](../../plugins/rss/README.md),
+built into the core image as `/usr/local/bin/quivr-rss`. `core-entrypoint.py` always
+pins it and the worker always runs it on `127.0.0.1:9920`, whatever `QUIVR_DEMO_PLUGINS`
+says, so feed instances keep polling. It logs `quivr-rss: serving connector.rss@…` at start.
 
 ## Credential key (optional)
 

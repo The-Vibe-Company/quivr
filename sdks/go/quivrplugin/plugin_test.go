@@ -37,7 +37,7 @@ func newTestPlugin(t *testing.T, fetch func(*FetchRequest) (*Page, error)) (http
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.MustConnector("feed", fake{fetch}).MustConnector("open", fake{fetch})
+	p.MustConnector("feed", fake{fetch}).MustConnector("open", fake{fetch}).MustConnector("optional", fake{fetch})
 	h, err := p.Handler()
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +158,26 @@ func TestErrorsMapToClassifiedEnvelopes(t *testing.T) {
 				t.Fatalf("the credential or panic text leaked:\n%s\n%s", raw, logs.String())
 			}
 		})
+	}
+}
+
+// credential_required: false lets an instance without a credential run, and
+// a credential that is sent must still match the schema.
+func TestAnOptionalCredentialMayBeNull(t *testing.T) {
+	h, _ := newTestPlugin(t, func(r *FetchRequest) (*Page, error) {
+		if !r.Credential.IsNull() {
+			t.Fatal("the null credential did not reach Fetch as null")
+		}
+		return &Page{Checkpoint: map[string]any{}}, nil
+	})
+	optional := func(credential any) []byte {
+		return fetchBody(func(b map[string]any) { b["connector"].(map[string]any)["kind"] = "optional"; b["credential"] = credential })
+	}
+	if status, _, raw := call(h, "/v0/contributions/connector/fetch", optional(nil)); status != 200 {
+		t.Fatalf("a null optional credential: HTTP %d %s", status, raw)
+	}
+	if status, out, raw := call(h, "/v0/contributions/connector/fetch", optional(map[string]any{"token": "wrong"})); status != 400 || out["code"] != "invalid_credential" {
+		t.Fatalf("an invalid optional credential: HTTP %d %s", status, raw)
 	}
 }
 

@@ -53,23 +53,39 @@ class CoreEntrypointTest(unittest.TestCase):
         for value in ('', '0', 'true'):
             config = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': value})
             self.assertEqual(config, base, value)
-        self.assertFalse({'plugins', 'destinations'} & set(base))
+        self.assertNotIn('destinations', base)
         enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
         actions = enabled['keys']['placeholder-api-key']['actions']
         self.assertEqual(set(actions) - set(base['keys']['placeholder-api-key']['actions']), {'monitoring:read', 'monitoring:write'})
         self.assertEqual(list(enabled['destinations']), [core_entrypoint.DESTINATION_ID])
+        self.assertEqual(enabled['plugins'][:len(base['plugins'])], base['plugins'])
+
+    def test_connector_plugins_are_pinned_and_run_without_any_flag(self):
+        # Instances of their kinds keep polling once created: an unpinned kind would fail them.
+        for env in (ENV, {**ENV, 'QUIVR_DEMO_PLUGINS': '1'}):
+            pins = core_entrypoint.build_config(env)['plugins']
+            rss = [p for p in pins if p['endpoint'] == 'http://127.0.0.1:9920']
+            self.assertEqual(rss, [{'manifest': '/app/plugins/rss/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9920', 'configuration': {}}])
+        commands = {name: argv for name, argv, _, _ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'})}
+        self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss']})
+        both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
+        self.assertEqual(both, {'rss', 'pdf-text', 'alerts'})
 
     def test_pinned_manifests_are_the_repository_plugins(self):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
         pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['plugins']
-        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910'])
+        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920'])
         ids = set()
         for pin in pins:
             source = pathlib.PurePosixPath(pin['manifest']).relative_to('/app')
-            self.assertIn(f'COPY {source.parent} /app/{source.parent}', dockerfile)
+            if (ROOT / source.parent / 'go.mod').exists():
+                # Go connector plugins: the connectors stage builds every plugins/<id> with a go.mod.
+                self.assertIn('COPY plugins ./plugins', dockerfile)
+            else:
+                self.assertIn(f'COPY {source.parent} /app/{source.parent}', dockerfile)
             ids.add(re.search(r'^id: (\S+)$', (ROOT / source).read_text(), re.M).group(1))
-        self.assertEqual(ids, {'alerts', 'pdf-text'})
+        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
 
@@ -105,8 +121,8 @@ class CoreEntrypointTest(unittest.TestCase):
         def kinds(env):
             pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1', **env})['plugins']
             return {pathlib.PurePosixPath(p['manifest']).parent.name: p.get('kinds') for p in pins}
-        self.assertEqual(kinds({}), {'alerts': ['keywords'], 'pdf-text': None})
-        self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], 'pdf-text': None})
+        self.assertEqual(kinds({}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None})
+        self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], 'pdf-text': None, 'rss': None})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])
 
 

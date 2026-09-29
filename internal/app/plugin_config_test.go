@@ -84,7 +84,7 @@ func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
 func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "quivr-plugin.yaml")
-	body := "id: acme.rss\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      rss:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
+	body := "id: acme.xlist\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      x_list:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
 	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
 	t.Setenv("QUIVR_CONFIG", config)
 	for _, command := range []string{"api", "worker"} {
 		err := Run(command)
-		if err == nil || !strings.Contains(err.Error(), `connector kind "rss"`) || !strings.Contains(err.Error(), "the engine") || !strings.Contains(err.Error(), "plugin acme.rss@1.0.0") {
+		if err == nil || !strings.Contains(err.Error(), `connector kind "x_list"`) || !strings.Contains(err.Error(), "the engine") || !strings.Contains(err.Error(), "plugin acme.xlist@1.0.0") {
 			t.Fatalf("%s started with a kind provided twice: %v", command, err)
 		}
 	}

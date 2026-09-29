@@ -1,0 +1,84 @@
+{
+ "steps": [
+  {
+   "feed": "atom.xml",
+   "etag": "\"a1\"",
+   "now": "2026-09-28T12:00:00Z",
+   "checkpoint_in": "null",
+   "items": [
+    {
+     "record_key": "urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a",
+     "revision": "sha256:1f904d8fd8b2da08d8ad383297631d875791836b228acd4199a5c6687609559c",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "Atom entry"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "Entry content."
+        }
+       },
+       {
+        "key": "body_html",
+        "parent_key": "body",
+        "role": "source_html",
+        "content": {
+         "kind": "text",
+         "text": "\u003cdiv\u003eEntry \u003cstrong\u003econtent\u003c/strong\u003e.\u003c/div\u003e"
+        }
+       },
+       {
+        "key": "summary",
+        "role": "summary",
+        "content": {
+         "kind": "text",
+         "text": "Entry summary."
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "atom",
+         "language": "en",
+         "link": "https://blog.example.org/",
+         "title": "Example Atom Feed",
+         "version": "1.0"
+        },
+        "item": {
+         "authors": [
+          {
+           "email": "alex@example.org",
+           "name": "Alex Writer"
+          }
+         ],
+         "categories": [
+          "Technology"
+         ],
+         "guid": "urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a",
+         "link": "https://blog.example.org/entry",
+         "published": "2026-09-03T11:00:00Z",
+         "updated": "2026-09-03T12:00:00Z"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "checkpoint": "{\"etag\":\"\\\"a1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"seen\":[{\"k\":\"3841e5cf232f5111\",\"r\":\"1f904d8fd8b2da08\"}]}"
+  }
+ ]
+}

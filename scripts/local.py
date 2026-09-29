@@ -91,7 +91,7 @@ class Stack:
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
-        cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',connector_rss_allow_private_addresses=True,
+        cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
             # The m365_mail kind talks to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
             x=dict(api_endpoint=f"http://127.0.0.1:{s['fake_x_port']}"),m365=dict(login_endpoint=f"http://127.0.0.1:{s['graph_port']}",graph_endpoint=f"http://127.0.0.1:{s['graph_port']}/v1.0"),keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
@@ -129,7 +129,7 @@ class Stack:
             # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
             # verification the sample connector plugin (scripts/connector_plugin.py). The fixture
             # evaluator stays installed for the notification-mechanics acceptance tests.
-            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self),monitoring_fixture_evaluator=True)
+            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self),monitoring_fixture_evaluator=True)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -140,7 +140,7 @@ class Stack:
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
         keyless={k:v for k,v in cfg.items() if k!='credential_key'}
         # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
-        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off'),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
     def running(self):
@@ -243,7 +243,7 @@ class Stack:
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
         self.start_dependencies()
         normalizer_plugin.prepare(self);subscription_plugin.prepare(self)
-        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);self.start_processes()
+        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);connector_plugin.start_first_party(self);self.start_processes()
     def start_dependencies(self,attempts=2):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
@@ -380,7 +380,7 @@ class Stack:
         """Stop this project's processes and containers. reset also deletes its volumes and the
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
-        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
             self.save()
@@ -601,9 +601,11 @@ def run_stack(command,part=None):
             normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
             subscription_plugin.select(stack,verification or subscription_plugin.from_environment(),subscription_plugin.described_mode(verification))
             connector_plugin.select(stack,verification)
+            # First-party connector plugins: always in verification, QUIVR_<ID>=on|off in make dev.
+            connector_plugin.select_first_party(stack,[r['id'] for r in connector_plugin.FIRST_PARTY] if verification else connector_plugin.from_environment())
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps,part)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
         elif command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(command=='reset')
         status='passed'

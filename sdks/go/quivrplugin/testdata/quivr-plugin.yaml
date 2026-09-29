@@ -23,5 +23,15 @@ contributions:
       open:
         config_schema: {type: object}
         default_interval_seconds: 600
+      optional:
+        config_schema: {type: object}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, pattern: "^tok-"}
+        credential_required: false
+        default_interval_seconds: 600
     limits:
       max_items: 2

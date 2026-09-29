@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.request
 import uuid
+import connector_plugin
 import fake_feeds
 import gotest
 import subscription_plugin
@@ -46,6 +47,8 @@ def main():
         # in `make demo` when TYPESAFE_API_KEY is set, and are not offered otherwise.
         described = subscription_plugin.described_mode(verify)
         subscription_plugin.select(stack, True, described)
+        # The demo's feeds need the first-party connector plugins, whatever QUIVR_<ID> says.
+        connector_plugin.select_first_party(stack, [row['id'] for row in connector_plugin.FIRST_PARTY])
         stack.up()
         demo_port = port() if verify else int(os.environ.get('DEMO_PORT', '5183'))
         demo_password = secrets.token_hex(24) if verify else os.environ.get('DEMO_PASSWORD', '')

@@ -80,8 +80,6 @@ var declaredExtensionSchemas = map[string]map[string]string{
   "additionalProperties": false
 }`,
 	},
-	// Item and feed metadata recorded by the built-in rss connector kind.
-	"connector.rss": {"1": rssExtensionSchema},
 	// connector.x_list carries X post metadata collected by the x_list connector.
 	"connector.x_list": {
 		"1": `{
@@ -196,39 +194,3 @@ func (BuiltinExtensions) Validate(_ context.Context, exts Extensions) error {
 	}
 	return nil
 }
-
-const rssExtensionSchema = `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["item", "feed"],
-  "additionalProperties": false,
-  "properties": {
-    "item": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "guid": {"type": "string"},
-        "link": {"type": "string"},
-        "links": {"type": "array", "maxItems": 20, "items": {"type": "string"}},
-        "authors": {"type": "array", "maxItems": 20, "items": {"type": "object", "additionalProperties": false, "properties": {"name": {"type": "string"}, "email": {"type": "string"}}}},
-        "published": {"type": "string", "format": "date-time"},
-        "updated": {"type": "string", "format": "date-time"},
-        "categories": {"type": "array", "maxItems": 50, "items": {"type": "string"}},
-        "enclosures": {"type": "array", "maxItems": 20, "items": {"type": "object", "required": ["url"], "additionalProperties": false, "properties": {"url": {"type": "string"}, "type": {"type": "string"}, "length": {"type": "string"}}}},
-        "truncated": {"type": "boolean"}
-      }
-    },
-    "feed": {
-      "type": "object",
-      "required": ["format"],
-      "additionalProperties": false,
-      "properties": {
-        "format": {"type": "string"},
-        "version": {"type": "string"},
-        "title": {"type": "string"},
-        "link": {"type": "string"},
-        "language": {"type": "string"}
-      }
-    }
-  }
-}`

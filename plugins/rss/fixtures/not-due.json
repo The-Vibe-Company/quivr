@@ -1,0 +1,9 @@
+{
+  "description": "Inside the feed's ttl the plugin answers not_due without polling, and the checkpoint stays as it was.",
+  "connector": {"kind": "rss", "config": {"url": "https://feeds.example.org/news.xml"}},
+  "checkpoint": {"etag": "\"v1\"", "ttl_seconds": 900, "not_before": "2026-01-01T00:15:00Z"},
+  "now": "2026-01-01T00:00:00Z",
+  "expect": {
+    "pages": [{"record_keys": [], "more": false}]
+  }
+}

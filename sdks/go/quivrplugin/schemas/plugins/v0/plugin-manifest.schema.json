@@ -354,6 +354,11 @@
           ],
           "description": "JSON Schema 2020-12 of the Deposited Credential (a JSON object). Absent: the kind takes no credential."
         },
+        "credential_required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Since Plugin API 0.3.1. Whether an instance needs a Deposited Credential before it runs. false: the credential is optional, and an instance without one is invoked with a null credential. Only meaningful with credential_schema."
+        },
         "default_interval_seconds": {
           "type": "integer",
           "minimum": 60,

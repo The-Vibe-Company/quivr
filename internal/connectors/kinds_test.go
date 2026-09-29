@@ -10,7 +10,7 @@ import (
 // validate owns the JSON Pointer of a schema failure and the registry's
 // acceptance: every row is one registry call as Create and rotation make it.
 func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
-	registry, err := NewRegistry(Fixture{}, RSS{}, XList{})
+	registry, err := NewRegistry(Fixture{}, XList{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,12 +22,11 @@ func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
 	}{
 		{"valid config and secret", "fixture", `{"script":[]}`, `{"token":"fixture-test-token"}`, nil, ""},
 		{"kind not enabled here", "m365_mail", `{}`, "", ErrUnsupportedKind, ""},
-		{"pattern mismatch", "rss", `{"url":"ftp://example.org"}`, "", ErrInvalidConfig, "/config/url"},
+		{"pattern mismatch", "x_list", `{"list_id":"list"}`, "", ErrInvalidConfig, "/config/list_id"},
 		{"missing required property", "x_list", `{}`, "", ErrInvalidConfig, "/config/list_id"},
-		{"unexpected property", "rss", `{"url":"https://example.org/feed","extra":1}`, "", ErrInvalidConfig, "/config/extra"},
-		{"reserved characters are escaped", "rss", `{"url":"https://example.org/feed","a/b~c":1}`, "", ErrInvalidConfig, "/config/a~1b~0c"},
+		{"unexpected property", "x_list", `{"list_id":"1","extra":1}`, "", ErrInvalidConfig, "/config/extra"},
+		{"reserved characters are escaped", "x_list", `{"list_id":"1","a/b~c":1}`, "", ErrInvalidConfig, "/config/a~1b~0c"},
 		{"nested type mismatch", "fixture", `{"script":[{"items":"x"}]}`, "", ErrInvalidConfig, "/config/script/0/items"},
-		{"secret branch mismatch", "rss", `{"url":"https://example.org/feed"}`, `{"username":"a"}`, ErrInvalidCredential, "/credential/secret"},
 		{"secret missing property", "x_list", `{"list_id":"1"}`, `{}`, ErrInvalidCredential, "/credential/secret/bearer_token"},
 	} {
 		var secret json.RawMessage
@@ -42,17 +41,17 @@ func TestValidationFailuresPointAtTheOffendingField(t *testing.T) {
 }
 
 func TestRegistryDescribesEnabledKindsFromTheirSchemas(t *testing.T) {
-	registry, err := NewRegistry(XList{}, Fixture{}, RSS{})
+	registry, err := NewRegistry(XList{}, Fixture{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	kinds := registry.Describe()
-	if len(kinds) != 3 || kinds[0].Kind != "fixture" || kinds[1].Kind != "rss" || kinds[2].Kind != "x_list" {
+	if len(kinds) != 2 || kinds[0].Kind != "fixture" || kinds[1].Kind != "x_list" {
 		t.Fatalf("kinds %+v", kinds)
 	}
-	want := map[string]string{"fixture": CredentialOptional, "rss": CredentialOptional, "x_list": CredentialRequired}
-	// Documented per-kind defaults (docs/connectors/rss.md, x.md).
-	interval := map[string]time.Duration{"fixture": 5 * time.Minute, "rss": 5 * time.Minute, "x_list": 2 * time.Minute}
+	want := map[string]string{"fixture": CredentialOptional, "x_list": CredentialRequired}
+	// Documented per-kind defaults (docs/connectors/x.md).
+	interval := map[string]time.Duration{"fixture": 5 * time.Minute, "x_list": 2 * time.Minute}
 	for _, k := range kinds {
 		if k.Title == "" || k.Title == k.Kind || k.Description == "" {
 			t.Errorf("%s: missing title/description annotations", k.Kind)

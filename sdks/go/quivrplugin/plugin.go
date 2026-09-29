@@ -45,6 +45,8 @@ type kind struct {
 	impl       Connector
 	config     *jsonschema.Schema
 	credential *jsonschema.Schema
+	// optional: the manifest sets credential_required: false.
+	optional bool
 }
 
 // Option configures a Plugin.
@@ -77,7 +79,7 @@ func New(path string, opts ...Option) (*Plugin, error) {
 		}
 	}
 	for name, declared := range m.Connector.Kinds {
-		k := &kind{}
+		k := &kind{optional: declared.CredentialRequired != nil && !*declared.CredentialRequired}
 		if k.config, err = compileDeclared(declared.ConfigSchema); err != nil {
 			return nil, fmt.Errorf("kind %s config_schema: %w", name, err)
 		}
@@ -245,10 +247,10 @@ func (p *Plugin) decode(w http.ResponseWriter, r *http.Request, schema string, i
 	case k.credential == nil && !credential.IsNull():
 		refuse(w, 400, "invalid_credential", fmt.Sprintf("kind %q takes no credential", c.Connector.Kind), credential)
 		return nil, credential
-	case k.credential != nil && credential.IsNull():
+	case k.credential != nil && credential.IsNull() && !k.optional:
 		refuse(w, 400, "invalid_credential", fmt.Sprintf("kind %q needs a credential", c.Connector.Kind), credential)
 		return nil, credential
-	case k.credential != nil:
+	case k.credential != nil && !credential.IsNull():
 		// Only the location: a schema message may quote the value.
 		if err := validateWith(k.credential, c.Credential); err != nil {
 			refuse(w, 400, "invalid_credential", "the credential does not match the kind's credential_schema", credential)

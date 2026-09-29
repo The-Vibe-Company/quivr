@@ -37,6 +37,47 @@ class ImageContextTest(unittest.TestCase):
         self.assertIsNone(image_context.check(root, root / 'Dockerfile', GO))
 
 
+class ConnectorPluginImageContextTest(unittest.TestCase):
+    """A Go connector plugin under plugins/<id> builds from exactly the connectors stage's COPY sources."""
+    BUILD = 'FROM golang AS build\nCOPY go.mod ./\nCOPY cmd ./cmd\nCOPY extra ./extra\n'
+
+    def repo(self, connectors_stage):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / 'go.mod').write_text('module example.test/app\n\ngo 1.21\n')
+        (root / 'cmd' / 'quivr').mkdir(parents=True)
+        (root / 'cmd' / 'quivr' / 'main.go').write_text(MAIN)
+        (root / 'extra').mkdir()
+        (root / 'extra' / 'extra.go').write_text('package extra\n\nfunc Run() {}\n')
+        # The plugin module replaces the SDK with its repository copy, as plugins/<id> do.
+        (root / 'sdks' / 'go' / 'kit').mkdir(parents=True)
+        (root / 'sdks' / 'go' / 'go.mod').write_text('module example.test/sdk\n\ngo 1.21\n')
+        (root / 'sdks' / 'go' / 'kit' / 'kit.go').write_text('package kit\n\nfunc Serve() {}\n')
+        (root / 'plugins' / 'feed').mkdir(parents=True)
+        (root / 'plugins' / 'feed' / 'go.mod').write_text(
+            'module example.test/feed\n\ngo 1.21\n\nrequire example.test/sdk v0.0.0\n\nreplace example.test/sdk => ../../sdks/go\n')
+        (root / 'plugins' / 'feed' / 'main.go').write_text('package main\n\nimport "example.test/sdk/kit"\n\nfunc main() { kit.Serve() }\n')
+        (root / 'Dockerfile').write_text(self.BUILD + connectors_stage)
+        return root
+
+    def test_plugin_builds_from_the_connectors_stage(self):
+        root = self.repo('FROM golang AS connectors\nWORKDIR /src\nCOPY sdks/go ./sdks/go\nCOPY plugins ./plugins\n')
+        self.assertIsNone(image_context.check(root, root / 'Dockerfile', GO))
+
+    def test_missing_sdk_copy_fails_and_names_the_plugin(self):
+        root = self.repo('FROM golang AS connectors\nWORKDIR /src\nCOPY plugins ./plugins\n')
+        failure = image_context.check(root, root / 'Dockerfile', GO)
+        self.assertIn('cannot build plugins/feed', failure)
+        self.assertIn('sdks/go', failure)
+
+    def test_missing_plugin_copy_fails(self):
+        root = self.repo('FROM golang AS connectors\nWORKDIR /src\nCOPY sdks/go ./sdks/go\n')
+        self.assertIn('does not copy plugins/feed', image_context.check(root, root / 'Dockerfile', GO))
+
+    def test_missing_connectors_stage_fails(self):
+        root = self.repo('')
+        self.assertIn('no "connectors" stage', image_context.check(root, root / 'Dockerfile', GO))
+
+
 class WebImageContextTest(unittest.TestCase):
     def repo(self, copy_line):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))

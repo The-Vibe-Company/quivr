@@ -5,6 +5,16 @@ instance's Corpus and Source Namespace. It reads RSS 0.9x/2.0, RSS 1.0 (RDF) and
 Atom. JSON Feed documents are also accepted (`feed.format: "json"`). Read the [common guide](README.md) first: it covers credentials, health,
 events and disabling for every kind.
 
+## Install the plugin
+
+The kind comes from the first-party plugin `connector.rss`, not from the core:
+build and pin it as [its README](../../plugins/rss/README.md) shows. `make dev`,
+`make verify`, the demo and the Railway image pin it by default;
+`QUIVR_RSS=off make dev` leaves it out. Without the pin, `rss` instances keep
+their checkpoints but their runs fail with `unsupported_connector_kind`, and
+pinning it again resumes them. Instances created when the kind was built into
+the core continue without being recreated.
+
 ## Create an instance
 
 ```http
@@ -68,15 +78,16 @@ content, and never use this to bypass the publisher's access controls.
   - Responses larger than 10 MiB (after decompression) are refused.
   - At most 5 redirects are followed.
   - At most the first 1,000 items of a feed are considered, and at most 250
-    new or changed items are submitted per page.
+    new or changed items are submitted per page (fewer when their text
+    passes 12 MiB; the rest follows on the next page).
 - **Network policy.** Unspecified, loopback, private, ULA, link-local (including
   cloud metadata), multicast, carrier-grade NAT, documentation, benchmarking,
   reserved and other special-purpose ranges, and IPv6 prefixes that embed an IPv4
   address (IPv4-mapped, IPv4-compatible, NAT64, 6to4, Teredo), are refused
   (`address_not_allowed`). The check runs on the address actually dialed, after
-  DNS resolution, for every connection and redirect hop; webhook delivery shares
-  the same guard (`internal/netguard`). Only a local test deployment should set
-  `connector_rss_allow_private_addresses: true`.
+  DNS resolution, for every connection and redirect hop, with the same rule as
+  webhook delivery. Only a local test deployment should set
+  `allow_private_addresses: true` in the pin's `configuration`.
 
 ## What is collected
 

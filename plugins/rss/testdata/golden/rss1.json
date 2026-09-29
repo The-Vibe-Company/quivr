@@ -1,0 +1,64 @@
+{
+ "steps": [
+  {
+   "feed": "rss1.rdf",
+   "etag": "\"r1\"",
+   "now": "2026-09-28T12:00:00Z",
+   "checkpoint_in": "null",
+   "items": [
+    {
+     "record_key": "https://journal.example.org/a",
+     "revision": "sha256:76e833dada201599979e5b463b6e89e2999e9e6c68ed196c7d41f3a8820f0bbb",
+     "content": {
+      "kind": "manifest",
+      "parts": [
+       {
+        "key": "title",
+        "role": "title",
+        "content": {
+         "kind": "text",
+         "text": "RDF item"
+        }
+       },
+       {
+        "key": "body",
+        "role": "body",
+        "content": {
+         "kind": "text",
+         "text": "RDF item description."
+        }
+       }
+      ]
+     },
+     "extensions": {
+      "connector.rss": {
+       "schema_version": "1",
+       "data": {
+        "feed": {
+         "format": "rss",
+         "link": "https://journal.example.org/",
+         "title": "Example Journal",
+         "version": "1.0"
+        },
+        "item": {
+         "authors": [
+          {
+           "name": "Sam Editor"
+          }
+         ],
+         "categories": [
+          "Science"
+         ],
+         "link": "https://journal.example.org/a",
+         "published": "2026-09-02T08:30:00Z",
+         "updated": "2026-09-02T08:30:00Z"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "checkpoint": "{\"etag\":\"\\\"r1\\\"\",\"last_modified\":\"Tue, 01 Sep 2026 10:00:00 GMT\",\"seen\":[{\"k\":\"a16cfd00652506ef\",\"r\":\"76e833dada201599\"}]}"
+  }
+ ]
+}

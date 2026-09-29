@@ -69,6 +69,13 @@ jobs:
           path: .scratch/plugin-sdk/static-source-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rss-contract-report
+          path: .scratch/plugin-sdk/rss-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
       # The public contracts this commit checked.
       - uses: actions/upload-artifact@v4
         if: always()

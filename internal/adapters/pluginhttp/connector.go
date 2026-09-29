@@ -82,8 +82,13 @@ func (c Connector) CredentialSchema() []byte {
 	return nil
 }
 
-// CredentialRequired: a kind that declares a credential schema needs one.
-func (c Connector) CredentialRequired() bool { return c.CredentialSchema() != nil }
+// CredentialRequired: a kind that declares a credential schema needs one,
+// unless its manifest sets credential_required: false.
+func (c Connector) CredentialRequired() bool {
+	d := c.declared()
+	d.CredentialSchema = c.CredentialSchema()
+	return d.NeedsCredential()
+}
 
 func (c Connector) DefaultInterval() time.Duration {
 	return time.Duration(c.declared().DefaultIntervalSeconds) * time.Second
