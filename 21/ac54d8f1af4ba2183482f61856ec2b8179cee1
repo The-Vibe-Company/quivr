@@ -17,6 +17,7 @@ quivr-search/src/components/alerts/AlertComposer.tsx
   s_54b80c92daa9cb::t_9229986fc0bf33 1-210
 quivr-search/src/App.tsx
   s_54b80c92daa9cb::t_a8ae75490024d5 18,34,64,120-121,143,151,288,334-345,369-372,374-375
+  s_54b80c92daa9cb::t_674a5926c81cb6 23,31-33,138-142,373
 quivr-search/alerts.mjs
   s_54b80c92daa9cb::t_85e69542a75b83 76-80,210-215,231-235,274-275,304-307,395-401,404-405
   s_54b80c92daa9cb::t_5d232043f937a4 199-202
