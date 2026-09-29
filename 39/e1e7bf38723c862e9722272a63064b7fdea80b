@@ -1,0 +1,36 @@
+README.md
+  h_ecee222750141d 202-206
+cmd/quivr/main.go
+  h_ecee222750141d 25
+docs/api-walkthrough.md
+  h_ecee222750141d 287-291
+docs/connect-an-ai-agent.md
+  h_ecee222750141d 1-69
+docs/inventory.toml
+  h_ecee222750141d 72,109
+docs/start/functional.md
+  h_ecee222750141d 16
+go.mod
+  h_ecee222750141d 11,34,46-47,50,52,56
+go.sum
+  h_ecee222750141d 42-43,50-51,77-78,94-97,106-107,142-143,163-164,170-171
+internal/online/mcp.go
+  h_ecee222750141d 1-234
+internal/online/mcp_catalogue.go
+  h_ecee222750141d 1-123
+internal/online/online.go
+  h_ecee222750141d 69,80,98
+tests/acceptance/search_mcp_test.go
+  h_ecee222750141d 1-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "39e1e7bf38723c862e9722272a63064b7fdea80b",
+  "prompts": {},
+  "humans": {
+    "h_ecee222750141d": {
+      "author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
