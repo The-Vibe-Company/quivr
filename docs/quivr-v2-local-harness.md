@@ -168,7 +168,7 @@ attempt, the harness kills and restarts the worker, and
 `TestDeliveryRestartAfter` proves the same Delivery converges to delivered.
 
 The local harness (`make dev` and `make verify`) shortens the webhook retry
-policy through the worker's `delivery` block (initial 2 s, cap 5 s, window 60 s
+policy through the worker's `delivery` block (initial 1 s, cap 2 s, window 20 s
 instead of 1 s / 5 min / 24 h); verification records it under
 `timing_overrides` in `report.json`. Because the test receivers listen on
 loopback, the same block sets `allow_private_destinations: true`, which is also

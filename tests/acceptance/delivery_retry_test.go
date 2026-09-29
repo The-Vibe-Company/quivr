@@ -16,8 +16,14 @@ import (
 )
 
 // Retry acceptance runs against the shortened, reported harness policy in
-// scripts/local.py (DELIVERY_OVERRIDES): initial 2s, cap 5s, window 60s.
-const shortWindow = 60 * time.Second
+// scripts/local.py (DELIVERY_OVERRIDES): initial 1s, cap 2s, window 20s.
+const (
+	shortWindow = 20 * time.Second
+	// quietPeriod is how long a check watches for an attempt that must not
+	// happen: the longest policy retry delay (cap 2s), plus the delivery
+	// worker's longest idle poll (2s), plus a second of margin.
+	quietPeriod = 5 * time.Second
+)
 
 // retryNotice is one Subscription's committed notice and logical Delivery.
 type retryNotice struct {
@@ -140,7 +146,8 @@ func TestMonitoringDeliveryRecoversFromTemporaryFailure(t *testing.T) {
 // TestMonitoringDeliveryExhaustsPersistentFailure proves persistent 503s end
 // exhausted when the shortened window closes, and a Retry-After longer than
 // the window is capped at the window end for one final attempt. Bounded
-// failure diagnostics and delivery metrics stay inspectable.
+// failure diagnostics and delivery metrics stay inspectable. Over the 10 s
+// budget by design: it waits out the harness delivery window (THE-755).
 func TestMonitoringDeliveryExhaustsPersistentFailure(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
@@ -181,7 +188,7 @@ func TestMonitoringDeliveryExhaustsPersistentFailure(t *testing.T) {
 	}
 	// No attempt after exhaustion.
 	seen := len(receiver.capturesOf(failing.event))
-	time.Sleep(7 * time.Second)
+	time.Sleep(quietPeriod)
 	if len(receiver.capturesOf(failing.event)) != seen {
 		t.Fatal("exhausted Delivery was attempted again")
 	}
@@ -216,15 +223,16 @@ func TestMonitoringDeliveryExhaustsPersistentFailure(t *testing.T) {
 
 // TestMonitoringDeliveryDisableBeforeRetry proves disabling a Subscription
 // after a failed attempt and before its next eligibility makes no new attempt.
-// The receiver asks for a 15 s Retry-After so the retry is deterministically
-// not yet admitted when disable commits; the setup fails otherwise.
+// The receiver asks for an 8 s Retry-After so the retry is deterministically
+// not yet admitted when disable commits; the setup fails otherwise. Over the
+// 10 s budget by design: it waits past that eligibility (THE-755).
 func TestMonitoringDeliveryDisableBeforeRetry(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	receiver := startReceiver(t)
-	n := retryScenario(t, "delivery-disable", receiver, []reply{{status: 503, retryAfter: "15"}, {status: 204}})[0]
+	n := retryScenario(t, "delivery-disable", receiver, []reply{{status: 503, retryAfter: "8"}, {status: 204}})[0]
 
 	failed := awaitDelivery(t, admin, n.delivery, func(d map[string]any) bool {
 		return d["state"] == "pending" && d["attempt_count"] == float64(1) && d["next_attempt_at"] != nil
@@ -244,8 +252,8 @@ func TestMonitoringDeliveryDisableBeforeRetry(t *testing.T) {
 	if !reflect.DeepEqual(disabled["admission"], map[string]any{"allowed": false, "reason": "subscription_disabled"}) || disabled["state"] != "pending" || disabled["next_attempt_at"] != nil {
 		t.Fatal("disabled admission view", disabled)
 	}
-	// Observe well beyond the former eligibility time.
-	time.Sleep(time.Until(next) + 6*time.Second)
+	// Observe beyond the former eligibility time.
+	time.Sleep(time.Until(next) + quietPeriod)
 	after := request(t, "GET", "/v0/deliveries/"+n.delivery, admin, nil, 200)
 	if after["attempt_count"] != float64(1) || after["state"] != "pending" || len(receiver.capturesOf(n.event)) != 1 {
 		t.Fatal("disabled Subscription made a new attempt", after, len(receiver.capturesOf(n.event)))
@@ -269,14 +277,15 @@ func restartStatePath() string {
 
 // TestDeliveryRestartBefore records one failed attempt, then scripts/local.py
 // kills and restarts the worker before TestDeliveryRestartAfter runs. The
-// receiver asks for a 20 s Retry-After so the retry falls after the restart.
+// receiver asks for an 8 s Retry-After so the retry falls after the restart,
+// inside the delivery window.
 func TestDeliveryRestartBefore(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	receiver := startReceiver(t)
-	n := retryScenario(t, "delivery-restart", receiver, []reply{{status: 503, retryAfter: "20"}})[0]
+	n := retryScenario(t, "delivery-restart", receiver, []reply{{status: 503, retryAfter: "8"}})[0]
 	awaitDelivery(t, admin, n.delivery, func(d map[string]any) bool { return d["attempt_count"] == float64(1) && d["last_error"] != nil })
 	captures := receiver.capturesOf(n.event)
 	if len(captures) != 1 {

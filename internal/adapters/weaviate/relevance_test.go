@@ -41,12 +41,16 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 	if err = json.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	// The complete CPU fixture includes ingestion and 72 real searches. Shared CI
-	// runners can exceed two minutes without any individual request being stuck.
+	// The complete CPU fixture includes ingestion, 24 query embeddings and 72 real
+	// searches. Shared CI runners are slow; no individual request should be stuck.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	model := tei.Encoder{Endpoint: cfg.TEIURL}
-	windows := processing.TokenWindows{Tokenizer: tokenizer.Encoder{Config: cfg.Tokenizer}}
+	// The persistent tokenizer is the one production runs; TestServerMatchesPinnedReference
+	// holds it to the one-shot reference, which costs a process start per call.
+	server := &tokenizer.Server{Config: cfg.Tokenizer}
+	defer server.Close()
+	windows := processing.TokenWindows{Tokenizer: server}
 	projection := weaviate.New(cfg.WeaviateURL)
 	g := content.Generation{ID: "relevance-fixture", Collection: "QuivrRelevanceV1", ProfileVersion: retrieval.ProfileVersion, SpaceID: model.Space().ID}
 	if err = projection.Bootstrap(ctx, g.Collection); err != nil {
@@ -80,20 +84,24 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 		}
 	}
 	report := map[string]any{"fixture": "original CC0 FR/EN v1; 24 queries, one relevant document each", "fixture_sha256": content.Hash(fixture), "scope": "real processing/TEI/Weaviate adapters with explicit title/body in a fixture-only collection (BM25 statistics isolated); public ingestion remains inline body until THE-648", "profile": retrieval.ProfileVersion, "space_id": model.Space().ID, "producer": model.Producer(), "known_limitation": "THE-641: prior semantic MRR@10 .9583/Recall@3 1; hybrid .7969/.9583. Report separately, never tune to fixture."}
+	// Each query is normalized and embedded once; the three modes search with the same inputs.
+	queries := make([]string, len(rows))
+	vectors := make([][]float32, len(rows))
+	for i, r := range rows {
+		if queries[i], err = windows.NormalizeQuery(ctx, r[4]); err != nil {
+			t.Fatal(err)
+		}
+		if vectors[i], err = model.Embed(ctx, "query: "+queries[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
 		mrr, recall, ndcg := 0.0, 0.0, 0.0
 		details := []any{}
-		for _, r := range rows {
-			query, err := windows.NormalizeQuery(ctx, r[4])
-			if err != nil {
-				t.Fatal(err)
-			}
-			q := retrieval.Request{Query: query, Mode: mode, Profile: "balanced", Limit: 10, CorpusIDs: []string{"fixture"}}
+		for i, r := range rows {
+			q := retrieval.Request{Query: queries[i], Mode: mode, Profile: "balanced", Limit: 10, CorpusIDs: []string{"fixture"}}
 			if mode != "lexical" {
-				q.Vector, err = model.Embed(ctx, "query: "+query)
-				if err != nil {
-					t.Fatal(err)
-				}
+				q.Vector = vectors[i]
 			}
 			hits, err := projection.Search(ctx, []retrieval.Route{{CorpusID: "fixture", Generation: g}}, scope, q)
 			if err != nil {

@@ -14,13 +14,18 @@ GO=os.environ.get('GO','go')
 def run(args, **kwargs):
     return subprocess.run(args, check=True, cwd=ROOT, **kwargs)
 
+def alive(pid):
+    """Whether pid still runs: an exited or killed process that is not reaped yet (a zombie) does not."""
+    try:return pathlib.Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z'
+    except (FileNotFoundError,IndexError):return False
+
 # Obvious local test signing secret of the capture receiver destination.
 CAPTURE_DESTINATION='local-receiver-capture'
 CAPTURE_SECRET='whsec_'+base64.b64encode(b'local-test-signing-secret-capture').decode()
 # Shortened webhook retry policy of the local harness, like its other short intervals (dev and verify;
 # deployment defaults: 1s/5m/24h/10s). Verification reports it in report.json. The local receivers listen
 # on loopback, so the harness also lifts the private-destination refusal (deployment default: refused).
-DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'5s','window':'60s','allow_private_destinations':True}
+DELIVERY_OVERRIDES={'retry_initial':'1s','retry_max':'2s','window':'20s','allow_private_destinations':True}
 # The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
 # short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
 PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}
@@ -177,8 +182,10 @@ class Stack:
         if pid is None:raise RuntimeError('worker not tracked')
         self.signal_owned(pid,signal.SIGKILL)
         self.state['pids']=[p for p in self.state['pids'] if p!=pid];self.save()
+        # The harness spawned the worker and never reaps it, so once killed it stays a zombie: stopped, holding
+        # no port or lease. Waiting for /proc/<pid> to vanish would always run the whole deadline (THE-755).
         deadline=time.monotonic()+10
-        while pathlib.Path(f'/proc/{pid}').exists() and time.monotonic()<deadline:time.sleep(.05)
+        while alive(pid) and time.monotonic()<deadline:time.sleep(.05)
     def start_worker(self):
         self.spawn('worker','worker.json');self.await_ready('worker_probe_port')
     def start_short_retention_api(self):

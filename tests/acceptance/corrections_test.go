@@ -245,7 +245,8 @@ func TestMonitoringWithdrawalNotices(t *testing.T) {
 // linked match.withdrawn notice and Delivery. No attempt is made while it is
 // disabled, even for longer than the delivery window. The re-enable (on the
 // change feed) opens the notice's window, and the notice is delivered with the
-// polled bytes. The Match history is unchanged.
+// polled bytes. The Match history is unchanged. Over the 10 s budget by
+// design: it stays disabled for longer than the delivery window (THE-755).
 func TestMonitoringWithdrawalNoticeAfterReenable(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
@@ -342,7 +343,7 @@ func TestMonitoringSupersededNotice(t *testing.T) {
 	}
 	// No attempt after it is superseded, beyond the harness's longest retry wait.
 	attempts := len(attemptOutcomes(t, stale))
-	time.Sleep(7 * time.Second)
+	time.Sleep(quietPeriod)
 	if now := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200); now["attempt_count"] != float64(attempts) || len(receiver.capturesOf(created["event_id"].(string))) != attempts {
 		t.Fatal("superseded notice was attempted again", now)
 	}
@@ -352,10 +353,11 @@ func TestMonitoringSupersededNotice(t *testing.T) {
 
 // TestMonitoringSupersededNoLongerMatches proves THE-694: a
 // match.no_longer_matches still waiting for its retry when a later correction
-// matches again is never delivered. The receiver asks for a 40 s Retry-After
+// matches again is never delivered. The receiver asks for a 12 s Retry-After
 // on it, so its first attempt has finished and its retry is not yet eligible
 // when the match.corrected commits; the setup fails otherwise. Its only
 // attempt therefore precedes the correction, and none is admitted after it.
+// Over the 10 s budget by design: it waits past that eligibility (THE-755).
 func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
@@ -364,7 +366,7 @@ func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 	receiver := startReceiver(t)
 	s := newNoticeScenario(t, "rematch", "Dépêche "+markerCorrectionMatch, map[string]any{markerCorrectionCalm: "no_match", "default": "match"})
 	sub := s.subscriptions[0]
-	receiver.scriptType(sub, "match.no_longer_matches", reply{status: 503, retryAfter: "40"})
+	receiver.scriptType(sub, "match.no_longer_matches", reply{status: 503, retryAfter: "12"})
 	deliveredAsPolled(t, receiver, s.created[sub])
 
 	// v2 no longer matches; its notice fails once and waits for its retry.
@@ -378,7 +380,7 @@ func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if time.Until(next) < 15*time.Second {
+	if time.Until(next) < 8*time.Second {
 		t.Fatal("invalid setup: retry eligibility too close to commit the correction before it", failed)
 	}
 
@@ -405,7 +407,7 @@ func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 
 	// Observe beyond its former eligibility plus the worker's longest idle
 	// backoff and retry wait: no attempt was admitted after the correction.
-	time.Sleep(time.Until(next) + 6*time.Second)
+	time.Sleep(time.Until(next) + quietPeriod)
 	after := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200)
 	if after["state"] != "pending" || after["attempt_count"] != float64(1) || len(receiver.capturesOf(invalidation["event_id"].(string))) != 1 {
 		t.Fatal("stale match.no_longer_matches attempted after the correction", after)

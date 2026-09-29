@@ -25,8 +25,8 @@ stay visible. The Spec 1 obligation map is in
   process checks. macOS and linux/arm64 are not claimed.
 - The acceptance suite is order- and load-sensitive, so tests use their own
   Corpus and are scheduled explicitly (`tests/acceptance/README.md`).
-- Delivery retries run on a shortened policy under verification (initial 2 s,
-  cap 5 s, window 60 s), reported under `timing_overrides`.
+- Delivery retries run on a shortened policy under verification (initial 1 s,
+  cap 2 s, window 20 s), reported under `timing_overrides`.
 - SeaweedFS 4.45 can crash with a raft map race when it restarts on existing
   data. The harness gives a failed dependency start one more bounded attempt and
   records it in `readiness.json` (`dependency_start_retries`).

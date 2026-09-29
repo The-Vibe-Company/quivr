@@ -62,41 +62,80 @@ func TestServerMatchesPinnedReference(t *testing.T) {
 	for i := range many {
 		many[i] = processing.TokenInput{Text: rows[i%len(rows)][1], Special: i%2 == 0}
 	}
-	batches := [][]processing.TokenInput{fixture, edges, many, {{Text: words("Élection présidentielle, inflation; énergie!", 40000)}}, {}}
-	for i, batch := range batches {
-		want, wantErr := reference.Encode(ctx, batch)
-		got, gotErr := server.Encode(ctx, batch)
-		if wantErr != nil || gotErr != nil || !reflect.DeepEqual(want, got) {
-			t.Fatalf("batch %d diverged: reference err=%v server err=%v", i, wantErr, gotErr)
-		}
-	}
-	t.Logf("THE-675 parity: %d items identical", len(fixture)+len(edges)+len(many)+1)
-
-	oneShot := processing.TokenWindows{Tokenizer: reference}
-	persistent := processing.TokenWindows{Tokenizer: server}
-	// End to end on a sample; every other fixture item is covered by the encodings above.
+	// End to end on a sample: every Encode call the persistent TokenWindows makes is
+	// recorded, then held to the reference below. TokenWindows is deterministic given
+	// its encodings, so equal encodings mean the one-shot helper would produce the same
+	// Segmentation and query decisions. Recording keeps the reference to a few process
+	// starts instead of one per call.
+	recorder := &recordingTokenizer{next: server}
+	persistent := processing.TokenWindows{Tokenizer: recorder}
 	for _, r := range rows[:3] {
 		v := content.Version{ID: r[0], RecordID: r[0], Manifest: content.Manifest{Kind: "text", Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: r[1]}}, {Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: r[2]}}}}}
-		in := processing.Input{Organization: "parity", Version: v}
-		want, wantErr := oneShot.Process(ctx, in)
-		got, gotErr := persistent.Process(ctx, in)
-		if wantErr != nil || gotErr != nil || !reflect.DeepEqual(want, got) {
-			t.Fatalf("segmentation of %s diverged: %v %v", r[0], wantErr, gotErr)
+		if _, err := persistent.Process(ctx, processing.Input{Organization: "parity", Version: v}); err != nil {
+			t.Fatalf("segmentation of %s: %v", r[0], err)
 		}
 	}
-	long := content.Version{ID: "long", RecordID: "long", Manifest: content.Manifest{Kind: "text", Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: words("Titre", 80)}}, {Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: words("Paris", 300) + "\n\n" + words("énergie", 900) + " 🌞 é\r\n"}}}}}
-	want, wantErr := oneShot.Process(ctx, processing.Input{Organization: "parity", Version: long})
-	got, gotErr := persistent.Process(ctx, processing.Input{Organization: "parity", Version: long})
-	if wantErr != nil || gotErr != nil || !reflect.DeepEqual(want, got) || len(want.Segments) < 2 {
-		t.Fatal("multi-window segmentation diverged", wantErr, gotErr)
+	long := content.Version{ID: "long", RecordID: "long", Manifest: content.Manifest{Kind: "text", Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: words("Titre", 80)}}, {Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: words("Paris", 300) + "\n\n" + words("énergie", 900) + " 🌞 é\r\n"}}}}}
+	if seg, err := persistent.Process(ctx, processing.Input{Organization: "parity", Version: long}); err != nil || len(seg.Segments) < 2 {
+		t.Fatal("multi-window segmentation", err)
 	}
 	for _, q := range []string{rows[0][4], " \r\n", words("Paris", 256), words("Paris", 257), strings.Repeat("é", 8193)} {
-		want, wantErr := oneShot.NormalizeQuery(ctx, q)
-		got, gotErr := persistent.NormalizeQuery(ctx, q)
-		if want != got || (wantErr == nil) != (gotErr == nil) {
-			t.Fatalf("query normalization diverged for %.40q: %v %v", q, wantErr, gotErr)
+		_, _ = persistent.NormalizeQuery(ctx, q)
+	}
+	if recorder.err != nil || len(recorder.inputs) == 0 {
+		t.Fatal("persistent tokenizer during segmentation and query normalization", recorder.err)
+	}
+
+	// Items are encoded independently, so batches that fit the limits share one reference
+	// call without changing any item's result; the server still sees each batch as sent.
+	huge := []processing.TokenInput{{Text: words("Élection présidentielle, inflation; énergie!", 40000)}}
+	batches := [][]processing.TokenInput{fixture, edges, many, huge, {}}
+	got := make([][]processing.Encoding, len(batches))
+	for i, batch := range batches {
+		var err error
+		if got[i], err = server.Encode(ctx, batch); err != nil {
+			t.Fatalf("server batch %d: %v", i, err)
 		}
 	}
+	joined := append(append(append([]processing.TokenInput{}, fixture...), edges...), recorder.inputs...)
+	joinedWant, err := reference.Encode(ctx, joined)
+	if err != nil {
+		t.Fatal("reference", err)
+	}
+	joinedGot := append(append(append([]processing.Encoding{}, got[0]...), got[1]...), recorder.outputs...)
+	if !reflect.DeepEqual(joinedWant, joinedGot) {
+		for i := range joinedWant {
+			if i < len(joinedGot) && !reflect.DeepEqual(joinedWant[i], joinedGot[i]) {
+				t.Fatalf("item %d diverged (fixture %d, edges %d, then recorded): %.60q", i, len(fixture), len(edges), joined[i].Text)
+			}
+		}
+		t.Fatalf("encodings diverged: reference %d items, server %d", len(joinedWant), len(joinedGot))
+	}
+	for _, i := range []int{2, 3, 4} {
+		want, err := reference.Encode(ctx, batches[i])
+		if err != nil || !reflect.DeepEqual(want, got[i]) {
+			t.Fatalf("batch %d diverged: reference err=%v", i, err)
+		}
+	}
+	t.Logf("THE-675 parity: %d items identical", len(fixture)+len(edges)+len(many)+len(huge)+len(recorder.inputs))
+}
+
+// recordingTokenizer passes every call to next and keeps its inputs and outputs.
+type recordingTokenizer struct {
+	next    processing.Tokenizer
+	inputs  []processing.TokenInput
+	outputs []processing.Encoding
+	err     error
+}
+
+func (r *recordingTokenizer) Encode(ctx context.Context, input []processing.TokenInput) ([]processing.Encoding, error) {
+	out, err := r.next.Encode(ctx, input)
+	if err != nil {
+		r.err = err
+		return nil, err
+	}
+	r.inputs, r.outputs = append(r.inputs, input...), append(r.outputs, out...)
+	return out, nil
 }
 
 // BenchmarkServerQueryEncode is the post-fix counterpart of BenchmarkTokenizerQueryEncode.

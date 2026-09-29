@@ -30,7 +30,11 @@ func processor(t *testing.T) processing.TokenWindows {
 	if err = json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	return processing.TokenWindows{Tokenizer: tokenizer.Encoder{Config: cfg.Tokenizer}}
+	// The persistent tokenizer production runs; TestServerMatchesPinnedReference holds it
+	// to the one-shot reference helper, which costs a process start per call.
+	server := &tokenizer.Server{Config: cfg.Tokenizer}
+	t.Cleanup(server.Close)
+	return processing.TokenWindows{Tokenizer: server}
 }
 func input(body, title string) processing.Input {
 	parts := []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: body}}}

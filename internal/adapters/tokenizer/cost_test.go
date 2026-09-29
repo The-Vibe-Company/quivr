@@ -43,8 +43,13 @@ func quantiles(samples []time.Duration) (time.Duration, time.Duration) {
 }
 
 // TestTokenizerQueryCost records the per-search tokenizer cost on the host (THE-675).
-// It only logs: numbers are evidence, not a pass/fail threshold.
+// It only logs: numbers are evidence, not a pass/fail threshold. It is a
+// measurement, so it runs in the measurement lane (.github/workflows/measure-adapters.yml),
+// nightly and on changes to the tokenizer, never in make verify.
 func TestTokenizerQueryCost(t *testing.T) {
+	if os.Getenv("QUIVR_MEASURE") == "" {
+		t.Skip("measurement: set QUIVR_MEASURE=1 (measure-adapters workflow)")
+	}
 	cfg := pinnedConfig(t)
 	var encoder processing.Tokenizer = tokenizer.Encoder{Config: cfg}
 	samples := make([]time.Duration, 0, 20)
