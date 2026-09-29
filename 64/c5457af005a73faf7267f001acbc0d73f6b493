@@ -1,0 +1,47 @@
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_f97f77f3e87170 85-91
+internal/adapters/pluginhttp/connector_test.go
+  s_54b80c92daa9cb::t_66a9f6789f23fa 211-228
+  s_54b80c92daa9cb::t_087e079f858726 12
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_df5dfa2ea897dd 48-49
+  s_54b80c92daa9cb::t_88d095fea6c6b0 82
+  s_54b80c92daa9cb::t_1caf09fca36f7b 250,253
+sdks/go/quivrplugin/testdata/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_6525a8aeed5fb8 26-35
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_45e8aa97024542 78
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_45e8aa97024542 357-361
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_163cdc5475f133 40
+  s_54b80c92daa9cb::t_084d53969328f3 164-183
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_e0e505b74f8a89 357-361
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_19a5ed13660be6 113
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_290b924a73196e 286,288
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_629becdcb55983 59-61
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_b1b0ec719de7de 161-171
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_cfa5b41aec73fa 78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "64c5457af005a73faf7267f001acbc0d73f6b493",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
