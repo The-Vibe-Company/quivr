@@ -30,6 +30,52 @@ Apply the `ready-for-agent` label only when the output is fully specified and ca
 
 Resolve the supplied Linear identifier or URL, then read the complete issue, comments, parent, sub-issues, labels, and blocking relations.
 
+## Spec and ticket format
+
+Every spec and ticket description starts with a short section in plain English, readable by someone who does not know the code. Everything technical comes after the separator. This format overrides the templates bundled in `/to-spec`, `/to-tickets` and `/triage`: keep their sections, but put them under **Technical detail**.
+
+Ticket:
+
+```markdown
+## In short
+
+- **What changes:** one or two sentences on what a user, operator or developer can do afterwards.
+- **Why:** one sentence on the problem it solves.
+- **Done when:**
+  - two to four checks a person could observe, such as "a 3-page PDF is found by a sentence from page 2";
+- **Depends on:** the blocking tickets, or "nothing".
+
+---
+
+## Technical detail
+
+Parent, what to build, acceptance criteria, decisions, notes.
+```
+
+Spec:
+
+```markdown
+## In short
+
+- **Problem:** two sentences, in the reader's words.
+- **After this spec:** what people can do that they cannot do today.
+- **Main decisions:** three to five bullets.
+- **Not included:** the most likely misunderstandings.
+- **Depends on:** specs or tickets that must land first.
+
+---
+
+## Technical detail
+
+Problem statement, solution, user stories, implementation and testing decisions, out of scope, further notes.
+```
+
+Rules for the **In short** section:
+
+- **Words:** use plain words, avoid internal type or function names, and explain a domain term in a few words the first time it appears.
+- **Length:** stay under about 120 words.
+- **Keep it true:** when the scope or a decision changes, update this section in the same edit.
+
 ## Ticket decomposition
 
 `/to-tickets` publishes tickets in dependency order, blockers first. Every ticket must:
