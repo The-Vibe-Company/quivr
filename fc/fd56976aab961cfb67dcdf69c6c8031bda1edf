@@ -1,0 +1,32 @@
+internal/connectors/xlist.go
+  s_54b80c92daa9cb::t_4fd991a4c191aa 97-103,238-240,244-249
+internal/connectors/xcompliance.go
+  s_54b80c92daa9cb::t_0a6140edb45fc2 49-53,59
+  s_54b80c92daa9cb::t_4fd991a4c191aa 97-100,117-122,131,136-140,160-161
+  s_54b80c92daa9cb::t_407e57564a0426 162
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_dd1dd89f0f2ccd 185
+  s_54b80c92daa9cb::t_e41a0a7f0e657a 105-111,119-124
+  s_54b80c92daa9cb::t_05c81aadfbc176 181-184
+  s_54b80c92daa9cb::t_f307632f3282db 112-115
+  s_54b80c92daa9cb::t_366e8418662d88 201-203
+internal/connectors/xcompliance_test.go
+  s_54b80c92daa9cb::t_8e1d1d45840116 195-246
+  s_54b80c92daa9cb::t_a5fb92aab284bd 262-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fcfd56976aab961cfb67dcdf69c6c8031bda1edf",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
