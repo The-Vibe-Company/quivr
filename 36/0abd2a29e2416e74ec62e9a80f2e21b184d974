@@ -1,0 +1,27 @@
+docs/keyword-alerts.md
+  s_54b80c92daa9cb::t_9cf45f628a1525 37-38,43-46
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_9cf45f628a1525 188-189
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_9cf45f628a1525 124-126
+plugins/alerts/alerts/notation.py
+  s_54b80c92daa9cb::t_0fea80c1b16de6 17-18,100-101,128-134,162-165,171,173
+plugins/alerts/tests/test_notation.py
+  s_54b80c92daa9cb::t_0fea80c1b16de6 30-33,75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "360abd2a29e2416e74ec62e9a80f2e21b184d974",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
