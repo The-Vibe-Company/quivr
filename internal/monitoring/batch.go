@@ -205,6 +205,11 @@ func (e Engine) admit(ctx context.Context, in Intent) (pending, bool, error) {
 	if target.Superseded {
 		return pending{}, false, e.Store.Complete(ctx, in, OutcomeVersionSuperseded)
 	}
+	if target.Decided {
+		// Another trigger of the same Version (enrichment after searchable)
+		// found the pair already decided: do not ask the evaluator again.
+		return pending{}, false, e.Store.Complete(ctx, in, OutcomeDuplicate)
+	}
 	return pending{in: in, target: target}, true, nil
 }
 

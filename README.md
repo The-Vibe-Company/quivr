@@ -108,6 +108,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
     ([guide](docs/keyword-alerts.md)).
   - the browser demo's **Alertes** tab writes these alerts and shows what each one
     caught, live ([`quivr-search/`](quivr-search/README.md#alertes)).
+- **Described alerts** through the same plugin: a plain-language description such as
+  "Labour strikes at ports and harbours", judged by TypeSafe's Jev classifier, so
+  rephrased and translated articles alert too:
+  - one classifier call per article covers all described alerts;
+  - the Match evidence carries the classifier's score;
+  - they are off without a TypeSafe key, because article text is sent to TypeSafe
+    ([guide](docs/described-alerts.md)).
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list
@@ -197,7 +204,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Alerts described in plain language, and alerts that catch rephrased or translated articles.
+- Alerts that catch rephrased or translated articles with Quivr's own vectors, without an external classifier.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
 - Reprocessing quarantined Versions.
@@ -212,6 +219,7 @@ listed here, not in "What works today".
 | [Your first search](docs/first-search.md) | Create a Corpus, add a Record and search it, step by step |
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [Keyword alerts](docs/keyword-alerts.md) | Writing alert queries and setting up metadata filters |
+| [Described alerts](docs/described-alerts.md) | Alerts written in plain language, and what is sent to TypeSafe |
 | [HTTP API reference](docs/reference/http-api.md) | Every endpoint, field and example, generated from the contract |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
 | [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |

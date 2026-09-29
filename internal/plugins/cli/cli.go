@@ -282,23 +282,7 @@ func pluginAPIAgainst(check *plugins.RangeCheck) string {
 // describeExpressionSchema lists the alert kinds of an expression schema that
 // discriminates them with a oneOf over a constant kind property.
 func describeExpressionSchema(raw json.RawMessage) [][2]string {
-	var schema struct {
-		OneOf []struct {
-			Properties struct {
-				Kind struct {
-					Const *string `json:"const"`
-				} `json:"kind"`
-			} `json:"properties"`
-		} `json:"oneOf"`
-	}
-	if err := json.Unmarshal(raw, &schema); err == nil && len(schema.OneOf) > 0 {
-		var kinds []string
-		for _, branch := range schema.OneOf {
-			if branch.Properties.Kind.Const == nil {
-				return describeSchema(raw)
-			}
-			kinds = append(kinds, *branch.Properties.Kind.Const)
-		}
+	if kinds := plugins.ExpressionKinds(raw); kinds != nil {
 		return [][2]string{{"kinds", strings.Join(kinds, ", ")}}
 	}
 	return describeSchema(raw)

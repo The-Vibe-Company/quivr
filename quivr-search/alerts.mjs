@@ -72,7 +72,7 @@ export function alertRoutes({
   owner,
   registry,
 }) {
-  const [pluginID, pluginVersion] = (evaluator || "alerts@0.1.0").split("@");
+  const [pluginID, pluginVersion] = (evaluator || "alerts@0.2.0").split("@");
   const pin = {
     plugin_id: pluginID,
     version: pluginVersion,

@@ -129,7 +129,11 @@ ORDER BY s.id LIMIT $5`, org, recordID, sequence, after, s.page())
 			// therefore applies from its commit on, and a checkpoint lagging
 			// behind it still judges earlier changes with the earlier
 			// Version. A re-enabled Subscription evaluates only triggers
-			// after its re-enable: the pause is never backfilled.
+			// after its re-enable: the pause is never backfilled. Enrichment
+			// asks again only the Subscription Versions that have not decided
+			// this Record Version yet (they answered not_ready, or their
+			// intent is still pending), so a decided rule, such as one that
+			// calls a paid classifier, is not called a second time.
 			rows, err = tx.Query(ctx, `SELECT s.id,v.id,$6::text FROM subscription_corpora sc
 JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
 JOIN LATERAL (SELECT e.id,e.saved_query_version_id FROM subscription_versions e
@@ -137,7 +141,9 @@ JOIN LATERAL (SELECT e.id,e.saved_query_version_id FROM subscription_versions e
   ORDER BY e.activation_position DESC LIMIT 1) v ON true
 JOIN saved_query_versions q ON (q.organization,q.id)=(s.organization,v.saved_query_version_id)
 WHERE sc.organization=$1 AND sc.corpus_id=$2 AND s.enabled AND $2=ANY(q.corpus_ids) AND coalesce(s.enabled_position,0)<$3 AND s.id>$4
-ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID)
+  AND NOT ($7 AND EXISTS(SELECT 1 FROM evaluation_intents d WHERE d.organization=$1 AND d.subscription_version_id=v.id AND d.record_version_id=$6
+    AND d.kind='evaluation' AND d.state='done' AND d.outcome IN `+decidedOutcomes+`))
+ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID, eventType == "record.enrichment_available")
 		}
 		if err != nil {
 			return false, err
@@ -166,12 +172,37 @@ ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID)
 	return true, tx.Commit(ctx)
 }
 
+// decidedOutcomes are the outcomes of an intent that decided its Record
+// Version for its Subscription Version.
+const decidedOutcomes = "('matched','duplicate','no_match','no_longer_matches')"
+
+// evaluatingSibling is true for an evaluation intent of table alias t whose
+// Subscription Version is evaluating the same Record Version under another,
+// leased intent: it waits, so one decision serves both and a rule that calls
+// a paid backend is not called twice for the same pair.
+func evaluatingSibling(t string) string {
+	return `(` + t + `.kind='evaluation' AND EXISTS(SELECT 1 FROM evaluation_intents o WHERE o.organization=` + t + `.organization AND o.subscription_version_id=` + t + `.subscription_version_id
+    AND o.record_version_id=` + t + `.record_version_id AND o.sequence<>` + t + `.sequence AND o.kind='evaluation' AND o.state='pending' AND o.lease_until>=now()))`
+}
+
+// evaluatingArticle is true for an evaluation intent of table alias t whose
+// Record Version another worker is evaluating (a leased evaluation intent of
+// it), or is claiming at this instant (the per-Version advisory lock). One
+// worker takes the due intents of a Version together (Claim, then
+// ClaimRelated), so its Subscriptions share one batch and one plugin call
+// instead of being split between workers.
+func evaluatingArticle(t string) string {
+	return `(` + t + `.kind='evaluation' AND (EXISTS(SELECT 1 FROM evaluation_intents o WHERE o.organization=` + t + `.organization AND o.record_version_id=` + t + `.record_version_id
+    AND (o.subscription_version_id,o.sequence)<>(` + t + `.subscription_version_id,` + t + `.sequence) AND o.kind='evaluation' AND o.state='pending' AND o.lease_until>=now())
+    OR NOT pg_try_advisory_xact_lock(hashtextextended('evaluation:' || ` + t + `.organization || ':' || ` + t + `.record_version_id, 0))))`
+}
+
 func (s EvaluationStore) Claim(ctx context.Context, lease time.Duration) (monitoring.Intent, error) {
 	var in monitoring.Intent
 	err := s.Pool.QueryRow(ctx, `UPDATE evaluation_intents i SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT organization,subscription_version_id,sequence FROM evaluation_intents
-  WHERE state='pending' AND available_at<=now() AND lease_until<now()
-  ORDER BY available_at,sequence LIMIT 1 FOR UPDATE SKIP LOCKED) due
+FROM (SELECT c.organization,c.subscription_version_id,c.sequence FROM evaluation_intents c
+  WHERE c.state='pending' AND c.available_at<=now() AND c.lease_until<now() AND NOT `+evaluatingArticle("c")+`
+  ORDER BY c.available_at,c.sequence LIMIT 1 FOR UPDATE OF c SKIP LOCKED) due
 WHERE (i.organization,i.subscription_version_id,i.sequence)=(due.organization,due.subscription_version_id,due.sequence)
 RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`, lease.Seconds()).Scan(
 		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
@@ -186,12 +217,13 @@ func (s EvaluationStore) Target(ctx context.Context, in monitoring.Intent) (moni
 	v := &t.Subscription
 	var evaluator, definition []byte
 	err := s.Pool.QueryRow(ctx, `SELECT s.enabled,`+supersededSQL("v", "$5")+`,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,coalesce(s.owner,''),
-  EXISTS(SELECT 1 FROM segments sg JOIN embedding_coverage ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`)
+  EXISTS(SELECT 1 FROM segments sg JOIN embedding_coverage ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`),
+  EXISTS(SELECT 1 FROM evaluation_intents d WHERE d.organization=$1 AND d.subscription_version_id=$2 AND d.record_version_id=$3 AND d.sequence<>$5 AND d.kind='evaluation' AND d.state='done' AND d.outcome IN `+decidedOutcomes+`)
 FROM subscription_versions v
 JOIN subscriptions s ON (s.organization,s.id)=(v.organization,v.subscription_id)
 JOIN saved_query_versions q ON (q.organization,q.id)=(v.organization,v.saved_query_version_id)
 WHERE v.organization=$1 AND v.id=$2`, in.Organization, in.SubscriptionVersionID, in.VersionID, in.CorpusID, in.Sequence).Scan(
-		&t.Enabled, &t.Superseded, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &v.Owner, &t.Enriched)
+		&t.Enabled, &t.Superseded, &v.SubscriptionID, &v.VersionID, &v.SavedQueryID, &v.SavedQueryVersionID, &evaluator, &v.DestinationID, &v.ActivationPosition, &v.CorpusIDs, &definition, &v.Owner, &t.Enriched, &t.Decided)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, monitoring.ErrNotFound
 	}

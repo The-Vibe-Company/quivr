@@ -68,6 +68,7 @@ excluded = [
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/x.md" = { audience = "functional", kind = "guide" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index" }
+"docs/described-alerts.md" = { audience = "functional", kind = "guide" }
 "docs/first-search.md" = { audience = "functional", kind = "guide" }
 "docs/keyword-alerts.md" = { audience = "functional", kind = "guide" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
@@ -98,6 +99,7 @@ excluded = [
 "docs/connectors/microsoft-365.md" = 230
 "docs/connectors/rss.md" = 190
 "docs/connectors/x.md" = 190
+"docs/described-alerts.md" = 150
 "docs/first-search.md" = 310
 "docs/keyword-alerts.md" = 155
 "docs/plugins/write-a-normalizer.md" = 360

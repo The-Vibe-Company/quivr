@@ -45,8 +45,15 @@ func (e Evaluator) MaxBatch() int {
 // Validate judges a Saved Query expression and a Subscription configuration
 // against the declared schemas. The first issue names the request member at
 // fault: the pinned Saved Query Version for an expression, the evaluator
-// configuration for a configuration.
+// configuration for a configuration. An expression of a kind the pin does not
+// offer (PinConfig.Kinds) is an invalid expression too.
 func (e Evaluator) Validate(expression, configuration map[string]any) error {
+	if !e.Pin.Offers(expression) {
+		kind, _ := expression["kind"].(string)
+		return monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id",
+			fmt.Sprintf("%s@%s: /expression/kind: this installation does not offer the kind %q (offered: %s); ask the operator to enable it",
+				e.Pin.Manifest.ID, e.Pin.Manifest.Version, kind, strings.Join(e.Pin.Kinds, ", ")))
+	}
 	expr, err := json.Marshal(expression)
 	if err != nil {
 		return monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", err.Error())

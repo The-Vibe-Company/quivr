@@ -268,3 +268,23 @@ func TestEngineErrorOnEveryCallIsBounded(t *testing.T) {
 		t.Fatalf("terminal: %d calls, %d retried", len(terminal.calls), len(store.retried))
 	}
 }
+
+// An intent whose Subscription Version already decided the Record Version
+// (the enrichment trigger after the searchable one) completes as a duplicate
+// and is never sent to the evaluator.
+func TestEngineDoesNotAskADecidedPairAgain(t *testing.T) {
+	evaluator := &phraseEvaluator{max: 32}
+	store, engine, _ := batchScenario(evaluator, "strike", "election")
+	decided := store.targets["subv-1"]
+	decided.Decided = true
+	store.targets["subv-1"] = decided
+	if progressed, err := engine.Step(context.Background()); !progressed || err != nil {
+		t.Fatal(progressed, err)
+	}
+	if len(evaluator.calls) != 1 || len(evaluator.calls[0].Items) != 1 || evaluator.calls[0].Items[0].Expression["text"] != "strike" {
+		t.Fatalf("the decided pair was sent again: %+v", evaluator.calls)
+	}
+	if fmt.Sprint(store.completed) != "[duplicate]" {
+		t.Fatalf("completed %v", store.completed)
+	}
+}

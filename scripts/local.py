@@ -101,6 +101,8 @@ class Stack:
                           'local-receiver-org-b':dict(organization='org_b',url='http://127.0.0.1:9/local-receiver-org-b',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-b!').decode()),
                           # The browser demo reads its alerts from Matches; nothing needs to receive these webhooks.
                           DEMO_DESTINATION:dict(organization='org_d',url='http://127.0.0.1:9/local-receiver-org-d',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-d!').decode()),
+                          # The keyless restart creates alerts in org_k (TestKeylessRefusesDescribedAlerts); nothing is delivered there.
+                          'local-receiver-org-k':dict(organization='org_k',url='http://127.0.0.1:9/local-receiver-org-k',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-k!').decode()),
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
                           CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
             delivery=DELIVERY_OVERRIDES,
@@ -119,7 +121,8 @@ class Stack:
         # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
         keyless={k:v for k,v in cfg.items() if k!='credential_key'}
-        keyless.update(log_directory=str(keyless_logs),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write'],['*'])})
+        # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
+        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off'),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
     def running(self):
@@ -329,7 +332,7 @@ class Stack:
             for command in ['api','worker']:
                 lines=(self.directory/'keyless'/(command+'.log')).read_text().count('credential deposits disabled')
                 assert lines==1,f'{command} logged credential deposits disabled {lines} times'
-            self.tests('TestKeyless',{'QUIVR_TEST_KEYLESS_MODE':'1'})
+            self.tests('TestKeyless',{'QUIVR_TEST_KEYLESS_MODE':'1',**subscription_plugin.environment(self)})
             status='passed'
         finally:
             (self.directory/'keyless-report.json').write_text(json.dumps({'status':status,'duration_seconds':round(time.monotonic()-start,3)}))
@@ -448,6 +451,8 @@ def verify(stack,steps):
     steps.run('alert_plugin',subscription_plugin.verify,stack)
     # Keyword alerts decided by plugins/alerts: the evidence names the matched terms, a filter alone alerts.
     steps.run('keyword_alerts',subscription_plugin.keywords,stack)
+    # Described alerts judged through the fake System One server, never TypeSafe: one call per article for every described alert.
+    steps.run('described_alerts',subscription_plugin.described,stack)
     steps.run('alert_plugin_outage',subscription_plugin.outage,stack)
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
@@ -514,7 +519,7 @@ def main():
         if args.command in ['dev','verify']:
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.
             normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
-            subscription_plugin.select(stack,verification or subscription_plugin.from_environment())
+            subscription_plugin.select(stack,verification or subscription_plugin.from_environment(),subscription_plugin.described_mode(verification))
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps)
             else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}")

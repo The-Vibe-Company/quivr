@@ -144,9 +144,14 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		t.Fatalf("enrichment trigger: %d intents", got)
 	}
 
-	// Claims lease due work; a leased intent is not claimed again until it expires.
-	claimed := map[string]bool{}
-	for i := 0; i < 1000 && len(claimed) < 6; i++ {
+	// Claims lease due work; a leased intent is not claimed again until it
+	// expires. While one worker evaluates a Version, other Claims leave that
+	// Version's intents alone: the worker takes the other Subscriptions'
+	// intents with ClaimRelated (both triggers of a pair may join the same
+	// group, where they share one evaluation), and the leased Subscription's
+	// second intent (the enrichment trigger) waits for the first to decide.
+	var first monitoring.Intent
+	for i := 0; i < 1000; i++ {
 		in, err := evaluation.Claim(ctx, time.Minute)
 		if err == monitoring.ErrNoWork {
 			break
@@ -157,14 +162,27 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		if in.Organization != org {
 			continue
 		}
-		key := fmt.Sprint(in.SubscriptionVersionID, in.Sequence)
-		if claimed[key] || in.VersionID != hitVersion || in.RecordID != hitRecord || in.CorpusID != a.ID {
-			t.Fatalf("claimed %+v twice or with wrong references", in)
+		if first.Organization != "" || in.VersionID != hitVersion || in.RecordID != hitRecord || in.CorpusID != a.ID {
+			t.Fatalf("claimed %+v beside %+v, or with wrong references", in, first)
 		}
-		claimed[key] = true
+		first = in
 	}
-	if len(claimed) != 6 {
-		t.Fatalf("claimed %d of 6 intents", len(claimed))
+	if first.Organization == "" {
+		t.Fatal("no intent claimed")
+	}
+	related, err := evaluation.ClaimRelated(ctx, first, subs[0].Current.Evaluator, 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs := map[string]bool{first.SubscriptionVersionID: true}
+	for _, in := range related {
+		if in.SubscriptionVersionID == first.SubscriptionVersionID || in.VersionID != hitVersion {
+			t.Fatalf("related %+v repeats the leased Subscription Version or is another Version", in)
+		}
+		pairs[in.SubscriptionVersionID] = true
+	}
+	if len(pairs) != 3 {
+		t.Fatalf("want the 3 Subscriptions of the Version in one group, got %d", len(pairs))
 	}
 	if _, err = pool.Exec(ctx, `UPDATE evaluation_intents SET lease_until='-infinity' WHERE organization=$1`, org); err != nil {
 		t.Fatal(err)
@@ -275,6 +293,43 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	drain()
 	if got := intents(laterVersion); got != 2 {
 		t.Fatalf("disabled Subscription dispatched: %d intents for %s", got, laterRecord)
+	}
+
+	// Enrichment asks again only the Subscriptions that have not decided the
+	// Version: one decided no_match, the other answered not_ready.
+	rows, err := pool.Query(ctx, `SELECT subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 ORDER BY subscription_version_id`, org, laterVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var later []monitoring.Intent
+	for rows.Next() {
+		in := monitoring.Intent{Organization: org}
+		if err = rows.Scan(&in.SubscriptionVersionID, &in.Sequence); err != nil {
+			t.Fatal(err)
+		}
+		later = append(later, in)
+	}
+	rows.Close()
+	if err = evaluation.Complete(ctx, later[0], monitoring.OutcomeNoMatch); err != nil {
+		t.Fatal(err)
+	}
+	if err = evaluation.Complete(ctx, later[1], monitoring.OutcomeNotReady); err != nil {
+		t.Fatal(err)
+	}
+	trigger("record.enrichment_available", a.ID, laterRecord, laterVersion)
+	drain()
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND subscription_version_id=$3`, org, laterVersion, later[0].SubscriptionVersionID); got != 1 {
+		t.Fatalf("a decided Subscription was asked again on enrichment: %d intents", got)
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND subscription_version_id=$3`, org, laterVersion, later[1].SubscriptionVersionID); got != 2 {
+		t.Fatalf("a not_ready Subscription must be asked again on enrichment: %d intents", got)
+	}
+	// Any other intent of the decided pair is admitted as already decided.
+	for i, want := range []bool{true, false} {
+		target, err := evaluation.Target(ctx, monitoring.Intent{Organization: org, SubscriptionVersionID: later[i].SubscriptionVersionID, Sequence: -1, CorpusID: a.ID, RecordID: laterRecord, VersionID: laterVersion})
+		if err != nil || target.Decided != want {
+			t.Fatalf("intent %d: decided %v, want %v (%v)", i, target.Decided, want, err)
+		}
 	}
 }
 

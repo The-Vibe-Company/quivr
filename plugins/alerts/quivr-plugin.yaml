@@ -2,16 +2,16 @@
 # Reference: contracts/plugins/v0/README.md in the Quivr repository, and
 # README.md here for the expression reference.
 id: alerts
-version: 0.1.0
-description: Keyword alerts. An article matches a saved search when its title and body satisfy a boolean keyword query, optionally filtered on its metadata.
+version: 0.2.0
+description: Keyword and described alerts. A keyword alert matches when an article's title and body satisfy a boolean keyword query, optionally filtered on its metadata; a described alert matches when a classifier (TypeSafe's Jev) judges the article fits a plain-language description.
 compatibility:
   engine: ">=0.1.0 <0.2.0"
   plugin_api: ">=0.2.0 <0.3.0"
 contributions:
   subscription:
     # A saved search's expression. Each alert kind is one oneOf branch told
-    # apart by "kind". This version implements "keywords"; "described"
-    # (plain-language alerts) is reserved for a later version.
+    # apart by "kind". An installation without TYPESAFE_API_KEY leaves
+    # "described" out of its pin's kinds, so the core refuses it at creation.
     expression_schema:
       oneOf:
         - type: object
@@ -24,6 +24,19 @@ contributions:
             match:
               $ref: "#/$defs/node1"
               description: The query tree. Groups nest at most 6 levels deep.
+        - type: object
+          additionalProperties: false
+          required: [kind, description]
+          properties:
+            kind:
+              const: described
+              description: A plain-language description of the articles to alert on, judged by a classifier. The article's text is sent to TypeSafe.
+            description:
+              type: string
+              minLength: 3
+              maxLength: 1000
+              pattern: "\\S"
+              description: What the articles are about, in plain language, for example "Tensions between two countries over visa rules".
       $defs:
         term:
           type: object
@@ -175,9 +188,15 @@ contributions:
       properties:
         wait_for_enrichment:
           type: boolean
-          description: Answer not_ready until the article is enriched (embeddings attached). Default false for keyword alerts.
+          description: Answer not_ready until the article is enriched (embeddings attached). Default false for keyword alerts, true for described alerts.
+        threshold:
+          type: number
+          minimum: 0.2
+          maximum: 0.95
+          description: Described alerts only. The classifier score (probability of yes) at or above which the article matches. Default the installer's described.threshold, else 0.5.
     max_batch_size: 64
-    timeout_ms: 5000
+    # A described batch makes one classifier call, split only past its request size limit.
+    timeout_ms: 20000
     retry:
       max_attempts: 3
 # Installer configuration: set in the plugin pin's `configuration`.
@@ -205,6 +224,19 @@ configuration:
           type: string
           minLength: 1
           maxLength: 64
-        description: Part roles whose text keyword terms search (default title and body).
+        description: Part roles whose text keyword terms search and described alerts send to the classifier (default title and body).
+      described:
+        type: object
+        additionalProperties: false
+        properties:
+          threshold:
+            type: number
+            minimum: 0.2
+            maximum: 0.95
+            description: Default score threshold of described alerts (default 0.5). A Subscription may override it.
+secrets:
+  - name: TYPESAFE_API_KEY
+    description: TypeSafe API key for described alerts, read from the plugin's environment. Without it keyword alerts work and described alerts cannot be decided; leave "described" out of the pin's kinds.
+    required: false
 run:
   command: [python3, -m, alerts]

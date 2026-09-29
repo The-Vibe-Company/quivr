@@ -162,3 +162,48 @@ func TestPinRegistersItsExtensionNamespaces(t *testing.T) {
 		t.Fatalf("without a pin: %v", err)
 	}
 }
+
+const kindsManifest = `id: acme.alerts
+version: 0.2.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      oneOf:
+        - {type: object, required: [kind], properties: {kind: {const: keywords}}}
+        - {type: object, required: [kind], properties: {kind: {const: described}}}
+`
+
+// An installation may offer a subset of the declared alert kinds; the core
+// then refuses the others when a Subscription pins them.
+func TestPinOffersTheConfiguredKinds(t *testing.T) {
+	path := writePinManifest(t, kindsManifest)
+	load := func(kinds []string) (*plugins.Pin, error) {
+		return plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: "http://127.0.0.1:9901", Kinds: kinds})
+	}
+	all, err := load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	some, err := load([]string{"keywords"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keywords, described := map[string]any{"kind": "keywords"}, map[string]any{"kind": "described"}
+	if !all.Offers(keywords) || !all.Offers(described) || !some.Offers(keywords) || some.Offers(described) || some.Offers(map[string]any{}) {
+		t.Fatal("offered kinds do not follow the pin")
+	}
+	for name, kinds := range map[string][]string{"empty": {}, "undeclared": {"vectors"}, "duplicate": {"keywords", "keywords"}} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := load(kinds); err == nil || !strings.Contains(err.Error(), plugins.CodeInvalidPin) || !strings.Contains(err.Error(), "/kinds") {
+				t.Fatalf("kinds %v: %v", kinds, err)
+			}
+		})
+	}
+	// A normalizer, or a rule whose schema has no kinds, cannot restrict kinds.
+	if _, err := plugins.LoadPin(pinConfig(writePinManifest(t, pinManifest), func(c *plugins.PinConfig) { c.Kinds = []string{"keywords"} })); err == nil || !strings.Contains(err.Error(), "/kinds") {
+		t.Fatalf("kinds on a normalizer: %v", err)
+	}
+}

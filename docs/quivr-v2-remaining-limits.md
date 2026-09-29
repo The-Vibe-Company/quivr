@@ -102,10 +102,14 @@ stay visible. The Spec 1 obligation map is in
 - Evaluation and delivery run as PostgreSQL-leased loops rather than Temporal
   workflows. This is a documented deviation from the blueprint.
 - Match criteria come from pinned `subscription` plugins. This repository ships
-  the keyword alerts plugin `plugins/alerts` (boolean keyword queries and
-  metadata filters, without stemming or wildcards) and the
-  `quivr plugin init --kind subscription` template. Plain-language alerts are a
-  later slice of Spec 3.
+  the alerts plugin `plugins/alerts`: keyword alerts (boolean keyword queries and
+  metadata filters, without stemming or wildcards), and described alerts judged by
+  TypeSafe's Jev, off without a TypeSafe key. It also ships the
+  `quivr plugin init --kind subscription` template. Matching by meaning with
+  Quivr's own vectors, without an external classifier, is a later slice of Spec 3.
+- Described alerts send article text to TypeSafe. A TypeSafe outage delays the
+  keyword alerts of the same articles too, because the core retries a plugin's
+  batch as one.
 - A pin names one plugin version at startup. Changing it restarts the api and
   worker; Subscription Versions pinned to a version no longer installed stay
   pending with `evaluator_unavailable`.

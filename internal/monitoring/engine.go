@@ -64,6 +64,9 @@ type Target struct {
 	// intent's trigger position.
 	Superseded bool
 	Enriched   bool
+	// Decided reports another intent of the same Subscription Version that
+	// already decided the Record Version: this one completes as a duplicate.
+	Decided bool
 }
 
 // MatchEvidence is the immutable, bounded evidence stored with a Match.

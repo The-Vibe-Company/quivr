@@ -4,7 +4,8 @@ A keyword alert sends a webhook when a new article matches a keyword query, such
 `"Airbus" AND (grève OR strike) NOT sport`. The alert says which words matched and
 where. This guide is for the people who write those queries and the operators who
 set them up. The [`alerts` plugin README](../plugins/alerts/README.md) is the
-reference for the expression format.
+reference for the expression format. To alert on a subject rather than on words,
+see [described alerts](described-alerts.md).
 
 ## Write a query
 
@@ -77,7 +78,7 @@ curl -s -X POST "$QUIVR_API/v0/saved-queries" -H "Authorization: Bearer $QUIVR_K
 curl -s -X POST "$QUIVR_API/v0/subscriptions" -H "Authorization: Bearer $QUIVR_KEY" -H 'Content-Type: application/json' -d '{
   "idempotency_key": "airbus-strikes-alert", "name": "Airbus strikes",
   "saved_query_id": "<saved_query_id>", "saved_query_version_id": "<current_version.version_id>",
-  "evaluator": {"plugin_id": "alerts", "version": "0.1.0", "configuration": {}},
+  "evaluator": {"plugin_id": "alerts", "version": "0.2.0", "configuration": {}},
   "destination_id": "<destination id>"}'
 ```
 

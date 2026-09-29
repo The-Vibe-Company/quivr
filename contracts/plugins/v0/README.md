@@ -208,7 +208,11 @@ Subscriptions pin it by `plugin_id` and `version`.
 is false. Nothing is evaluated at acceptance time, before the Version is
 searchable. The core batches every due Subscription of one Record Version
 pinned to the plugin, across Subscriptions and owners, into as few requests as
-`max_batch_size` allows.
+`max_batch_size` allows. A Subscription Version that decided a Record Version
+(`match` or `no_match`) is not asked about it again, even when a later trigger
+arrives while it is being decided, so a rule that calls a paid backend pays
+once per Record Version. One worker at a time claims the due evaluations of a
+Record Version, so they are not split between concurrent requests.
 
 **Request** (`subscription-request.schema.json`):
 
@@ -298,7 +302,11 @@ Subscription or a Subscription Version whose expression or configuration the
 schemas refuse is 422 with that code, the request member at fault in `field`
 and the first schema issue in `message`. To offer
 several kinds of alert, discriminate them with a `oneOf` over a constant
-`kind` property; `quivr plugin inspect` lists the kinds.
+`kind` property; `quivr plugin inspect` lists the kinds. An installation may
+accept only some of them: the pin's optional `kinds` in the core startup
+configuration (for example `["keywords"]`, when the plugin has no credentials
+for the backend of another kind) must name declared kinds, and the core
+refuses a Saved Query of any other kind with `invalid_expression`.
 
 ## Normative fixtures
 

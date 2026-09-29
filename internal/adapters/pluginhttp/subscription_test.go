@@ -239,3 +239,36 @@ func TestEvaluatorValidatesAgainstDeclaredSchemas(t *testing.T) {
 		t.Fatalf("configuration: %v %q", err, field)
 	}
 }
+
+// A kind the pin does not offer is refused like an invalid expression, and
+// the message names the kinds that are offered.
+func TestEvaluatorRefusesKindsThePinDoesNotOffer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
+	manifest := strings.Replace(alertsManifest, `    expression_schema:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: {type: string, minLength: 1}
+`, `    expression_schema:
+      oneOf:
+        - {type: object, required: [kind], properties: {kind: {const: keywords}}}
+        - {type: object, required: [kind], properties: {kind: {const: described}}}
+`, 1)
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: "http://127.0.0.1:9", Kinds: []string{"keywords"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluator := pluginhttp.Evaluator{Pin: pin}
+	if err := evaluator.Validate(map[string]any{"kind": "keywords"}, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	err = evaluator.Validate(map[string]any{"kind": "described"}, map[string]any{})
+	if field, message := monitoring.Field(err); !errors.Is(err, monitoring.ErrInvalidExpression) || field != "/saved_query_version_id" ||
+		!strings.Contains(message, `does not offer the kind "described" (offered: keywords)`) {
+		t.Fatalf("%v %q", err, message)
+	}
+}

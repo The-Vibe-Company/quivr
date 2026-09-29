@@ -36,6 +36,13 @@ type PinConfig struct {
 	Endpoint      string          `json:"endpoint"`
 	Configuration json.RawMessage `json:"configuration,omitempty"`
 	Routes        []RouteConfig   `json:"routes"`
+	// Kinds lists the alert kinds this installation offers, a subset of those
+	// the subscription expression schema declares (ExpressionKinds). A Saved
+	// Query of another kind is refused when a Subscription pins it. Absent
+	// offers every declared kind. The operator sets it, for example to leave
+	// out a kind whose backend the plugin has no credentials for: the core
+	// never sees the plugin's environment.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // RouteConfig maps one accepted Blob media type to the pinned normalizer.
@@ -55,7 +62,9 @@ type Pin struct {
 	Endpoint string
 	// Configuration is the validated plugin configuration JSON object.
 	Configuration json.RawMessage
-	routes        map[string]RouteConfig
+	// Kinds is the offered subset of the declared alert kinds; nil offers all.
+	Kinds  []string
+	routes map[string]RouteConfig
 }
 
 // PinError lists every actionable issue of a refused pin.
@@ -106,6 +115,7 @@ func LoadPin(c PinConfig) (*Pin, error) {
 			issues = append(issues, Issue{Code: CodeNamespaceConflict, Path: "/extensions/" + pointerToken(namespace), Message: fmt.Sprintf("extension namespace %q is a built-in namespace of the engine; declare a namespace of your own under %q", namespace, m.ID+".")})
 		}
 	}
+	issues = append(issues, checkKinds(m, c.Kinds)...)
 	declared := map[string]bool{}
 	if m.Contributions.Normalizer != nil {
 		for _, mediaType := range m.Contributions.Normalizer.MediaTypes {
@@ -140,7 +150,82 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	if len(issues) > 0 {
 		return nil, refuse(issues)
 	}
-	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, routes: routes}, nil
+	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, Kinds: c.Kinds, routes: routes}, nil
+}
+
+// ExpressionKinds lists the alert kinds of a subscription expression schema
+// that discriminates them with a oneOf over a constant `kind` property, in
+// declaration order. It returns nil for any other schema.
+func ExpressionKinds(raw json.RawMessage) []string {
+	var schema struct {
+		OneOf []struct {
+			Properties struct {
+				Kind struct {
+					Const *string `json:"const"`
+				} `json:"kind"`
+			} `json:"properties"`
+		} `json:"oneOf"`
+	}
+	if json.Unmarshal(raw, &schema) != nil || len(schema.OneOf) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, len(schema.OneOf))
+	for _, branch := range schema.OneOf {
+		if branch.Properties.Kind.Const == nil {
+			return nil
+		}
+		kinds = append(kinds, *branch.Properties.Kind.Const)
+	}
+	return kinds
+}
+
+// checkKinds validates a pin's offered kinds against the declared ones.
+func checkKinds(m *Manifest, kinds []string) []Issue {
+	if kinds == nil {
+		return nil
+	}
+	var declared []string
+	if m.Contributions.Subscription != nil {
+		declared = ExpressionKinds(m.Contributions.Subscription.ExpressionSchema)
+	}
+	if declared == nil {
+		return []Issue{{Code: CodeInvalidPin, Path: "/kinds", Message: "kinds applies to a subscription Contribution whose expression schema discriminates kinds with a oneOf over a constant kind property; remove kinds from this pin"}}
+	}
+	if len(kinds) == 0 {
+		return []Issue{{Code: CodeInvalidPin, Path: "/kinds", Message: fmt.Sprintf("list at least one kind (declared: %s), or omit kinds to offer them all", strings.Join(declared, ", "))}}
+	}
+	var issues []Issue
+	seen := map[string]bool{}
+	for i, kind := range kinds {
+		path := fmt.Sprintf("/kinds/%d", i)
+		switch {
+		case seen[kind]:
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path, Message: fmt.Sprintf("kind %q is listed more than once", kind)})
+		case !contains(declared, kind):
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path, Message: fmt.Sprintf("kind %q is not declared by %s (declared: %s)", kind, m.ID, strings.Join(declared, ", "))})
+		}
+		seen[kind] = true
+	}
+	return issues
+}
+
+// Offers reports whether the pin offers an expression's alert kind: always
+// when the pin restricts no kinds.
+func (p *Pin) Offers(expression map[string]any) bool {
+	if p == nil || p.Kinds == nil {
+		return true
+	}
+	kind, _ := expression["kind"].(string)
+	return contains(p.Kinds, kind)
+}
+
+func contains(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func namespacesOf(m *Manifest) []string {

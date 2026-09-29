@@ -518,13 +518,24 @@ Every stack also pins two alert-rule plugins through the configuration's
 
 | Plugin | Subscriptions pin | Log |
 | --- | --- | --- |
-| The keyword alerts plugin [`plugins/alerts`](../plugins/alerts/README.md), installed into `.scratch/plugin-sdk/venv` ([guide](keyword-alerts.md)) | `{"plugin_id": "alerts", "version": "0.1.0"}` | `.scratch/<project>/alerts-plugin.log` |
+| The alerts plugin [`plugins/alerts`](../plugins/alerts/README.md) (keyword and described alerts), installed into `.scratch/plugin-sdk/venv` ([keyword](keyword-alerts.md) and [described](described-alerts.md) guides) | `{"plugin_id": "alerts", "version": "0.2.0"}` | `.scratch/<project>/alerts-plugin.log` |
 | The `quivr plugin init --kind subscription` template, scaffolded once as `alert-rules` in `.scratch/<project>/subscription-plugin` | `{"plugin_id": "alert-rules", "version": "0.1.0"}` | `.scratch/<project>/subscription-plugin.log` |
 
 `QUIVR_ALERTS=off make dev` leaves the keyword alerts plugin unpinned, and
 Subscriptions pinned to it are then refused with `422 unsupported_evaluator`.
 `make verify` always pins it. `make dev` prints the pinned alert-rule plugins
 under the API address.
+
+Described alerts are offered (the pin's `kinds`) only when the plugin has a classifier:
+- `make verify` starts the fake System One server `alerts.fake_system_one` (log
+  `.scratch/<project>/fake-system-one.log`), gives the plugin a test key and the
+  fake's URL, and never calls TypeSafe. The `described_alerts` step checks that
+  rephrased and translated articles alert, that an unrelated one does not, and that
+  each article costs one classifier call. The keyless restart pins
+  `"kinds": ["keywords"]` and checks that a described alert is refused with 422.
+- `make dev` offers them when `TYPESAFE_API_KEY` is set in its environment; the
+  plugin then sends article text to TypeSafe. Otherwise it pins
+  `"kinds": ["keywords"]` and clears the key from the plugin's environment.
 
 The PostgreSQL adapter suite also kills the test plugin process in the middle of an
 invocation, restarts it, and checks that the Version ends with exactly one published

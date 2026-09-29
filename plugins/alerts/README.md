@@ -2,18 +2,22 @@
 
 Quivr's first-party alert rules, a `subscription` plugin built with the
 [Python Plugin SDK](../../sdks/python/README.md). A Subscription pinned to
-`{"plugin_id": "alerts", "version": "0.1.0"}` gets a Match when a new article
-satisfies its Saved Query's expression. This version implements one alert kind,
-**`keywords`**: a boolean keyword query over the article's title and body, with
-optional filters on its metadata. The kind `described` (plain-language alerts)
-is reserved for a later version.
+`{"plugin_id": "alerts", "version": "0.2.0"}` gets a Match when a new article
+satisfies its Saved Query's expression. It offers two alert kinds:
 
-Operators writing alert queries should start with the
-[keyword alerts guide](../../docs/keyword-alerts.md). This README is the reference.
+- **`keywords`**: a boolean keyword query over the article's title and body, with
+  optional filters on its metadata;
+- **`described`**: a plain-language description that a classifier, TypeSafe's Jev,
+  judges each article against ([below](#described-alerts)). The article's text is
+  sent to TypeSafe, and the kind is off without `TYPESAFE_API_KEY`.
+
+People writing alerts should start with the guides:
+[keyword alerts](../../docs/keyword-alerts.md) and
+[described alerts](../../docs/described-alerts.md). This README is the reference.
 
 ## Expression
 
-A Saved Query expression for this plugin:
+A keyword alert's Saved Query expression:
 
 ```json
 {
@@ -113,7 +117,8 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `fields` | `{}` | Name → JSON Pointer, added to or replacing the built-in names. Names match `[a-z][a-z0-9_]*` |
-| `text_roles` | `["title", "body"]` | Part roles that terms search |
+| `text_roles` | `["title", "body"]` | Part roles that terms search and described alerts send |
+| `described.threshold` | `0.5` | Default score threshold of described alerts, 0.2 to 0.95 |
 
 ```json
 {"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
@@ -125,11 +130,21 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `wait_for_enrichment` | `false` | Answer `not_ready` until the article is enriched (embeddings attached). The core asks again on `record.enrichment_available` |
+| `wait_for_enrichment` | `false` for keywords, `true` for described | Answer `not_ready` until the article is enriched (embeddings attached). The core asks again on `record.enrichment_available` |
+| `threshold` | installer's `described.threshold` | Described alerts only: the score at or above which the article matches, 0.2 to 0.95. Keyword alerts ignore it |
 
 Rules run when an article becomes searchable. Keyword alerts need no enrichment, so
 they decide at once by default. If a deployment never enriches articles, a Subscription
 with `wait_for_enrichment: true` never decides.
+
+**Pin `kinds`** (core startup config): the alert kinds this installation accepts.
+An installation without `TYPESAFE_API_KEY` pins `"kinds": ["keywords"]`, so a
+described alert is `422 invalid_expression` at creation. Absent, both kinds are
+accepted.
+
+**Secret:** `TYPESAFE_API_KEY`, read from the plugin's environment only and declared
+in the manifest with `required: false`. `TYPESAFE_API_URL` optionally replaces the
+System One endpoint, for example with the fake server in tests.
 
 ## Decisions and evidence
 
@@ -159,6 +174,84 @@ with `wait_for_enrichment: true` never decides.
 - **Bounds.** Terms appear in query order. `part_keys` follows the article's Part
   order, with at most 100 keys. `details` stays under 12 KiB; when it is trimmed,
   `details.truncated` is `true`.
+
+## Described alerts
+
+```json
+{"kind": "described", "description": "Labour strikes at ports and harbours"}
+```
+
+The description has 3 to 1000 characters, with at least one character that is not a
+space. Each batch is decided as follows.
+
+1. **One call.** All described evaluations of the batch that are ready share one
+   classifier call. Their descriptions are deduplicated after runs of spaces are
+   collapsed, then sorted, so each distinct description is asked once. Evaluations
+   that differ only in threshold share their question. The core already
+   deduplicates identical expression and configuration pairs across Subscriptions
+   and owners. There is no keyword pre-filter.
+2. **What the classifier sees** (`state`):
+   - `title`: the `title` Parts;
+   - `source`: the Source Namespace;
+   - every installer-mapped field that has a value (`fields`, such as `author` or
+     `category`), with strings bounded to 256 characters and lists to 16 items;
+   - `text`: the other `text_roles` Parts in Part order, joined by blank lines.
+
+   The text is cut at a word boundary so the serialized state stays under 48 KB.
+   That is far under Jev's budget of 32k tokens for the state plus the longest
+   question, and it keeps the start of the article, where news puts the
+   essentials.
+3. **Jev request.** `POST https://api.typesafe.ai/v1/systemone` with the pinned model
+   `jev-1.13.0`, `{"article": state}` as the state, and one
+   [Noul](https://docs.typesafe.ai/primitives/noul.md) question per description.
+   The question's instructions hold the description as data (`alert`) and ask
+   whether the article is about what `alert` describes, in other words or another
+   language. A request is split only when its body would exceed 120,000 bytes,
+   under TypeSafe's limit of about 128 KB. The parts are sent in parallel (at most
+   4 at once, 15 seconds each), within the declared `timeout_ms` of 20 seconds.
+4. **Decision.** `match` when the Noul, the probability of "yes", is at or above the
+   threshold; otherwise `no_match`, whose explanation gives the score. TypeSafe's
+   `confidence` field is never used. Noul answers do not carry it, and it has no
+   separating power for this decision.
+5. **Evidence:**
+
+   ```json
+   {
+     "explanation": "Jev (jev-1.13.0) judged that the article fits the description: score 0.97, threshold 0.50.",
+     "part_keys": ["title", "body"],
+     "details": {"kind": "described", "classifier": "Jev", "model": "jev-1.13.0", "score": 0.97, "threshold": 0.5, "truncated": false}
+   }
+   ```
+
+   `part_keys` are the Parts sent, even partly. `truncated` says the text was cut.
+
+**Default threshold 0.5.** It was calibrated on [`calibration/set.json`](calibration/set.json),
+13 neutral French and English articles, each judged against 6 descriptions (78
+pairs, including near misses such as a strike on the railways, or visa-free
+tourism). With `jev-1.13.0` on 2026-09-29:
+- the fitting pairs scored 0.94 to 0.99;
+- the others scored 0.01 to 0.07;
+- every threshold from 0.20 to 0.90 classified all 78 pairs correctly.
+
+0.5 sits in the middle of that gap. The set is small and clear-cut, so tune the
+threshold per alert on real traffic. Re-run the calibration with
+`python3 calibration/calibrate.py` (it calls TypeSafe with `TYPESAFE_API_KEY`) before
+moving to another model version.
+
+**Errors.** The plugin never echoes TypeSafe's response body, and never logs the key.
+
+| Situation | Plugin error | The core |
+| --- | --- | --- |
+| No `TYPESAFE_API_KEY` and a described evaluation is due | `described_unavailable`, terminal | Isolates the described evaluations by halving the batch, decides the others, retries these with backoff |
+| HTTP 401 or 403 | `classifier_unauthorized`, terminal | Same |
+| Other 4xx, or an answer without a valid Noul | `classifier_refused_request`, `classifier_invalid_answer`, terminal | Same |
+| Timeout, connection failure, HTTP 408, 429, 5xx or 529 | `classifier_unavailable`, retryable | Retries the whole batch with backoff; keyword evaluations of that batch wait too |
+
+**Replaceable classifier.** `alerts/described.py` depends only on the `Classifier`
+protocol: a `name`, a `model` and `judge(state, descriptions) -> {description: score}`.
+`alerts/jev.py` implements it. Another classifier, such as an in-house model,
+replaces `rule.classifier`, the factory that returns the classifier, or `None`
+when described alerts cannot be decided.
 
 ## Text notation
 
@@ -202,12 +295,28 @@ It exits 1 and explains the mistake for an invalid query. From Python, use
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e <quivr-v2 checkout>/sdks/python -e .
-python3 -m unittest discover -s tests            # grammar, matching, evidence, schema
-quivr plugin dev --fixture fixtures/sample.json  # replay the sample batch
-quivr plugin test .                              # Contract Runner certification
+python3 -m unittest discover -s tests            # grammar, matching, evidence, schema, described alerts
+quivr plugin dev --fixture fixtures/sample.json  # replay the keyword sample batch
+quivr plugin test .                              # Contract Runner certification (keyword fixture)
 ```
 
-`scripts/plugin_sdk.sh` (part of `make test`) runs all three, and CI publishes the
-Contract Runner report as the `alerts-contract-report` artifact. The local stack pins
+Tests never call TypeSafe. Described alerts are tested against
+`alerts.fake_system_one`, a deterministic stand-in for System One that judges by
+topic words in English and French. To certify both kinds, run it and point the plugin
+at it:
+
+```bash
+python3 -m alerts.fake_system_one --port 8765 --key test-key &
+TYPESAFE_API_KEY=test-key TYPESAFE_API_URL=http://127.0.0.1:8765/v1/systemone \
+  quivr plugin test --fixture fixtures/sample.json --fixture tests/data/described.json .
+```
+
+One opt-in test calls the real API. It is skipped unless both
+`QUIVR_ALERTS_LIVE=1` and `TYPESAFE_API_KEY` are set:
+`QUIVR_ALERTS_LIVE=1 python3 -m unittest test_described.Live`, run from `tests/`.
+
+`scripts/plugin_sdk.sh` (part of `make test`) runs the unit tests, the replay and the
+certification with the fake server. CI publishes the Contract Runner report as the
+`alerts-contract-report` artifact. The local stack pins
 this plugin by default; `QUIVR_ALERTS=off make dev` leaves it out
 ([harness](../../docs/quivr-v2-local-harness.md)).

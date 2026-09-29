@@ -22,7 +22,7 @@ func (s EvaluationStore) ClaimRelated(ctx context.Context, first monitoring.Inte
 	rows, err := s.Pool.Query(ctx, `UPDATE evaluation_intents i SET lease_until=now()+make_interval(secs => $7::double precision)
 FROM (SELECT e.organization,e.subscription_version_id,e.sequence FROM evaluation_intents e
   JOIN subscription_versions v ON (v.organization,v.id)=(e.organization,e.subscription_version_id)
-  WHERE e.organization=$1 AND e.record_version_id=$2 AND e.kind='evaluation' AND e.state='pending' AND e.available_at<=now() AND e.lease_until<now()
+  WHERE e.organization=$1 AND e.record_version_id=$2 AND e.kind='evaluation' AND e.state='pending' AND e.available_at<=now() AND e.lease_until<now() AND NOT `+evaluatingSibling("e")+`
     AND NOT (e.subscription_version_id=$3 AND e.sequence=$4)
     AND v.evaluator->>'plugin_id'=$5 AND v.evaluator->>'version'=$6
   ORDER BY e.available_at,e.sequence LIMIT $8 FOR UPDATE OF e SKIP LOCKED) due

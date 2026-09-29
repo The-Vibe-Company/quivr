@@ -13,9 +13,10 @@
 #     .scratch/plugin-sdk/subscription-contract-report.json);
 #  5. the reference plugin plugins/pdf-text passes its tests and `quivr plugin
 #     test` (JSON report in .scratch/plugin-sdk/pdf-text-contract-report.json);
-#  6. the keyword alerts plugin plugins/alerts passes its tests, replays its
-#     fixture and passes `quivr plugin test` (JSON report in
-#     .scratch/plugin-sdk/alerts-contract-report.json).
+#  6. the alerts plugin plugins/alerts passes its tests, replays its keyword
+#     fixture and passes `quivr plugin test` with its keyword and described
+#     fixtures, described alerts talking to the fake System One server, never
+#     TypeSafe (JSON report in .scratch/plugin-sdk/alerts-contract-report.json).
 # Needs Python 3.12+ and network access for pip (like `make contracts`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -113,15 +114,26 @@ python3 -W error::ResourceWarning -m unittest discover -s tests
 grep -q "^CERTIFIED" "$work/pdf-text-contract.log" || { cat "$work/pdf-text-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-report.json"
 
-# The first-party keyword alerts plugin plugins/alerts: unit tests (grammar,
-# matching, evidence), a replayed fixture and Contract Runner certification.
-# CI uploads the report.
+# The first-party alerts plugin plugins/alerts: unit tests (grammar, matching,
+# evidence, described alerts against the fake System One server), a replayed
+# fixture and Contract Runner certification of both kinds. CI uploads the report.
 cd "$root/plugins/alerts"
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
 python3 -W error::ResourceWarning -m unittest discover -s tests
 "$quivr" plugin inspect . > "$work/alerts-inspect.log"
 "$quivr" plugin dev --fixture fixtures/sample.json > "$work/alerts-response.json" 2> "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
 grep -q "8 decisions in 1 batches (5 match, 2 no_match, 1 not_ready)" "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
-"$quivr" plugin test --report "$work/alerts-contract-report.json" . > "$work/alerts-contract.log" 2>&1 || { cat "$work/alerts-contract.log"; exit 1; }
+# Described alerts are certified against the fake System One server with a test key.
+fake_port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 -m alerts.fake_system_one --port "$fake_port" --key test-key &
+fake_pid=$!
+trap 'kill "$fake_pid" 2>/dev/null || true' EXIT
+python3 -c 'import sys, time, urllib.request
+for _ in range(100):
+    try: urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/requests", timeout=1).close(); break
+    except OSError: time.sleep(.05)' "$fake_port"
+TYPESAFE_API_KEY=test-key TYPESAFE_API_URL="http://127.0.0.1:$fake_port/v1/systemone" \
+  "$quivr" plugin test --report "$work/alerts-contract-report.json" --fixture fixtures/sample.json --fixture tests/data/described.json . > "$work/alerts-contract.log" 2>&1 || { cat "$work/alerts-contract.log"; exit 1; }
+grep -q "PASS  batch            \[subscription\] tests/data/described.json" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.json"
