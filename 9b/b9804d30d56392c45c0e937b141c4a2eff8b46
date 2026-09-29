@@ -1,0 +1,28 @@
+CONTEXT.md
+  s_54b80c92daa9cb::t_f0b3a44cc1753c 101-104
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_6ee997dbd685e9 313-320
+tests/acceptance/monitoring_owner_test.go
+  s_54b80c92daa9cb::t_330baa8a1e1017 1-116
+docs/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_6ee997dbd685e9 135,547-579
+  s_54b80c92daa9cb::t_98e6cb7f6ffd7a 580
+README.md
+  s_54b80c92daa9cb::t_6ee997dbd685e9 125-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9bb9804d30d56392c45c0e937b141c4a2eff8b46",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
