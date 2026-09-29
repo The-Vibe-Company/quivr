@@ -41,6 +41,13 @@ type ProcessResult struct {
 // engine invocation cap plus discovery and durable recording.
 const normalizationActivityTimeout = normalization.TimeoutCap + time.Minute
 
+// normalizationHeartbeatTimeout bounds how long an attempt of normalize-external
+// can go unheard. A running attempt heartbeats well within it. An attempt that
+// no worker is running, because a stopping worker took the task or never
+// reported it, is retried after this bound, not after the three-minute
+// start-to-close bound (THE-745).
+const normalizationHeartbeatTimeout = 10 * time.Second
+
 // maxNormalizationRounds bounds normalize-then-process rounds of one receipt.
 // normalize-external records an outcome (or leaves one to publication), so a
 // second round only happens when a route or the pin changed in between.
@@ -52,7 +59,7 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 	// receipt; version 2 runs it only when publication reports a routed Blob
 	// without a normalization outcome, so other content runs no extra Activity.
 	version := workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 2)
-	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
+	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, HeartbeatTimeout: normalizationHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
 	switch version {
 	case 1:
@@ -117,7 +124,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		return ProcessResult{}, err
 	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		return service.Normalize(ctx, in.Organization, in.ReceiptID)
+		return heartbeating(ctx, normalizationHeartbeatTimeout/3, func() error { return service.Normalize(ctx, in.Organization, in.ReceiptID) })
 	}, activity.RegisterOptions{Name: "normalize-external"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
 	registerRebuild(w, rebuilder)
@@ -145,6 +152,29 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	return runtime, nil
 }
+
+// heartbeating runs run while it records an activity heartbeat every interval,
+// so the server can tell a live attempt from one no worker is running.
+func heartbeating(ctx context.Context, interval time.Duration, run func() error) error {
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				activity.RecordHeartbeat(ctx)
+			}
+		}
+	}()
+	return run()
+}
+
 func (r *Runtime) Close() {
 	r.Worker.Stop()
 	if r.ConnectorWorker != nil {
