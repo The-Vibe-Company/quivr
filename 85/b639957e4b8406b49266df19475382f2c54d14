@@ -1,0 +1,28 @@
+contracts/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_34cedf9966974f 1-142
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 67-72
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 47-49,163-192
+  s_54b80c92daa9cb::t_fbdcd1f15a3c88 193
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_1d1cb31c3f582c 402
+contracts/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_b59b7315d97a94 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85b639957e4b8406b49266df19475382f2c54d14",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
