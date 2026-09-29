@@ -9,10 +9,12 @@ import sys
 def build_config(env):
     """Build the core configuration from Railway runtime variables."""
     key = env['QUIVR_API_KEY']
-    actions = ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query']
+    # changes:read feeds the web app's live Veille page (read-only, fenced to the demo corpus).
+    actions = ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query',
+               'changes:read']
     # Opt-in: lets the web app list, create and watch Connector Instances.
     if env.get('QUIVR_DEMO_CONNECTORS') == '1':
-        actions += ['connectors:read', 'connectors:write', 'changes:read']
+        actions += ['connectors:read', 'connectors:write']
     config = {
         'database_url': env['DATABASE_URL'],
         'cursor_key': env['QUIVR_CURSOR_KEY'],

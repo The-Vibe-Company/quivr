@@ -55,8 +55,8 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 The web app has a **Sources** view (THE-679, THE-732). By default the demo key cannot use
 it, so the view shows "Les connecteurs ne sont pas activés sur ce déploiement". To
 enable it, set `QUIVR_DEMO_CONNECTORS=1` on api and worker, then redeploy them. The
-demo key then also gets `connectors:read`, `connectors:write` and `changes:read`
-(live health). Without `QUIVR_CREDENTIAL_KEY` only credential-free kinds, such as
+demo key then also gets `connectors:read` and `connectors:write`; it always has
+`changes:read`, which the live health and the **Veille** feed use. Without `QUIVR_CREDENTIAL_KEY` only credential-free kinds, such as
 public RSS, can be created, and the view says so. Unset the variable and redeploy to
 turn it off again. Instances created meanwhile keep polling; pause or remove them
 first from the view if they should stop.

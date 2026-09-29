@@ -42,6 +42,14 @@ Organization, so texts added before this change are not shown. The local stack l
 the core reach private addresses; the web server still refuses them, so private
 feeds get the same error as in production.
 
+### Veille
+
+The **Veille** tab (`?view=veille`) lists everything entering the demo corpus, newest
+first, with source (namespace, or **Ajouté à la main**), time, title and excerpt. New
+items arrive live, chips filter by source and an item opens in the document view. The
+server builds it from the change feed and catalog (`feed.mjs`; needs `changes:read`).
+Time is when the server saw an item arrive; older items show their RSS date or **Déjà présent**.
+
 ## Frontend development and checks
 
 With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`.
@@ -60,7 +68,7 @@ make verify-demo
 | Variable | Meaning |
 | --- | --- |
 | `QUIVR_API_URL` | Private core URL, no trailing route |
-| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab |
+| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab; the Veille tab needs `changes:read` |
 | `QUIVR_DEMO_CORPUS_ID` | Optional existing demo corpus; otherwise created idempotently |
 | `DEMO_PASSWORD` | Shared demo password, required on public binds |
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |

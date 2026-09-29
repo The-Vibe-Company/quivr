@@ -1,0 +1,167 @@
+import { test, expect, type Page } from "@playwright/test";
+
+// Synthetic content only. The RSS item comes from the local test site that
+// scripts/demo.py starts (scripts/fake_feeds.py), which the facade allows as
+// a private feed origin; the tests never reach the internet.
+const FEEDS = process.env.QUIVR_DEMO_FEEDS_URL || "";
+const run = Date.now().toString(36);
+const handTitle = `Note de veille ${run}`;
+const rssTitle = "Les cartographes redessinent la lagune";
+const rssBody = "Un relevé au sonar corrige les cartes anciennes de la lagune.";
+const namespace = `veille-${run}`;
+
+test.beforeEach(async ({ page }) => {
+  await page.request.post("/demo/login", {
+    data: { password: process.env.QUIVR_DEMO_PASSWORD || "local-browser-demo" },
+  });
+});
+
+async function openVeille(page: Page) {
+  await page.goto("/?view=veille");
+  await expect(
+    page.getByRole("heading", { name: "Veille", level: 1 }),
+  ).toBeVisible();
+}
+
+test("un texte ajouté à la main puis un article RSS arrivent en direct, filtrables et lisibles", async ({
+  page,
+  baseURL,
+}, info) => {
+  test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
+  test.setTimeout(150000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openVeille(page);
+  // The badge reads "Reconnexion…" until the facade follows the change feed.
+  try {
+    await expect(page.locator(".live-badge")).toHaveText("En direct", {
+      timeout: 30000,
+    });
+  } catch (error) {
+    await page.screenshot({
+      path: info.outputPath("veille-not-live.png"),
+      fullPage: true,
+    });
+    console.log(
+      "Veille when not live:",
+      await page.locator("main").innerText(),
+    );
+    throw error;
+  }
+  // Scoped to the list: the live region also announces new titles.
+  const list = page.getByRole("list", { name: "Derniers éléments" });
+  const items = list.locator(".feed-item");
+
+  // 1. A text added by hand appears at the top without reloading.
+  await page
+    .getByRole("button", { name: "Ajouter du texte", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Ajouter du texte" });
+  await dialog
+    .getByLabel("Votre texte")
+    .fill(`${handTitle}\nUn texte collé depuis la démo.`);
+  await dialog.getByRole("button", { name: "Ajouter à la démo" }).click();
+  await expect(dialog.getByText("Texte enregistré")).toBeVisible({
+    timeout: 30000,
+  });
+  await page.keyboard.press("Escape");
+  await expect(items.first()).toContainText(handTitle, { timeout: 30000 });
+  await expect(items.first()).toContainText("Ajouté à la main");
+
+  // 2. An RSS Connector Instance collects an item, which lands above it.
+  const { corpus_id } = await (await page.request.get("/demo/session")).json();
+  const created = await page.request.post("/v0/connectors", {
+    headers: { Origin: baseURL! },
+    data: {
+      idempotency_key: `veille-${run}`,
+      corpus_id,
+      source_namespace: namespace,
+      kind: "rss",
+      config: { url: `${FEEDS}/feeds/world.xml?run=${namespace}` },
+      schedule: { interval_seconds: 2 },
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const { connector_id } = await created.json();
+  try {
+    await expect(items.first()).toContainText(rssTitle, { timeout: 90000 });
+    await expect(items.first()).toContainText(namespace);
+    await expect(items.first()).toContainText(rssBody);
+    const titles = await items.locator(".feed-title").allTextContents();
+    expect(titles.indexOf(rssTitle)).toBeLessThan(titles.indexOf(handTitle));
+    await page.screenshot({
+      path: info.outputPath("veille-desktop.png"),
+      fullPage: true,
+    });
+
+    // 3. The source filter keeps one source at a time.
+    const filter = page.getByRole("group", { name: "Filtrer par source" });
+    await filter.getByRole("button", { name: /^Ajouté à la main/ }).click();
+    await expect(list.getByText(handTitle)).toBeVisible();
+    await expect(list.getByText(rssTitle)).toHaveCount(0);
+    await filter
+      .getByRole("button", { name: new RegExp(`^${namespace}`) })
+      .click();
+    await expect(list.getByText(rssTitle)).toBeVisible();
+    await expect(list.getByText(handTitle)).toHaveCount(0);
+    await expect(items).toHaveCount(1);
+
+    // 4. An item opens in the document view, without its HTML source.
+    await page.getByRole("link", { name: rssTitle }).click();
+    await expect(page.getByTestId("canonical-text").first()).toBeVisible();
+    await expect(page.getByRole("dialog")).toContainText(rssBody);
+    await expect(page.getByRole("dialog")).not.toContainText("<");
+    await page.keyboard.press("Escape");
+    await filter.getByRole("button", { name: /^Toutes les sources/ }).click();
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath("veille-mobile.png"),
+      fullPage: true,
+    });
+  } finally {
+    await page.request.post(`/v0/connectors/${connector_id}/disable`, {
+      headers: { Origin: baseURL! },
+      data: { idempotency_key: `veille-disable-${run}` },
+    });
+  }
+});
+
+// The verify Corpus is shared by every spec, so an empty feed is simulated.
+test("une veille vide explique comment ajouter une source ou un texte", async ({
+  page,
+}, info) => {
+  await page.route("**/demo/feed", (route) =>
+    route.fulfill({ json: { items: [], live: true } }),
+  );
+  await page.route("**/demo/feed/stream", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: "retry: 60000\n\n",
+    }),
+  );
+  await openVeille(page);
+  await expect(
+    page.getByRole("heading", { name: "Rien n’est encore arrivé." }),
+  ).toBeVisible();
+  await expect(page.getByText(/un flux RSS, ou collez un texte/)).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("veille-empty.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Ajouter du texte" }).last().click();
+  await expect(
+    page.getByRole("dialog", { name: "Ajouter du texte" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Ajouter une source" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sources", level: 1 }),
+  ).toBeVisible();
+});

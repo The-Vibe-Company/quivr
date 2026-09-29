@@ -29,13 +29,15 @@ export function DocumentPanel({
       });
     return () => controller.abort();
   }, [record, version, attempt]);
+  // Connector items carry a title Part; texts pasted in the app do not.
+  const collected = doc?.manifest.parts.some((part) => part.role === "title");
   return (
     <Dialog title="Document source" onClose={onClose} wide>
       <div className="document-body">
         <div className="eyebrow">
           <FileText size={16} aria-hidden="true" /> Texte original
         </div>
-        <h1>Votre document</h1>
+        <h1>{collected ? "Document collecté" : "Votre document"}</h1>
         {!doc && !error && <p role="status">Chargement du texte…</p>}
         {error && (
           <div className="notice" role="alert">
@@ -51,17 +53,22 @@ export function DocumentPanel({
         {doc && (
           <>
             <p className="document-caption">
-              Le texte tel que vous l’avez ajouté, sans modification.
+              {collected
+                ? "Le texte tel qu’il a été collecté, sans modification."
+                : "Le texte tel que vous l’avez ajouté, sans modification."}
             </p>
-            {doc.manifest.parts.map((part) => (
-              <div
-                key={part.key}
-                className="canonical-text"
-                data-testid="canonical-text"
-              >
-                <Highlight text={part.content.text} terms={terms} />
-              </div>
-            ))}
+            {doc.manifest.parts
+              // Markup kept beside a text Part is not shown as text.
+              .filter((part) => part.role !== "source_html")
+              .map((part) => (
+                <div
+                  key={part.key}
+                  className="canonical-text"
+                  data-testid="canonical-text"
+                >
+                  <Highlight text={part.content.text} terms={terms} />
+                </div>
+              ))}
           </>
         )}
       </div>

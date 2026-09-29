@@ -165,6 +165,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   Each source shows its health and last article, and can be paused, resumed or
   removed. Other kinds keep forms generated from their schemas, so new kinds need
   no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
+- **Live feed page in the web app** (**Veille** tab): everything entering the demo
+  Corpus, newest first, with source, time, title and excerpt. New items arrive over
+  SSE, which the app's server relays from the change feed, and can be filtered by
+  source ([guide](quivr-search/README.md#veille)).
 - **Operational metrics and correlated logs** on each process's private probe
   listener (`/metrics`, Prometheus text, bounded labels):
   - API: accepted commands and the pending-ingestion backlog;

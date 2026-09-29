@@ -5,6 +5,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { feedGuard, parseSuggestions } from "./feeds.mjs";
+import { createFeed } from "./feed.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -47,6 +48,7 @@ async function saveRemoved() {
     console.warn("DEMO_STATE_FILE could not be written.");
   }
 }
+let feed;
 const equal = (a, b) =>
   timingSafeEqual(
     createHash("sha256").update(a).digest(),
@@ -88,7 +90,10 @@ async function upstream(path, method = "GET", body) {
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.length;
-    if (size > 2 << 20) throw fail(502, "Réponse du moteur invalide.");
+    if (size > 2 << 20)
+      throw Object.assign(fail(502, "Réponse du moteur invalide."), {
+        oversized: true,
+      });
     chunks.push(chunk);
   }
   const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -268,13 +273,25 @@ const server = http.createServer(async (req, res) => {
       path === "/demo/session" ||
       path.startsWith("/v0/") ||
       path.startsWith("/demo/feeds/") ||
-      path === "/demo/sources/remove"
+      path === "/demo/sources/remove" ||
+      path === "/demo/feed" ||
+      path === "/demo/feed/stream"
     ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
       const id = await readyCorpus();
       if (path === "/demo/session" && req.method === "GET") {
         send(res, 200, { corpus_id: id, name: "Espace démo" });
+        return;
+      }
+      // The Veille page: a snapshot and a live stream of the demo corpus.
+      if (
+        (path === "/demo/feed" || path === "/demo/feed/stream") &&
+        req.method === "GET"
+      ) {
+        feed ||= createFeed({ core, key, corpus: id, upstream });
+        if (path === "/demo/feed") send(res, 200, await feed.snapshot());
+        else await feed.subscribe(req, res);
         return;
       }
       let response;

@@ -14,17 +14,20 @@ import { ResultItem } from "./components/ResultItem";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
+import { FeedView } from "./components/FeedView";
 import { APIError, login, search, session, tokenize } from "./lib/search";
 import type { Mode, SearchResponse } from "./types";
 
 type Auth = "loading" | "login" | "ready" | "error";
-type View = "search" | "connectors";
+type View = "search" | "veille" | "connectors";
 function urlState() {
   const p = new URLSearchParams(location.search);
   return {
-    view: (["sources", "connectors"].includes(p.get("view") || "")
-      ? "connectors"
-      : "search") as View,
+    view: (p.get("view") === "veille"
+      ? "veille"
+      : ["sources", "connectors"].includes(p.get("view") || "")
+        ? "connectors"
+        : "search") as View,
     query: p.get("q") || "",
     mode: (["hybrid", "lexical", "semantic"].includes(p.get("mode") || "")
       ? p.get("mode")
@@ -108,6 +111,7 @@ export default function App() {
   useEffect(() => {
     const p = new URLSearchParams();
     if (view === "connectors") p.set("view", "sources");
+    if (view === "veille") p.set("view", "veille");
     if (query) p.set("q", query);
     if (mode !== "hybrid") p.set("mode", mode);
     if (doc) {
@@ -122,9 +126,11 @@ export default function App() {
     document.title =
       view === "connectors"
         ? "Sources — Quivr Search"
-        : query
-          ? `${query} — Quivr Search`
-          : "Quivr Search";
+        : view === "veille"
+          ? "Veille — Quivr Search"
+          : query
+            ? `${query} — Quivr Search`
+            : "Quivr Search";
   }, [query, mode, doc, view]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -133,7 +139,7 @@ export default function App() {
         event.target instanceof HTMLElement &&
         (["INPUT", "TEXTAREA"].includes(event.target.tagName) ||
           event.target.isContentEditable);
-      if (adding || doc || view === "connectors") return;
+      if (adding || doc || view !== "search") return;
       if (
         (event.key === "/" && !typing) ||
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
@@ -191,6 +197,10 @@ export default function App() {
     setDoc(null);
   };
   const onUnauthorized = useCallback(() => setAuth("login"), []);
+  const openDoc = useCallback(
+    (record: string, version: string) => setDoc({ record, version }),
+    [],
+  );
   if (auth !== "ready")
     return (
       <div className="auth-page">
@@ -266,9 +276,7 @@ export default function App() {
   return (
     <div
       className="app"
-      data-view={
-        view === "connectors" ? "connectors" : query ? "results" : "home"
-      }
+      data-view={view !== "search" ? view : query ? "results" : "home"}
     >
       <header className="topbar">
         <a
@@ -291,6 +299,17 @@ export default function App() {
             }}
           >
             Recherche
+          </a>
+          <a
+            href="/?view=veille"
+            aria-current={view === "veille" ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              setDoc(null);
+              setView("veille");
+            }}
+          >
+            Veille
           </a>
           <a
             href="/?view=sources"
@@ -319,6 +338,13 @@ export default function App() {
       </header>
       {view === "connectors" ? (
         <ConnectorsView corpus={corpus} onUnauthorized={onUnauthorized} />
+      ) : view === "veille" ? (
+        <FeedView
+          onOpen={openDoc}
+          onAdd={() => setAdding(true)}
+          onSources={() => setView("connectors")}
+          onUnauthorized={onUnauthorized}
+        />
       ) : (
         <main className={query ? "results-page" : "home"}>
           <div className={query ? "query-area" : "home-inner"}>

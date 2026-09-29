@@ -406,3 +406,225 @@ test("sources: suggestions, guarded discovery and creation, removal hides every 
   assert.equal((await fetch(base + "/v0/connectors/connector_a2")).status, 404);
   assert.equal((await fetch(base + "/v0/connectors/connector_b")).status, 200);
 });
+
+test("the Veille feed scans the catalog, relays live Records newest first and never exposes the key", async (t) => {
+  const records = {
+    rec_rss: { namespace: "wire", version: "v_rss" },
+    rec_hand: { namespace: "web-demo", version: "v_hand" },
+    rec_gone: { namespace: "wire", version: "v_gone", withdrawn: true },
+    rec_other: { namespace: "wire", version: "v_other", corpus: "private" },
+  };
+  const text = (key, role, value, extra = {}) => ({
+    key,
+    role,
+    content: { kind: "text", text: value },
+    ...extra,
+  });
+  const versions = {
+    v_rss: {
+      manifest: {
+        parts: [
+          text("title", "title", "Feed headline"),
+          text("body", "body", "Body   of the\narticle"),
+          text("body_html", "source_html", "<p>Body</p>", {
+            parent_key: "body",
+          }),
+        ],
+      },
+      extensions: {
+        "connector.rss": {
+          schema_version: "1",
+          data: { item: { published: "2026-09-01T08:00:00Z" } },
+        },
+      },
+    },
+    v_hand: {
+      manifest: { parts: [text("text", "body", "Pasted note\nSecond line")] },
+    },
+    v_new: {
+      manifest: { parts: [text("text", "body", "Fresh arrival\nIts excerpt")] },
+    },
+  };
+  const seen = [];
+  let stream;
+  const streamOpened = Promise.withResolvers();
+  const upstream = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization });
+    const url = new URL(req.url, "http://x");
+    const json = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    if (url.pathname === "/v0/changes/stream") {
+      assert.equal(url.searchParams.get("cursor"), "c0");
+      assert.equal(url.searchParams.get("corpus_id"), "demo");
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(": resumed\n\n");
+      stream = res;
+      streamOpened.resolve();
+      return;
+    }
+    if (url.pathname === "/v0/changes")
+      return json(200, { items: [], next_cursor: "c0", has_more: false });
+    if (url.pathname === "/v0/records") {
+      assert.equal(url.searchParams.get("corpus_id"), "demo");
+      return json(200, {
+        items: Object.keys(records).map((record_id) => ({ record_id })),
+      });
+    }
+    const match = url.pathname.match(
+      /^\/v0\/records\/(\w+)(?:\/versions\/(\w+))?$/,
+    );
+    const record = match && records[match[1]];
+    if (!record) return json(404, { code: "not_found" });
+    if (match[2])
+      return json(200, {
+        record_id: match[1],
+        version_id: match[2],
+        ...versions[match[2]],
+      });
+    json(200, {
+      record_id: match[1],
+      source: {
+        corpus_id: record.corpus || "demo",
+        namespace: record.namespace,
+        record_key: match[1],
+      },
+      withdrawn: !!record.withdrawn,
+      current_version_id: record.version,
+    });
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+
+  const snapshot = await (await fetch(base + "/demo/feed")).json();
+  assert.deepEqual(
+    snapshot.items.map((item) => item.record_id),
+    ["rec_rss", "rec_hand"],
+    "withdrawn and out-of-corpus Records stay out; dated items first",
+  );
+  assert.deepEqual(snapshot.items[0], {
+    record_id: "rec_rss",
+    version_id: "v_rss",
+    namespace: "wire",
+    title: "Feed headline",
+    excerpt: "Body of the article",
+    published_at: "2026-09-01T08:00:00.000Z",
+  });
+  assert.equal(snapshot.items[1].title, "Pasted note");
+  assert.equal(snapshot.items[1].excerpt, "Second line");
+  assert.ok(seen.every((r) => r.auth === "Bearer fixture-server-key"));
+
+  // Live: a Record event reaches subscribers as a hydrated item.
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const live = await fetch(base + "/demo/feed/stream", {
+    signal: controller.signal,
+  });
+  assert.equal(live.status, 200);
+  assert.match(live.headers.get("content-type"), /^text\/event-stream/);
+  const reader = live.body.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  const until = async (pattern) => {
+    while (!pattern.test(received)) {
+      const { value, done } = await reader.read();
+      assert.ok(!done, "stream closed");
+      received += decoder.decode(value, { stream: true });
+    }
+  };
+  await streamOpened.promise;
+  records.rec_new = { namespace: "web-demo", version: "v_new" };
+  const change = (id, cursor) =>
+    stream.write(
+      `id: ${cursor}\nevent: change\ndata: ${JSON.stringify({
+        event_id: cursor,
+        type: "record.materialized",
+        schema_version: "1",
+        occurred_at: "2026-09-29T10:00:00Z",
+        resource: { kind: "record", id, corpus_id: "demo" },
+        cursor,
+      })}\n\n`,
+    );
+  change("rec_new", "c1");
+  await until(/event: item\ndata: [^\n]*"rec_new"/);
+  const after = await (await fetch(base + "/demo/feed")).json();
+  assert.equal(after.items[0].record_id, "rec_new");
+  assert.equal(after.items[0].received_at, "2026-09-29T10:00:00.000Z");
+  assert.equal(after.items[0].title, "Fresh arrival");
+  assert.equal(after.items[0].excerpt, "Its excerpt");
+
+  // A withdrawal removes the item for every reader.
+  records.rec_hand.withdrawn = true;
+  change("rec_hand", "c2");
+  await until(/event: remove\ndata: \{"record_id":"rec_hand"\}/);
+  const final = await (await fetch(base + "/demo/feed")).json();
+  assert.deepEqual(
+    final.items.map((item) => item.record_id),
+    ["rec_new", "rec_rss"],
+  );
+  assert.ok(!received.includes("fixture-server-key"));
+  assert.ok(!JSON.stringify(final).includes("fixture-server-key"));
+
+  // An expired cursor mid-stream resynchronizes from the catalog, then
+  // tells readers to reread the snapshot.
+  const scans = seen.filter((r) => r.url.startsWith("/v0/records?")).length;
+  stream.write(
+    `event: stream_error\ndata: ${JSON.stringify({ code: "cursor_expired", message: "expired", retryable: false })}\n\n`,
+  );
+  stream.end();
+  await until(/event: reset\n/);
+  assert.equal(
+    seen.filter((r) => r.url.startsWith("/v0/records?")).length,
+    scans + 1,
+  );
+});
+
+test("the Veille feed routes need the demo session", async (t) => {
+  const seen = [];
+  const upstream = http.createServer((req, res) => {
+    seen.push(req.url);
+    res.writeHead(500);
+    res.end();
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port, {
+    DEMO_PASSWORD: "fixture-demo-password",
+  });
+  for (const route of ["/demo/feed", "/demo/feed/stream"])
+    assert.equal((await fetch(base + route)).status, 401, route);
+  assert.deepEqual(seen, [], "nothing reaches the core without a session");
+});
+
+test("the Veille feed explains a key without change-feed access", async (t) => {
+  const upstream = http.createServer((req, res) => {
+    res.writeHead(403, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        code: "forbidden",
+        message: "forbidden",
+        retryable: false,
+      }),
+    );
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+  const response = await fetch(base + "/demo/feed");
+  assert.equal(response.status, 403);
+  assert.match((await response.json()).message, /changements/);
+});
