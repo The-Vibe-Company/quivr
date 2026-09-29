@@ -1,6 +1,6 @@
 # Documentation conventions
 
-How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets, the glossary form and frozen dated documents, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
+How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets, the glossary form, start pages and frozen dated documents, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
 
 ## Living and dated documents
 
@@ -18,7 +18,10 @@ Living documentation is written in English, with neutral examples: no customer n
 ```
 
 - **audience**: `functional` (integrators and non-developers), `plugin-author` (people extending Quivr with plugins) or `contributor` (people and coding agents changing this repository).
-- **kind**: `guide` (steps a reader follows), `concept` (how and why something works), `generated-reference` (generator output; edit the source) or `index` (mostly links).
+- **kind**: `guide` (steps a reader follows), `concept` (how and why something works), `generated-reference` (generator output; edit the source), `index` (mostly links) or `start-page` (see below).
+- **summary** (optional): one line shown after the page's title on its start page.
+
+Each audience has one start page in `docs/start/`, generated from the inventory: it lists every other page of that audience, grouped by kind, and never a dated document. After declaring, moving or retitling a page, run `make start-pages`; `make docs` fails with `stale-start-page` until the start pages match. The README links to the start pages instead of listing files.
 
 ## Line budgets
 

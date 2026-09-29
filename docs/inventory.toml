@@ -9,7 +9,11 @@
 # parallel additions land in different places (`make docs` prints the line to
 # paste for an undeclared page):
 #
-#   "docs/path/to/page.md" = { audience = "functional", kind = "guide" }
+#   "docs/path/to/page.md" = { audience = "functional", kind = "guide", summary = "what a reader finds there" }
+#
+# summary is optional: one line shown after the page title on its audience's
+# start page. Then run `make start-pages`: `make docs` fails with
+# `stale-start-page` until the start pages match this list.
 #
 # audience: who reads it
 #   functional     integrators and non-developers learning what Quivr does
@@ -20,6 +24,8 @@
 #   concept               explanation of how and why something works
 #   generated-reference   output of a generator; edit the source, not the page
 #   index                 entry point that mostly links to other pages
+#   start-page            the generated start page of its audience (one each),
+#                         listing every other page of that audience by kind
 #
 # Globs use fnmatch: `*` also matches across folders.
 #
@@ -50,38 +56,42 @@ excluded = [
 ]
 
 [pages]
-"AGENTS.md" = { audience = "contributor", kind = "guide" }
-"CONTEXT.md" = { audience = "contributor", kind = "concept" }
-"README.md" = { audience = "functional", kind = "index" }
-"contracts/http/v0/README.md" = { audience = "functional", kind = "concept" }
-"contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept" }
-"deploy/railway/README.md" = { audience = "functional", kind = "guide" }
-"docs/agents/documentation.md" = { audience = "contributor", kind = "guide" }
-"docs/agents/domain.md" = { audience = "contributor", kind = "guide" }
-"docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide" }
-"docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide" }
-"docs/agents/testing.md" = { audience = "contributor", kind = "guide" }
-"docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide" }
-"docs/api-walkthrough.md" = { audience = "functional", kind = "guide" }
-"docs/connectors/README.md" = { audience = "functional", kind = "guide" }
-"docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide" }
-"docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
-"docs/connectors/x.md" = { audience = "functional", kind = "guide" }
-"docs/dated/README.md" = { audience = "contributor", kind = "index" }
-"docs/described-alerts.md" = { audience = "functional", kind = "guide" }
-"docs/first-search.md" = { audience = "functional", kind = "guide" }
-"docs/keyword-alerts.md" = { audience = "functional", kind = "guide" }
-"docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
-"docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept" }
-"docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
-"docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference" }
-"docs/runnable-guides.md" = { audience = "contributor", kind = "guide" }
-"plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept" }
-"plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }
-"quivr-search/README.md" = { audience = "functional", kind = "guide" }
-"sdks/python/README.md" = { audience = "plugin-author", kind = "guide" }
-"tests/acceptance/README.md" = { audience = "contributor", kind = "guide" }
-"third_party/README.md" = { audience = "contributor", kind = "index" }
+"AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
+"CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
+"README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
+"contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
+"contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
+"deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
+"docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
+"docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
+"docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
+"docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
+"docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
+"docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
+"docs/api-walkthrough.md" = { audience = "functional", kind = "guide", summary = "endpoint behaviour, limits, processing and search in detail" }
+"docs/connectors/README.md" = { audience = "functional", kind = "guide", summary = "set up and operate scheduled sources of content" }
+"docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide", summary = "collect mail from a Microsoft 365 mailbox" }
+"docs/connectors/rss.md" = { audience = "functional", kind = "guide", summary = "collect articles from RSS and Atom feeds" }
+"docs/connectors/x.md" = { audience = "functional", kind = "guide", summary = "collect posts from an X list" }
+"docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
+"docs/described-alerts.md" = { audience = "functional", kind = "guide", summary = "write alerts in plain language, and see what is sent to the model provider" }
+"docs/first-search.md" = { audience = "functional", kind = "guide", summary = "create a Corpus, add a Record and search it, step by step" }
+"docs/keyword-alerts.md" = { audience = "functional", kind = "guide", summary = "write alert queries and set up metadata filters" }
+"docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide", summary = "from `quivr plugin init` to a searchable, observable Record" }
+"docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
+"docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
+"docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference", summary = "every endpoint, field and example, generated from the contract" }
+"docs/runnable-guides.md" = { audience = "contributor", kind = "guide", summary = "write guide blocks that `make verify` replays" }
+"docs/start/contributor.md" = { audience = "contributor", kind = "start-page" }
+"docs/start/functional.md" = { audience = "functional", kind = "start-page" }
+"docs/start/plugin-author.md" = { audience = "plugin-author", kind = "start-page" }
+"docs/what-quivr-can-do.md" = { audience = "functional", kind = "concept", summary = "what Quivr does, in plain words, for non-developers" }
+"plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
+"plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
+"quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources and live feed" }
+"sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run a Python normalizer" }
+"tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
+"third_party/README.md" = { audience = "contributor", kind = "index", summary = "dependency notices and inventory" }
 
 # Maximum number of lines per page, in path order.
 [budgets]
@@ -104,6 +114,7 @@ excluded = [
 "docs/keyword-alerts.md" = 155
 "docs/plugins/write-a-normalizer.md" = 360
 "docs/runnable-guides.md" = 85
+"docs/what-quivr-can-do.md" = 60
 "plugins/pdf-text/README.md" = 120
 "quivr-search/README.md" = 100
 "sdks/python/README.md" = 125

@@ -214,25 +214,18 @@ listed here, not in "What works today".
 
 ## Documentation
 
-| Read | For |
-| --- | --- |
-| [Your first search](docs/first-search.md) | Create a Corpus, add a Record and search it, step by step |
-| [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
-| [Keyword alerts](docs/keyword-alerts.md) | Writing alert queries and setting up metadata filters |
-| [Described alerts](docs/described-alerts.md) | Alerts written in plain language, and what is sent to TypeSafe |
-| [HTTP API reference](docs/reference/http-api.md) | Every endpoint, field and example, generated from the contract |
-| [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
-| [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
-| [Write a normalizer](docs/plugins/write-a-normalizer.md) | From `quivr plugin init` to a searchable, observable Record |
-| [Python Plugin SDK](sdks/python/README.md) | Writing, testing and running a Python normalizer |
-| [Architecture decisions](docs/adr/) | Hard-to-reverse decisions and why |
-| [Domain language](CONTEXT.md) | Corpus, Record, Version, Manifest, Receipt… |
-| [Connectors](docs/connectors/README.md) | Operating scheduled Connector Instances |
-| [Local harness](docs/quivr-v2-local-harness.md) | How `make dev` and `make verify` work |
-| [Remaining limits](docs/quivr-v2-remaining-limits.md) | Known limits and their tickets; what is not claimed |
-| [Third-party notices](third_party/README.md) | Dependency notices and inventory |
-| [Railway deployment](deploy/railway/README.md) | Hosted single-node evaluation demo |
-| [Dated documents](docs/dated/README.md) | Frozen design records, evidence and research: architecture, module boundaries, data model and contract rationale as decided |
+New to Quivr? [What Quivr can do](docs/what-quivr-can-do.md) explains it in plain words.
+Then start from the page for what you want to do:
+
+- [Using Quivr](docs/start/functional.md): run Quivr, send it content, search it and set
+  up alerts.
+- [Writing plugins](docs/start/plugin-author.md): extend Quivr with your own plugins.
+- [Contributing to Quivr](docs/start/contributor.md): change this repository, as a person
+  or a coding agent.
+
+These start pages are generated from [`docs/inventory.toml`](docs/inventory.toml), so
+every living page appears on the one for its reader. The authoritative request and
+response shapes are in the [OpenAPI contract](contracts/http/v0/openapi.yaml).
 
 ## Repository layout
 
@@ -259,9 +252,9 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
 - Run `make check` before pushing and keep `make verify` green; add tests with
   every behaviour change.
 - Declare every new living doc page in [`docs/inventory.toml`](docs/inventory.toml)
-  with one line giving its audience and kind (the file's header explains both);
-  `make docs` fails on an undeclared page, a broken relative link or a missing
-  repository path, and names the fix.
+  with one line giving its audience and kind (the file's header explains both),
+  then run `make start-pages`; `make docs` fails on an undeclared page, a stale start
+  page, a broken relative link or a missing repository path, and names the fix.
 - Show API requests in guides as [runnable blocks](docs/runnable-guides.md), which
   `make verify` replays.
 - Never edit an accepted ADR or a dated document under `docs/dated/`: supersede it

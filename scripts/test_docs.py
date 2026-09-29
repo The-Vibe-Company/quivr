@@ -116,6 +116,7 @@ class Inventory(unittest.TestCase):
             'unknown key': 'owners = []\n' + pages,
             'dated not a list': 'dated = "history"\n' + pages,
             'extra field': pages.replace('kind = "guide" }', 'kind = "guide", owner = "x" }'),
+            'summary not text': pages.replace('kind = "guide" }', 'kind = "guide", summary = 3 }'),
             'pages not a table': 'pages = "x"\n',
             'not normalized': pages + '"./README.md" = { audience = "functional", kind = "index" }\n',
         }
@@ -325,7 +326,7 @@ class Budgets(unittest.TestCase):
         with tmpdir() as tmp:
             inventory = INVENTORY.replace('kind = "guide" }', 'kind = "guide", owner = "x" }')
             findings = [str(f) for f in Repo(tmp, inventory).findings()]
-        self.assertTrue(any('must set exactly audience and kind' in f for f in findings))
+        self.assertTrue(any('must set audience and kind' in f for f in findings))
         self.assertFalse(any('not declared in [pages]' in f for f in findings))
 
 
@@ -467,6 +468,97 @@ class Frozen(unittest.TestCase):
             [finding] = d.check(self.repo(tmp).root, 'origin/main')
         self.assertEqual(finding.rule, 'frozen-document')
         self.assertIn('git fetch --no-tags origin', finding.fix)
+
+
+START_PAGES = INVENTORY + '''"docs/start/contributor.md" = { audience = "contributor", kind = "start-page" }
+"docs/start/functional.md" = { audience = "functional", kind = "start-page" }
+'''
+
+
+class StartPages(unittest.TestCase):
+    def repo(self, tmp, inventory=START_PAGES):
+        repo = Repo(tmp, inventory)
+        repo.write('history/old.md', '# Old design\n')
+        d.write_start_pages(repo.root)
+        return repo
+
+    def page(self, repo, audience):
+        return (repo.root / f'docs/start/{audience}.md').read_text()
+
+    def test_generated_start_pages_pass_and_list_each_page_for_its_reader(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            self.assertEqual(repo.findings(), [])
+            contributor, functional = self.page(repo, 'contributor'), self.page(repo, 'functional')
+        self.assertIn('- [Guide](../guide.md)', contributor)
+        self.assertIn('- [Project](../../README.md)', functional)
+        self.assertNotIn('guide.md', functional)
+        self.assertIn('- [Using Quivr](functional.md)', contributor)  # other readers
+        self.assertNotIn('history/old.md', contributor + functional)  # dated documents are never listed
+
+    def test_declaring_a_page_without_regenerating_fails_with_the_command(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('docs/new.md', '# New page\n')
+            repo.write('docs/inventory.toml', START_PAGES + '"docs/new.md" = { audience = "contributor", kind = "concept" }\n')
+            [finding] = repo.findings()
+        self.assertEqual((finding.rule, finding.path), ('stale-start-page', 'docs/start/contributor.md'))
+        self.assertIn('make start-pages', str(finding))
+
+    def test_regenerating_lists_a_new_page_of_a_kind_not_used_before_with_its_summary(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('docs/reference/api.md', '# API reference\n')
+            repo.write('docs/inventory.toml', START_PAGES + '"docs/reference/api.md" = '
+                       '{ audience = "functional", kind = "generated-reference", summary = "every endpoint" }\n')
+            d.write_start_pages(repo.root)
+            self.assertEqual(repo.findings(), [])
+            functional = self.page(repo, 'functional')
+        self.assertIn('## Reference\n\n- [API reference](../reference/api.md): every endpoint\n', functional)
+
+    def test_retitling_a_page_or_editing_a_start_page_by_hand_is_stale(self):
+        for rel, text in (('docs/guide.md', '# Renamed guide\n'), ('docs/start/functional.md', '# Mine\n')):
+            with self.subTest(rel), tmpdir() as tmp:
+                repo = self.repo(tmp)
+                repo.write(rel, text)
+                self.assertEqual([f.rule for f in repo.findings()], ['stale-start-page'])
+
+    def test_missing_start_page_names_the_command(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            (repo.root / 'docs/start/functional.md').unlink()
+            [finding] = [f for f in repo.findings() if f.rule == 'missing-page']  # the other page's link breaks too
+        self.assertIn('make start-pages', str(finding))
+
+    def test_second_start_page_for_an_audience_fails(self):
+        inventory = START_PAGES + '"docs/start/other.md" = { audience = "contributor", kind = "start-page" }\n'
+        with tmpdir() as tmp:
+            repo = self.repo(tmp, inventory)
+            [finding] = [f for f in repo.findings() if f.rule == 'invalid-entry']
+        self.assertIn('second start page', str(finding))
+
+    def test_malformed_start_page_entry_is_reported_not_raised(self):
+        for audience in ('["functional"]', '"readers"'):
+            inventory = START_PAGES + f'"docs/start/other.md" = {{ audience = {audience}, kind = "start-page" }}\n'
+            with self.subTest(audience), tmpdir() as tmp:
+                repo = self.repo(tmp, inventory)
+                self.assertIn('invalid-entry', [f.rule for f in repo.findings()])
+
+    def test_title_keeps_a_hash_that_is_part_of_it(self):
+        with tmpdir() as tmp:
+            repo = self.repo(tmp)
+            repo.write('docs/guide.md', '# Plugins in C# ##\n')
+            d.write_start_pages(repo.root)
+            self.assertIn('- [Plugins in C#](../guide.md)', self.page(repo, 'contributor'))
+
+    def test_command_writes_the_start_pages(self):
+        with tmpdir() as tmp:
+            repo = Repo(tmp, START_PAGES)
+            commit(repo.root)
+            out = io.StringIO()
+            status = d.main(['--root', tmp, '--base', 'HEAD', '--write-start-pages'], stdout=out)
+        self.assertEqual(status, 0)
+        self.assertIn('wrote docs/start/functional.md', out.getvalue())
 
 
 class Command(unittest.TestCase):

@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs denylist migrations migration migration-restamp image-context
+.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs start-pages denylist migrations migration migration-restamp image-context
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -30,10 +30,13 @@ generate:
 contracts:
 	GO=$(GO) bash scripts/contracts.sh check
 # Fails on an undeclared or missing doc page, a broken link or a missing path, a page over its line budget,
-# a malformed glossary term, or an edited dated doc or accepted ADR (compared with where the branch forked
-# from origin/main); see docs/inventory.toml and docs/agents/documentation.md.
+# a malformed glossary term, a stale start page, or an edited dated doc or accepted ADR (compared with where
+# the branch forked from origin/main); see docs/inventory.toml and docs/agents/documentation.md.
 docs:
 	python3 scripts/docs.py
+# Regenerates the per-reader start pages (docs/start/) from docs/inventory.toml, then checks.
+start-pages:
+	python3 scripts/docs.py --write-start-pages
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
 denylist:
 	python3 scripts/denylist.py
