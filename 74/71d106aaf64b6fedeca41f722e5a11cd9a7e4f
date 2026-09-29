@@ -1,0 +1,27 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_b5197080b32e0a 1,4,10-14,28,32,35,38
+internal/app/run.go
+  s_54b80c92daa9cb::t_a72479f294fe4d 138
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_bc9ba2e1fb613a 156-162,172,185,190,205-208
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_dc7680e750ceb4 7,115
+scripts/local.py
+  s_54b80c92daa9cb::t_5ceebe987e7df9 448-476
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7471d106aaf64b6fedeca41f722e5a11cd9a7e4f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
