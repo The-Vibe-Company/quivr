@@ -1,0 +1,19 @@
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_f575bb824418cf 35-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c8a2d24d49e4a54c4d4ee8ac06d4fdbf61e7ecf",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
