@@ -20,9 +20,9 @@ SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN 
 // deadVersionSQL is true for a Version aliased v of Record r that can never be
 // served again: its Record is withdrawn or tombstoned (absorbing fences), or it
 // is neither the Record's current nor its desired Version. desired only moves
-// to a strictly newer source position, a Version identity is reserved once per
-// Record slot (a revert to earlier bytes reuses the old slot and leaves desired
-// unchanged), and current only moves to desired.
+// to a newly reserved slot at a newer source position, a Version identity is
+// reserved once per Record slot (a revert to earlier bytes reserves a new slot
+// and so a new Version, ADR 0003), and current only moves to desired.
 const deadVersionSQL = `(r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
  OR (v.id IS DISTINCT FROM r.current_version_id AND v.id IS DISTINCT FROM r.desired_version_id))`
 

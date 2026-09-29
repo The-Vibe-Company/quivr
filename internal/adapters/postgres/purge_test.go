@@ -170,10 +170,10 @@ func TestPurgeSelectsOnlyAbandonedGenerations(t *testing.T) {
 // Dead Versions are superseded, withdrawn or tombstoned ones; current and
 // desired Versions never are. Regression guard for the purge's permanence
 // argument: correcting a Record back to an earlier Version's exact bytes
-// reuses that Version's identity without making it current again, so its
-// purged objects are never needed and the Record stays served by its current
-// Version. If revert semantics ever re-point a Record to an old Version, this
-// test fails and the purge must also clear that Version's coverage.
+// mints a new Version with that content (ADR 0003), which becomes current and
+// serves the reverted text, while the purged earlier Version stays dead. If
+// revert semantics ever re-point a Record to an old Version, this test fails
+// and the purge must also clear that Version's coverage.
 func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -225,32 +225,99 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Correct r back to v1's exact bytes after v1 was purged.
+	// Correct r back to v1's exact bytes after v1 was purged: a new Version
+	// with A's content becomes current and desired; v1 is never re-pointed.
 	_, reverted := f.publish("r", "r-3", "Dépêche A")
-	var current, desired string
-	if err = f.pool.QueryRow(ctx, `SELECT current_version_id,desired_version_id FROM records WHERE organization=$1 AND id=$2`, f.org, record).Scan(&current, &desired); err != nil {
-		t.Fatal(err)
+	if reverted == v1 || reverted == v2 {
+		t.Fatalf("revert reused an earlier Version: reverted %s, v1 %s, v2 %s", reverted, v1, v2)
 	}
-	if reverted != v1 || current != v2 || desired != v2 {
-		t.Fatalf("revert re-pointed the Record: reverted %s (v1 %s), current %s, desired %s, v2 %s — the purge must now clear coverage of purged Versions", reverted, v1, current, desired, v2)
+	if outcome := f.outcome("r-3"); outcome != "created" {
+		t.Fatalf("revert Receipt resolved %s, want created", outcome)
+	}
+	if current, desired := f.pointers(record); current != reverted || desired != reverted {
+		t.Fatalf("revert not applied: current %s, desired %s, want %s", current, desired, reverted)
 	}
 	var segment, generation string
-	if err = f.pool.QueryRow(ctx, `SELECT sg.id,pc.generation_id FROM segments sg JOIN projection_coverage pc ON (pc.organization,pc.version_id)=(sg.organization,sg.version_id) WHERE sg.organization=$1 AND sg.version_id=$2`, f.org, v2).Scan(&segment, &generation); err != nil {
+	if err = f.pool.QueryRow(ctx, `SELECT sg.id,pc.generation_id FROM segments sg JOIN projection_coverage pc ON (pc.organization,pc.version_id)=(sg.organization,sg.version_id) WHERE sg.organization=$1 AND sg.version_id=$2`, f.org, reverted).Scan(&segment, &generation); err != nil {
 		t.Fatal(err)
 	}
-	if h, _, err := f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: segment, GenerationID: generation}); err != nil || h.VersionID != v2 {
-		t.Fatalf("Record not served after the revert: %+v %v", h, err)
+	if h, _, err := f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: segment, GenerationID: generation}); err != nil || h.VersionID != reverted || h.TextSHA256 != content.Hash([]byte("Dépêche A")) {
+		t.Fatalf("Record does not serve A after the revert: %+v %v", h, err)
 	}
-	var oldSegment string
-	if err = f.pool.QueryRow(ctx, `SELECT id FROM segments WHERE organization=$1 AND version_id=$2`, f.org, v1).Scan(&oldSegment); err != nil {
-		t.Fatal(err)
+	for _, old := range []string{v1, v2} {
+		var oldSegment string
+		if err = f.pool.QueryRow(ctx, `SELECT id FROM segments WHERE organization=$1 AND version_id=$2`, f.org, old).Scan(&oldSegment); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: oldSegment, GenerationID: generation}); !errors.Is(err, corpus.ErrNotFound) {
+			t.Fatalf("a superseded Version %s hydrated: %v", old, err)
+		}
 	}
-	if _, _, err = f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: oldSegment, GenerationID: generation}); !errors.Is(err, corpus.ErrNotFound) {
-		t.Fatalf("a purged Version hydrated: %v", err)
-	}
-	// Nothing new is noticed for the purged Version, and the withdrawn Record stays fenced.
+	// Only the superseded v2 is newly noticed: the purged v1 stays dead and
+	// its item stays purged, and the withdrawn Record stays fenced.
 	notice(t, ctx, f.store)
-	if got = noticed(t, ctx, f.pool, f.org); len(got) != 2 {
-		t.Fatalf("noticed after revert %v", got)
+	got = noticed(t, ctx, f.pool, f.org)
+	want = []string{"version:::" + v1, "version:::" + v2, "version:::" + w1}
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("noticed after revert %v, want %v", got, want)
+	}
+	if n := f.count(`SELECT count(*) FROM projection_purges WHERE organization=$1 AND version_id=$2 AND purged_at IS NOT NULL`, f.org, v1); n != 1 {
+		t.Fatalf("purged v1 item changed: %d", n)
+	}
+
+	// Replaying the revert request is the same Receipt, not another Version.
+	replay, err := f.contents.Accept(ctx, f.scope, correctionCommand(f.corpusID, "r", "r-3", "Dépêche A"))
+	if err != nil || replay.VersionID != reverted || replay.Outcome != "created" {
+		t.Fatalf("replayed revert %+v %v", replay, err)
+	}
+	// The same content under a new key while it is desired is a duplicate.
+	if _, again := f.publish("r", "r-4", "Dépêche A"); again != reverted || f.outcome("r-4") != "duplicate" {
+		t.Fatalf("repeat of the current content minted %s (want %s), outcome %s", again, reverted, f.outcome("r-4"))
+	}
+	if n := f.count(`SELECT count(*) FROM record_versions WHERE organization=$1 AND record_id=$2`, f.org, record); n != 3 {
+		t.Fatalf("Versions of r: %d, want 3", n)
+	}
+}
+
+// A revert under an explicit Source Position older than the desired Version is
+// a stale replay: it converges on the earlier Version and never moves desired.
+func TestStaleRevertKeepsNewerDesiredVersion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	f := newCorrectionFixture(t, ctx, "adapter-stale-revert-")
+	positioned := func(key, text, position string) content.Command {
+		c := correctionCommand(f.corpusID, "s", key, text)
+		c.Position = position
+		return c
+	}
+	accept := func(c content.Command) content.Work {
+		t.Helper()
+		r, err := f.contents.Accept(ctx, f.scope, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, _, err := f.store.Work(ctx, f.org, r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	a := accept(positioned("s-1", "Dépêche A", "10"))
+	b := accept(positioned("s-2", "Dépêche B", "20"))
+	stale := accept(positioned("s-3", "Dépêche A", "15"))
+	if stale.VersionID != a.VersionID {
+		t.Fatalf("stale revert minted %s, want %s", stale.VersionID, a.VersionID)
+	}
+	if _, desired := f.pointers(a.RecordID); desired != b.VersionID {
+		t.Fatalf("stale revert moved desired to %s, want %s", desired, b.VersionID)
+	}
+	// A newer position reverts: a new Version becomes desired.
+	fresh := accept(positioned("s-4", "Dépêche A", "30"))
+	if fresh.VersionID == a.VersionID || fresh.VersionID == b.VersionID {
+		t.Fatalf("revert reused %s", fresh.VersionID)
+	}
+	if _, desired := f.pointers(a.RecordID); desired != fresh.VersionID {
+		t.Fatalf("revert left desired at %s, want %s", desired, fresh.VersionID)
 	}
 }

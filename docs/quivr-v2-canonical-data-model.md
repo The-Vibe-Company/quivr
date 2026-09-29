@@ -123,6 +123,7 @@ The two diagrams are connected by `Organization`, `Record Version`, and `Change 
 - The same source revision and same canonical Manifest digest converge on one Record Version.
 - The same source revision with different canonical content is a conflict and is quarantined; it is never an overwrite.
 - When a stable external revision identifier exists, it selects the version slot and the Manifest digest verifies it. Without one, the canonical Manifest digest supplies version identity.
+- Without a revision, a newer submission whose bytes equal an earlier, no-longer-desired Version is a revert. It mints a new Record Version with identical content, which becomes current; the earlier Version is never re-pointed (ADR 0003).
 - Distinct external revision identifiers preserve distinct source history even when their canonical bytes happen to agree.
 - An older revision arriving late may be retained as immutable history, but it cannot replace a newer desired or current revision.
 - A newer accepted revision fences any older in-flight cutover. The older work may finish safely, but compare-and-set promotion fails.

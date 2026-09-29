@@ -78,9 +78,10 @@ stay visible. The Spec 1 obligation map is in
   at most the lexical object: an enriched object is never created without its
   anchor. No reconciliation sweep compares the store with coverage.
 - The purge keeps projection and embedding coverage rows as history. It relies
-  on a dead Version never becoming current again; a correction back to an
-  earlier Version's exact bytes currently leaves the newer Version current, and
-  an adapter test fails if that ever changes.
+  on a dead Version never becoming current again. A correction back to an
+  earlier Version's exact bytes mints a new Version with that content
+  (ADR 0003, THE-712) instead of re-pointing the Record to the purged one. An
+  adapter test fails if that ever changes.
 - Physical collections left by evaluation cutover migrations (earlier default
   generations) are not purged.
 - Each worker's purge sweep scans every Record Version once a minute to find

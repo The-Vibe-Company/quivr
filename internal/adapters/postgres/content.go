@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -50,6 +51,31 @@ func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, err
 	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''))`, event.Organization, sequence, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID)
 	return sequence, err
 }
+
+// digestSlot picks the Version slot of a submission without a source revision
+// (ADR 0003). Content already reserved converges on its latest reservation,
+// unless that reservation is no longer the Record's desired Version and this
+// submission would become desired: a revert to earlier bytes then reserves a
+// new slot, qualified by its acceptance order, and so mints a new Version with
+// identical content. Callers hold the Organization journal lock.
+func digestSlot(ctx context.Context, tx pgx.Tx, org, recordID, digest string, order int64, incoming, desiredPosition string) (string, error) {
+	base := "digest:" + digest
+	var latest string
+	var desired bool
+	err := tx.QueryRow(ctx, `SELECT a.slot,a.version_id IS NOT DISTINCT FROM r.desired_version_id FROM accepted_revisions a JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id)
+WHERE a.organization=$1 AND a.record_id=$2 AND a.digest=$3 AND (a.slot=$4 OR a.slot LIKE $4||'@%') ORDER BY a.acceptance_order DESC LIMIT 1`, org, recordID, digest, base).Scan(&latest, &desired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return base, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if desired || !content.NewerPosition(incoming, desiredPosition) {
+		return latest, nil
+	}
+	return base + "@" + strconv.FormatInt(order, 10), nil
+}
+
 func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
 	canonical, err := json.Marshal(c)
 	if err != nil {
@@ -104,6 +130,8 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 	slot := "digest:" + digest
 	if c.Revision != "" {
 		slot = "revision:" + c.Revision
+	} else if slot, err = digestSlot(ctx, tx, scope.Organization, recordID, digest, order, c.Position, position); err != nil {
+		return content.Receipt{}, err
 	}
 	versionID := content.StableID("version", scope.Organization, recordID, slot)
 	// Reserve the original revision order and lineage once, before any worker can publish it.

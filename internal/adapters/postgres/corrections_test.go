@@ -351,6 +351,48 @@ func TestNoLongerMatchesSupersededByLaterCorrection(t *testing.T) {
 	}
 }
 
+// TestRevertNotices proves THE-712 against the real journal: a correction back
+// to an earlier Version's exact bytes is a new Version, so each Subscription
+// hears the right notice. One that matched A and not B gets a match.corrected
+// linking its invalidated Match; one that matched only B gets a
+// match.no_longer_matches for B's Match.
+func TestRevertNotices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	f := newCorrectionFixture(t, ctx, "adapter-revert-")
+	onA, onB := f.subscribe("a"), f.subscribe("b")
+	evaluation := postgres.EvaluationStore{ContentStore: f.store}
+	decide := func(sub monitoring.Subscription, record, version string, matches bool, want string) {
+		t.Helper()
+		f.commit(want, func() (string, error) {
+			if matches {
+				return evaluation.CommitMatch(ctx, f.intent(sub, record, version), f.evidence(sub))
+			}
+			return evaluation.CommitNoMatch(ctx, f.intent(sub, record, version))
+		})
+	}
+
+	record, v1 := f.publish("r", "r-1", "Dépêche A")
+	decide(onA, record, v1, true, monitoring.OutcomeMatched)
+	decide(onB, record, v1, false, monitoring.OutcomeNoMatch)
+	_, v2 := f.publish("r", "r-2", "Dépêche B")
+	decide(onA, record, v2, false, monitoring.OutcomeNoLongerMatches)
+	decide(onB, record, v2, true, monitoring.OutcomeMatched)
+	_, v3 := f.publish("r", "r-3", "Dépêche A")
+	if v3 == v1 {
+		t.Fatal("revert reused the earlier Version")
+	}
+	decide(onA, record, v3, true, monitoring.OutcomeMatched)
+	decide(onB, record, v3, false, monitoring.OutcomeNoLongerMatches)
+
+	if _, n := f.noticeOf(f.matchOf(onA, v3), monitoring.NoticeCorrected); n.References.PreviousMatchID != f.matchOf(onA, v1) || n.References.RecordVersionID != v3 {
+		t.Fatalf("revert match.corrected %+v", n.References)
+	}
+	if _, n := f.noticeOf(f.matchOf(onB, v2), monitoring.NoticeNoLongerMatches); n.References.RecordVersionID != v3 {
+		t.Fatalf("revert match.no_longer_matches %+v", n.References)
+	}
+}
+
 // correctionFixture is one Organization with a Corpus and a Saved Query over
 // it, plus the helpers the correction adapter tests share.
 type correctionFixture struct {
@@ -406,7 +448,7 @@ func (f *correctionFixture) subscribe(key string) monitoring.Subscription {
 func (f *correctionFixture) publish(recordKey, requestKey, text string) (string, string) {
 	t, ctx, org, store := f.t, f.ctx, f.org, f.store
 	t.Helper()
-	cmd := content.Command{Key: requestKey, Source: content.Source{CorpusID: f.corpusID, Namespace: "corrections", RecordKey: recordKey}, Content: content.Text{Kind: "text", Text: text}}
+	cmd := correctionCommand(f.corpusID, recordKey, requestKey, text)
 	r, err := f.contents.Accept(ctx, f.scope, cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -434,6 +476,30 @@ func (f *correctionFixture) publish(recordKey, requestKey, text string) (string,
 		t.Fatal(err)
 	}
 	return work.RecordID, work.VersionID
+}
+
+// correctionCommand is one inline text submission for recordKey.
+func correctionCommand(corpusID, recordKey, requestKey, text string) content.Command {
+	return content.Command{Key: requestKey, Source: content.Source{CorpusID: corpusID, Namespace: "corrections", RecordKey: recordKey}, Content: content.Text{Kind: "text", Text: text}}
+}
+
+// outcome reads the resolved outcome of the Receipt for requestKey.
+func (f *correctionFixture) outcome(requestKey string) string {
+	f.t.Helper()
+	r, err := f.store.Receipt(f.ctx, f.org, content.StableID("receipt", f.org, "ingestion", requestKey))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return r.Outcome
+}
+
+// pointers reads a Record's current and desired Versions.
+func (f *correctionFixture) pointers(recordID string) (current, desired string) {
+	f.t.Helper()
+	if err := f.pool.QueryRow(f.ctx, `SELECT coalesce(current_version_id,''),coalesce(desired_version_id,'') FROM records WHERE organization=$1 AND id=$2`, f.org, recordID).Scan(&current, &desired); err != nil {
+		f.t.Fatal(err)
+	}
+	return current, desired
 }
 
 func (f *correctionFixture) count(query string, args ...any) int {

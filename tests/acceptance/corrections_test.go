@@ -383,7 +383,6 @@ func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 	}
 
 	// v3 matches again: a match.corrected linked to the invalidated Match.
-	// Its text differs from v1, which would otherwise dedupe to that Version.
 	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-3", s.recordKey, "Dépêche corrigée "+markerCorrectionMatch))
 	corrected := s.awaitNotices(t, map[string]int{"match.corrected": 1})["match.corrected"][0]
 	if refsOf(corrected)["previous_match_id"] != refsOf(invalidation)["match_id"] {
@@ -416,4 +415,67 @@ func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
 	}
 	// Nothing is lost: the invalidated Match stays readable.
 	request(t, "GET", "/v0/matches/"+refsOf(invalidation)["match_id"].(string), admin, nil, 200)
+}
+
+// TestMonitoringRevertNotices corrects an alerted Record back to its first
+// Version's exact bytes (THE-712). The revert is a new Version that becomes
+// current and searchable with the reverted text, and the Subscription that
+// stopped matching on the intermediate Version hears match.corrected linking
+// its invalidated Match. Replaying the revert request returns the same
+// Receipt, and resubmitting the current content under a new key is a
+// duplicate of the revert.
+func TestMonitoringRevertNotices(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	receiver := startReceiver(t)
+	original := "Dépêche initiale " + markerCorrectionMatch
+	s := newNoticeScenario(t, "revert", original, map[string]any{markerCorrectionCalm: "no_match", "default": "match"})
+	sub := s.subscriptions[0]
+	deliveredAsPolled(t, receiver, s.created[sub])
+	first := refsOf(s.created[sub])
+
+	// v2 no longer matches.
+	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-2", s.recordKey, "Dépêche corrigée "+markerCorrectionCalm))
+	invalidation := s.awaitNotices(t, map[string]int{"match.no_longer_matches": 1})["match.no_longer_matches"][0]
+	if refsOf(invalidation)["match_id"] != first["match_id"] {
+		t.Fatal("match.no_longer_matches must reference the first Match", invalidation)
+	}
+	deliveredAsPolled(t, receiver, invalidation)
+	if hits := searchHits(t, s.corpus, "initiale", "lexical"); len(hits) != 0 {
+		t.Fatal("superseded text still searchable", hits)
+	}
+
+	// v3 restores v1's exact bytes: a new current Version, created, not a duplicate.
+	revert := inlineCommand(s.corpus, s.recordKey+"-3", s.recordKey, original)
+	reverted := awaitReady(t, request(t, "POST", "/v0/records", admin, revert, 202)["receipt_id"].(string))
+	v3 := reverted["version_id"]
+	if reverted["outcome"] != "created" || v3 == first["record_version_id"] || reverted["record_id"] != s.record {
+		t.Fatal("revert is not a new Version of the Record", reverted)
+	}
+	if record := request(t, "GET", "/v0/records/"+s.record, admin, nil, 200); record["current_version_id"] != v3 {
+		t.Fatal("revert is not the current Version", record)
+	}
+	if hits := searchHits(t, s.corpus, "initiale", "lexical"); len(hits) != 1 || hits[0]["record_id"] != s.record || hits[0]["version_id"] != v3 {
+		t.Fatal("reverted text not served by the revert Version", hits)
+	}
+	corrected := s.awaitNotices(t, map[string]int{"match.corrected": 1})["match.corrected"][0]
+	refs := refsOf(corrected)
+	if refs["previous_match_id"] != first["match_id"] || refs["record_version_id"] != v3 || refs["match_id"] == first["match_id"] {
+		t.Fatal("revert match.corrected references", corrected)
+	}
+	deliveredAsPolled(t, receiver, corrected)
+
+	// The same request is the same Receipt; the same content under a new key converges on v3.
+	if replay := request(t, "POST", "/v0/records", admin, revert, 202); replay["receipt_id"] != reverted["receipt_id"] {
+		t.Fatal("replayed revert is a new Receipt", replay)
+	}
+	again := awaitReceipt(t, ingestCorrection(t, s.corpus, s.recordKey+"-4", s.recordKey, original))
+	if again["outcome"] != "duplicate" || again["version_id"] != v3 {
+		t.Fatal("repeat of the current content", again)
+	}
+	if history := request(t, "GET", matchesPath(sub, "", 0), admin, nil, 200)["items"].([]any); len(history) != 2 {
+		t.Fatal("revert Match history", history)
+	}
 }

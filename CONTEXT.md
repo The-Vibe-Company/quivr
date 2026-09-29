@@ -13,7 +13,7 @@ A stable, typed logical item owned by exactly one corpus, independent of any par
 _Avoid_: Document as a universal term, publication, signal
 
 **Record Version**:
-An immutable representation of a record observed at a particular point in its history. A source correction creates a new version, while progressive enrichment does not; distinct ingestion receipts may converge on the same version when source revision and content agree.
+An immutable representation of a record observed at a particular point in its history. A source correction creates a new version, while progressive enrichment does not; distinct ingestion receipts may converge on the same version when source revision and content agree. A correction back to an earlier version's content is a new version, never a return to the old one.
 _Avoid_: Mutable record, overwrite
 
 **Record Version Manifest**:
