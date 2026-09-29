@@ -1,0 +1,23 @@
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_91d2cc11d4ecd4 223-225
+internal/adapters/postgres/evaluation_batch_test.go
+  s_54b80c92daa9cb::t_91d2cc11d4ecd4 224,232-235,243-246
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_8991ac7ef01ce0 113-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0063fe1a7db866aeff547ca14f914c9b0c4e2d0a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
