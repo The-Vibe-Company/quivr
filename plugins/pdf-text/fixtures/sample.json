@@ -1,0 +1,7 @@
+{
+  "description": "A three-page PDF: two pages of text and a last page without text, like a scan.",
+  "input": {
+    "path": "sample.pdf",
+    "media_type": "application/pdf"
+  }
+}

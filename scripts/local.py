@@ -85,7 +85,8 @@ class Stack:
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
                           CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
             delivery=DELIVERY_OVERRIDES,
-            # The `quivr plugin init` template, pinned as the text/markdown normalizer (scripts/normalizer_plugin.py).
+            # The pinned external normalizer: pdf-text for application/pdf (make dev default), the
+            # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
             plugin=normalizer_plugin.pin(self))
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
@@ -407,6 +408,9 @@ def verify(stack,steps):
     # test plugin is pinned to observe every failure class and the optional-route fallback.
     steps.run('normalizer_outage',normalizer_plugin.outage,stack)
     steps.run('normalizer_failures',normalizer_plugin.failures,stack)
+    # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
+    steps.run('pdf_normalizer_pin',normalizer_plugin.switch,stack,'pdf-text')
+    steps.run('pdf_normalizer',stack.tests,'TestPDF')
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
     steps.run('connectors',connectors,stack)
@@ -465,9 +469,11 @@ def main():
     steps=verify_report.Steps();start=time.monotonic();status='failed'
     try:
         if args.command in ['dev','verify']:
+            # Verification starts on the template's text/markdown pin, then switches to pdf-text.
+            normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}")
         elif args.command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(args.command=='reset')
         status='passed'

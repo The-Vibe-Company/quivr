@@ -183,13 +183,21 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   output with the engine's own validation: Manifest rules, response size, input-Blob-only
   Blob Parts and declared namespaces. It writes a JSON report with `--report`, and CI
   publishes one for the `quivr plugin init` template.
+- **Searchable PDFs** through the reference plugin [`plugins/pdf-text`](plugins/pdf-text/README.md)
+  (pypdf, BSD-3-Clause). An `application/pdf` Blob becomes one `body` Part per page with
+  text, and a phrase is found on its page's Part. Blank or scanned pages give warnings;
+  encrypted or damaged PDFs are quarantined with a diagnostic naming the plugin.
+  `make dev` pins it by default; there is no OCR
+  ([walkthrough](docs/api-walkthrough.md#pdf-documents)).
+- **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
+  your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).
 
 ## What comes next
 
 - Plugin-owned match criteria.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The rest of the plugin platform: a PDF to text reference normalizer.
+- The rest of the plugin platform: pinning several plugins at once.
 - Reprocessing quarantined Versions.
 
 The contract already describes some of these routes; the ones not implemented yet are
@@ -202,6 +210,7 @@ listed here, not in "What works today".
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
 | [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
+| [Write a normalizer](docs/plugins/write-a-normalizer.md) | From `quivr plugin init` to a searchable, observable Record |
 | [Python Plugin SDK](sdks/python/README.md) | Writing, testing and running a Python normalizer |
 | [Architecture decisions](docs/adr/) | Hard-to-reverse decisions and why |
 | [Domain language](CONTEXT.md) | Corpus, Record, Version, Manifest, Receipt… |
@@ -222,6 +231,9 @@ listed here, not in "What works today".
 cmd/quivr/          single binary: API, worker, migrations
 internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
 contracts/http/v0/  OpenAPI contract, examples and checks
+contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
+sdks/python/        Python Plugin SDK
+plugins/pdf-text/   reference normalizer: PDF text, one Part per page
 migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI

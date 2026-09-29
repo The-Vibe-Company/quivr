@@ -31,6 +31,14 @@ jobs:
           include-hidden-files: true
           path: .scratch/plugin-sdk/contract-report.json
           if-no-files-found: warn
+      # Contract Runner report for the reference plugin plugins/pdf-text (scripts/plugin_sdk.sh).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pdf-text-contract-report
+          include-hidden-files: true
+          path: .scratch/plugin-sdk/pdf-text-contract-report.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:

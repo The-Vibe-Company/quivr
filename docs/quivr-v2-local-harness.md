@@ -389,10 +389,23 @@ The Plugin Contract Runner separately checks plugin input/result schemas and
 timeouts. Do not build a plugin registry or force local calls over HTTP for the
 harness. Private customer fixtures are not prerequisites for the public CC0 journey.
 
-The harness pins one external normalizer. `scripts/normalizer_plugin.py` scaffolds
-the `quivr plugin init` template, runs it as its own process with the repository
-SDK, and pins it for `text/markdown` in the stack configuration. Verification then
-runs these steps in order:
+The harness pins one external normalizer, because Plugin API v0 pins a single
+plugin. `scripts/normalizer_plugin.py` pins it in the stack configuration and,
+for pdf-text and the template, runs it as its own process with the repository
+SDK. `QUIVR_NORMALIZER` chooses it for `make dev`:
+
+| `QUIVR_NORMALIZER` | Plugin | Routed media type |
+| --- | --- | --- |
+| `pdf-text` (default) | The reference plugin [`plugins/pdf-text`](../plugins/pdf-text/README.md), installed into `.scratch/plugin-sdk/venv` | `application/pdf` |
+| `template` | The `quivr plugin init` template, scaffolded once per stack | `text/markdown` |
+| `none` | No external normalizer; only `text/*` Blobs are accepted | none |
+| a plugin directory | Your own plugin, pinned at `http://127.0.0.1:$QUIVR_NORMALIZER_PORT` (default 9900) with the JSON configuration in `QUIVR_NORMALIZER_CONFIG` (default `{}`). The harness does not run it; start it with `quivr plugin dev --port 9900 <dir>` ([guide](plugins/write-a-normalizer.md)) | every media type its normalizer declares |
+
+For example, `QUIVR_NORMALIZER=none make dev` disables it. The choice is applied
+on every `make dev` and printed with the API address. The plugin's log is
+`.scratch/<project>/normalizer-plugin.log`.
+
+Verification starts on the template and runs these steps in order:
 
 1. It ingests a Markdown Blob through the public API.
 2. It checks that `quivr api` and `quivr worker` refuse invalid pins: an
@@ -413,6 +426,15 @@ runs these steps in order:
    the Version read, and a `record.quarantined` change event is published. It also
    checks that the optional route stays searchable through the built-in text path.
    Finally it restores the stack's pin.
+7. It switches the pin to pdf-text, restarting the plugin, the API, the worker
+   and the short-retention API.
+8. It uploads a three-page PDF and finds a phrase from page 2 on Part `page-2`,
+   with `normalization` provenance naming `pdf-text` 0.1.0.
+9. It ingests damaged PDF bytes. The Version is quarantined with a structured
+   `normalizer_failed` diagnostic naming pdf-text and a `record.quarantined`
+   change event, and a Record ingested afterwards is still searchable.
+
+Later steps keep the pdf-text pin.
 
 The PostgreSQL adapter suite also kills the test plugin process in the middle of an
 invocation, restarts it, and checks that the Version ends with exactly one published

@@ -11,6 +11,7 @@ notice list, not a legal review, and it certifies nothing for production.
 | Hugging Face Tokenizers 0.23.2 | Hash-pinned wheel, `tokenizer/requirements-linux-x86_64.txt` | [tokenizer/NOTICE.md](tokenizer/NOTICE.md), [tokenizer/LICENSE.tokenizers](tokenizer/LICENSE.tokenizers) |
 | PostgreSQL, Temporal, SeaweedFS and Weaviate images | Pinned by digest in `deploy/compose/compose.yaml`; run, not redistributed | Upstream images; licences not inventoried here |
 | OpenAPI Generator image | Pinned by digest in `scripts/contracts.sh`; contract checks only | Upstream image; licence not inventoried here |
+| pypdf 6.19.0 and cryptography 50.0.1 (reference plugin `plugins/pdf-text`) | Pinned in `plugins/pdf-text/pyproject.toml`, installed from PyPI into the plugin's virtualenv; they run in the plugin process and are never linked into `quivr` | pypdf BSD-3-Clause; cryptography Apache-2.0 OR BSD-3-Clause; see [plugins/pdf-text/README.md](../plugins/pdf-text/README.md#dependencies-and-licences) |
 | `quivr-search` demo UI packages | `quivr-search/package-lock.json` | Listed in `dependency-inventory.json` with the licence the lock file records |
 
 `dependency-inventory.json` is written by `python3 scripts/inventory.py <quivr-binary> <output>`,

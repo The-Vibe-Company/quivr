@@ -1,39 +1,109 @@
-"""External normalizer of the local harness: the `quivr plugin init` template.
+"""External normalizer of the local harness.
 
-The harness scaffolds the template once per stack, runs it as its own process
-with the repository's Python Plugin SDK and pins it in the startup
-configuration for text/markdown. Verification then proves startup refusal of
-invalid pins and that an unreachable plugin leaves the API and worker healthy.
-Every oracle is a process exit status or a public HTTP read.
+Plugin API v0 pins a single plugin, so a stack pins one of:
+
+* ``pdf-text``: the reference plugin plugins/pdf-text for application/pdf,
+  the default of `make dev`;
+* ``template``: the `quivr plugin init` template, scaffolded once per stack,
+  for text/markdown; `make verify` starts with it;
+* ``none``: no external normalizer;
+* a plugin directory: the author's own plugin, pinned for every media type its
+  normalizer declares at http://127.0.0.1:$QUIVR_NORMALIZER_PORT (default
+  9900) with $QUIVR_NORMALIZER_CONFIG (JSON, default {}). The author runs it,
+  for example with `quivr plugin dev --port 9900 <dir>`.
+
+`make dev` reads QUIVR_NORMALIZER (default pdf-text). pdf-text and the template
+run as their own process with the repository's Python Plugin SDK. Verification proves
+startup refusal of invalid pins and that an unreachable plugin leaves the API
+and worker healthy, then switches the pin to pdf-text. Every oracle is a
+process exit status or a public HTTP read.
 """
 import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NAME = 'markdown-sections'
-MODULE = NAME.replace('-', '_')
 SDK = ROOT / '.scratch' / 'plugin-sdk'
+PDF_TEXT = ROOT / 'plugins' / 'pdf-text'
+# Selection -> Python module, routed media type and plugin configuration.
+PLUGINS = {'pdf-text': ('pdf_text', 'application/pdf', {}),
+           'template': (NAME.replace('-', '_'), 'text/markdown', {'max_sections': 32})}
+CHOICES = ['pdf-text', 'template', 'none']
+
+
+def from_environment():
+    """The selection of `make dev`: QUIVR_NORMALIZER, default pdf-text."""
+    return os.environ.get('QUIVR_NORMALIZER') or 'pdf-text'
+
+
+def select(stack, name):
+    """Record the selection; a plugin directory also records its port and configuration."""
+    if name not in CHOICES:
+        path = pathlib.Path(name).expanduser().resolve()
+        if not (path / 'quivr-plugin.yaml').is_file():
+            raise ValueError(f'unknown normalizer {name!r}; QUIVR_NORMALIZER is one of: {", ".join(CHOICES)}, or a plugin directory with a quivr-plugin.yaml')
+        name = str(path)
+        stack.state['custom_plugin'] = {'port': int(os.environ.get('QUIVR_NORMALIZER_PORT') or 9900),
+                                        'configuration': json.loads(os.environ.get('QUIVR_NORMALIZER_CONFIG') or '{}')}
+    stack.state['normalizer'] = name
+    stack.save()
+
+
+def selected(stack):
+    return stack.state.get('normalizer')
+
+
+def custom(stack):
+    """Whether the selection is an author's plugin directory."""
+    return selected(stack) not in CHOICES + [None]
 
 
 def directory(stack):
-    return stack.directory / 'normalizer-plugin'
+    if custom(stack):
+        return pathlib.Path(selected(stack))
+    return PDF_TEXT if selected(stack) == 'pdf-text' else stack.directory / 'normalizer-plugin'
 
 
 def manifest(stack):
     return directory(stack) / 'quivr-plugin.yaml'
 
 
+def describe(stack):
+    """One line for `make dev`: what is pinned and how to change it."""
+    hint = 'QUIVR_NORMALIZER=pdf-text|template|none|<plugin-dir>'
+    if custom(stack):
+        port = stack.state['custom_plugin']['port']
+        return f'External normalizer: {directory(stack)}, pinned at http://127.0.0.1:{port}; run it with: quivr plugin dev --port {port} {directory(stack)} ({hint})'
+    return f'External normalizer: {selected(stack)} ({hint})'
+
+
+def media_types(stack):
+    """Media types the selected plugin's normalizer declares (quivr plugin inspect --json)."""
+    result = subprocess.run([str(stack.directory / 'quivr'), 'plugin', 'inspect', '--json', str(manifest(stack))], cwd=ROOT, capture_output=True, text=True)
+    report = json.loads(result.stdout or '{}')
+    if not report.get('valid'):
+        raise RuntimeError(f'{manifest(stack)} is not a valid plugin manifest; run: quivr plugin inspect {directory(stack)}')
+    return report['manifest']['contributions']['normalizer']['media_types']
+
+
 def pin(stack, manifest_path=None, configuration=None):
     """Startup pin of QUIVR_CONFIG: manifest, endpoint, configuration, routes.
 
-    None (no pin) until prepare scaffolded the plugin, so stacks that never
-    prepare it, such as the measurement harness, run without a normalizer.
+    None (no pin) when nothing is selected or the template is not scaffolded
+    yet, so stacks that never select one, such as the measurement harness,
+    run without a normalizer.
     """
-    if manifest_path is None and not manifest(stack).exists():
+    name = selected(stack)
+    if custom(stack):
+        own = stack.state['custom_plugin']
+        return {'manifest': str(manifest(stack)), 'endpoint': f"http://127.0.0.1:{own['port']}", 'configuration': own['configuration'],
+                'routes': [{'media_type': m, 'mode': 'required'} for m in media_types(stack)]}
+    if name not in PLUGINS or (manifest_path is None and not manifest(stack).exists()):
         return None
+    _, media_type, default = PLUGINS[name]
     stack.state.setdefault('plugin_port', stack_port())
     return {'manifest': str(manifest_path or manifest(stack)), 'endpoint': f"http://127.0.0.1:{stack.state['plugin_port']}",
-            'configuration': configuration if configuration is not None else {'max_sections': 32},
-            'routes': [{'media_type': 'text/markdown', 'mode': 'required'}]}
+            'configuration': configuration if configuration is not None else default,
+            'routes': [{'media_type': media_type, 'mode': 'required'}]}
 
 
 def python():
@@ -48,10 +118,20 @@ def python():
 
 
 def prepare(stack):
-    """Scaffold the template with the stack's quivr binary (once) and assign its port."""
+    """Prepare the selected plugin (pdf-text by default) and assign its port.
+
+    pdf-text is installed into the SDK virtualenv with its pinned dependencies;
+    the template is scaffolded once with the stack's quivr binary.
+    """
+    stack.state.setdefault('normalizer', 'pdf-text')
     stack.state.setdefault('plugin_port', stack_port())
     stack.save()
-    if not manifest(stack).exists():
+    name = selected(stack)
+    if name == 'pdf-text':
+        if subprocess.run([str(python()), '-c', 'import pdf_text, pypdf, cryptography'], cwd=SDK, capture_output=True).returncode:
+            subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
+                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(PDF_TEXT)], cwd=ROOT, check=True)
+    elif name == 'template' and not manifest(stack).exists():
         with (stack.directory / 'normalizer-plugin-init.log').open('w') as log:
             subprocess.run([str(stack.directory / 'quivr'), 'plugin', 'init', NAME, '--dir', str(directory(stack))], cwd=ROOT, check=True, stdout=log, stderr=log)
 
@@ -72,11 +152,13 @@ def healthy(stack):
 
 
 def start(stack):
-    """Run the plugin like `quivr plugin dev` does, then wait for its health."""
+    """Run the selected plugin like `quivr plugin dev` does, then wait for its health."""
     stop(stack)
+    if selected(stack) not in PLUGINS:
+        return
     env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(manifest(stack))}
     with (stack.directory / 'normalizer-plugin.log').open('a') as log:
-        p = subprocess.Popen([str(python()), '-m', MODULE], cwd=directory(stack), env=env, stdout=log, stderr=log, start_new_session=True)
+        p = subprocess.Popen([str(python()), '-m', PLUGINS[selected(stack)][0]], cwd=directory(stack), env=env, stdout=log, stderr=log, start_new_session=True)
     stack.state['plugin_pid'] = p.pid
     stack.save()
     deadline = time.monotonic() + 30
@@ -121,6 +203,18 @@ def refused(stack, name, plugin, code):
         result = subprocess.run([str(stack.directory / 'quivr'), command], cwd=ROOT, env={**os.environ, 'QUIVR_CONFIG': str(path)}, capture_output=True, text=True, timeout=30)
         (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stderr)
         assert result.returncode != 0 and code in result.stderr, (name, command, result.returncode, result.stderr)
+
+
+def switch(stack, name):
+    """Pin another plugin: restart the plugin, api, worker and the short-retention API on the new pin."""
+    stop(stack)
+    stack.stop_processes()
+    select(stack, name)
+    prepare(stack)
+    stack.config()
+    start(stack)
+    stack.start_processes()
+    stack.start_short_retention_api()
 
 
 def verify(stack):

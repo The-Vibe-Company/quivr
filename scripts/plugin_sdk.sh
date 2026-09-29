@@ -6,10 +6,13 @@
 #     `quivr plugin dev --fixture` prints a response the engine accepts,
 #     `quivr plugin test` certifies it (JSON report in
 #     .scratch/plugin-sdk/contract-report.json), and a discovery digest
-#     mismatch is reported.
+#     mismatch is reported;
+#  4. the reference plugin plugins/pdf-text passes its tests and `quivr plugin
+#     test` (JSON report in .scratch/plugin-sdk/pdf-text-contract-report.json).
 # Needs Python 3.12+ and network access for pip (like `make contracts`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+root="$PWD"
 GO=${GO:-go}
 PYTHON=${PYTHON:-python3}
 work="$PWD/.scratch/plugin-sdk"
@@ -68,3 +71,13 @@ if "$quivr" plugin dev --fixture fixtures/sample.json > /dev/null 2> mismatch.lo
 fi
 grep -q "discovery_mismatch  /manifest_digest" mismatch.log || { cat mismatch.log; exit 1; }
 echo "plugin dev reported the discovery digest mismatch"
+
+# The reference plugin plugins/pdf-text: unit tests (including fixture
+# reproducibility) and Contract Runner certification. CI uploads the report.
+cd "$root/plugins/pdf-text"
+"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+python3 -W error::ResourceWarning -m unittest discover -s tests
+"$quivr" plugin inspect . > "$work/pdf-text-inspect.log"
+"$quivr" plugin test --report "$work/pdf-text-contract-report.json" . > "$work/pdf-text-contract.log" 2>&1 || { cat "$work/pdf-text-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/pdf-text-contract.log" || { cat "$work/pdf-text-contract.log"; exit 1; }
+echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-report.json"

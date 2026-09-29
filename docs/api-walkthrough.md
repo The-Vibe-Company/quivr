@@ -198,8 +198,32 @@ and never blocks the API, text ingestion or search.
   Blob takes the built-in text path; any other media type is quarantined with
   `normalizer_unrouted`.
 
-`make dev` pins the `quivr plugin init` template for `text/markdown`
-([SDK guide](../sdks/python/README.md)).
+`make dev` pins the reference `pdf-text` plugin for `application/pdf`;
+`QUIVR_NORMALIZER=template` pins the `quivr plugin init` template for
+`text/markdown` instead, and `none` pins nothing
+([local harness](quivr-v2-local-harness.md#plugin-substitution-and-handoff)). To
+write your own, follow [Write a normalizer](plugins/write-a-normalizer.md).
+
+### PDF documents
+
+With the [`pdf-text`](../plugins/pdf-text/README.md) plugin pinned for
+`application/pdf` (the `make dev` default), a PDF is uploaded through an Upload
+Session and ingested with `content: {"kind": "blob", "blob_id": …, "media_type":
+"application/pdf"}`, like any Blob. Runnable commands are in
+[Write a normalizer, step 7](plugins/write-a-normalizer.md#7-ingest-a-blob).
+
+- The published Manifest has one `body` Part `page-<n>` per page with text, and a
+  `source` Blob Part that references the PDF. A search hit names its page
+  through `part_key`, for example `page-2`.
+- The Version shows `provenance.normalization.plugin_id: "pdf-text"` with its
+  version, and `extensions["pdf-text.document"]` holds `page_count` and
+  `text_pages`.
+- Pages without text, such as scans, are skipped and listed in an `empty_pages`
+  warning. There is no OCR.
+- An encrypted or damaged PDF is quarantined with a `normalizer_failed`
+  diagnostic that names `pdf-text`.
+
+Limits and configuration are in the [plugin README](../plugins/pdf-text/README.md#limits).
 
 ## Processing: segmentation and embeddings
 
