@@ -136,9 +136,6 @@ type ConfigChecker interface {
 	CheckConfig(config json.RawMessage, now time.Time) error
 }
 
-// Kinds known to the public contract, delivered or not.
-var Kinds = []string{"fixture", "rss", "m365_mail", "x_list"}
-
 type registered struct {
 	connector  Connector
 	config     *jsonschema.Schema

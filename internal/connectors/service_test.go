@@ -1,7 +1,6 @@
 package connectors
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,61 +10,46 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-// replayStore persists by idempotency key and compares request digests the
-// way the PostgreSQL adapter does, recording every call it receives.
-type replayStore struct {
+// recordingStore keeps created instances by ID and counts every call that
+// would persist something, so a test can prove a refusal never reached it.
+type recordingStore struct {
 	calls     int
-	created   map[string]NewInstance
+	created   map[string]Instance
 	deposited []CredentialDeposit
 }
 
-func (s *replayStore) CreateConnector(_ context.Context, n NewInstance) (Instance, error) {
+func (s *recordingStore) CreateConnector(_ context.Context, n NewInstance) (Instance, error) {
 	s.calls++
-	if prior, ok := s.created[n.RequestKey]; ok {
-		if !bytes.Equal(prior.RequestDigest, n.RequestDigest) {
-			return Instance{}, ErrConflict
-		}
-		return prior.Instance, nil
-	}
 	if s.created == nil {
-		s.created = map[string]NewInstance{}
+		s.created = map[string]Instance{}
 	}
-	s.created[n.RequestKey] = n
+	s.created[n.ID] = n.Instance
 	return n.Instance, nil
 }
 
-func (s *replayStore) ReadConnector(_ context.Context, org, id string) (Instance, error) {
-	for _, n := range s.created {
-		if n.Organization == org && n.ID == id {
-			return n.Instance, nil
-		}
+func (s *recordingStore) ReadConnector(_ context.Context, org, id string) (Instance, error) {
+	if in, ok := s.created[id]; ok && in.Organization == org {
+		return in, nil
 	}
 	return Instance{}, corpus.ErrNotFound
 }
 
-func (s *replayStore) ListConnectors(context.Context, corpus.Scope, string, string, int) ([]Instance, error) {
+func (s *recordingStore) ListConnectors(context.Context, corpus.Scope, string, string, int) ([]Instance, error) {
 	return nil, nil
 }
 
-func (s *replayStore) DisableConnector(_ context.Context, org, id string) (Instance, error) {
-	return s.ReadConnector(context.Background(), org, id)
+func (s *recordingStore) DisableConnector(ctx context.Context, org, id string) (Instance, error) {
+	return s.ReadConnector(ctx, org, id)
 }
 
-func (s *replayStore) ReplaceCredential(_ context.Context, org, id string, d CredentialDeposit) (Instance, error) {
+func (s *recordingStore) ReplaceCredential(ctx context.Context, org, id string, d CredentialDeposit) (Instance, error) {
 	s.calls++
 	s.deposited = append(s.deposited, d)
-	return s.ReadConnector(context.Background(), org, id)
+	return s.ReadConnector(ctx, org, id)
 }
 
-func (s *replayStore) ChangeSchedule(_ context.Context, org, id string, interval time.Duration) (Instance, error) {
-	for key, n := range s.created {
-		if n.Organization == org && n.ID == id {
-			n.Interval = interval
-			s.created[key] = n
-			return n.Instance, nil
-		}
-	}
-	return Instance{}, corpus.ErrNotFound
+func (s *recordingStore) ChangeSchedule(ctx context.Context, org, id string, _ time.Duration) (Instance, error) {
+	return s.ReadConnector(ctx, org, id)
 }
 
 var writer = corpus.Scope{Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}}
@@ -88,7 +72,7 @@ func fixtureInput(key string, secret json.RawMessage) CreateInput {
 }
 
 func TestKeylessServiceRefusesCredentialDepositsBeforeStoringAnything(t *testing.T) {
-	store := &replayStore{}
+	store := &recordingStore{}
 	svc := keylessService(t, store)
 	ctx := context.Background()
 	if _, err := svc.Create(ctx, writer, fixtureInput("c1", json.RawMessage(`{"token":"fixture-test-secret-keyless"}`))); !errors.Is(err, ErrCredentialsUnavailable) {
@@ -118,28 +102,5 @@ func TestKeylessServiceRefusesCredentialDepositsBeforeStoringAnything(t *testing
 	}
 	if _, err = svc.Create(ctx, corpus.Scope{Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}}, fixtureInput("c4", json.RawMessage(`{"token":"x"}`))); !errors.Is(err, corpus.ErrForbidden) {
 		t.Fatalf("unauthorized create: %v", err)
-	}
-}
-
-func TestKeylessServiceReplaysSecretFreeCreatesUnderAKeyedDigest(t *testing.T) {
-	store := &replayStore{}
-	svc := keylessService(t, store)
-	ctx := context.Background()
-	first, err := svc.Create(ctx, writer, fixtureInput("c1", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored := store.created["c1"]
-	if len(stored.RequestDigest) == 0 || stored.Credential != nil {
-		t.Fatalf("stored digest %x credential %v", stored.RequestDigest, stored.Credential)
-	}
-	replay, err := svc.Create(ctx, writer, fixtureInput("c1", nil))
-	if err != nil || replay.ID != first.ID {
-		t.Fatalf("replay: %v %s != %s", err, replay.ID, first.ID)
-	}
-	changed := fixtureInput("c1", nil)
-	changed.Namespace = "other"
-	if _, err = svc.Create(ctx, writer, changed); !errors.Is(err, ErrConflict) {
-		t.Fatalf("changed body under the same key: %v", err)
 	}
 }

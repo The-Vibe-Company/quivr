@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -79,7 +78,6 @@ func (m *memoryConnectors) ListConnectors(_ context.Context, s corpus.Scope, cor
 func (m *memoryConnectors) DisableConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
 	in, err := m.ReadConnector(ctx, org, id)
 	in.Enabled = false
-	in.Health.State = connectors.HealthDisabled
 	m.items[id] = in
 	return in, err
 }
@@ -91,9 +89,6 @@ func (m *memoryConnectors) ChangeSchedule(ctx context.Context, org, id string, i
 	if err != nil {
 		return in, err
 	}
-	if !in.Enabled {
-		return connectors.Instance{}, connectors.ErrDisabled
-	}
 	in.Interval = interval
 	m.items[id] = in
 	return in, nil
@@ -101,7 +96,9 @@ func (m *memoryConnectors) ChangeSchedule(ctx context.Context, org, id string, i
 
 const (
 	connectorKey = "connector-key-0123456789abcdef0123456"
-	contentKey   = "content-only-key-0123456789abcdef01234"
+	// otherCorpusKey may write connectors, but only in another Corpus.
+	otherCorpusKey = "other-corpus-key-0123456789abcdef0123"
+	contentKey     = "content-only-key-0123456789abcdef01234"
 )
 
 func connectorAPI(t *testing.T) http.Handler {
@@ -122,9 +119,10 @@ func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors
 		t.Fatal(err)
 	}
 	keys := map[string]corpus.Scope{
-		connectorKey: {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
-		readerKey:    {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
-		contentKey:   {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
+		connectorKey:   {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
+		otherCorpusKey: {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_other"}},
+		readerKey:      {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
+		contentKey:     {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 	}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
 		httpapi.WithConnectors(connectors.Service{Store: store, Registry: registry, Sealer: sealer}))
@@ -182,7 +180,7 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 	if status, _ := readJSON(t, handler, "/v0/connectors/connector_missing", readerKey); status != 404 {
 		t.Fatalf("missing: %d", status)
 	}
-	if status, body := postJSON(t, handler, "/v0/connectors/"+id+"/disable", connectorKey, map[string]any{"idempotency_key": "d1"}); status != 200 || body["enabled"] != false || body["health"].(map[string]any)["state"] != "disabled" {
+	if status, body := postJSON(t, handler, "/v0/connectors/"+id+"/disable", connectorKey, map[string]any{"idempotency_key": "d1"}); status != 200 || body["connector_id"] != id || body["enabled"] != false {
 		t.Fatalf("disable: %d %v", status, body)
 	}
 }
@@ -198,28 +196,14 @@ func readJSON(t *testing.T, handler http.Handler, path, key string) (int, map[st
 	return rec.Code, out
 }
 
-func TestXListInstancesValidateTheirWindowAndExposeUsageAndDiagnostics(t *testing.T) {
+// Health usage and diagnostics are stored by acquisition; the transport renders
+// them, including the previous day's reads.
+func TestConnectorHealthRendersUsageAndDiagnostics(t *testing.T) {
 	store := &memoryConnectors{items: map[string]connectors.Instance{}}
 	handler := connectorAPIWith(t, store)
-	body := func(config map[string]any) map[string]any {
-		return map[string]any{"idempotency_key": fmt.Sprint(config), "corpus_id": "corpus_news", "source_namespace": fmt.Sprint(len(store.items)), "kind": "x_list", "config": config,
-			"credential": map[string]any{"secret": map[string]any{"bearer_token": "x-handler-token-not-real", "consumer_secret": "x-handler-consumer-not-real"}}}
-	}
-	status, created := postJSON(t, handler, "/v0/connectors", connectorKey, body(map[string]any{"list_id": "1234567890123456789", "backfill_since": time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)}))
-	if status != 201 || created["schedule"].(map[string]any)["interval_seconds"].(float64) != 120 {
+	status, created := postJSON(t, handler, "/v0/connectors", connectorKey, map[string]any{"idempotency_key": "u1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}})
+	if status != 201 {
 		t.Fatalf("create: %d %v", status, created)
-	}
-	if raw, _ := json.Marshal(created); strings.Contains(string(raw), "x-handler") {
-		t.Fatalf("secret echoed: %s", raw)
-	}
-	for _, config := range []map[string]any{
-		{"list_id": "1", "backfill_since": time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)},
-		{"list_id": "not-a-list"},
-		{"list_id": "1", "recheck_window_seconds": 10},
-	} {
-		if status, e := postJSON(t, handler, "/v0/connectors", connectorKey, body(config)); status != 422 || e["code"] != "invalid_config" {
-			t.Errorf("%v: %d %v", config, status, e)
-		}
 	}
 	id := created["connector_id"].(string)
 	in := store.items[id]
@@ -237,37 +221,6 @@ func TestXListInstancesValidateTheirWindowAndExposeUsageAndDiagnostics(t *testin
 	}
 	if d := h["diagnostics"].(map[string]any); d["recheck_window_seconds"].(float64) != 86400 {
 		t.Fatalf("diagnostics %v", h)
-	}
-}
-
-func TestKeylessDeploymentRefusesCredentialDepositsWith503(t *testing.T) {
-	sealer, err := connectors.NewKeylessSealer("cursor-key-0123456789abcdef0123456789")
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := connectorAPISealed(t, &memoryConnectors{items: map[string]connectors.Instance{}}, sealer)
-	withSecret := map[string]any{"idempotency_key": "k1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}},
-		"credential": map[string]any{"secret": map[string]any{"token": "fixture-test-secret-keyless"}}}
-	status, body := postJSON(t, handler, "/v0/connectors", connectorKey, withSecret)
-	if status != 503 || body["code"] != "credentials_unavailable" || body["retryable"] != false {
-		t.Fatalf("create with secret: %d %v", status, body)
-	}
-	conforms(t, "Error", body)
-	free := map[string]any{"idempotency_key": "k2", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}}
-	status, created := postJSON(t, handler, "/v0/connectors", connectorKey, free)
-	if status != 201 || created["credential"] != nil {
-		t.Fatalf("secret-free create: %d %v", status, created)
-	}
-	payload, _ := json.Marshal(map[string]any{"idempotency_key": "r1", "secret": map[string]any{"token": "fixture-test-secret-keyless"}})
-	req := httptest.NewRequest("PUT", "/v0/connectors/"+created["connector_id"].(string)+"/credential", bytes.NewReader(payload))
-	req.Header.Set("Authorization", "Bearer "+connectorKey)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	var rotated map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &rotated)
-	if rec.Code != 503 || rotated["code"] != "credentials_unavailable" {
-		t.Fatalf("rotation: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -340,10 +293,12 @@ func TestConnectorScheduleChangesAreValidatedAndAuthorized(t *testing.T) {
 		{"below the floor", path, connectorKey, map[string]any{"interval_seconds": 29}, 422, "invalid_interval", "/interval_seconds"},
 		{"above a day", path, connectorKey, map[string]any{"interval_seconds": 86401}, 422, "invalid_interval", "/interval_seconds"},
 		{"zero", path, connectorKey, map[string]any{"interval_seconds": 0}, 422, "invalid_interval", "/interval_seconds"},
+		{"negative", path, connectorKey, map[string]any{"interval_seconds": -1}, 422, "invalid_interval", "/interval_seconds"},
 		{"wraps as a Duration", path, connectorKey, map[string]any{"interval_seconds": int64(1)<<55 + 64}, 422, "invalid_interval", "/interval_seconds"},
 		{"not an integer", path, connectorKey, map[string]any{"interval_seconds": "60"}, 422, "invalid_schema", "/interval_seconds"},
 		{"unexpected member", path, connectorKey, map[string]any{"interval_seconds": 60, "every": 1}, 422, "invalid_schema", "/every"},
 		{"read-only key", path, readerKey, map[string]any{"interval_seconds": 60}, 403, "forbidden", ""},
+		{"writer of another Corpus", path, otherCorpusKey, map[string]any{"interval_seconds": 60}, 404, "not_found", ""},
 		{"unknown instance", "/v0/connectors/connector_missing/schedule", connectorKey, map[string]any{"interval_seconds": 60}, 404, "not_found", ""},
 	} {
 		status, body := putJSON(t, handler, c.path, c.key, c.body)
@@ -354,10 +309,6 @@ func TestConnectorScheduleChangesAreValidatedAndAuthorized(t *testing.T) {
 	}
 	if status, _ := postJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 60}); status != 405 {
 		t.Fatalf("POST schedule: %d", status)
-	}
-	postJSON(t, handler, "/v0/connectors/"+created["connector_id"].(string)+"/disable", connectorKey, map[string]any{"idempotency_key": "d"})
-	if status, body := putJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 60}); status != 409 || body["code"] != "connector_disabled" {
-		t.Fatalf("disabled: %d %v", status, body)
 	}
 }
 

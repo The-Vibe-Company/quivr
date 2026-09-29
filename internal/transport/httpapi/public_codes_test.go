@@ -64,6 +64,8 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 		connectors.ErrInvalidCredential: {422, "invalid_credential"},
 		connectors.ErrInvalidInterval:   {422, "invalid_interval"},
 		connectors.ErrInvalid:           {422, "invalid_input"},
+		// A deployment without credential_key; retrying cannot help.
+		connectors.ErrCredentialsUnavailable: {503, "credentials_unavailable"},
 	} {
 		for style, err := range detailed(sentinel) {
 			status, code := written(t, func(w *httptest.ResponseRecorder) { connectorFailure(w, err) })
@@ -71,6 +73,12 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
 		}
+	}
+	rec := httptest.NewRecorder()
+	connectorFailure(rec, connectors.ErrCredentialsUnavailable)
+	var body struct{ Retryable *bool }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Retryable == nil || *body.Retryable {
+		t.Fatalf("credentials_unavailable must not be retryable: %s", rec.Body.String())
 	}
 }
 

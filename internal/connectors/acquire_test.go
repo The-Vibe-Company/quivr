@@ -110,24 +110,6 @@ func TestAcquisitionIngestsThroughTheCommandPathThenCommitsTheCheckpoint(t *test
 	}
 }
 
-func TestReFetchedItemsReuseTheirIdempotencyKeys(t *testing.T) {
-	config := `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha v2"}]}]}`
-	a, runs, ingest := newAcquirer(t, config, "")
-	for i := 0; i < 3; i++ {
-		if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
-			t.Fatal(err)
-		}
-	}
-	k := ingest.accepted
-	if k[0].Key != k[1].Key || k[0].Revision != k[1].Revision {
-		t.Fatal("identical re-fetched item must replay the same key and revision")
-	}
-	if k[2].Key == k[0].Key || k[2].Revision == k[0].Revision {
-		t.Fatal("changed content must be a new revision (correction)")
-	}
-	_ = runs
-}
-
 func TestCheckpointIsNotAdvancedWhenIngestionIsUnavailable(t *testing.T) {
 	a, runs, ingest := newAcquirer(t, `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]}]}`, "")
 	ingest.fail = errors.New("database down")
@@ -192,11 +174,20 @@ func TestARejectedItemIsReportedWithoutStallingTheSource(t *testing.T) {
 
 func TestOnlyNewVersionsAdvanceLastItem(t *testing.T) {
 	config := `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha"}]},{"items":[{"record_key":"a","text":"Alpha v2"}]},{"items":[{"record_key":"b","withdraw":true}]}]}`
-	a, runs, _ := newAcquirer(t, config, "")
+	a, runs, ingest := newAcquirer(t, config, "")
 	for i := 0; i < 4; i++ {
 		if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A re-fetched identical item replays its key and revision; changed content
+	// is a new revision (a correction) under a new key.
+	k := ingest.accepted
+	if k[0].Key != k[1].Key || k[0].Revision != k[1].Revision {
+		t.Fatal("identical re-fetched item must replay the same key and revision")
+	}
+	if k[2].Key == k[0].Key || k[2].Revision == k[0].Revision {
+		t.Fatal("changed content must be a new revision (correction)")
 	}
 	// New item, replayed duplicate, correction, withdrawal (no new Version).
 	if want := []bool{true, false, true, false}; fmt.Sprint(runs.items) != fmt.Sprint(want) {

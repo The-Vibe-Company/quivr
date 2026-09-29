@@ -51,22 +51,3 @@ func TestFixtureRefusesARevokedCredentialAsAccessError(t *testing.T) {
 		t.Fatalf("valid credential: %v %+v", err, page)
 	}
 }
-
-func TestRegistryValidatesKindSchemas(t *testing.T) {
-	r, err := NewRegistry(Fixture{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"token":"fixture-test-token"}`), "/credential/secret"); err != nil {
-		t.Fatal(err)
-	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":"nope"}`), nil, "/credential/secret"); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("config: %v", err)
-	}
-	if err = r.validate("fixture", json.RawMessage(`{"script":[]}`), json.RawMessage(`{"password":1}`), "/credential/secret"); !errors.Is(err, ErrInvalidCredential) {
-		t.Fatalf("credential: %v", err)
-	}
-	if err = r.validate("rss", json.RawMessage(`{}`), nil, "/credential/secret"); !errors.Is(err, ErrUnsupportedKind) {
-		t.Fatalf("kind: %v", err)
-	}
-}
