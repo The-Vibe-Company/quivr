@@ -1,0 +1,19 @@
+client/client.gen.go
+  s_54b80c92daa9cb::t_ff24caa6f3c80e 979,1057,1368,1392,1407,2181,2187,2234,2240,3086,3102,3229,3245,5865,5873,5928,5936,8862,8876,8979,8993
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "88c6594099b82abdcfa2dbec8f1e6f9d1ce911e3",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
