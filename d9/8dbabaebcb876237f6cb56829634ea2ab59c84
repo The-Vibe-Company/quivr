@@ -1,0 +1,34 @@
+README.md
+  h_ecee222750141d 206-212
+client/client.gen.go
+  h_ecee222750141d 1-10589
+cmd/quivr/main.go
+  h_ecee222750141d 8,17-22,25
+docs/api-walkthrough.md
+  h_ecee222750141d 25,286-323
+docs/quivr-v2-local-harness.md
+  h_ecee222750141d 314-315
+internal/online/online.go
+  h_ecee222750141d 1-291
+internal/online/search.go
+  h_ecee222750141d 1-117
+internal/online/search_test.go
+  h_ecee222750141d 1-246
+scripts/contracts.sh
+  h_ecee222750141d 6,11-12,15,19
+scripts/local.py
+  h_ecee222750141d 213,408-409
+tests/acceptance/search_cli_test.go
+  h_ecee222750141d 1-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d98dbabaebcb876237f6cb56829634ea2ab59c84",
+  "prompts": {},
+  "humans": {
+    "h_ecee222750141d": {
+      "author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
