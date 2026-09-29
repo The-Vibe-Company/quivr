@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs denylist migrations migration migration-restamp
+.PHONY: dev verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs denylist migrations migration migration-restamp image-context
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -9,7 +9,7 @@ demo-reset:
 	GO=$(GO) python3 scripts/demo.py reset
 verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
-verify: docs denylist migrations contracts test
+verify: docs denylist migrations contracts image-context test
 	GO=$(GO) python3 scripts/local.py verify
 	GO=$(GO) python3 scripts/demo.py verify
 # PostgreSQL adapter suite on a bare migrated database (THE-699): make adapter-postgres [args='-run TestX']
@@ -34,6 +34,9 @@ docs:
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
 denylist:
 	python3 scripts/denylist.py
+# Fails when the core image build stage misses a Go package the binary imports.
+image-context:
+	GO=$(GO) python3 scripts/image_context.py
 # Fails when a migration added here sorts before main's latest; see scripts/migrations.py.
 migrations:
 	python3 scripts/migrations.py check
