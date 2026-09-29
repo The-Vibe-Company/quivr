@@ -1,0 +1,14 @@
+# The expression and configuration schemas must compile as JSON Schema 2020-12.
+id: example-alerts
+version: 0.3.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      properties:
+        text: {type: 42}
+    configuration_schema:
+      minLength: -1

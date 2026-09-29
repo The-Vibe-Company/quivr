@@ -1,0 +1,40 @@
+# Quivr plugin manifest (Plugin API 0.2). Check it with: quivr plugin inspect .
+# Reference: contracts/plugins/v0/README.md in the Quivr repository.
+id: __PLUGIN_ID__
+version: 0.1.0
+description: An alert rule that matches an article when a phrase appears in its text.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    # The shape of a saved search's expression. Each alert kind is one oneOf
+    # branch told apart by "kind"; add a branch (and handle it in rule.py) to
+    # offer another kind of alert. The core validates saved searches against it.
+    expression_schema:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, text]
+          properties:
+            kind:
+              const: substring
+            text:
+              type: string
+              minLength: 1
+              maxLength: 256
+              description: Phrase that must appear in a text Part.
+    # Per-Subscription settings, validated by the core when a Subscription is created.
+    configuration_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        case_sensitive:
+          type: boolean
+          description: Match the exact case; by default case is ignored.
+    max_batch_size: 32
+    timeout_ms: 5000
+    retry:
+      max_attempts: 3
+run:
+  command: [python3, -m, __PLUGIN_MODULE__]

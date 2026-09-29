@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quivr-plugin-sdk"
-version = "0.1.0"
-description = "Write Quivr Plugin Protocol v0 plugins in Python: typed models, HTTP server adapter, errors, configuration validation and fixture helpers."
+version = "0.2.0"
+description = "Write Quivr Plugin Protocol v0 plugins in Python (normalizers and alert rules): typed models, HTTP server adapter, errors, configuration validation and fixture helpers."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

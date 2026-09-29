@@ -7,7 +7,11 @@
 #     `quivr plugin test` certifies it (JSON report in
 #     .scratch/plugin-sdk/contract-report.json), and a discovery digest
 #     mismatch is reported;
-#  4. the reference plugin plugins/pdf-text passes its tests and `quivr plugin
+#  4. an alert-rule plugin scaffolded by `quivr plugin init --kind
+#     subscription` passes inspect, its own tests, `quivr plugin dev --fixture`
+#     and `quivr plugin test` (JSON report in
+#     .scratch/plugin-sdk/subscription-contract-report.json);
+#  5. the reference plugin plugins/pdf-text passes its tests and `quivr plugin
 #     test` (JSON report in .scratch/plugin-sdk/pdf-text-contract-report.json).
 # Needs Python 3.12+ and network access for pip (like `make contracts`).
 set -euo pipefail
@@ -71,6 +75,30 @@ if "$quivr" plugin dev --fixture fixtures/sample.json > /dev/null 2> mismatch.lo
 fi
 grep -q "discovery_mismatch  /manifest_digest" mismatch.log || { cat mismatch.log; exit 1; }
 echo "plugin dev reported the discovery digest mismatch"
+
+# An alert-rule plugin scaffolded by `quivr plugin init --kind subscription`:
+# inspect, its own tests, a replayed fixture and Contract Runner
+# certification. CI uploads the JSON report.
+cd "$e2e"
+"$quivr" plugin init alerts --kind subscription > init-alerts.log
+cd alerts
+"$quivr" plugin inspect . > inspect.log
+python3 -m unittest discover -s tests
+"$quivr" plugin dev --fixture fixtures/sample.json > response.json 2> dev.log || { cat dev.log; exit 1; }
+python3 - <<'EOF'
+import json
+response = json.load(open("response.json"))
+decisions = [(d["id"], d["decision"]) for d in response["decisions"]]
+assert decisions == [("e1", "match"), ("e2", "no_match"), ("e3", "match")], decisions
+assert response["decisions"][0]["evidence"]["part_keys"] == ["title", "body"], response["decisions"][0]
+log = open("dev.log").read()
+assert "3 decisions in 1 batches (2 match, 1 no_match, 0 not_ready)" in log, log
+print("plugin dev replayed the scaffolded subscription fixture:", decisions)
+EOF
+"$quivr" plugin test --report "$work/subscription-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
+grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
+grep -q "PASS  batch" contract.log || { cat contract.log; exit 1; }
+echo "quivr plugin test certified the scaffolded subscription template: $work/subscription-contract-report.json"
 
 # The reference plugin plugins/pdf-text: unit tests (including fixture
 # reproducibility) and Contract Runner certification. CI uploads the report.

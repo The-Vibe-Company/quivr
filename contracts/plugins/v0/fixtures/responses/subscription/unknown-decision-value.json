@@ -1,0 +1,6 @@
+{
+  "decisions": [
+    {"id": "e1", "decision": "maybe"},
+    {"id": "e2", "decision": "no_match"}
+  ]
+}

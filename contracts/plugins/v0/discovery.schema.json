@@ -42,7 +42,8 @@
       "uniqueItems": true,
       "items": {
         "enum": [
-          "normalizer"
+          "normalizer",
+          "subscription"
         ]
       }
     }

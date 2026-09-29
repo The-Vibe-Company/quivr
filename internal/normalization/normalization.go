@@ -165,7 +165,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	}
 	normalizer := s.Pin.Manifest.Contributions.Normalizer
 	inv := invocation{org: org, receiptID: receiptID, work: work, optional: route.Mode == plugins.RouteOptional, budget: MaxAttempts(normalizer),
-		provenance: content.Normalization{PluginID: s.Pin.Manifest.ID, PluginVersion: s.Pin.Manifest.Version, PluginAPI: plugins.PluginAPIVersion, Contribution: Contribution, InvocationID: invocationID(),
+		provenance: content.Normalization{PluginID: s.Pin.Manifest.ID, PluginVersion: s.Pin.Manifest.Version, PluginAPI: s.Pin.PluginAPI(), Contribution: Contribution, InvocationID: invocationID(),
 			IdempotencyKey: IdempotencyKey(s.Pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
 	input, err := s.Content.BlobSource.VerifiedBlob(ctx, org, c.Content.BlobID)
 	if errors.Is(err, content.ErrUnverifiedBlob) || (err == nil && (input.Blob.SHA256 != c.Content.BlobSHA256 || input.MediaType != c.Content.MediaType)) {

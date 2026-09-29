@@ -1,0 +1,31 @@
+# Alert-rule test plugin used by the SDK unit tests (Plugin API 0.2).
+id: sdk-alerts
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, text]
+          properties:
+            kind: {const: substring}
+            text: {type: string, minLength: 1}
+    configuration_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        case_sensitive: {type: boolean}
+    max_batch_size: 1
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      mode:
+        enum: [ok, missing, unknown-part, no-evidence, huge-details, long-explanation, crash, retry, dicts]
+run:
+  command: [python3, -m, sdk_alerts]

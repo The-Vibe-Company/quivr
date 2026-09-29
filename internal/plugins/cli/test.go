@@ -14,7 +14,7 @@ import (
 const testUsage = "quivr plugin test [--endpoint <url>] [--report <file>] [--fixture <file>]... [--startup-timeout <duration>] [<plugin-dir>]"
 
 // test is the Plugin Contract Runner: it certifies that the engine can safely
-// invoke the plugin's normalizer. Exit 0 certified, 1 not certified, 2 usage.
+// invoke every Contribution the plugin declares. Exit 0 certified, 1 not certified, 2 usage.
 func test(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	opts := runner.Options{Output: stderr}
 	var reportPath string
@@ -92,7 +92,7 @@ func printTestReport(w io.Writer, r runner.Report) {
 	if r.Plugin.ID != "" {
 		name = fmt.Sprintf("plugin %s %s", r.Plugin.ID, r.Plugin.Version)
 	}
-	verdict := "CERTIFIED: the engine can safely invoke this normalizer"
+	verdict := "CERTIFIED: the engine can safely invoke this plugin"
 	if !r.Certified {
 		verdict = "NOT CERTIFIED"
 	}
@@ -105,6 +105,9 @@ func printTestReport(w io.Writer, r runner.Report) {
 		subject := c.Title
 		if c.Fixture != "" {
 			subject = c.Fixture + ": " + subject
+		}
+		if c.Contribution != "" {
+			subject = "[" + c.Contribution + "] " + subject
 		}
 		fmt.Fprintf(w, "  %-4s  %-15s  %s (%d ms)\n", strings.ToUpper(string(c.Status)), c.ID, subject, c.DurationMS)
 		if c.Note != "" && c.Status != runner.Pass {

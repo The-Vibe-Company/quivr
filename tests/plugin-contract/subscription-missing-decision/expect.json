@@ -1,0 +1,6 @@
+{
+  "description": "The last evaluation of the batch is not answered.",
+  "certified": false,
+  "check": "invoke",
+  "code": "missing_decision"
+}

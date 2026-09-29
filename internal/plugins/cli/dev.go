@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -201,10 +202,20 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 		return nil, false
 	}
 	var request []byte
+	var batches []devhost.SubscriptionBatch
 	if s.fixture != "" {
 		var issues []plugins.Issue
 		var err error
-		request, issues, err = devhost.BuildFixtureRequest(s.fixture, m)
+		raw, readErr := os.ReadFile(s.fixture)
+		unparsable := readErr != nil || !json.Valid(raw)
+		if devhost.IsSubscriptionFixture(raw) || (unparsable && m.Contributions.Normalizer == nil) {
+			batches, issues, err = devhost.BuildSubscriptionRequests(s.fixture, m)
+		} else if m.Contributions.Normalizer == nil {
+			issues = []plugins.Issue{{Code: plugins.CodeInvalidManifest, Path: "/contributions/normalizer",
+				Message: "this is an invocation fixture for a normalizer, but the manifest declares no normalizer Contribution"}}
+		} else {
+			request, issues, err = devhost.BuildFixtureRequest(s.fixture, m)
+		}
 		if err != nil {
 			s.status("fixture %s: %v", s.fixture, err)
 			return nil, false
@@ -240,6 +251,9 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 		return proc, false
 	}
 	s.status("discovery matches %s (%s)", filepath.Base(report.Path), report.ManifestDigest)
+	if batches != nil {
+		return proc, s.replaySubscription(ctx, proc, m, batches)
+	}
 	if request == nil {
 		s.status("plugin ready at %s", proc.BaseURL)
 		return proc, true
@@ -286,4 +300,63 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 	s.status("response valid: %d Parts, %d Relations, %d warnings; the engine's Manifest validation accepts it",
 		len(summary.Manifest.Parts), len(summary.Manifest.Relations), len(summary.Warnings))
 	return proc, true
+}
+
+// replaySubscription sends the batches of a subscription fixture, validates
+// every answer with the engine's subscription output checks and the fixture's
+// expected decisions, and prints the decisions of all batches.
+func (s *devSession) replaySubscription(ctx context.Context, proc *devhost.Process, m *plugins.Manifest, batches []devhost.SubscriptionBatch) bool {
+	sub := m.Contributions.Subscription
+	var decisions []json.RawMessage
+	counts := map[string]int{}
+	for _, b := range batches {
+		invokeCtx, cancel := context.WithTimeout(ctx, time.Duration(sub.TimeoutMS)*time.Millisecond)
+		result, err := devhost.InvokeSubscriptionWith(invokeCtx, proc.BaseURL, b.Body, plugins.SubscriptionMaxResponseBytes(m), func(body []byte) []plugins.Issue {
+			return plugins.CheckSubscriptionOutput(body, b.View, m)
+		})
+		cancel()
+		if err != nil {
+			s.status("%v", err)
+			return false
+		}
+		if len(result.Issues) == 0 && result.Error == nil {
+			result.Issues = devhost.ExpectationIssues(result.Body, b.Expect)
+		}
+		if len(result.Issues) > 0 {
+			s.issues(fmt.Sprintf("subscription batch %d answered HTTP %d with an invalid response", b.Index, result.Status), result.Issues)
+			if len(result.Body) > 0 {
+				fmt.Fprintf(s.stderr, "%s\n", result.Body)
+			}
+			return false
+		}
+		if result.Error != nil {
+			kind := "terminal"
+			if result.Error.Retryable {
+				kind = "retryable"
+			}
+			s.status("subscription batch %d returned HTTP %d, %s error %s: %s", b.Index, result.Status, kind, result.Error.Code, result.Error.Message)
+			return false
+		}
+		var response struct {
+			Decisions []json.RawMessage `json:"decisions"`
+		}
+		_ = json.Unmarshal(result.Body, &response)
+		for _, d := range response.Decisions {
+			var decision struct {
+				Decision string `json:"decision"`
+			}
+			_ = json.Unmarshal(d, &decision)
+			counts[decision.Decision]++
+		}
+		decisions = append(decisions, response.Decisions...)
+	}
+	merged, _ := json.Marshal(map[string]any{"decisions": decisions})
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, merged, "", "  "); err != nil {
+		pretty.Write(merged)
+	}
+	fmt.Fprintf(s.stdout, "%s\n", pretty.Bytes())
+	s.status("response valid: %d decisions in %d batches (%d match, %d no_match, %d not_ready); the engine's subscription output validation accepts them and they match the fixture's expectations",
+		len(decisions), len(batches), counts[plugins.DecisionMatch], counts[plugins.DecisionNoMatch], counts[plugins.DecisionNotReady])
+	return true
 }

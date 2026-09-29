@@ -1,0 +1,6 @@
+{
+  "description": "Never matches, so the fixture's expected match is reported.",
+  "certified": false,
+  "check": "invoke",
+  "code": "unexpected_decision"
+}

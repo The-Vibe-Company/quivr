@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.1",
+  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.2",
   "description": "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md.",
   "type": "object",
   "additionalProperties": false,
@@ -41,20 +41,20 @@
     "contributions": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "normalizer"
-      ],
-      "description": "Keyed by Contribution name. Plugin API 0.1 accepts only normalizer; the other names are reserved and rejected.",
+      "minProperties": 1,
+      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1) and subscription (since 0.2). The other names are reserved and rejected.",
       "properties": {
         "normalizer": {
           "$ref": "#/$defs/Normalizer"
+        },
+        "subscription": {
+          "$ref": "#/$defs/Subscription"
         },
         "connector": false,
         "enricher": false,
         "validator": false,
         "projector": false,
-        "retriever": false,
-        "subscription": false
+        "retriever": false
       }
     },
     "configuration": {
@@ -217,6 +217,59 @@
             }
           }
         }
+      }
+    },
+    "Subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expression_schema"
+      ],
+      "description": "An alert rule, since Plugin API 0.2: decides whether one Record Version matches each Saved Query expression of a batch.",
+      "properties": {
+        "expression_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Saved Query expression (a JSON object) this rule interprets. The core validates Saved Query Versions against it. Discriminate several alert kinds with a oneOf over a kind property."
+        },
+        "configuration_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the per-Subscription evaluator configuration (a JSON object). Absent: any object. Distinct from the installer configuration under configuration.schema."
+        },
+        "max_batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 32,
+          "description": "Most evaluations one request carries; the core splits a larger batch into several requests."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "retry": {
+          "$ref": "#/$defs/Normalizer/properties/retry"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            }
+          }
+        },
+        "vectors": false
       }
     }
   }

@@ -19,7 +19,18 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.1.0"
+const PluginAPIVersion = "0.2.0"
+
+// SupportedPluginAPIVersions are the Plugin API versions this engine serves,
+// oldest first. A minor version only adds to the previous one, so a plugin
+// built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
+// when its plugin_api range admits any of these versions.
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0"}
+
+// ContributionSince is the Plugin API version that introduced each accepted
+// Contribution. A manifest that declares one needs a plugin_api range that
+// admits that version or a later supported one.
+var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0"}
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
@@ -31,8 +42,14 @@ var EngineVersion = "0.1.0"
 const ManifestFile = "quivr-plugin.yaml"
 
 // ReservedContributions are Contribution names kept for later Plugin API
-// versions; Plugin API 0.1 rejects them.
-var ReservedContributions = []string{"connector", "enricher", "validator", "projector", "retriever", "subscription"}
+// versions; Plugin API 0.2 rejects them.
+var ReservedContributions = []string{"connector", "enricher", "validator", "projector", "retriever"}
+
+// reservedFields are manifest fields (JSON Pointers) kept for a later Plugin
+// API version.
+var reservedFields = []struct{ path, message string }{
+	{"/contributions/subscription/vectors", "Part and query vectors for subscription rules are reserved for a later Plugin API version; remove vectors"},
+}
 
 // Effective defaults applied when a manifest omits the field.
 const (
@@ -40,23 +57,26 @@ const (
 	DefaultMaxAttempts      = 3
 	DefaultMaxResponseBytes = 4 << 20
 	DefaultMaxParts         = 256
+	DefaultMaxBatchSize     = 32
 )
 
 // Stable issue codes.
 const (
-	CodeUnreadable             = "unreadable_manifest"
-	CodeInvalidYAML            = "invalid_yaml"
-	CodeSchema                 = "schema_violation"
-	CodeInvalidRange           = "invalid_range"
-	CodeIncompatibleEngine     = "incompatible_engine"
-	CodeIncompatiblePluginAPI  = "incompatible_plugin_api"
-	CodeReservedContribution   = "reserved_contribution"
-	CodeForeignNamespace       = "foreign_namespace"
-	CodeInvalidConfigSchema    = "invalid_config_schema"
-	CodeInvalidExtensionSchema = "invalid_extension_schema"
-	CodeDuplicateSecret        = "duplicate_secret"
-	CodeInvalidManifest        = "invalid_manifest"
-	CodeInvalidConfiguration   = "invalid_configuration"
+	CodeUnreadable              = "unreadable_manifest"
+	CodeInvalidYAML             = "invalid_yaml"
+	CodeSchema                  = "schema_violation"
+	CodeInvalidRange            = "invalid_range"
+	CodeIncompatibleEngine      = "incompatible_engine"
+	CodeIncompatiblePluginAPI   = "incompatible_plugin_api"
+	CodeReservedContribution    = "reserved_contribution"
+	CodeForeignNamespace        = "foreign_namespace"
+	CodeInvalidConfigSchema     = "invalid_config_schema"
+	CodeInvalidExtensionSchema  = "invalid_extension_schema"
+	CodeDuplicateSecret         = "duplicate_secret"
+	CodeInvalidManifest         = "invalid_manifest"
+	CodeInvalidConfiguration    = "invalid_configuration"
+	CodeInvalidExpressionSchema = "invalid_expression_schema"
+	CodeReservedField           = "reserved_field"
 )
 
 // Issue is one actionable validation failure. Path is a JSON Pointer into the
@@ -86,7 +106,39 @@ type Compatibility struct {
 }
 
 type Contributions struct {
-	Normalizer *Normalizer `json:"normalizer,omitempty"`
+	Normalizer   *Normalizer   `json:"normalizer,omitempty"`
+	Subscription *Subscription `json:"subscription,omitempty"`
+}
+
+// Names lists the declared Contributions in protocol order, as discovery
+// lists them.
+func (c Contributions) Names() []string {
+	names := []string{}
+	if c.Normalizer != nil {
+		names = append(names, "normalizer")
+	}
+	if c.Subscription != nil {
+		names = append(names, "subscription")
+	}
+	return names
+}
+
+// Subscription is an alert rule (Plugin API 0.2): it decides whether one
+// Record Version matches each Saved Query expression of a batch.
+type Subscription struct {
+	// ExpressionSchema is the JSON Schema of the Saved Query expression.
+	ExpressionSchema json.RawMessage `json:"expression_schema"`
+	// ConfigurationSchema is the JSON Schema of the per-Subscription
+	// evaluator configuration; nil accepts any object.
+	ConfigurationSchema json.RawMessage    `json:"configuration_schema,omitempty"`
+	MaxBatchSize        int                `json:"max_batch_size"`
+	TimeoutMS           int                `json:"timeout_ms"`
+	Retry               Retry              `json:"retry"`
+	Limits              SubscriptionLimits `json:"limits"`
+}
+
+type SubscriptionLimits struct {
+	MaxResponseBytes int `json:"max_response_bytes"`
 }
 
 type Normalizer struct {
@@ -227,6 +279,20 @@ func applyDefaults(m *Manifest) {
 			n.Limits.MaxParts = DefaultMaxParts
 		}
 	}
+	if s := m.Contributions.Subscription; s != nil {
+		if s.MaxBatchSize == 0 {
+			s.MaxBatchSize = DefaultMaxBatchSize
+		}
+		if s.TimeoutMS == 0 {
+			s.TimeoutMS = DefaultTimeoutMS
+		}
+		if s.Retry.MaxAttempts == 0 {
+			s.Retry.MaxAttempts = DefaultMaxAttempts
+		}
+		if s.Limits.MaxResponseBytes == 0 {
+			s.Limits.MaxResponseBytes = DefaultMaxResponseBytes
+		}
+	}
 	for i := range m.Secrets {
 		if m.Secrets[i].Required == nil {
 			required := true
@@ -264,37 +330,61 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 		for _, name := range ReservedContributions {
 			if _, declared := contributions[name]; declared {
 				issues = append(issues, Issue{Code: CodeReservedContribution, Path: "/contributions/" + name,
-					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer", name, PluginAPIVersion)})
+					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer or subscription", name, PluginAPIVersion)})
+			}
+		}
+		if sub, ok := contributions["subscription"].(map[string]any); ok {
+			for _, field := range []struct{ name, code, label string }{
+				{"expression_schema", CodeInvalidExpressionSchema, "expression"},
+				{"configuration_schema", CodeInvalidConfigSchema, "Subscription configuration"},
+			} {
+				if schema, present := sub[field.name]; present {
+					if _, err := compileUserSchema(schema); err != nil {
+						issues = append(issues, Issue{Code: field.code, Path: "/contributions/subscription/" + field.name,
+							Message: fmt.Sprintf("the %s schema is not a valid JSON Schema: %v", field.label, err)})
+					}
+				}
+			}
+		}
+		for _, field := range reservedFields {
+			if pointerPresent(root, field.path) {
+				issues = append(issues, Issue{Code: CodeReservedField, Path: field.path, Message: field.message})
 			}
 		}
 	}
 	if c, ok := root["compatibility"].(map[string]any); ok {
-		for _, target := range []struct {
-			field, code, label, version string
-			out                         **RangeCheck
-		}{
-			{"engine", CodeIncompatibleEngine, "engine", EngineVersion, &compat.Engine},
-			{"plugin_api", CodeIncompatiblePluginAPI, "Plugin API", PluginAPIVersion, &compat.PluginAPI},
-		} {
-			raw, ok := c[target.field].(string)
-			if !ok {
-				continue
-			}
-			path := "/compatibility/" + target.field
+		if raw, ok := c["engine"].(string); ok {
+			path := "/compatibility/engine"
 			r, err := ParseRange(raw)
 			if err != nil {
 				issues = append(issues, Issue{Code: CodeInvalidRange, Path: path, Message: err.Error()})
-				continue
+			} else {
+				v, verr := ParseVersion(EngineVersion)
+				compat.Engine = &RangeCheck{Range: r.String(), Version: EngineVersion, Compatible: verr == nil && r.Contains(v)}
+				if verr != nil {
+					issues = append(issues, Issue{Code: CodeIncompatibleEngine, Path: path,
+						Message: fmt.Sprintf("this build reports engine version %q, which is not SemVer; rebuild with a valid version", EngineVersion)})
+				} else if !compat.Engine.Compatible {
+					issues = append(issues, Issue{Code: CodeIncompatibleEngine, Path: path,
+						Message: fmt.Sprintf("engine %s does not satisfy the declared range %q", EngineVersion, r.String())})
+				}
 			}
-			v, verr := ParseVersion(target.version)
-			check := &RangeCheck{Range: r.String(), Version: target.version, Compatible: verr == nil && r.Contains(v)}
-			*target.out = check
-			if verr != nil {
-				issues = append(issues, Issue{Code: target.code, Path: path,
-					Message: fmt.Sprintf("this build reports %s version %q, which is not SemVer; rebuild with a valid version", target.label, target.version)})
-			} else if !check.Compatible {
-				issues = append(issues, Issue{Code: target.code, Path: path,
-					Message: fmt.Sprintf("%s %s does not satisfy the declared range %q", target.label, target.version, r.String())})
+		}
+		if raw, ok := c["plugin_api"].(string); ok {
+			path := "/compatibility/plugin_api"
+			r, err := ParseRange(raw)
+			if err != nil {
+				issues = append(issues, Issue{Code: CodeInvalidRange, Path: path, Message: err.Error()})
+			} else {
+				negotiated, ok := NegotiatePluginAPI(r)
+				compat.PluginAPI = &RangeCheck{Range: r.String(), Version: PluginAPIVersion, Compatible: ok}
+				if ok {
+					compat.PluginAPI.Version = negotiated
+				} else {
+					issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: path,
+						Message: fmt.Sprintf("no Plugin API version this engine supports (%s) satisfies the declared range %q", strings.Join(SupportedPluginAPIVersions, ", "), r.String())})
+				}
+				issues = append(issues, contributionVersionIssues(root, r)...)
 			}
 		}
 	}
@@ -391,4 +481,56 @@ func normalizeYAML(v any) any {
 		return t.Format(time.RFC3339Nano)
 	}
 	return v
+}
+
+// NegotiatePluginAPI returns the highest supported Plugin API version the
+// range admits: the version the engine speaks to that plugin.
+func NegotiatePluginAPI(r Range) (string, bool) {
+	for i := len(SupportedPluginAPIVersions) - 1; i >= 0; i-- {
+		if v, err := ParseVersion(SupportedPluginAPIVersions[i]); err == nil && r.Contains(v) {
+			return SupportedPluginAPIVersions[i], true
+		}
+	}
+	return "", false
+}
+
+// contributionVersionIssues reports a declared Contribution that none of the
+// supported Plugin API versions admitted by the range provides.
+func contributionVersionIssues(root map[string]any, r Range) []Issue {
+	contributions, _ := root["contributions"].(map[string]any)
+	var issues []Issue
+	for _, name := range sortedKeys(contributions) {
+		since, known := ContributionSince[name]
+		if !known {
+			continue
+		}
+		minimum, _ := ParseVersion(since)
+		admitted := false
+		for _, supported := range SupportedPluginAPIVersions {
+			if v, err := ParseVersion(supported); err == nil && v.Compare(minimum) >= 0 && r.Contains(v) {
+				admitted = true
+			}
+		}
+		if !admitted {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/" + name,
+				Message: fmt.Sprintf("the %s Contribution exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", name, since, r.String(), since, minimum.Major, minimum.Minor+1)})
+		}
+	}
+	return issues
+}
+
+// pointerPresent reports whether a JSON Pointer made of object keys resolves
+// in doc.
+func pointerPresent(doc any, pointer string) bool {
+	node := doc
+	for _, token := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
+		object, ok := node.(map[string]any)
+		if !ok {
+			return false
+		}
+		if node, ok = object[token]; !ok {
+			return false
+		}
+	}
+	return true
 }

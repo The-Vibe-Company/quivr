@@ -167,7 +167,7 @@ class Discovery(Model):
     plugin_api: str
     plugin: PluginIdentity
     manifest_digest: str
-    contributions: list[Literal["normalizer"]]
+    contributions: list[Literal["normalizer", "subscription"]]
 
 
 @dataclass(kw_only=True)
@@ -214,10 +214,28 @@ class NormalizerContribution(Model):
 
 
 @dataclass(kw_only=True)
-class ManifestContributions(Model):
-    "Keyed by Contribution name. Plugin API 0.1 accepts only normalizer; the other names are reserved and rejected."
+class SubscriptionLimits(Model):
+    max_response_bytes: int | None = None
 
-    normalizer: NormalizerContribution
+
+@dataclass(kw_only=True)
+class SubscriptionContribution(Model):
+    "An alert rule, since Plugin API 0.2: decides whether one Record Version matches each Saved Query expression of a batch."
+
+    expression_schema: Any
+    configuration_schema: Any | None = None
+    max_batch_size: int | None = None
+    timeout_ms: int | None = None
+    retry: RetryIntent | None = None
+    limits: SubscriptionLimits | None = None
+
+
+@dataclass(kw_only=True)
+class ManifestContributions(Model):
+    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1) and subscription (since 0.2). The other names are reserved and rejected."
+
+    normalizer: NormalizerContribution | None = None
+    subscription: SubscriptionContribution | None = None
 
 
 @dataclass(kw_only=True)
@@ -272,17 +290,117 @@ class InvocationFixture(Model):
     provenance: Provenance | None = None
 
 
+@dataclass(kw_only=True)
+class RecordPart(Model):
+    key: str
+    role: str
+    text: str
+
+
+@dataclass(kw_only=True)
+class EvaluatedRecord(Model):
+    "The evaluated Record Version."
+
+    corpus_id: str
+    record_id: str
+    record_version_id: str
+    enriched: bool
+    parts: list[RecordPart]
+
+
+@dataclass(kw_only=True)
+class SubscriptionRef(Model):
+    subscription_id: str
+    subscription_version_id: str
+    saved_query_id: str
+    saved_query_version_id: str
+
+
+@dataclass(kw_only=True)
+class Evaluation(Model):
+    id: str
+    expression: dict[str, Any]
+    configuration: dict[str, Any]
+    subscriptions: list[SubscriptionRef]
+
+
+@dataclass(kw_only=True)
+class SubscriptionRequest(Model):
+    "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size."
+
+    invocation_id: str
+    idempotency_key: str
+    contribution: Literal["subscription"] = "subscription"
+    organization_id: str
+    record: EvaluatedRecord
+    evaluations: list[Evaluation]
+    configuration: dict[str, Any]
+
+
+@dataclass(kw_only=True)
+class Evidence(Model):
+    "Required for match, optional otherwise."
+
+    explanation: str
+    part_keys: list[str] | None = None
+    details: dict[str, Any] | None = None
+
+
+@dataclass(kw_only=True)
+class Decision(Model):
+    id: str
+    decision: Literal["match", "no_match", "not_ready"]
+    evidence: Evidence | None = None
+
+
+@dataclass(kw_only=True)
+class SubscriptionResponse(Model):
+    "200 body of POST /v0/contributions/subscription, since Plugin API 0.2. Exactly one decision per requested evaluation id. A match carries evidence; the core stores it with the Match. Bounds this schema cannot express (one decision per id, Part keys that exist in the request, details of at most 16 KiB) are listed in README.md."
+
+    decisions: list[Decision]
+
+
+@dataclass(kw_only=True)
+class FixtureRecord(Model):
+    enriched: bool | None = None
+    parts: list[RecordPart]
+
+
+@dataclass(kw_only=True)
+class FixtureEvaluation(Model):
+    description: str | None = None
+    expression: dict[str, Any]
+    configuration: dict[str, Any] | None = None
+    expect: Literal["match", "no_match", "not_ready"] | None = None
+
+
+@dataclass(kw_only=True)
+class SubscriptionFixture(Model):
+    "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property."
+
+    description: str | None = None
+    configuration: dict[str, Any] | None = None
+    record: FixtureRecord
+    evaluations: list[FixtureEvaluation]
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
     "BlobContent",
+    "Decision",
     "Discovery",
     "ErrorEnvelope",
+    "EvaluatedRecord",
+    "Evaluation",
+    "Evidence",
     "ExtensionEntry",
     "Extensions",
     "FileReference",
+    "FixtureEvaluation",
     "FixtureInput",
+    "FixtureRecord",
     "Health",
     "InputBlob",
     "InvocationFixture",
@@ -300,6 +418,7 @@ __all__ = [
     "PluginIdentity",
     "PluginManifest",
     "Provenance",
+    "RecordPart",
     "RelationInput",
     "ResponseWarning",
     "RetryIntent",
@@ -307,5 +426,11 @@ __all__ = [
     "Secret",
     "SignedUrlReference",
     "SourceIdentity",
+    "SubscriptionContribution",
+    "SubscriptionFixture",
+    "SubscriptionLimits",
+    "SubscriptionRef",
+    "SubscriptionRequest",
+    "SubscriptionResponse",
     "TextContent",
 ]

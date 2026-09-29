@@ -1,0 +1,10 @@
+{
+  "record": {
+    "parts": [
+      {"key": "body", "role": "body", "text": "A short note."}
+    ]
+  },
+  "evaluations": [
+    {"expect": "match"}
+  ]
+}

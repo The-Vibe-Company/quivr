@@ -1,0 +1,17 @@
+{
+  "invocation_id": "inv-7f3c",
+  "idempotency_key": "gen-1:subscription:version-44:batch-1",
+  "contribution": "subscription",
+  "organization_id": "org-1",
+  "record": {
+    "corpus_id": "news",
+    "record_id": "record-44",
+    "record_version_id": "version-44",
+    "enriched": true,
+    "parts": [
+      {"key": "body", "role": "body", "text": "A short note."}
+    ]
+  },
+  "evaluations": [],
+  "configuration": {}
+}

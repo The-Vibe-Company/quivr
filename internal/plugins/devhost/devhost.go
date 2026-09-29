@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,9 @@ const (
 	CodeDiscoveryMismatch    = "discovery_mismatch"
 	CodeResponseTooLarge     = plugins.CodeResponseTooLarge
 	CodeInvalidErrorEnvelope = "invalid_error_envelope"
+	// CodeUnexpectedDecision is a subscription decision that differs from the
+	// decision a fixture expects.
+	CodeUnexpectedDecision = "unexpected_decision"
 )
 
 // Environment variables a plugin process receives (the local run convention).
@@ -267,13 +271,21 @@ func CheckDiscovery(ctx context.Context, baseURL string, report plugins.Report) 
 	if r, err := plugins.ParseRange(m.Compatibility.PluginAPI); err == nil {
 		if v, err := plugins.ParseVersion(doc.PluginAPI); err != nil || !r.Contains(v) {
 			mismatch("/plugin_api", "discovery implements Plugin API %s, outside the declared range %q", doc.PluginAPI, m.Compatibility.PluginAPI)
+		} else if !slices.Contains(plugins.SupportedPluginAPIVersions, doc.PluginAPI) {
+			mismatch("/plugin_api", "discovery implements Plugin API %s; this engine serves %v", doc.PluginAPI, plugins.SupportedPluginAPIVersions)
+		} else {
+			for _, name := range m.Contributions.Names() {
+				if since, err := plugins.ParseVersion(plugins.ContributionSince[name]); err == nil && v.Compare(since) < 0 {
+					mismatch("/plugin_api", "discovery implements Plugin API %s, but the declared %s Contribution needs Plugin API %s or later", doc.PluginAPI, name, plugins.ContributionSince[name])
+				}
+			}
 		}
 	}
-	declared := []string{}
-	if m.Contributions.Normalizer != nil {
-		declared = append(declared, "normalizer")
-	}
-	if strings.Join(doc.Contributions, ",") != strings.Join(declared, ",") {
+	// Contributions are a set: discovery may list them in any order.
+	declared := m.Contributions.Names()
+	served := slices.Clone(doc.Contributions)
+	slices.Sort(served)
+	if !slices.Equal(served, slices.Sorted(slices.Values(declared))) {
 		mismatch("/contributions", "discovery lists Contributions %v; the manifest declares %v", doc.Contributions, declared)
 	}
 	return issues, nil
@@ -449,19 +461,23 @@ func InvokeNormalizer(ctx context.Context, baseURL string, request []byte, maxRe
 // body, such as a closure over plugins.CheckNormalizerOutput with the
 // invocation context.
 func InvokeNormalizerWith(ctx context.Context, baseURL string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v0/contributions/normalizer", bytes.NewReader(request))
+	return invoke(ctx, baseURL, "/v0/contributions/normalizer", request, maxResponseBytes, check)
+}
+
+func invoke(ctx context.Context, baseURL, route string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+route, bytes.NewReader(request))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("POST /v0/contributions/normalizer: %w", err)
+		return nil, fmt.Errorf("POST %s: %w", route, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read normalizer response: %w", err)
+		return nil, fmt.Errorf("read %s response: %w", route, err)
 	}
 	result := &Result{Status: resp.StatusCode, Body: body}
 	if len(body) > maxResponseBytes {

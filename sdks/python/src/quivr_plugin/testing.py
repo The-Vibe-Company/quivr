@@ -5,6 +5,11 @@ local input file and optional configuration. ``build_request`` turns it into the
 same normalizer request ``quivr plugin dev --fixture`` sends: an absolute
 file:// reference, the computed size and SHA-256, and deterministic development
 identifiers.
+
+A subscription fixture (contracts/plugins/v0/subscription-fixture.schema.json)
+holds record Parts and evaluations with optional expected decisions.
+``build_subscription_requests`` turns it into the same batches the Contract
+Runner and ``quivr plugin dev`` send.
 """
 from __future__ import annotations
 
@@ -13,7 +18,21 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .models import FileReference, InputBlob, InvocationFixture, NormalizerRequest, NormalizerResponse, SourceIdentity
+from .manifest import DEFAULT_MAX_BATCH_SIZE
+from .models import (
+    EvaluatedRecord,
+    Evaluation,
+    FileReference,
+    InputBlob,
+    InvocationFixture,
+    NormalizerRequest,
+    NormalizerResponse,
+    SourceIdentity,
+    SubscriptionFixture,
+    SubscriptionRef,
+    SubscriptionRequest,
+    SubscriptionResponse,
+)
 from .schema import protocol_errors
 from .server import Plugin, Reply
 
@@ -71,3 +90,78 @@ def expect_response(reply: Reply) -> NormalizerResponse:
     if reply.status != 200:
         raise AssertionError(f"normalizer returned HTTP {reply.status}: {reply.body}")
     return NormalizerResponse.from_dict(reply.body)
+
+
+def load_subscription_fixture(path: str | Path) -> SubscriptionFixture:
+    """Read and schema-check a subscription fixture file."""
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    problems = protocol_errors("subscription-fixture.schema.json", document)
+    if problems:
+        raise ValueError(f"{path} is not a valid subscription fixture: " + "; ".join(problems))
+    return SubscriptionFixture.from_dict(document)
+
+
+def build_subscription_requests(fixture_path: str | Path, *, max_batch_size: int = DEFAULT_MAX_BATCH_SIZE) -> list[SubscriptionRequest]:
+    """Build the development subscription requests for a fixture file, split into batches.
+
+    Evaluations are numbered e1, e2, ... and evaluation n stands for Subscription
+    dev-subscription-n; the Record Version ids and idempotency keys derive from the
+    SHA-256 of the fixture bytes, exactly like quivr plugin dev and the Contract Runner.
+    """
+    raw = Path(fixture_path).read_bytes()
+    fixture = load_subscription_fixture(fixture_path)
+    digest = hashlib.sha256(raw).hexdigest()
+    short = digest[:16]
+    record = EvaluatedRecord(corpus_id="dev-corpus", record_id=f"dev-record-{short}", record_version_id=f"dev-version-{short}",
+                             enriched=bool(fixture.record.enriched), parts=fixture.record.parts)
+    evaluations = [
+        Evaluation(
+            id=f"e{n}",
+            expression=item.expression,
+            configuration=item.configuration if item.configuration is not None else {},
+            subscriptions=[SubscriptionRef(subscription_id=f"dev-subscription-{n}", subscription_version_id=f"dev-subscription-version-{n}",
+                                           saved_query_id=f"dev-saved-query-{n}", saved_query_version_id=f"dev-saved-query-version-{n}")],
+        )
+        for n, item in enumerate(fixture.evaluations, start=1)
+    ]
+    batches = []
+    for index, start in enumerate(range(0, len(evaluations), max_batch_size), start=1):
+        batches.append(SubscriptionRequest(
+            invocation_id=f"dev-invocation-{short}-{index}",
+            idempotency_key=f"dev:{digest}:{index}",
+            organization_id="dev-organization",
+            record=record,
+            evaluations=evaluations[start:start + max_batch_size],
+            configuration=fixture.configuration if fixture.configuration is not None else {},
+        ))
+    return batches
+
+
+def expected_decisions(fixture_path: str | Path) -> dict[str, str]:
+    """Map evaluation ids (e1, e2, ...) to the decisions a subscription fixture expects."""
+    fixture = load_subscription_fixture(fixture_path)
+    return {f"e{n}": item.expect for n, item in enumerate(fixture.evaluations, start=1) if item.expect}
+
+
+def invoke_subscription_fixture(plugin: Plugin, fixture_path: str | Path) -> SubscriptionResponse:
+    """Run a subscription fixture through the plugin's subscription route in process, batch by batch.
+
+    Returns the decisions of every batch; raises AssertionError on an error reply or when a
+    decision differs from the fixture's expected decision.
+    """
+    decisions = []
+    for request in build_subscription_requests(fixture_path, max_batch_size=plugin.manifest.max_batch_size):
+        decisions.extend(expect_subscription_response(plugin.evaluate(request)).decisions)
+    expected = expected_decisions(fixture_path)
+    for decision in decisions:
+        want = expected.get(decision.id)
+        if want and want != decision.decision:
+            raise AssertionError(f"evaluation {decision.id} answered {decision.decision}; the fixture expects {want}")
+    return SubscriptionResponse(decisions=decisions)
+
+
+def expect_subscription_response(reply: Reply) -> SubscriptionResponse:
+    """Return the decoded response of a successful subscription reply, or raise AssertionError with the error envelope."""
+    if reply.status != 200:
+        raise AssertionError(f"subscription returned HTTP {reply.status}: {reply.body}")
+    return SubscriptionResponse.from_dict(reply.body)

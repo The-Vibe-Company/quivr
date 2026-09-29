@@ -1,0 +1,4 @@
+{
+  "description": "A well-behaved subscription plugin: one decision per evaluation, evidence within bounds.",
+  "certified": true
+}

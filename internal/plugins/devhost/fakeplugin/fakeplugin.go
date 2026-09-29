@@ -33,6 +33,8 @@ const (
 	// by-record-key, which takes each request's mode from its Record Key up to
 	// the first "." (so "terminal.1" answers like the terminal mode), letting
 	// one pinned plugin exercise every failure class through the public API.
+	// POST /v0/contributions/subscription answers with a substring rule; see
+	// decide for its broken modes.
 	EnvMode   = "QUIVR_FAKE_PLUGIN_MODE"
 	EnvMarker = "QUIVR_FAKE_PLUGIN_MARKER" // file appended with "start\n" on every start
 )
@@ -50,6 +52,69 @@ func MaybeRun() {
 		os.Exit(3)
 	}
 	os.Exit(0)
+}
+
+// decide answers a valid subscription request. The well-behaved rule matches
+// when the expression's "text" appears, case-insensitively, in a Part. The
+// other modes are the broken subscription plugins of tests/plugin-contract:
+// unknown-part-key, oversize-evidence, missing-decision, batch-dependent
+// (decides by position in the batch), nondeterministic and never-match.
+func decide(mode string, body []byte) map[string]any {
+	var request struct {
+		InvocationID string `json:"invocation_id"`
+		Record       struct {
+			Parts []struct {
+				Key  string `json:"key"`
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"record"`
+		Evaluations []struct {
+			ID         string `json:"id"`
+			Expression struct {
+				Text string `json:"text"`
+			} `json:"expression"`
+		} `json:"evaluations"`
+	}
+	_ = json.Unmarshal(body, &request)
+	decisions := []any{}
+	for i, e := range request.Evaluations {
+		needle := strings.ToLower(e.Expression.Text)
+		var keys []string
+		for _, p := range request.Record.Parts {
+			if needle != "" && strings.Contains(strings.ToLower(p.Text), needle) {
+				keys = append(keys, p.Key)
+			}
+		}
+		matched := len(keys) > 0
+		switch mode {
+		case "batch-dependent":
+			matched, keys = i%2 == 0, nil
+		case "never-match":
+			matched = false
+		}
+		if !matched {
+			decisions = append(decisions, map[string]any{"id": e.ID, "decision": "no_match"})
+			continue
+		}
+		explanation := fmt.Sprintf("%q appears in %d Parts.", e.Expression.Text, len(keys))
+		switch mode {
+		case "unknown-part-key":
+			keys = append(keys, "no-such-part")
+		case "oversize-evidence":
+			explanation = strings.Repeat("é", 4097)
+		case "nondeterministic":
+			explanation += " Invocation " + request.InvocationID + "."
+		}
+		evidence := map[string]any{"explanation": explanation, "details": map[string]any{"needle": needle}}
+		if keys != nil {
+			evidence["part_keys"] = keys
+		}
+		decisions = append(decisions, map[string]any{"id": e.ID, "decision": "match", "evidence": evidence})
+	}
+	if mode == "missing-decision" && len(decisions) > 0 {
+		decisions = decisions[:len(decisions)-1]
+	}
+	return map[string]any{"decisions": decisions}
 }
 
 func serve() error {
@@ -83,6 +148,13 @@ func serve() error {
 	if d := os.Getenv(EnvDigest); d != "" {
 		digest = d
 	}
+	// Like an SDK, serve the highest Plugin API version the manifest admits.
+	pluginAPI := plugins.PluginAPIVersion
+	if r, err := plugins.ParseRange(report.Manifest.Compatibility.PluginAPI); err == nil {
+		if v, ok := plugins.NegotiatePluginAPI(r); ok {
+			pluginAPI = v
+		}
+	}
 	mux := http.NewServeMux()
 	write := func(w http.ResponseWriter, status int, body any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -98,10 +170,10 @@ func serve() error {
 	})
 	mux.HandleFunc("GET /v0/discovery", func(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, map[string]any{
-			"plugin_api":      plugins.PluginAPIVersion,
+			"plugin_api":      pluginAPI,
 			"plugin":          map[string]string{"id": report.Manifest.ID, "version": report.Manifest.Version},
 			"manifest_digest": digest,
-			"contributions":   []string{"normalizer"},
+			"contributions":   report.Manifest.Contributions.Names(),
 		})
 	})
 	mux.HandleFunc("POST /v0/contributions/normalizer", func(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +283,25 @@ func serve() error {
 		default:
 			write(w, 200, ok)
 		}
+	})
+	mux.HandleFunc("POST /v0/contributions/subscription", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var invalid error
+		if issues := plugins.ValidateDocument("subscription-request.schema.json", body); len(issues) > 0 {
+			invalid = fmt.Errorf("%s %s", issues[0].Path, issues[0].Message)
+		}
+		if invalid != nil {
+			switch mode {
+			case "wrong-error-class":
+				write(w, 503, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": true})
+			case "accept-invalid":
+				write(w, 202, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": false})
+			default:
+				write(w, 400, map[string]any{"code": "invalid_request", "message": invalid.Error(), "retryable": false})
+			}
+			return
+		}
+		write(w, 200, decide(mode, body))
 	})
 	listener, err := net.Listen("tcp", net.JoinHostPort(os.Getenv("QUIVR_PLUGIN_HOST"), os.Getenv("QUIVR_PLUGIN_PORT")))
 	if err != nil {

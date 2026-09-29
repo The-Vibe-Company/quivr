@@ -1,5 +1,5 @@
 {
-  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests) or the engine Manifest validation (responses) reports.",
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) or the engine subscription output validation (subscription responses, judged against the request named by request) reports.",
   "cases": [
     {
       "file": "manifests/valid/full.yaml",
@@ -45,7 +45,7 @@
       "errors": [
         "incompatible_plugin_api"
       ],
-      "description": "Plugin API 0.1.0 is outside the declared range."
+      "description": "No Plugin API version this engine supports (0.1.0, 0.2.0) is inside the declared range."
     },
     {
       "file": "manifests/invalid/incompatible-engine.yaml",
@@ -260,7 +260,7 @@
       "schema": "discovery.schema.json",
       "valid": false,
       "schema_valid": false,
-      "description": "Discovery may only list normalizer in v0."
+      "description": "Discovery may list only normalizer and subscription in v0."
     },
     {
       "file": "protocol/health-ok.json",
@@ -303,6 +303,225 @@
       "valid": false,
       "schema_valid": false,
       "description": "An invocation fixture must declare the input media type."
+    },
+    {
+      "file": "manifests/valid/subscription.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "An alert-rule plugin: subscription Contribution with a discriminated expression schema, every subscription field."
+    },
+    {
+      "file": "manifests/invalid/subscription-plugin-api-0.1.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "subscription exists since Plugin API 0.2; the declared range admits only 0.1."
+    },
+    {
+      "file": "manifests/invalid/subscription-invalid-schemas.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema",
+        "invalid_expression_schema"
+      ],
+      "description": "expression_schema and configuration_schema must compile as JSON Schema 2020-12."
+    },
+    {
+      "file": "manifests/invalid/subscription-vectors.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "reserved_field"
+      ],
+      "description": "vectors is reserved for a later Plugin API version."
+    },
+    {
+      "file": "manifests/invalid/no-contribution.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A manifest declares at least one Contribution."
+    },
+    {
+      "file": "requests/subscription/valid.json",
+      "schema": "subscription-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "One Record Version and two distinct evaluations; the first stands for two Subscriptions."
+    },
+    {
+      "file": "requests/subscription/missing-record.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "The evaluated Record Version is mandatory."
+    },
+    {
+      "file": "requests/subscription/empty-evaluations.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A request carries at least one evaluation."
+    },
+    {
+      "file": "requests/subscription/reserved-vector.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Part vectors are reserved and never sent in Plugin API 0.2."
+    },
+    {
+      "file": "responses/subscription/valid.json",
+      "schema": "subscription-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [],
+      "description": "A match with evidence and a no_match."
+    },
+    {
+      "file": "responses/subscription/explanation-at-limit.json",
+      "schema": "subscription-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [],
+      "description": "An explanation of exactly 4096 code points (more than 4096 bytes) and a not_ready."
+    },
+    {
+      "file": "responses/subscription/missing-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "missing_decision"
+      ],
+      "description": "Evaluation e2 is not answered."
+    },
+    {
+      "file": "responses/subscription/duplicate-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "duplicate_decision"
+      ],
+      "description": "Evaluation e1 is answered twice."
+    },
+    {
+      "file": "responses/subscription/unknown-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "unknown_decision"
+      ],
+      "description": "A decision answers an id the request does not carry."
+    },
+    {
+      "file": "responses/subscription/unknown-part-key.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "unknown_part_key"
+      ],
+      "description": "Evidence names a Part key the request does not carry."
+    },
+    {
+      "file": "responses/subscription/match-without-evidence.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "missing_evidence"
+      ],
+      "description": "A match needs evidence with an explanation."
+    },
+    {
+      "file": "responses/subscription/explanation-too-long.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "evidence_too_large"
+      ],
+      "description": "An explanation of 4097 code points."
+    },
+    {
+      "file": "responses/subscription/too-many-part-keys.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "evidence_too_large"
+      ],
+      "description": "101 Part keys."
+    },
+    {
+      "file": "responses/subscription/details-too-large.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "details_too_large"
+      ],
+      "description": "Details over 16 KiB once serialized."
+    },
+    {
+      "file": "responses/subscription/nul-in-evidence.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "invalid_evidence"
+      ],
+      "description": "Evidence with a NUL character, which the engine cannot store."
+    },
+    {
+      "file": "responses/subscription/unknown-decision-value.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Decisions are match, no_match or not_ready."
+    },
+    {
+      "file": "subscriptions/strike.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Subscription fixture: record Parts and two evaluations with expected decisions."
+    },
+    {
+      "file": "subscriptions/missing-expression.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Every fixture evaluation carries an expression."
     }
   ]
 }

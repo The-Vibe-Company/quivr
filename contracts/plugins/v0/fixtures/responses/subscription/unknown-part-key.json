@@ -1,0 +1,10 @@
+{
+  "decisions": [
+    {
+      "id": "e1",
+      "decision": "match",
+      "evidence": {"explanation": "\"strike\" appears in the lede.", "part_keys": ["lede"]}
+    },
+    {"id": "e2", "decision": "no_match"}
+  ]
+}

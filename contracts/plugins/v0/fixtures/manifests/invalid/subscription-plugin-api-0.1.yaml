@@ -1,0 +1,9 @@
+# subscription exists since Plugin API 0.2; a range limited to 0.1 cannot declare it.
+id: example-alerts
+version: 0.3.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  subscription:
+    expression_schema: {type: object}

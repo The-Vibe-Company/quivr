@@ -1,0 +1,7 @@
+# A manifest declares at least one Contribution.
+id: example-empty
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.3.0"
+contributions: {}

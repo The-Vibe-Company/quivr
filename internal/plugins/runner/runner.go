@@ -43,6 +43,13 @@ const (
 	CheckInvoke         = "invoke"
 	CheckReplay         = "replay"
 	CheckInvalidRequest = "invalid_request"
+	CheckBatch          = "batch"
+)
+
+// Contributions a check can concern.
+const (
+	ContributionNormalizer   = "normalizer"
+	ContributionSubscription = "subscription"
 )
 
 // Issue codes the runner adds to those of packages plugins and devhost.
@@ -57,7 +64,8 @@ const (
 	CodeNondeterministic   = "nondeterministic_output"
 	CodeAcceptedInvalid    = "accepted_invalid_request"
 	CodeWrongErrorClass    = "wrong_error_class"
-	CodeMissingNormalizer  = "missing_normalizer"
+	CodeBatchDependent     = "batch_dependent_decision"
+	CodeUnexpectedDecision = devhost.CodeUnexpectedDecision
 	normativeFixturePrefix = "contracts:"
 )
 
@@ -72,13 +80,16 @@ const (
 
 // Check is one verdict in the report.
 type Check struct {
-	ID         string          `json:"id"`
-	Title      string          `json:"title"`
-	Status     Status          `json:"status"`
-	Fixture    string          `json:"fixture,omitempty"`
-	DurationMS int64           `json:"duration_ms"`
-	Note       string          `json:"note,omitempty"`
-	Issues     []plugins.Issue `json:"issues"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Contribution is the Contribution the check exercises; empty for
+	// checks of the whole plugin.
+	Contribution string          `json:"contribution,omitempty"`
+	Status       Status          `json:"status"`
+	Fixture      string          `json:"fixture,omitempty"`
+	DurationMS   int64           `json:"duration_ms"`
+	Note         string          `json:"note,omitempty"`
+	Issues       []plugins.Issue `json:"issues"`
 }
 
 // Plugin identifies the certified plugin.
@@ -204,13 +215,57 @@ func (r *run) execute(ctx context.Context) {
 	}
 	r.add(Check{ID: CheckDiscovery, Title: "GET /v0/discovery matches quivr-plugin.yaml", Issues: issues}, started)
 
-	requests := r.fixtures()
-	for _, req := range requests {
-		r.invoke(ctx, req)
+	own := r.ownFixtures()
+	if r.m.Contributions.Normalizer != nil {
+		requests := r.fixtures(own)
+		for _, req := range requests {
+			r.invoke(ctx, req)
+		}
+		if len(requests) > 0 {
+			r.invalidRequests(ctx, requests[0].body)
+		}
 	}
-	if len(requests) > 0 {
-		r.invalidRequests(ctx, requests[0].body)
+	if r.m.Contributions.Subscription != nil {
+		batches := r.subscriptionFixtures(own)
+		for _, b := range batches {
+			r.invokeSubscription(ctx, b)
+		}
+		if len(batches) > 0 {
+			r.invalidSubscriptionRequests(ctx, batches[0].body)
+		}
 	}
+}
+
+type ownFixture struct {
+	label, path  string
+	subscription bool
+}
+
+// ownFixtures lists the plugin's own fixture files (<dir>/fixtures/*.json or
+// --fixture), each classified as a subscription fixture or an invocation
+// fixture.
+func (r *run) ownFixtures() []ownFixture {
+	files := r.opts.Fixtures
+	if len(files) == 0 {
+		files, _ = filepath.Glob(filepath.Join(filepath.Dir(r.report.Plugin.ManifestPath), "fixtures", "*.json"))
+		sort.Strings(files)
+	}
+	base := filepath.Dir(r.report.Plugin.ManifestPath)
+	var out []ownFixture
+	for _, file := range files {
+		label := file
+		if rel, err := filepath.Rel(base, file); err == nil && !strings.HasPrefix(rel, "..") {
+			label = filepath.ToSlash(rel)
+		}
+		raw, err := os.ReadFile(file)
+		subscription := devhost.IsSubscriptionFixture(raw)
+		if (err != nil || !json.Valid(raw)) && r.m.Contributions.Normalizer == nil {
+			// Unreadable or not JSON: let the declared Contribution report the real error.
+			subscription = true
+		}
+		out = append(out, ownFixture{label: label, path: file, subscription: subscription})
+	}
+	return out
 }
 
 // inspect runs the manifest and compatibility checks with the engine's
@@ -231,10 +286,6 @@ func (r *run) inspect() bool {
 	}
 	if m := inspected.Manifest; m != nil {
 		r.report.Plugin.ID, r.report.Plugin.Version = m.ID, m.Version
-		if m.Contributions.Normalizer == nil {
-			manifestIssues = append(manifestIssues, plugins.Issue{Code: CodeMissingNormalizer, Path: "/contributions",
-				Message: "the manifest declares no normalizer, the only Contribution Plugin API 0.1 certifies"})
-		}
 	}
 	r.add(Check{ID: CheckManifest, Title: "quivr-plugin.yaml is valid (quivr plugin inspect)", Issues: manifestIssues}, started)
 	compat := Check{ID: CheckCompatibility, Issues: compatIssues,
@@ -293,9 +344,9 @@ type fixtureRequest struct {
 
 // fixtures builds requests from the normative invocation fixtures that apply
 // to the plugin's media types and configuration, plus the plugin's own.
-func (r *run) fixtures() []fixtureRequest {
+func (r *run) fixtures(own []ownFixture) []fixtureRequest {
 	started := time.Now()
-	check := Check{ID: CheckFixtures, Title: "invocation fixtures build valid requests"}
+	check := Check{ID: CheckFixtures, Contribution: ContributionNormalizer, Title: "invocation fixtures build valid requests"}
 	var out []fixtureRequest
 	var notes []string
 	declared := map[string]bool{}
@@ -339,16 +390,14 @@ func (r *run) fixtures() []fixtureRequest {
 			out = append(out, fixtureRequest{label: label, body: body})
 		}
 	}
-	own := r.opts.Fixtures
-	if len(own) == 0 {
-		own, _ = filepath.Glob(filepath.Join(filepath.Dir(r.report.Plugin.ManifestPath), "fixtures", "*.json"))
-		sort.Strings(own)
-	}
-	base := filepath.Dir(r.report.Plugin.ManifestPath)
-	for _, file := range own {
-		label := file
-		if rel, err := filepath.Rel(base, file); err == nil && !strings.HasPrefix(rel, "..") {
-			label = filepath.ToSlash(rel)
+	for _, f := range own {
+		label, file := f.label, f.path
+		if f.subscription {
+			if r.m.Contributions.Subscription == nil {
+				check.Issues = append(check.Issues, plugins.Issue{Code: CodeInvalidFixture, Path: "/contributions",
+					Message: label + ": a subscription fixture, but the manifest declares no subscription Contribution"})
+			}
+			continue
 		}
 		body, issues, err := devhost.BuildFixtureRequest(file, r.m)
 		if err != nil {
@@ -387,6 +436,16 @@ func (r *run) timeout() time.Duration {
 	return time.Duration(r.m.Contributions.Normalizer.TimeoutMS) * time.Millisecond
 }
 
+// deadlineIssue reports an invocation abandoned at the declared deadline, or
+// nil when callCtx did not expire on its own.
+func deadlineIssue(ctx, callCtx context.Context, contribution string, timeoutMS int) *plugins.Issue {
+	if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		return &plugins.Issue{Code: CodeDeadlineExceeded, Path: "/contributions/" + contribution + "/timeout_ms",
+			Message: fmt.Sprintf("no complete answer within the declared timeout_ms %d; the engine abandons the invocation at this deadline", timeoutMS)}
+	}
+	return nil
+}
+
 // call posts one request within the declared deadline and judges a 200 body
 // with plugins.CheckNormalizerOutput for that request's input Blob.
 func (r *run) call(ctx context.Context, body []byte) (*devhost.Result, *plugins.Issue) {
@@ -400,9 +459,8 @@ func (r *run) call(ctx context.Context, body []byte) (*devhost.Result, *plugins.
 	if err == nil {
 		return result, nil
 	}
-	if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-		return nil, &plugins.Issue{Code: CodeDeadlineExceeded, Path: "/contributions/normalizer/timeout_ms",
-			Message: fmt.Sprintf("no complete answer within the declared timeout_ms %d; the engine abandons the invocation at this deadline", r.m.Contributions.Normalizer.TimeoutMS)}
+	if issue := deadlineIssue(ctx, callCtx, ContributionNormalizer, r.m.Contributions.Normalizer.TimeoutMS); issue != nil {
+		return nil, issue
 	}
 	return nil, &plugins.Issue{Code: CodeUnavailable, Message: err.Error()}
 }
@@ -444,12 +502,12 @@ func verifyInput(input plugins.InputBlob, request []byte) func(context.Context, 
 
 func (r *run) invoke(ctx context.Context, req fixtureRequest) {
 	started := time.Now()
-	check := Check{ID: CheckInvoke, Fixture: req.label,
+	check := Check{ID: CheckInvoke, Contribution: ContributionNormalizer, Fixture: req.label,
 		Title: fmt.Sprintf("valid invocation within %d ms returns output the engine accepts", r.m.Contributions.Normalizer.TimeoutMS)}
 	first, problem := r.call(ctx, req.body)
 	check.Issues = judgeSuccess(first, problem)
 	r.add(check, started)
-	replay := Check{ID: CheckReplay, Fixture: req.label, Title: "replaying the idempotency key returns the same logical output"}
+	replay := Check{ID: CheckReplay, Contribution: ContributionNormalizer, Fixture: req.label, Title: "replaying the idempotency key returns the same logical output"}
 	if len(check.Issues) > 0 {
 		replay.Status = Skip
 		replay.Note = "the first invocation failed"
@@ -579,22 +637,29 @@ func (r *run) invalidRequests(ctx context.Context, valid []byte) {
 	}
 	for _, c := range cases {
 		started := time.Now()
-		check := Check{ID: CheckInvalidRequest, Fixture: c.label,
+		check := Check{ID: CheckInvalidRequest, Contribution: ContributionNormalizer, Fixture: c.label,
 			Title: "an invalid request is refused with a terminal error envelope (" + c.reason + ")"}
 		result, problem := r.call(ctx, c.body)
-		switch {
-		case problem != nil:
-			check.Issues = []plugins.Issue{*problem}
-		case result.Status >= 200 && result.Status < 300, result.Error == nil && len(result.Issues) == 0:
-			check.Issues = []plugins.Issue{{Code: CodeAcceptedInvalid, Message: fmt.Sprintf("HTTP %d for an invalid request (%s); answer 4xx with the error envelope and retryable false", result.Status, c.reason)}}
-		case len(result.Issues) > 0:
-			check.Issues = result.Issues
-		case result.Error.Retryable:
-			check.Issues = []plugins.Issue{{Code: CodeWrongErrorClass, Path: "/retryable",
-				Message: fmt.Sprintf("HTTP %d %s with retryable true for an invalid request (%s); the engine would retry a request that can never succeed; answer retryable false", result.Status, result.Error.Code, c.reason)}}
-		}
+		check.Issues = judgeRefusal(result, problem, c.reason)
 		r.add(check, started)
 	}
+}
+
+// judgeRefusal requires an invalid request to be refused with the error
+// envelope and retryable false.
+func judgeRefusal(result *devhost.Result, problem *plugins.Issue, reason string) []plugins.Issue {
+	switch {
+	case problem != nil:
+		return []plugins.Issue{*problem}
+	case result.Status >= 200 && result.Status < 300, result.Error == nil && len(result.Issues) == 0:
+		return []plugins.Issue{{Code: CodeAcceptedInvalid, Message: fmt.Sprintf("HTTP %d for an invalid request (%s); answer 4xx with the error envelope and retryable false", result.Status, reason)}}
+	case len(result.Issues) > 0:
+		return result.Issues
+	case result.Error.Retryable:
+		return []plugins.Issue{{Code: CodeWrongErrorClass, Path: "/retryable",
+			Message: fmt.Sprintf("HTTP %d %s with retryable true for an invalid request (%s); the engine would retry a request that can never succeed; answer retryable false", result.Status, result.Error.Code, reason)}}
+	}
+	return nil
 }
 
 // WriteJSON writes the report as indented JSON.

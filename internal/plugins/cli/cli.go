@@ -135,7 +135,7 @@ func printReport(w io.Writer, r plugins.Report) {
 	for _, c := range []struct {
 		label, against string
 		check          *plugins.RangeCheck
-	}{{"engine", "engine " + r.EngineVersion, r.Compatibility.Engine}, {"plugin_api", "Plugin API " + r.PluginAPIVersion, r.Compatibility.PluginAPI}} {
+	}{{"engine", "engine " + r.EngineVersion, r.Compatibility.Engine}, {"plugin_api", pluginAPIAgainst(r.Compatibility.PluginAPI), r.Compatibility.PluginAPI}} {
 		if c.check == nil {
 			row(c.label, "(invalid or missing range) against "+c.against)
 			continue
@@ -154,6 +154,25 @@ func printReport(w io.Writer, r plugins.Report) {
 			row("retry intent", fmt.Sprintf("up to %d attempts on retryable errors", n.Retry.MaxAttempts))
 			row("declared max response", fmt.Sprintf("%d bytes", n.Limits.MaxResponseBytes))
 			row("declared max parts", fmt.Sprint(n.Limits.MaxParts))
+		}
+		if sub := m.Contributions.Subscription; sub != nil {
+			fmt.Fprintln(tw, "Contribution subscription")
+			row("max batch size", fmt.Sprintf("%d evaluations per request", sub.MaxBatchSize))
+			row("timeout", fmt.Sprintf("%d ms", sub.TimeoutMS))
+			row("retry intent", fmt.Sprintf("up to %d attempts on retryable errors", sub.Retry.MaxAttempts))
+			row("declared max response", fmt.Sprintf("%d bytes", sub.Limits.MaxResponseBytes))
+			fmt.Fprintln(tw, "Expression schema")
+			for _, line := range describeExpressionSchema(sub.ExpressionSchema) {
+				row(line[0], line[1])
+			}
+			fmt.Fprintln(tw, "Subscription configuration schema")
+			if len(sub.ConfigurationSchema) == 0 {
+				row("(none)", "any object")
+			} else {
+				for _, line := range describeSchema(sub.ConfigurationSchema) {
+					row(line[0], line[1])
+				}
+			}
 		}
 		fmt.Fprintln(tw, "Configuration schema")
 		if m.Configuration == nil {
@@ -249,4 +268,38 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// pluginAPIAgainst names the Plugin API version a range was checked against:
+// the negotiated version when compatible, else every supported version.
+func pluginAPIAgainst(check *plugins.RangeCheck) string {
+	if check != nil && check.Compatible {
+		return "Plugin API " + check.Version
+	}
+	return "Plugin API " + strings.Join(plugins.SupportedPluginAPIVersions, " or ")
+}
+
+// describeExpressionSchema lists the alert kinds of an expression schema that
+// discriminates them with a oneOf over a constant kind property.
+func describeExpressionSchema(raw json.RawMessage) [][2]string {
+	var schema struct {
+		OneOf []struct {
+			Properties struct {
+				Kind struct {
+					Const *string `json:"const"`
+				} `json:"kind"`
+			} `json:"properties"`
+		} `json:"oneOf"`
+	}
+	if err := json.Unmarshal(raw, &schema); err == nil && len(schema.OneOf) > 0 {
+		var kinds []string
+		for _, branch := range schema.OneOf {
+			if branch.Properties.Kind.Const == nil {
+				return describeSchema(raw)
+			}
+			kinds = append(kinds, *branch.Properties.Kind.Const)
+		}
+		return [][2]string{{"kinds", strings.Join(kinds, ", ")}}
+	}
+	return describeSchema(raw)
 }

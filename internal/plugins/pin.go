@@ -207,6 +207,17 @@ func (p *Pin) Generation() string {
 	return "startup:" + p.Manifest.ID + "@" + p.Manifest.Version + "#" + p.ManifestDigest
 }
 
+// PluginAPI is the Plugin API version the engine speaks to the pinned plugin:
+// the highest supported version its plugin_api range admits.
+func (p *Pin) PluginAPI() string {
+	if r, err := ParseRange(p.Manifest.Compatibility.PluginAPI); err == nil {
+		if v, ok := NegotiatePluginAPI(r); ok {
+			return v
+		}
+	}
+	return PluginAPIVersion
+}
+
 // Report is the inspection report the discovery check compares against.
 func (p *Pin) Report() Report {
 	m := p.Manifest

@@ -18,6 +18,22 @@ func run(args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
+func TestInspectSummarizesASubscriptionContribution(t *testing.T) {
+	code, out, errOut := run("inspect", fixtures+"valid/subscription.yaml")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	for _, want := range []string{
+		"example-alerts 0.3.0", "Plugin API 0.2.0", "Contribution subscription",
+		"16 evaluations per request", "5000 ms", "2 attempts", "1048576 bytes",
+		"kinds", "substring, any_of", "case_sensitive",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestInspectPrintsAHumanSummary(t *testing.T) {
 	code, out, errOut := run("inspect", fixtures+"valid/full.yaml")
 	if code != 0 || errOut != "" {

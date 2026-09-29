@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "__PLUGIN_ID__"
+version = "0.1.0"
+description = "A Quivr normalizer plugin."
+requires-python = ">=3.12"
+# The Quivr Plugin SDK is installed from the Quivr repository (see README.md).
+dependencies = ["quivr-plugin-sdk>=0.2,<0.3"]
+
+[tool.setuptools]
+packages = ["__PLUGIN_MODULE__"]

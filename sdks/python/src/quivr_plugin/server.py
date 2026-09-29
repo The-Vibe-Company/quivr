@@ -1,7 +1,8 @@
 """Plugin Protocol v0 server adapter.
 
-A ``Plugin`` binds a manifest to a normalizer function and serves the three
-protocol routes over HTTP with the standard library::
+A ``Plugin`` binds a manifest to a normalizer and/or a subscription handler
+(see quivr_plugin.subscription) and serves the protocol routes over HTTP with
+the standard library::
 
     plugin = Plugin(Path(__file__).parent.parent / "quivr-plugin.yaml")
 
@@ -30,14 +31,23 @@ from typing import Any
 from .blob import read_input
 from .errors import PluginError, TerminalError
 from .logs import configure_logging, invocation_context
-from .manifest import PLUGIN_API_VERSION, LoadedManifest, load_manifest
-from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity
+from .manifest import LoadedManifest, load_manifest
+from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SubscriptionRequest
 from .schema import protocol_errors
+from .subscription import SubscriptionInvocation, as_response, response_problems
 
 DISCOVERY_PATH = "/v0/discovery"
 HEALTH_PATH = "/v0/health"
 NORMALIZER_PATH = "/v0/contributions/normalizer"
+SUBSCRIPTION_PATH = "/v0/contributions/subscription"
 MAX_REQUEST_BYTES = 1 << 20
+# A subscription request carries the text of a Record Version; the core keeps it within 16 MiB.
+MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
+
+
+def max_request_bytes(path: str) -> int:
+    """Largest request body accepted on a route."""
+    return MAX_SUBSCRIPTION_REQUEST_BYTES if path.split("?", 1)[0] == SUBSCRIPTION_PATH else MAX_REQUEST_BYTES
 
 log = logging.getLogger("quivr_plugin.server")
 
@@ -64,6 +74,7 @@ class Invocation:
 
 
 Normalizer = Callable[[Invocation], "NormalizerResponse | dict[str, Any]"]
+SubscriptionHandler = Callable[[SubscriptionInvocation], Any]
 HealthCheck = Callable[[], None]
 
 
@@ -84,7 +95,7 @@ def _from_exception(exc: PluginError) -> Reply:
 
 
 class Plugin:
-    """A plugin process: one manifest, one normalizer, the Plugin Protocol v0 routes."""
+    """A plugin process: one manifest, its Contributions' handlers, the Plugin Protocol v0 routes."""
 
     def __init__(self, manifest: str | Path | None = None) -> None:
         """Load the manifest file (or directory). Without an argument, QUIVR_PLUGIN_MANIFEST is used."""
@@ -94,11 +105,21 @@ class Plugin:
                 raise ValueError("pass the quivr-plugin.yaml path or set QUIVR_PLUGIN_MANIFEST")
         self.manifest = load_manifest(manifest)
         self._normalizer: Normalizer | None = None
+        self._subscription: SubscriptionHandler | None = None
         self._health: HealthCheck | None = None
 
     def normalizer(self, fn: Normalizer) -> Normalizer:
         """Decorator registering the normalizer Contribution."""
         self._normalizer = fn
+        return fn
+
+    def subscription(self, fn: SubscriptionHandler) -> SubscriptionHandler:
+        """Decorator registering the subscription Contribution (an alert rule).
+
+        The function receives a SubscriptionInvocation and returns a SubscriptionResponse,
+        a list of Decision models (see quivr_plugin.match, no_match, not_ready) or their dicts.
+        """
+        self._subscription = fn
         return fn
 
     def health_check(self, fn: HealthCheck) -> HealthCheck:
@@ -109,17 +130,17 @@ class Plugin:
     def discovery(self) -> Discovery:
         m = self.manifest.model
         return Discovery(
-            plugin_api=PLUGIN_API_VERSION,
+            plugin_api=self.manifest.plugin_api,
             plugin=PluginIdentity(id=m.id, version=m.version),
             manifest_digest=self.manifest.digest,
-            contributions=["normalizer"],
+            contributions=self.manifest.contributions,
         )
 
     # Protocol dispatch, independent of the HTTP transport.
 
     def handle(self, method: str, path: str, body: bytes = b"") -> Reply:
         """Answer one protocol request; used by the HTTP server and by quivr_plugin.testing."""
-        routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST"}
+        routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST", SUBSCRIPTION_PATH: "POST"}
         path = path.split("?", 1)[0]
         if path not in routes:
             return _error(404, "not_found", f"no Plugin Protocol v0 route {path}")
@@ -137,6 +158,8 @@ class Plugin:
                 log.exception("health check raised an unexpected exception")
                 return _error(503, "unhealthy", "the health check raised an unexpected exception; see the plugin logs", True)
             return Reply(200, Health().to_dict())
+        if path == SUBSCRIPTION_PATH:
+            return self._evaluate(body)
         return self._invoke(body)
 
     def invoke(self, request: NormalizerRequest | dict[str, Any]) -> Reply:
@@ -144,7 +167,76 @@ class Plugin:
         data = request.to_dict() if isinstance(request, NormalizerRequest) else request
         return self.handle("POST", NORMALIZER_PATH, json.dumps(data).encode())
 
+    def evaluate(self, request: SubscriptionRequest | dict[str, Any]) -> Reply:
+        """Run the subscription route in process for a request model or JSON object."""
+        data = request.to_dict() if isinstance(request, SubscriptionRequest) else request
+        return self.handle("POST", SUBSCRIPTION_PATH, json.dumps(data).encode())
+
+    def _evaluate(self, body: bytes) -> Reply:
+        if self.manifest.model.contributions.subscription is None or self._subscription is None:
+            return _error(501, "not_implemented", "the plugin declares or registers no subscription Contribution")
+        if len(body) > MAX_SUBSCRIPTION_REQUEST_BYTES:
+            return _error(413, "request_too_large", f"request body exceeds {MAX_SUBSCRIPTION_REQUEST_BYTES} bytes")
+        try:
+            document = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return _error(400, "invalid_request", f"request body is not JSON: {exc}")
+        problems = protocol_errors("subscription-request.schema.json", document)
+        if problems:
+            return _error(400, "invalid_request", "; ".join(problems))
+        request = SubscriptionRequest.from_dict(document)
+        with invocation_context(request.invocation_id, request.idempotency_key):
+            started = time.monotonic()
+            reply = self._run_subscription(request)
+            log.info(
+                "subscription invocation finished",
+                extra={
+                    "status": reply.status,
+                    "code": reply.body.get("code") if reply.status != 200 else None,
+                    "evaluations": len(request.evaluations),
+                    "duration_ms": round((time.monotonic() - started) * 1000, 1),
+                },
+            )
+            return reply
+
+    def _run_subscription(self, request: SubscriptionRequest) -> Reply:
+        manifest = self.manifest
+        for i, evaluation in enumerate(request.evaluations):
+            problems = manifest.validate_expression(evaluation.expression)
+            if problems:
+                return _error(400, "invalid_expression", f"evaluation {evaluation.id}: " + "; ".join(f"/evaluations/{i}/expression{p}" for p in problems))
+            problems = manifest.validate_subscription_configuration(evaluation.configuration)
+            if problems:
+                return _error(400, "invalid_subscription_configuration", f"evaluation {evaluation.id}: " + "; ".join(f"/evaluations/{i}/configuration{p}" for p in problems))
+        try:
+            manifest.validate_configuration(request.configuration)
+            result = self._subscription(SubscriptionInvocation(request=request, manifest=manifest))
+        except PluginError as exc:
+            log.warning("subscription failed: %s", exc.message, extra={"code": exc.code, "retryable": exc.retryable})
+            return _from_exception(exc)
+        except Exception:  # an unexpected bug: report it, never crash the server
+            log.exception("subscription handler raised an unexpected exception")
+            return _error(500, "internal_error", "the subscription handler raised an unexpected exception; see the plugin logs")
+        try:
+            document = as_response(result).to_dict()
+        except (TypeError, ValueError, KeyError) as exc:
+            log.error("subscription handler returned an invalid response: %s", exc)
+            return _error(500, "invalid_response", f"the subscription handler returned an invalid response: {exc}")
+        problems = protocol_errors("subscription-response.schema.json", document) or response_problems(request, document)
+        if problems:
+            log.error("subscription response violates the protocol", extra={"problems": problems})
+            return _error(500, "invalid_response", "the subscription response violates the protocol: " + "; ".join(problems))
+        size = len(json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode())
+        if size > manifest.subscription_max_response_bytes:
+            return _from_exception(TerminalError(
+                "response_too_large",
+                f"the subscription response is {size} bytes; the manifest declares at most {manifest.subscription_max_response_bytes}",
+                status=500))
+        return Reply(200, document)
+
     def _invoke(self, body: bytes) -> Reply:
+        if self.manifest.model.contributions.normalizer is None:
+            return _error(501, "not_implemented", "the plugin declares no normalizer Contribution")
         if self._normalizer is None:
             return _error(501, "not_implemented", "the plugin registered no normalizer")
         if len(body) > MAX_REQUEST_BYTES:
@@ -210,7 +302,7 @@ class Plugin:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
-            server_version = "quivr-plugin-sdk/0.1"
+            server_version = "quivr-plugin-sdk/0.2"
 
             def _serve(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"
@@ -221,8 +313,8 @@ class Plugin:
                 if length < 0:
                     reply = _error(400, "invalid_request", f"invalid Content-Length {raw_length!r}")
                     self.close_connection = True
-                elif length > MAX_REQUEST_BYTES:
-                    reply = _error(413, "request_too_large", f"request body exceeds {MAX_REQUEST_BYTES} bytes")
+                elif length > max_request_bytes(self.path):
+                    reply = _error(413, "request_too_large", f"request body exceeds {max_request_bytes(self.path)} bytes")
                     self.close_connection = True
                 else:
                     body = self.rfile.read(length) if length else b""

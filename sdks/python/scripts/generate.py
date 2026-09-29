@@ -33,6 +33,9 @@ FILES = {
     "error.schema.json": "ErrorEnvelope",
     "plugin-manifest.schema.json": "PluginManifest",
     "plugin-fixture.schema.json": "InvocationFixture",
+    "subscription-request.schema.json": "SubscriptionRequest",
+    "subscription-response.schema.json": "SubscriptionResponse",
+    "subscription-fixture.schema.json": "SubscriptionFixture",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".
@@ -53,6 +56,16 @@ NAMES = {
     "plugins/v0/plugin-manifest.schema.json#/$defs/Normalizer/properties/retry": "RetryIntent",
     "plugins/v0/plugin-manifest.schema.json#/$defs/Normalizer/properties/limits": "OutputLimits",
     "plugins/v0/plugin-fixture.schema.json#/properties/input": "FixtureInput",
+    "plugins/v0/plugin-manifest.schema.json#/$defs/Subscription": "SubscriptionContribution",
+    "plugins/v0/plugin-manifest.schema.json#/$defs/Subscription/properties/limits": "SubscriptionLimits",
+    "plugins/v0/subscription-request.schema.json#/properties/record": "EvaluatedRecord",
+    "plugins/v0/subscription-request.schema.json#/properties/record/properties/parts/items": "RecordPart",
+    "plugins/v0/subscription-request.schema.json#/properties/evaluations/items": "Evaluation",
+    "plugins/v0/subscription-request.schema.json#/properties/evaluations/items/properties/subscriptions/items": "SubscriptionRef",
+    "plugins/v0/subscription-response.schema.json#/properties/decisions/items": "Decision",
+    "plugins/v0/subscription-response.schema.json#/properties/decisions/items/properties/evidence": "Evidence",
+    "plugins/v0/subscription-fixture.schema.json#/properties/record": "FixtureRecord",
+    "plugins/v0/subscription-fixture.schema.json#/properties/evaluations/items": "FixtureEvaluation",
 }
 
 HEADER = '''"""Typed Plugin Protocol v0 models.

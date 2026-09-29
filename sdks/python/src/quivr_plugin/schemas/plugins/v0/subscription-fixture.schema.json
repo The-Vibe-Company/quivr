@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Subscription fixture, v0",
+  "description": "A language-neutral local test input for a subscription Contribution, since Plugin API 0.2. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a subscription request: they number the evaluations e1, e2, ... in order, give each one development Subscription ids, derive the Record Version ids and the idempotency key from the SHA-256 of the fixture bytes, and validate every expression and configuration against the manifest schemas. A fixture file is told apart from an invocation fixture by its top-level evaluations property.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record",
+    "evaluations"
+  ],
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Plugin (installer) configuration; validated against the manifest configuration schema. Defaults to an empty object."
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parts"
+      ],
+      "properties": {
+        "enriched": {
+          "type": "boolean",
+          "default": false
+        },
+        "parts": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/parts"
+        }
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expression"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "expression": {
+            "type": "object"
+          },
+          "configuration": {
+            "type": "object",
+            "description": "Subscription evaluator configuration. Defaults to an empty object."
+          },
+          "expect": {
+            "enum": [
+              "match",
+              "no_match",
+              "not_ready"
+            ],
+            "description": "Expected decision. The Contract Runner and quivr plugin dev report a different answer."
+          }
+        }
+      }
+    }
+  }
+}

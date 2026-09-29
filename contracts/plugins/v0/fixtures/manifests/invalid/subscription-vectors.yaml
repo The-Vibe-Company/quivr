@@ -1,0 +1,10 @@
+# vectors is reserved for a later Plugin API version (local-vector matching).
+id: example-alerts
+version: 0.3.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema: {type: object}
+    vectors: {parts: true, query: true}

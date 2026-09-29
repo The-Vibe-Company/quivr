@@ -1,6 +1,6 @@
-// Package scaffold writes the Python normalizer template embedded in the quivr
-// binary (`quivr plugin init`). The template depends only on the Quivr Plugin
-// SDK (sdks/python).
+// Package scaffold writes the Python plugin templates embedded in the quivr
+// binary (`quivr plugin init`): a normalizer and an alert rule (subscription).
+// The templates depend only on the Quivr Plugin SDK (sdks/python).
 package scaffold
 
 import (
@@ -15,8 +15,17 @@ import (
 	"strings"
 )
 
-//go:embed all:template
-var template embed.FS
+//go:embed all:templates
+var templates embed.FS
+
+// Template kinds, one per Contribution.
+const (
+	KindNormalizer   = "normalizer"
+	KindSubscription = "subscription"
+)
+
+// Kinds lists the template kinds; the first is the default.
+var Kinds = []string{KindNormalizer, KindSubscription}
 
 const (
 	placeholderID     = "__PLUGIN_ID__"
@@ -77,12 +86,26 @@ func CheckName(name string) error {
 	return nil
 }
 
-// Write creates the template for plugin id in dir, which must not exist or be
-// empty. It returns the written paths relative to dir.
-func Write(dir, id string) ([]string, error) {
+// CheckKind validates a template kind.
+func CheckKind(kind string) error {
+	for _, k := range Kinds {
+		if k == kind {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown template kind %q; use %s", kind, strings.Join(Kinds, " or "))
+}
+
+// Write creates the template of the given kind for plugin id in dir, which
+// must not exist or be empty. It returns the written paths relative to dir.
+func Write(dir, id, kind string) ([]string, error) {
 	if err := CheckName(id); err != nil {
 		return nil, err
 	}
+	if err := CheckKind(kind); err != nil {
+		return nil, err
+	}
+	root := "templates/" + kind
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s already exists and is not empty", dir)
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -90,7 +113,7 @@ func Write(dir, id string) ([]string, error) {
 	}
 	replace := strings.NewReplacer(placeholderID, id, placeholderModule, ModuleName(id))
 	var written []string
-	err := fs.WalkDir(template, "template", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(templates, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -100,8 +123,8 @@ func Write(dir, id string) ([]string, error) {
 		if d.IsDir() || strings.HasSuffix(p, ".pyc") {
 			return nil
 		}
-		rel := replace.Replace(strings.TrimPrefix(p, "template/"))
-		data, err := template.ReadFile(p)
+		rel := replace.Replace(strings.TrimPrefix(p, root+"/"))
+		data, err := templates.ReadFile(p)
 		if err != nil {
 			return err
 		}

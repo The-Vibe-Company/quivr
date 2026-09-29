@@ -39,9 +39,10 @@ type report struct {
 	Certified bool                  `json:"certified"`
 	Target    struct{ Mode string } `json:"target"`
 	Checks    []struct {
-		ID     string          `json:"id"`
-		Status string          `json:"status"`
-		Issues []plugins.Issue `json:"issues"`
+		ID           string          `json:"id"`
+		Contribution string          `json:"contribution"`
+		Status       string          `json:"status"`
+		Issues       []plugins.Issue `json:"issues"`
 	} `json:"checks"`
 }
 
@@ -98,7 +99,7 @@ func runTest(t *testing.T, args ...string) (int, string, report) {
 func TestContractRunnerCertifiesOnlyWellBehavedPlugins(t *testing.T) {
 	fakeOnPath(t)
 	manifests, err := filepath.Glob(filepath.Join("*", plugins.ManifestFile))
-	if err != nil || len(manifests) < 9 {
+	if err != nil || len(manifests) < 17 {
 		t.Fatalf("test plugins: %v %v", manifests, err)
 	}
 	for _, manifest := range manifests {
@@ -134,6 +135,44 @@ func TestContractRunnerCertifiesOnlyWellBehavedPlugins(t *testing.T) {
 			}
 			t.Fatalf("no failed %s check with issue %s:\n%s", want.Check, want.Code, out)
 		})
+	}
+}
+
+func TestContractRunnerCertifiesASubscriptionPlugin(t *testing.T) {
+	fakeOnPath(t)
+	code, out, r := runTest(t, "subscription-valid")
+	if code != cli.ExitOK || !r.Certified {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	passed := map[string]int{}
+	for _, c := range r.Checks {
+		if c.Contribution == "normalizer" {
+			t.Errorf("normalizer check %s on a subscription-only plugin", c.ID)
+		}
+		if c.Status == "pass" {
+			passed[c.Contribution+"/"+c.ID]++
+		}
+	}
+	for _, want := range []string{"subscription/fixtures", "subscription/invoke", "subscription/replay", "subscription/batch", "subscription/invalid_request", "/discovery"} {
+		if passed[want] == 0 {
+			t.Errorf("no passing %s check:\n%s", want, out)
+		}
+	}
+	// Two unknown-field and non-JSON probes plus the normative invalid subscription requests.
+	if passed["subscription/invalid_request"] < 5 {
+		t.Errorf("invalid requests probed: %d\n%s", passed["subscription/invalid_request"], out)
+	}
+}
+
+func TestContractRunnerReportsABrokenSubscriptionFixture(t *testing.T) {
+	fakeOnPath(t)
+	bad := filepath.Join(t.TempDir(), "broken.json")
+	if err := os.WriteFile(bad, []byte(`{"record": `), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, r := runTest(t, "--fixture", bad, "subscription-valid")
+	if code != cli.ExitInvalid || r.Certified || strings.Contains(out, "declares no normalizer") || !strings.Contains(out, "not JSON") {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
 

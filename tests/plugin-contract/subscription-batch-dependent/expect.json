@@ -1,0 +1,6 @@
+{
+  "description": "Decides by position in the batch, so reversing the batch changes a decision.",
+  "certified": false,
+  "check": "batch",
+  "code": "batch_dependent_decision"
+}

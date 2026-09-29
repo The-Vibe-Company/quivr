@@ -1,0 +1,19 @@
+# Deliberately broken subscription test plugin for the Contract Runner (tests/plugin-contract).
+# Decides by position in the batch, so reversing the batch changes a decision.
+id: broken.subscription-batch-dependent
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind: {const: substring}
+        text: {type: string, minLength: 1}
+    timeout_ms: 5000
+run:
+  command: [quivr-fake-plugin, batch-dependent]

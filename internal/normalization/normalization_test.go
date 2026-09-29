@@ -224,7 +224,7 @@ func TestNormalizeRecordsTheValidatedOutputOnce(t *testing.T) {
 	}
 	wantKey := normalization.IdempotencyKey("startup:acme.markdown@1.0.0#"+f.pin.ManifestDigest, "normalizer", "org_a", "version_1", content.Hash(input))
 	p := stored.Provenance
-	if p.PluginID != "acme.markdown" || p.PluginVersion != "1.0.0" || p.PluginAPI != plugins.PluginAPIVersion || p.Contribution != "normalizer" || p.IdempotencyKey != wantKey || p.InputSHA256 != content.Hash(input) || !strings.HasPrefix(p.InvocationID, "inv_") {
+	if p.PluginID != "acme.markdown" || p.PluginVersion != "1.0.0" || p.PluginAPI != "0.1.0" || p.Contribution != "normalizer" || p.IdempotencyKey != wantKey || p.InputSHA256 != content.Hash(input) || !strings.HasPrefix(p.InvocationID, "inv_") {
 		t.Fatalf("provenance %+v", p)
 	}
 	var m content.Manifest

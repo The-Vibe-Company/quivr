@@ -1,8 +1,8 @@
 # Quivr Plugin SDK for Python
 
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
-([contract](../../contracts/plugins/v0/README.md)) so that a Python normalizer
-is a single function. It has no Temporal, Weaviate or database clients, and its
+([contract](../../contracts/plugins/v0/README.md), Plugin API 0.2) so that a
+Python normalizer or alert rule is a single function. It has no Temporal, Weaviate or database clients, and its
 only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
 later.
 
@@ -15,6 +15,7 @@ pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr-v2
 
 Start a new plugin with `quivr plugin init <name>`. It writes a working
 `text/markdown` normalizer, a fixture and tests that use only this SDK.
+`quivr plugin init <name> --kind subscription` writes an alert rule instead.
 
 ## A normalizer
 
@@ -37,15 +38,46 @@ if __name__ == "__main__":
     plugin.serve()   # QUIVR_PLUGIN_HOST / QUIVR_PLUGIN_PORT, else 127.0.0.1:8080
 ```
 
+## An alert rule
+
+An alert rule is the `subscription` Contribution. It receives one Record
+Version's text Parts and a batch of distinct evaluations (a Saved Query
+`expression` and a Subscription `configuration` each, already validated against
+the manifest's `expression_schema` and `configuration_schema`), and returns one
+decision per evaluation:
+
+```python
+from quivr_plugin import Plugin, SubscriptionInvocation, match, no_match
+
+plugin = Plugin(Path(__file__).parent.parent / "quivr-plugin.yaml")
+
+@plugin.subscription
+def evaluate(invocation: SubscriptionInvocation):
+    decisions = []
+    for evaluation in invocation.evaluations:
+        needle = evaluation.expression["text"].casefold()
+        keys = [p.key for p in invocation.parts if needle in p.text.casefold()]
+        if keys:
+            decisions.append(match(evaluation, "The phrase appears.", part_keys=keys))
+        else:
+            decisions.append(no_match(evaluation))
+    return decisions
+```
+
+`not_ready(evaluation)` defers a decision, for example until
+`invocation.enriched`. A decision must depend only on the record, the
+expression and the configurations: the core batches, deduplicates and replays
+evaluations freely.
+
 ## What the SDK does
 
 | Concern | Behavior |
 | --- | --- |
 | Models | Dataclasses generated from the contract schemas (`quivr_plugin.models`), with `from_dict` and `to_dict` |
-| Routes | `GET /v0/discovery` (plugin identity, Plugin API `0.1.0`, `sha256:` digest of the exact `quivr-plugin.yaml` bytes), `GET /v0/health`, `POST /v0/contributions/normalizer` |
-| Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration` |
+| Routes | `GET /v0/discovery` (plugin identity, the declared Contributions, the highest Plugin API version the manifest range admits — `0.1.0` or `0.2.0` —, `sha256:` digest of the exact `quivr-plugin.yaml` bytes), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription` |
+| Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration`; a subscription expression or evaluation configuration against the declared schemas → 400 `invalid_expression` or `invalid_subscription_configuration` |
 | Errors | `RetryableError` → 503, `retryable: true`. `TerminalError` → 422, `retryable: false`. Unexpected exception → 500 `internal_error`, `retryable: false`. Always the protocol error envelope |
-| Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation |
+| Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation. For a subscription, also one decision per evaluation, evidence for every match, Part keys that exist and details of at most 16 KiB (500 `invalid_response`) |
 | Input Blob | `Invocation.read_input()` reads `file://` or signed http(s) references, at most `size_bytes + 1` bytes. Transport errors and 401/403/408/425/429/5xx raise `RetryableError("input_unavailable")`; a size or SHA-256 mismatch raises `TerminalError` |
 | Logging | `serve()` logs JSON lines to stderr. Every record emitted during an invocation carries `invocation_id` and `idempotency_key`; use `invocation.logger` or any logger |
 | Health | `@plugin.health_check` may raise a `PluginError` to answer 503 while not ready |
@@ -62,6 +94,13 @@ response = expect_response(invoke_fixture(plugin, "fixtures/sample.json"))
 using an [invocation fixture](../../contracts/plugins/v0/plugin-fixture.schema.json),
 and runs the normalizer route in process. `Plugin.invoke(request)` and
 `Plugin.handle(method, path, body)` expose the same dispatch without HTTP.
+
+For an alert rule, `invoke_subscription_fixture(plugin, "fixtures/sample.json")`
+builds the same batches as `quivr plugin dev` and the Contract Runner from a
+[subscription fixture](../../contracts/plugins/v0/subscription-fixture.schema.json),
+runs them through `Plugin.evaluate(request)`, and fails when a decision
+differs from the fixture's `expect`. `build_subscription_requests` returns the
+requests themselves.
 
 ## Maintaining the SDK
 

@@ -28,7 +28,7 @@ func TestInitWritesATemplateThatPassesInspect(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	for _, want := range []string{"Created plugin demo", "quivr plugin dev --fixture fixtures/sample.json", "sdks/python"} {
+	for _, want := range []string{"Created normalizer plugin demo", "quivr plugin dev --fixture fixtures/sample.json", "sdks/python"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -39,7 +39,14 @@ func TestInitWritesATemplateThatPassesInspect(t *testing.T) {
 	if code, _, errOut := run("init", "demo", "--dir", dir); code != 1 || !strings.Contains(errOut, "not empty") {
 		t.Fatalf("second init: exit %d %s", code, errOut)
 	}
-	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}} {
+	alerts := filepath.Join(t.TempDir(), "alerts")
+	if code, out, errOut := run("init", "alerts", "--kind", "subscription", "--dir", alerts); code != 0 || !strings.Contains(out, "Created subscription plugin alerts") {
+		t.Fatalf("init --kind subscription: exit %d %s %s", code, out, errOut)
+	}
+	if code, out, _ := run("inspect", alerts); code != 0 || !strings.Contains(out, "Contribution subscription") {
+		t.Fatalf("subscription template fails inspect: %s", out)
+	}
+	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}, {"init", "demo", "--kind"}, {"init", "demo", "--kind=connector"}} {
 		if code, _, errOut := run(args...); code != 2 {
 			t.Errorf("%v: exit %d %s", args, code, errOut)
 		}
@@ -90,6 +97,66 @@ func TestDevReplaysAFixtureAndPrintsTheValidatedResponse(t *testing.T) {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errOut)
 		}
+	}
+}
+
+// subscriptionPluginDir writes a plugin declaring both Contributions and a
+// subscription fixture with two batches (max_batch_size 1).
+func subscriptionPluginDir(t *testing.T, env ...string) string {
+	t.Helper()
+	dir := fakePluginDir(t, env...)
+	command, _ := json.Marshal(fakeplugin.Command())
+	writeFile(t, filepath.Join(dir, plugins.ManifestFile), []byte(fmt.Sprintf(`id: fake
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.3.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+  subscription:
+    expression_schema: {type: object, required: [text], properties: {text: {type: string}}}
+    max_batch_size: 1
+run:
+  command: %s
+`, command)))
+	writeFile(t, filepath.Join(dir, "fixtures", "alerts.json"), []byte(`{
+  "record": {"parts": [{"key": "body", "role": "body", "text": "Dockers vote to strike."}]},
+  "evaluations": [
+    {"expression": {"text": "strike"}, "expect": "match"},
+    {"expression": {"text": "election"}, "expect": "no_match"}
+  ]
+}`))
+	return dir
+}
+
+func TestDevReplaysASubscriptionFixture(t *testing.T) {
+	dir := subscriptionPluginDir(t)
+	code, out, errOut := run("dev", "--fixture", filepath.Join(dir, "fixtures", "alerts.json"), dir)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, errOut)
+	}
+	var response struct {
+		Decisions []plugins.SubscriptionDecision `json:"decisions"`
+	}
+	if err := json.Unmarshal([]byte(out), &response); err != nil || len(response.Decisions) != 2 ||
+		response.Decisions[0].Decision != "match" || response.Decisions[1].Decision != "no_match" {
+		t.Fatalf("stdout %s (%v)", out, err)
+	}
+	if !strings.Contains(errOut, "2 decisions in 2 batches (1 match, 1 no_match, 0 not_ready)") {
+		t.Fatalf("stderr:\n%s", errOut)
+	}
+	// The normalizer fixture of the same plugin still replays.
+	if code, _, errOut := run("dev", "--fixture", filepath.Join(dir, "fixtures", "sample.json"), dir); code != 0 {
+		t.Fatalf("normalizer fixture: exit %d:\n%s", code, errOut)
+	}
+}
+
+func TestDevReportsAnUnexpectedSubscriptionDecision(t *testing.T) {
+	dir := subscriptionPluginDir(t, fakeplugin.EnvMode+"=never-match")
+	code, out, errOut := run("dev", "--fixture", filepath.Join(dir, "fixtures", "alerts.json"), dir)
+	if code != 1 || out != "" || !strings.Contains(errOut, "unexpected_decision") || !strings.Contains(errOut, "the fixture expects match") {
+		t.Fatalf("exit %d, stdout %q:\n%s", code, out, errOut)
 	}
 }
 

@@ -263,12 +263,16 @@ The versioned, language-neutral contract through which the engine discovers, che
 _Avoid_: SDK API, internal plugin interface
 
 **Plugin API Version**:
-The semantic version of the plugin protocol, versioned independently of the engine; a plugin declares the range it supports and the engine refuses one outside it.
+The semantic version of the plugin protocol, versioned independently of the engine; a plugin declares the range it supports and the engine refuses one outside it. A minor version only adds to the previous one, so the engine keeps serving plugins built for an earlier minor version and speaks the highest version their range admits.
 _Avoid_: Engine version, plugin version
 
 **Normalizer**:
 A contribution that turns one accepted blob of a routed media type into the parts, relations and extensions of that record version's manifest, without changing the record version's identity.
 _Avoid_: Parser, converter, enricher
+
+**Alert Rule**:
+A subscription contribution: it decides, for one record version and a batch of distinct saved query expressions and subscription configurations, whether each one is a match, no match or not ready yet, with bounded evidence for a match. It declares the schemas of the expressions and configurations it interprets.
+_Avoid_: Evaluator plugin, matcher, filter
 
 **Normalizer Route**:
 The installation's mapping from an accepted blob media type to the normalizer that handles it, marked required or optional.
@@ -279,8 +283,12 @@ One uniquely identified call of a contribution for a specific input; retries of 
 _Avoid_: Plugin request, job
 
 **Invocation Fixture**:
-A language-neutral local test input for a contribution: an input file, its media type and optional configuration, which tools turn into a plugin invocation through a local file reference.
+A language-neutral local test input for a normalizer: an input file, its media type and optional configuration, which tools turn into a plugin invocation through a local file reference.
 _Avoid_: Test case, sample request
+
+**Subscription Fixture**:
+A language-neutral local test input for an alert rule: a record version's text parts and the evaluations to decide, each with an optional expected decision, which tools turn into batched plugin invocations.
+_Avoid_: Test case, sample alert
 
 **Plugin Contract Runner**:
 The tool that checks a plugin against the plugin protocol and normative fixtures using the engine's own validation, so passing it means the engine accepts the plugin.

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "subscription invocation request, v0",
+  "description": "POST /v0/contributions/subscription, since Plugin API 0.2. One Record Version's text Parts and a batch of distinct evaluations to decide. The core deduplicates Subscriptions that share the same expression and configuration into one evaluation and never sends more evaluations than the manifest's max_batch_size.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "idempotency_key",
+    "contribution",
+    "organization_id",
+    "record",
+    "evaluations",
+    "configuration"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Opaque, stable across retries of the same logical invocation. The same key must yield the same decisions and evidence."
+    },
+    "contribution": {
+      "const": "subscription"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "corpus_id",
+        "record_id",
+        "record_version_id",
+        "enriched",
+        "parts"
+      ],
+      "description": "The evaluated Record Version.",
+      "properties": {
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_version_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enriched": {
+          "type": "boolean",
+          "description": "True when the Version has embedding coverage in the active generation. A rule that needs enrichment answers not_ready while it is false; the core evaluates again after enrichment."
+        },
+        "parts": {
+          "type": "array",
+          "maxItems": 256,
+          "description": "The canonical text Parts of the Version, in Manifest order. Blob Parts are not sent. Keys are unique.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "role",
+              "text"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string"
+              },
+              "vector": false
+            }
+          }
+        }
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "description": "Distinct evaluations to decide, each answered by exactly one decision with the same id.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "expression",
+          "configuration",
+          "subscriptions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Opaque, unique within the request."
+          },
+          "expression": {
+            "type": "object",
+            "description": "The pinned Saved Query Version expression, valid against the manifest's expression_schema."
+          },
+          "configuration": {
+            "type": "object",
+            "description": "The pinned Subscription evaluator configuration, valid against the manifest's configuration_schema."
+          },
+          "subscriptions": {
+            "type": "array",
+            "minItems": 1,
+            "description": "The Subscription Versions this evaluation stands for. Informational (logs, tracing): a decision must depend only on the record, the expression and the configurations.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "subscription_id",
+                "subscription_version_id",
+                "saved_query_id",
+                "saved_query_version_id"
+              ],
+              "properties": {
+                "subscription_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "subscription_version_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "saved_query_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "saved_query_version_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "query_vector": false
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The validated plugin (installer) configuration, as for every Contribution."
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Plugin Contract Runner report, v1",
-  "description": "JSON report written by `quivr plugin test --report <file>`. certified is true when no check failed: the engine can safely invoke the plugin's normalizer. Tools may rely on report_version, certified, the check ids and the issue codes; titles, notes and messages are for humans.",
+  "description": "JSON report written by `quivr plugin test --report <file>`. certified is true when no check failed: the engine can safely invoke every Contribution the plugin declares. Tools may rely on report_version, certified, the check ids and the issue codes; titles, notes and messages are for humans.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -152,11 +152,19 @@
             "fixtures",
             "invoke",
             "replay",
-            "invalid_request"
+            "invalid_request",
+            "batch"
           ]
         },
         "title": {
           "type": "string"
+        },
+        "contribution": {
+          "enum": [
+            "normalizer",
+            "subscription"
+          ],
+          "description": "Contribution the check exercises; absent for checks of the whole plugin."
         },
         "status": {
           "enum": [

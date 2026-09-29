@@ -186,7 +186,7 @@ The Contract Runner starts your plugin and checks it over the public protocol
 only. It runs health and discovery, invokes every fixture, replays each
 idempotency key, enforces `timeout_ms`, and sends invalid requests. It judges
 the output with Quivr's own validation. It exits `0` and prints
-`CERTIFIED: the engine can safely invoke this normalizer` only when Quivr can
+`CERTIFIED: the engine can safely invoke this plugin` only when Quivr can
 safely call your plugin. Run it in your CI and keep the JSON report.
 
 ## 6. Pin it in `QUIVR_CONFIG`

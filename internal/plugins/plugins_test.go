@@ -22,6 +22,7 @@ type fixtureCase struct {
 	Valid       bool     `json:"valid"`
 	SchemaValid bool     `json:"schema_valid"`
 	Errors      []string `json:"errors"`
+	Request     string   `json:"request"`
 }
 
 func loadIndex(t *testing.T) []fixtureCase {
@@ -81,6 +82,16 @@ func TestNormativeFixtures(t *testing.T) {
 				issues = report.Errors
 			case "normalizer-response.schema.json":
 				issues = plugins.ValidateNormalizerResponse(raw)
+			case "subscription-response.schema.json":
+				request, err := os.ReadFile(filepath.Join(fixtures, c.Request))
+				if err != nil {
+					t.Fatalf("subscription response fixtures name their request: %v", err)
+				}
+				view, err := plugins.ViewSubscriptionRequest(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				issues = plugins.CheckSubscriptionOutput(raw, view, nil)
 			default:
 				issues = plugins.ValidateDocument(c.Schema, raw)
 			}
@@ -145,7 +156,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.1.0" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.2.0" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer
@@ -155,6 +166,80 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if !report.Compatibility.Engine.Compatible || !report.Compatibility.PluginAPI.Compatible {
 		t.Fatalf("compatibility %+v", report.Compatibility)
 	}
+	// A plugin built for Plugin API 0.1 keeps working: the engine speaks 0.1.0 to it.
+	if report.Compatibility.PluginAPI.Version != "0.1.0" {
+		t.Fatalf("negotiated Plugin API %q, want 0.1.0", report.Compatibility.PluginAPI.Version)
+	}
+}
+
+func TestSubscriptionManifestDefaultsAndNegotiation(t *testing.T) {
+	raw := []byte(`id: rule
+version: 0.1.0
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.1.0 <0.3.0"}
+contributions:
+  subscription:
+    expression_schema: {type: object}
+`)
+	report := plugins.Validate(raw)
+	if !report.Valid {
+		t.Fatalf("errors %+v", report.Errors)
+	}
+	s := report.Manifest.Contributions.Subscription
+	if s.MaxBatchSize != 32 || s.TimeoutMS != 30000 || s.Retry.MaxAttempts != 3 || s.Limits.MaxResponseBytes != 4194304 || s.ConfigurationSchema != nil {
+		t.Fatalf("defaults not applied: %+v", s)
+	}
+	if report.Compatibility.PluginAPI.Version != "0.2.0" || strings.Join(report.Manifest.Contributions.Names(), ",") != "subscription" {
+		t.Fatalf("negotiated %+v, contributions %v", report.Compatibility.PluginAPI, report.Manifest.Contributions.Names())
+	}
+	old, err := os.ReadFile(filepath.Join(fixtures, "manifests/invalid/subscription-plugin-api-0.1.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := plugins.Validate(old)
+	if len(got.Errors) != 1 || got.Errors[0].Path != "/contributions/subscription" || !strings.Contains(got.Errors[0].Message, ">=0.2.0 <0.3.0") {
+		t.Fatalf("issue not actionable: %+v", got.Errors)
+	}
+}
+
+func TestValidateSubscriptionItem(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(fixtures, "manifests/valid/subscription.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := plugins.Validate(raw).Manifest
+	for _, c := range []struct {
+		expression, configuration string
+		want                      []string
+	}{
+		{`{"kind": "substring", "text": "strike"}`, `{}`, []string{}},
+		{`{"kind": "any_of", "terms": ["a", "b"]}`, `{"case_sensitive": true}`, []string{}},
+		{`{"kind": "substring"}`, `{}`, []string{"invalid_expression"}},
+		{`{"kind": "regex", "text": "a+"}`, `{"case_sensitive": "yes"}`, []string{"invalid_expression", "invalid_subscription_configuration"}},
+		{`["strike"]`, `{}`, []string{"invalid_expression"}},
+		{`{"kind": "substring", "text": "x"}`, `{"unknown": 1}`, []string{"invalid_subscription_configuration"}},
+	} {
+		issues := plugins.ValidateSubscriptionItem(m, []byte(c.expression), []byte(c.configuration))
+		if !reflect.DeepEqual(codes(issues), sorted(c.want)) {
+			t.Errorf("%s %s: codes %v, want %v: %+v", c.expression, c.configuration, codes(issues), c.want, issues)
+		}
+		for _, issue := range issues {
+			if !strings.HasPrefix(issue.Path, "/expression") && !strings.HasPrefix(issue.Path, "/configuration") {
+				t.Errorf("issue path %q", issue.Path)
+			}
+		}
+	}
+	if issues := plugins.ValidateSubscriptionItem(plugins.Validate(mustRead(t, "manifests/valid/minimal.yaml")).Manifest, []byte(`{}`), []byte(`{}`)); len(issues) != 1 {
+		t.Fatalf("normalizer-only manifest: %+v", issues)
+	}
+}
+
+func mustRead(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(fixtures, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestIssuesAreActionable(t *testing.T) {
