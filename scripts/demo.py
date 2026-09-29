@@ -24,6 +24,7 @@ def main():
     verify = args.command == 'verify'
     suffix = uuid.uuid4().hex[:10] if verify else hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
     stack = Stack(('quivr-demo-verify-' if verify else 'quivr-demo-') + suffix)
+    stack.verifying = verify
     if args.command == 'reset':
         stack.down(True)
         return

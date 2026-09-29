@@ -94,6 +94,24 @@ class Readiness(unittest.TestCase):
         self.assertFalse(recorded['worker']['ready'])
         self.assertIn('last', recorded['worker'])
 
+    def test_verification_refuses_a_disk_near_weaviates_read_only_threshold(self):
+        # THE-758: past 90% Weaviate turns read-only and Records stop becoming searchable.
+        name = 'quivr-test-' + uuid.uuid4().hex[:10]
+        self.addCleanup(shutil.rmtree, local.ROOT / '.scratch' / name, True)
+        stack = local.Stack(name)
+        with mock.patch.object(local, 'docker_disk', return_value=('/var/lib/docker', 89.9)):
+            stack.verifying = True
+            with self.assertRaisesRegex(RuntimeError, r'\(/var/lib/docker\) is 89\.9% full; Weaviate turns read-only at 90%'):
+                stack.check_disk()
+            stack.verifying = False
+            with mock.patch('builtins.print') as warned:
+                stack.check_disk()
+            self.assertIn('89.9% full', warned.call_args.args[0])
+        with mock.patch.object(local, 'docker_disk', return_value=('/var/lib/docker', 60.0)):
+            stack.verifying = True
+            stack.check_disk()
+        self.assertEqual(json.loads((stack.directory / 'readiness.json').read_text())['docker_disk_used_percent'], 60.0)
+
 
 class StepsAndReport(unittest.TestCase):
     def test_steps_record_outcomes_and_name_the_failed_step(self):

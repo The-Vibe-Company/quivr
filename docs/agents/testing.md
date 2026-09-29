@@ -57,7 +57,8 @@ A test that fails without a code change is a bug, and it is fixed at its cause.
   request, and the ticket records it.
 - Do not add retries to reach green. Find the race: most flakes so far read a
   value once instead of waiting for it (THE-738) or compared two moments of an
-  asynchronous result (THE-754).
+  asynchronous result (THE-754). Also read the dependency logs: a runner disk
+  at 90% turned Weaviate read-only and stalled ingestion (THE-758).
 - The fix shows the race: force the slow path, show the old test fails and the
   new one passes.
 

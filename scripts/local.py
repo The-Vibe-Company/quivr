@@ -39,9 +39,25 @@ PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'all
 port=ports.allocate
 PORT_KEYS=['api_port','probe_port','worker_probe_port','short_api_port','short_probe_port','receiver_port','graph_port','fake_x_port']
 
+# Weaviate turns its shards read-only once the disk under its data is 90% full (its default
+# DISK_USE_READONLY_PERCENTAGE); every index write then fails and ingestion retries until space
+# frees up, so Records stop becoming searchable (THE-758). A verification refuses to start past
+# DISK_LIMIT, which leaves room for what the run itself writes.
+DISK_LIMIT=85
+
+def docker_disk():
+    """(Docker data root, percent used) of the disk holding Docker volumes, or None when it is not on
+    this host (Docker Desktop keeps it in a VM). Computed like Weaviate: reserved blocks count as free."""
+    root=subprocess.run(['docker','info','--format','{{.DockerRootDir}}'],capture_output=True,text=True).stdout.strip()
+    if not root or not os.path.isdir(root):return None
+    disk=os.statvfs(root)
+    return root,round(100*(disk.f_blocks-disk.f_bfree)/disk.f_blocks,1)
+
 class Stack:
     def __init__(self, name):
         self.name=name
+        # Verification refuses a nearly full disk; a dev stack only warns (THE-758).
+        self.verifying=False
         self.directory=ROOT/'.scratch'/name
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.directory.chmod(0o700)
@@ -208,7 +224,17 @@ class Stack:
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
         self.state['pids']=[];self.state.pop('worker_pid',None);self.save()
         time.sleep(.15)
+    def check_disk(self):
+        disk=docker_disk()
+        if disk is None:return
+        root,used=disk
+        self.readiness['docker_disk_used_percent']=used;self.save_readiness()
+        if used>=DISK_LIMIT:
+            message=f'the disk holding Docker volumes ({root}) is {used}% full; Weaviate turns read-only at 90%, so Records would stop becoming searchable. Free disk space below {DISK_LIMIT}%.'
+            if self.verifying:raise RuntimeError(message)
+            print('Warning: '+message,flush=True)
     def up(self):
+        self.check_disk()
         self.stop_processes()
         prepare_tokenizer()
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
@@ -561,6 +587,7 @@ def run_stack(command,part=None):
     name=os.environ.get('QUIVR_PROJECT') if command in ['down','reset','migrate'] else None
     stack=Stack(name or (f'quivr-verify-{part}-'+uuid.uuid4().hex[:10] if verification else 'quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]))
     stack.part=part
+    stack.verifying=verification
     def interrupted(*_):raise verify_report.Interrupted()
     signal.signal(signal.SIGTERM,interrupted)
     steps=verify_report.Steps(echo=print if verification else None);stack.steps=steps;start=time.monotonic();status='failed'

@@ -137,6 +137,10 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('quivr-search/package-lock.json') }}
       - if: matrix.part == 'demo'
         run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
+      # The runner image starts about 84% full and a verification writes several GB more, which
+      # brought the demo stack to Weaviate's 90% read-only threshold (THE-758). Remove preinstalled
+      # toolchains this job never uses (about 17 GB, a few seconds).
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
       - run: make verify part=${{ matrix.part }}
       - uses: actions/upload-artifact@v4
         id: verification-artifact
@@ -187,6 +191,11 @@ jobs:
             .scratch/quivr-demo-verify-*/playwright.json
             .scratch/quivr-demo-verify-*/browser/**/*.png
             .scratch/quivr-demo-verify-*/browser/**/trace.zip
+            .scratch/quivr-demo-verify-*/readiness.json
+            .scratch/quivr-demo-verify-*/demo-server.log
+            .scratch/quivr-demo-verify-*/api*.log*
+            .scratch/quivr-demo-verify-*/worker*.log*
+            .scratch/quivr-demo-verify-*/weaviate.log
           if-no-files-found: warn
       # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
