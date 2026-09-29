@@ -22,6 +22,7 @@ import {
 } from "../lib/connectors";
 import { useAlertMarks } from "../lib/alerts";
 import { AlertMarks } from "./alerts/AlertMarks";
+import { EmptyState, LiveBadge, LoadingState, Notice, PageHeader } from "./ui";
 
 type Status = "loading" | "ready" | "error";
 
@@ -191,71 +192,54 @@ export function FeedView({
     : items;
 
   return (
-    <main className="feed-page">
-      <div className="feed-head">
-        <div>
-          <h1>Veille</h1>
-          <p className="muted">
-            Tout ce qui entre dans l’espace démo, le plus récent en premier.
-          </p>
-        </div>
-        {status === "ready" && (
-          <span className="live-badge" data-live={live}>
-            <span className="live-dot" aria-hidden="true" />
-            {live ? "En direct" : "Reconnexion…"}
-          </span>
-        )}
-      </div>
+    <main className="page feed-page">
+      <PageHeader
+        title="Veille"
+        description="Tout ce qui entre dans l’espace démo, le plus récent en premier."
+        aside={
+          status === "ready" && (
+            <LiveBadge live={live} offLabel="Reconnexion…" />
+          )
+        }
+      />
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </p>
-      {status === "loading" && (
-        <div className="results-skeleton" aria-hidden="true">
-          {[0, 1, 2].map((i) => (
-            <div key={i}>
-              <span />
-              <span />
-              <span />
-            </div>
-          ))}
-        </div>
-      )}
+      {status === "loading" && <LoadingState rows={4} />}
       {status === "error" && (
-        <div className="notice" role="alert">
-          <h2>La veille ne s’affiche pas.</h2>
-          <p>{error}</p>
-          <button
-            className="button"
-            onClick={() => {
-              setStatus("loading");
-              setAttempt((n) => n + 1);
-            }}
-          >
-            Réessayer
-          </button>
-        </div>
+        <Notice
+          title="La veille ne s’affiche pas."
+          onRetry={() => {
+            setStatus("loading");
+            setAttempt((n) => n + 1);
+          }}
+        >
+          {error}
+        </Notice>
       )}
       {status === "ready" && items.length === 0 && (
-        <section className="empty feed-empty">
-          <Broadcast size={30} aria-hidden="true" />
-          <h2>Rien n’est encore arrivé.</h2>
-          <p>
-            Ajoutez une source, par exemple un flux RSS, ou collez un texte.
-            <br />
-            Chaque nouvel élément apparaît ici en quelques secondes, sans
-            recharger la page.
-          </p>
-          <div className="feed-empty-actions">
-            <button className="button primary" onClick={onSources}>
-              <Plus size={17} weight="bold" aria-hidden="true" />
-              Ajouter une source
-            </button>
-            <button className="button" onClick={onAdd}>
-              <NotePencil size={17} aria-hidden="true" />
-              Ajouter du texte
-            </button>
-          </div>
-        </section>
+        <EmptyState
+          className="feed-empty"
+          icon={<Broadcast size={26} aria-hidden="true" />}
+          title="Rien n’est encore arrivé."
+          actions={
+            <>
+              <button className="button primary" onClick={onSources}>
+                <Plus size={17} weight="bold" aria-hidden="true" />
+                Ajouter une source
+              </button>
+              <button className="button" onClick={onAdd}>
+                <NotePencil size={17} aria-hidden="true" />
+                Ajouter du texte
+              </button>
+            </>
+          }
+        >
+          Ajoutez une source, par exemple un flux RSS, ou collez un texte.
+          <br />
+          Chaque nouvel élément apparaît ici en quelques secondes, sans
+          recharger la page.
+        </EmptyState>
       )}
       {status === "ready" && items.length > 0 && (
         <>
@@ -282,12 +266,14 @@ export function FeedView({
             ))}
           </div>
           {shown.length === 0 ? (
-            <div className="empty">
-              <h2>Plus rien de cette source pour l’instant.</h2>
-              <button className="text-button" onClick={() => setFilter(null)}>
-                Voir toutes les sources
-              </button>
-            </div>
+            <EmptyState
+              title="Plus rien de cette source pour l’instant."
+              actions={
+                <button className="text-button" onClick={() => setFilter(null)}>
+                  Voir toutes les sources
+                </button>
+              }
+            />
           ) : (
             <ol className="feed-list" aria-label="Derniers éléments">
               {shown.map((item) => {

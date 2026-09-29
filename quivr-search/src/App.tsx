@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  Bell,
+  Broadcast,
   FileText,
   Plus,
   MagnifyingGlass,
+  RssSimple,
   Sparkle,
   LockKey,
+  type Icon,
 } from "@phosphor-icons/react";
 import { Brand } from "./components/Logo";
 import { SearchBar } from "./components/SearchBar";
@@ -16,11 +20,24 @@ import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
 import { FeedView } from "./components/FeedView";
 import { AlertsView } from "./components/alerts/AlertsView";
+import { EmptyState, LoadingState, Notice } from "./components/ui";
 import { APIError, login, search, session, tokenize } from "./lib/search";
 import type { Mode, SearchResponse } from "./types";
 
 type Auth = "loading" | "login" | "ready" | "error";
 type View = "search" | "veille" | "connectors" | "alerts";
+// One navigation for the four pages; the icon fills on the current one.
+const TABS: { view: View; label: string; href: string; Icon: Icon }[] = [
+  { view: "search", label: "Recherche", href: "/", Icon: MagnifyingGlass },
+  { view: "veille", label: "Veille", href: "/?view=veille", Icon: Broadcast },
+  {
+    view: "connectors",
+    label: "Sources",
+    href: "/?view=sources",
+    Icon: RssSimple,
+  },
+  { view: "alerts", label: "Alertes", href: "/?view=alerts", Icon: Bell },
+];
 function urlState() {
   const p = new URLSearchParams(location.search);
   return {
@@ -223,14 +240,16 @@ export default function App() {
           <h1>Votre espace de démo.</h1>
           <p className="muted">Ajoutez vos textes. Retrouvez ce qui compte.</p>
           {auth === "loading" ? (
-            <p role="status">Connexion à votre espace…</p>
+            <p role="status" className="auth-status">
+              Connexion à votre espace…
+            </p>
           ) : auth === "error" ? (
-            <div className="notice" role="alert">
-              <p>{authError}</p>
-              <button className="button" onClick={() => void connect()}>
-                Réessayer
-              </button>
-            </div>
+            <Notice
+              title="Connexion indisponible."
+              onRetry={() => void connect()}
+            >
+              {authError}
+            </Notice>
           ) : (
             <form
               onSubmit={async (event) => {
@@ -299,50 +318,26 @@ export default function App() {
           <Brand />
         </a>
         <nav className="view-tabs" aria-label="Sections">
-          <a
-            href="/"
-            aria-current={view === "search" ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              setView("search");
-            }}
-          >
-            Recherche
-          </a>
-          <a
-            href="/?view=veille"
-            aria-current={view === "veille" ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              setDoc(null);
-              setView("veille");
-            }}
-          >
-            Veille
-          </a>
-          <a
-            href="/?view=sources"
-            aria-current={view === "connectors" ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              setDoc(null);
-              setView("connectors");
-            }}
-          >
-            Sources
-          </a>
-          <a
-            href="/?view=alerts"
-            aria-current={view === "alerts" ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              setDoc(null);
-              setAlert(null);
-              setView("alerts");
-            }}
-          >
-            Alertes
-          </a>
+          {TABS.map(({ view: target, label, href, Icon }) => (
+            <a
+              key={target}
+              href={href}
+              aria-current={view === target ? "page" : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                if (target !== "search") setDoc(null);
+                if (target === "alerts") setAlert(null);
+                setView(target);
+              }}
+            >
+              <Icon
+                size={18}
+                weight={view === target ? "fill" : "regular"}
+                aria-hidden="true"
+              />
+              {label}
+            </a>
+          ))}
         </nav>
         <div className="topbar-spacer" />
         <span className="workspace-label">
@@ -378,7 +373,7 @@ export default function App() {
           onUnauthorized={onUnauthorized}
         />
       ) : (
-        <main className={query ? "results-page" : "home"}>
+        <main className={query ? "page results-page" : "home"}>
           <div className={query ? "query-area" : "home-inner"}>
             {!query && (
               <>
@@ -445,50 +440,39 @@ export default function App() {
                 </p>
                 <span>Les 10 premiers passages au maximum</span>
               </div>
-              {status === "loading" && (
-                <div className="results-skeleton" aria-hidden="true">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i}>
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                  ))}
-                </div>
-              )}
+              {status === "loading" && <LoadingState />}
               {status === "error" && (
-                <div className="notice" role="alert">
-                  <h2>La recherche n’a pas abouti.</h2>
-                  <p>{searchError}</p>
-                  <button
-                    className="button"
-                    onClick={() => setAttempt((value) => value + 1)}
-                  >
-                    Réessayer
-                  </button>
-                  {mode !== "lexical" && (
-                    <button
-                      className="text-button"
-                      onClick={() => setMode("lexical")}
-                    >
-                      Passer aux mots-clés
-                    </button>
-                  )}
-                </div>
+                <Notice
+                  title="La recherche n’a pas abouti."
+                  onRetry={() => setAttempt((value) => value + 1)}
+                  actions={
+                    mode !== "lexical" && (
+                      <button
+                        className="text-button"
+                        onClick={() => setMode("lexical")}
+                      >
+                        Passer aux mots-clés
+                      </button>
+                    )
+                  }
+                >
+                  {searchError}
+                </Notice>
               )}
               {status === "ready" && response?.items.length === 0 && (
-                <div className="empty">
-                  <MagnifyingGlass size={30} aria-hidden="true" />
-                  <h2>Aucun passage trouvé.</h2>
-                  <p>
-                    Essayez une autre formulation ou ajoutez un texte à votre
-                    espace.
-                  </p>
-                  <button className="button" onClick={() => setAdding(true)}>
-                    <Plus size={17} aria-hidden="true" />
-                    Ajouter du texte
-                  </button>
-                </div>
+                <EmptyState
+                  icon={<MagnifyingGlass size={26} aria-hidden="true" />}
+                  title="Aucun passage trouvé."
+                  actions={
+                    <button className="button" onClick={() => setAdding(true)}>
+                      <Plus size={17} aria-hidden="true" />
+                      Ajouter du texte
+                    </button>
+                  }
+                >
+                  Essayez une autre formulation ou ajoutez un texte à votre
+                  espace.
+                </EmptyState>
               )}
               {status === "ready" &&
                 response?.items.map((result) => (
@@ -509,10 +493,12 @@ export default function App() {
         </main>
       )}
       <footer className="page-footer">
-        <span>Quivr · Démo de recherche</span>
-        <span>
-          <kbd>/</kbd> pour rechercher
-        </span>
+        <span>Quivr · Espace démo</span>
+        {view === "search" && (
+          <span>
+            <kbd>/</kbd> pour rechercher
+          </span>
+        )}
       </footer>
       {adding && (
         <AddText

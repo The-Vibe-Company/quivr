@@ -1,6 +1,5 @@
 import { BellRinging } from "@phosphor-icons/react";
 import type { Alert } from "../../lib/alerts";
-import "../../alerts.css";
 
 /** The alerts that caught an article of the Veille feed, each opening its alert. */
 export function AlertMarks({

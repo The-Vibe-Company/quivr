@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Key, Plugs } from "@phosphor-icons/react";
+import { Key, RssSimple } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import {
   connectorMessage,
@@ -20,6 +20,7 @@ import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { AddSource } from "./AddSource";
 import { SourceList, groupSources } from "./SourceList";
+import { EmptyState, LiveBadge, LoadingState, Notice, PageHeader } from "../ui";
 
 const LIVE_INTERVAL = 5000;
 
@@ -243,40 +244,32 @@ export function ConnectorsView({
     });
 
   return (
-    <main className="connectors-page">
-      <div className="connectors-head">
-        <div>
-          <h1>Sources</h1>
-          <p className="muted">
-            Les sites et flux collectés automatiquement dans l’espace démo.
-          </p>
-        </div>
-      </div>
+    <main className="page connectors-page">
+      <PageHeader
+        title="Sources"
+        description="Les sites et flux collectés automatiquement dans l’espace démo."
+        aside={status === "ready" && <LiveBadge live={live} />}
+      />
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </p>
-      {status === "loading" && (
-        <p role="status" className="muted">
-          Chargement des sources…
-        </p>
-      )}
+      {status === "loading" && <LoadingState label="Chargement des sources…" />}
       {status === "unavailable" && (
-        <div className="notice" role="status">
-          <h2>Les connecteurs ne sont pas activés sur ce déploiement.</h2>
-          <p>
-            L’administrateur peut les activer côté serveur. La recherche et
-            l’ajout de textes restent disponibles.
-          </p>
-        </div>
+        <Notice
+          tone="info"
+          title="Les connecteurs ne sont pas activés sur ce déploiement."
+        >
+          L’administrateur peut les activer côté serveur. La recherche et
+          l’ajout de textes restent disponibles.
+        </Notice>
       )}
       {status === "error" && (
-        <div className="notice" role="alert">
-          <h2>Les sources n’ont pas pu être chargées.</h2>
-          <p>{error}</p>
-          <button className="button" onClick={() => setAttempt((n) => n + 1)}>
-            <ArrowClockwise size={16} aria-hidden="true" /> Réessayer
-          </button>
-        </div>
+        <Notice
+          title="Les sources n’ont pas pu être chargées."
+          onRetry={() => setAttempt((n) => n + 1)}
+        >
+          {error}
+        </Notice>
       )}
       {status === "ready" && catalog && (
         <>
@@ -298,27 +291,17 @@ export function ConnectorsView({
                 <span className="count"> {sources.length}</span>
               )}
             </h2>
-            <span className="live-line muted">
-              {live ? (
-                <>
-                  <span className="status-dot" aria-hidden="true" /> Santé
-                  suivie en direct
-                </>
-              ) : (
-                "Santé actualisée régulièrement"
-              )}
-            </span>
           </div>
           {sources.length === 0 ? (
-            <div className="empty sources-empty">
-              <Plugs size={30} aria-hidden="true" />
-              <h2>Aucune source pour l’instant.</h2>
-              <p>
-                {catalog.items.length
-                  ? "Collez l’adresse d’un site d’actualité ci-dessus, ou choisissez une suggestion."
-                  : "Aucun type de source n’est disponible sur ce déploiement."}
-              </p>
-            </div>
+            <EmptyState
+              className="sources-empty"
+              icon={<RssSimple size={26} aria-hidden="true" />}
+              title="Aucune source pour l’instant."
+            >
+              {catalog.items.length
+                ? "Collez l’adresse d’un site d’actualité ci-dessus, ou choisissez une suggestion."
+                : "Aucun type de source n’est disponible sur ce déploiement."}
+            </EmptyState>
           ) : (
             <SourceList
               sources={sources}

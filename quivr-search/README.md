@@ -60,7 +60,7 @@ ports the plugin's parser; `alerts.mjs` explains how alerts are stored and read.
 
 ## Frontend development and checks
 
-With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`.
+With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`. Design tokens (colour, spacing, type, radii, motion) sit at the top of `src/styles.css`; every page builds its header, live badge and loading, empty and error states from `src/components/ui.tsx`.
 
 ```sh
 npm run typecheck --prefix quivr-search

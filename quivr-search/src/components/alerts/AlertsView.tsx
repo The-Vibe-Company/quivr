@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Bell, CaretRight } from "@phosphor-icons/react";
+import { Bell, CaretRight } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import {
   alertMessage,
@@ -11,7 +11,7 @@ import {
 } from "../../lib/alerts";
 import { AlertComposer } from "./AlertComposer";
 import { AlertDetail, StateBadge, queryText } from "./AlertDetail";
-import "../../alerts.css";
+import { EmptyState, LiveBadge, LoadingState, Notice, PageHeader } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -149,43 +149,34 @@ export function AlertsView({
   };
 
   return (
-    <main className="connectors-page alerts-page">
+    <main className="page alerts-page">
       {!selected && (
-        <div className="connectors-head">
-          <div>
-            <h1>Alertes</h1>
-            <p className="muted">
-              Soyez prévenu dès qu’un article correspond à vos mots-clés, qu’il
-              vienne d’un flux RSS ou d’un texte ajouté à la main.
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          title="Alertes"
+          description="Soyez prévenu dès qu’un article correspond à vos mots-clés, qu’il vienne d’un flux RSS ou d’un texte ajouté à la main."
+          aside={status === "ready" && <LiveBadge live={live} />}
+        />
       )}
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
       </p>
-      {status === "loading" && (
-        <p role="status" className="muted">
-          Chargement des alertes…
-        </p>
-      )}
+      {status === "loading" && <LoadingState label="Chargement des alertes…" />}
       {status === "unavailable" && (
-        <div className="notice" role="status">
-          <h2>Les alertes ne sont pas activées sur ce déploiement.</h2>
-          <p>
-            L’administrateur peut les activer côté serveur. La recherche, les
-            sources et l’ajout de textes restent disponibles.
-          </p>
-        </div>
+        <Notice
+          tone="info"
+          title="Les alertes ne sont pas activées sur ce déploiement."
+        >
+          L’administrateur peut les activer côté serveur. La recherche, les
+          sources et l’ajout de textes restent disponibles.
+        </Notice>
       )}
       {status === "error" && (
-        <div className="notice" role="alert">
-          <h2>Les alertes n’ont pas pu être chargées.</h2>
-          <p>{error}</p>
-          <button className="button" onClick={() => setAttempt((n) => n + 1)}>
-            <ArrowClockwise size={16} aria-hidden="true" /> Réessayer
-          </button>
-        </div>
+        <Notice
+          title="Les alertes n’ont pas pu être chargées."
+          onRetry={() => setAttempt((n) => n + 1)}
+        >
+          {error}
+        </Notice>
       )}
       {status === "ready" && selected && (
         <AlertDetail
@@ -228,26 +219,16 @@ export function AlertsView({
                 <span className="count"> {alerts.length}</span>
               )}
             </h2>
-            <span className="live-line muted">
-              {live ? (
-                <>
-                  <span className="status-dot" aria-hidden="true" /> Suivies en
-                  direct
-                </>
-              ) : (
-                "Actualisées régulièrement"
-              )}
-            </span>
           </div>
           {alerts.length === 0 ? (
-            <div className="empty sources-empty">
-              <Bell size={30} aria-hidden="true" />
-              <h2>Aucune alerte pour l’instant.</h2>
-              <p>
-                Écrivez des mots-clés ci-dessus : chaque nouvel article qui
-                correspond s’affichera ici.
-              </p>
-            </div>
+            <EmptyState
+              className="sources-empty"
+              icon={<Bell size={26} aria-hidden="true" />}
+              title="Aucune alerte pour l’instant."
+            >
+              Écrivez des mots-clés ci-dessus : chaque nouvel article qui
+              correspond s’affichera ici.
+            </EmptyState>
           ) : (
             <ul className="alert-list" aria-label="Alertes">
               {alerts.map((alert) => (

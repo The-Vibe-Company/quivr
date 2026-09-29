@@ -4,6 +4,7 @@ import { fetchDocument } from "../lib/search";
 import { Dialog } from "./Dialog";
 import { Highlight } from "./Highlight";
 import type { DocumentDetail } from "../types";
+import { LoadingState, Notice } from "./ui";
 export function DocumentPanel({
   record,
   version,
@@ -38,17 +39,16 @@ export function DocumentPanel({
           <FileText size={16} aria-hidden="true" /> Texte original
         </div>
         <h1>{collected ? "Document collecté" : "Votre document"}</h1>
-        {!doc && !error && <p role="status">Chargement du texte…</p>}
+        {!doc && !error && (
+          <LoadingState label="Chargement du texte…" rows={2} />
+        )}
         {error && (
-          <div className="notice" role="alert">
-            <p>{error}</p>
-            <button
-              className="button"
-              onClick={() => setAttempt((value) => value + 1)}
-            >
-              Réessayer
-            </button>
-          </div>
+          <Notice
+            title="Le texte ne s’affiche pas."
+            onRetry={() => setAttempt((value) => value + 1)}
+          >
+            {error}
+          </Notice>
         )}
         {doc && (
           <>

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowClockwise,
   BellSlash,
   Pause,
   PencilSimple,
   Play,
   Trash,
+  Tray,
 } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import { print } from "../../lib/notation";
@@ -22,6 +22,7 @@ import {
 import { Interpretation } from "./Interpretation";
 import { QueryPreview, useParsed } from "./QueryPreview";
 import { CaughtItem } from "./CaughtItem";
+import { EmptyState, LoadingState, Notice } from "../ui";
 
 export function StateBadge({ enabled }: { enabled: boolean }) {
   return (
@@ -97,17 +98,11 @@ export function AlertDetail({
       <section className="alert-detail">
         {back}
         {error ? (
-          <div className="notice" role="alert">
-            <h2>L’alerte n’a pas pu être chargée.</h2>
-            <p>{error}</p>
-            <button className="button" onClick={onRetry}>
-              <ArrowClockwise size={16} aria-hidden="true" /> Réessayer
-            </button>
-          </div>
+          <Notice title="L’alerte n’a pas pu être chargée." onRetry={onRetry}>
+            {error}
+          </Notice>
         ) : (
-          <p role="status" className="muted">
-            Chargement de l’alerte…
-          </p>
+          <LoadingState label="Chargement de l’alerte…" />
         )}
       </section>
     );
@@ -289,13 +284,14 @@ export function AlertDetail({
         )}
       </div>
       {detail.matches.length === 0 ? (
-        <div className="empty sources-empty">
-          <h2>Rien pour l’instant.</h2>
-          <p>
-            Les articles qui arrivent à partir de maintenant et correspondent à
-            la requête s’afficheront ici, en direct.
-          </p>
-        </div>
+        <EmptyState
+          className="sources-empty"
+          icon={<Tray size={26} aria-hidden="true" />}
+          title="Rien pour l’instant."
+        >
+          Les articles qui arrivent à partir de maintenant et correspondent à la
+          requête s’afficheront ici, en direct.
+        </EmptyState>
       ) : (
         <ul className="caught-list" aria-label="Articles trouvés">
           {detail.matches.map((article) => (
