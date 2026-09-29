@@ -1,0 +1,52 @@
+internal/normalization/normalization_test.go
+  s_54b80c92daa9cb::t_dafc1a883d5f3a 32,410
+  s_54b80c92daa9cb::t_78aefc84a34e55 33-34,127-147
+  s_54b80c92daa9cb::t_5db15153dc3d76 275,295-306,317-349,351-352,356,359-367,369-371,373,375-376,380-385,387-388,390-392,394-395,397-409,411-412,414-491,529
+  s_54b80c92daa9cb::t_48997a6acc2877 413
+internal/app/run.go
+  s_54b80c92daa9cb::t_a1f51b474c132e 205
+migrations/20260929T0555Z_normalization_failures.sql
+  s_54b80c92daa9cb::t_3abef9b04d480f 1-42
+internal/adapters/postgres/normalizations.go
+  s_54b80c92daa9cb::t_5b04d23cea84ab 11-14,17-38,45-47,50-64,74-101
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_ac8e26e22329ab 308,310-313,317-342,420-430,442-446
+  s_54b80c92daa9cb::t_723be614b09739 258-268
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_44170933a54f3e 17-19,38,111-113,115,133-136
+  s_54b80c92daa9cb::t_c953d5ee6bb460 137-138
+internal/content/content.go
+  s_54b80c92daa9cb::t_dc35d573704d21 144-146,148-153,186-188,220-222,232,632-636
+  s_54b80c92daa9cb::t_e64fbbff3b2bff 763,765-775,798,828-834,846-859,863,866,868-882,885-887,890-895,898,900-923,928-929,932-960,962,966,968-973,975-1000,1003,1007,1011,1015,1023
+  s_54b80c92daa9cb::t_710e32e7b189de 860-862,864-865,867,889,899
+  s_54b80c92daa9cb::t_d2a8618e094880 274-276
+  s_54b80c92daa9cb::t_6312ea061d702c 143
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_6e0384ba5e2baa 20,94-96,111-124
+  s_54b80c92daa9cb::t_51f5ee73931a31 90
+  s_54b80c92daa9cb::t_5197ea17d5ad7e 125-126
+internal/content/normalized_test.go
+  s_54b80c92daa9cb::t_b707269aef81f4 206
+  s_54b80c92daa9cb::t_2fce22892ad537 122-125,135,137,215-320
+  s_54b80c92daa9cb::t_b1e3f3cd61549b 321
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_b3d1ce8308bb91 3,5,7-13,38-41,49-66,69-70,72-77,115-133,135-139,152-159,161-163,169-171,174,177,180,188,190,192,208,211,217,219,221-223,225,238,243,246,250,252,254,257-321
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_edd0cf7812a14e 32-39,44-48,50-58,62-82,112-115,117-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "775749295eb38c9c6834e2207f672c683229516b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
