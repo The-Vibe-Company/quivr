@@ -1,0 +1,21 @@
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_0f6b53e32f9c03 408-409
+quivr-search/tests/feed.spec.ts
+  s_54b80c92daa9cb::t_1dd21274e5f4a4 3-6,9-10,30,80,165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8f9b52e42fc00990af4b0977dda2fc9ff9f0b0e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
