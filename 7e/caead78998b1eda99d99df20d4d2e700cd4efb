@@ -1,0 +1,20 @@
+research/forge-generation-pipeline.md
+  s_f26448a44ad9a9::t_f80590f4494096 132,188,203
+  s_f26448a44ad9a9::t_bf18196b7f778a 1-131,133-187,189-202,204-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ecaead78998b1eda99d99df20d4d2e700cd4efb",
+  "prompts": {},
+  "sessions": {
+    "s_f26448a44ad9a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af25d7d1-ce01-4d86-bf3d-11fb1c2f7a14",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
