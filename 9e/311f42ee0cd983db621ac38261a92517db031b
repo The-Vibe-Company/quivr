@@ -1,0 +1,28 @@
+internal/retrieval/purge_test.go
+  s_ec117ba6cf48fd::t_cd49f0f73b35a1 1-124
+internal/app/run.go
+  s_ec117ba6cf48fd::t_ba1ef7b0d59967 297
+  s_ec117ba6cf48fd::t_c58e53d296c69d 27
+  s_ec117ba6cf48fd::t_499ae1ae51804f 176-181
+  s_ec117ba6cf48fd::t_72e1c2356b8e96 79-81
+  s_ec117ba6cf48fd::t_923e9d639abd5c 369-382
+internal/retrieval/purge.go
+  s_ec117ba6cf48fd::t_73b97d622545d9 5-6
+  s_ec117ba6cf48fd::t_c128af3fe82f78 74-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e311f42ee0cd983db621ac38261a92517db031b",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+internal/adapters/postgres/purge_test.go
+  s_ec117ba6cf48fd::t_c537bfc84b402b 5,183,244-249
+  s_ec117ba6cf48fd::t_4450505e86ea5b 1-4,6-12,14-95,100-182,184-243,250-256
+  s_ec117ba6cf48fd::t_1e29f7463249a1 13,96-99
+internal/adapters/postgres/purge.go
+  s_ec117ba6cf48fd::t_ad547966df2e4c 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d25ff05796e87fd58691f19c8938259e538a4f09",
+  "prompts": {},
+  "sessions": {
+    "s_ec117ba6cf48fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36dfcdd9-262b-4395-84cb-8264c3f4b801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
