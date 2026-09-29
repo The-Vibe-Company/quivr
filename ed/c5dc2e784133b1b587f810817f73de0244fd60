@@ -1,0 +1,19 @@
+scripts/local.py
+  s_2e259f4852fce6::t_a356de9ceaa6f4 404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "edc5dc2e784133b1b587f810817f73de0244fd60",
+  "prompts": {},
+  "sessions": {
+    "s_2e259f4852fce6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8894f8199b19be99",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
