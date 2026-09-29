@@ -22,6 +22,11 @@ internal/online/online.go
   s_54b80c92daa9cb::t_37c65f4f1a8ef9 69,80,98
 go.sum
   s_54b80c92daa9cb::t_a142639d9b9dd1 42-43,50-51,77-78,94-97,106-107,142-143,163-164,170-171
+docs/inventory.toml
+  s_54b80c92daa9cb::t_30f48390e61c37 109
+  s_54b80c92daa9cb::t_eea1c0dc31429d 72
+docs/start/functional.md
+  s_54b80c92daa9cb::t_30f48390e61c37 16
 ---
 {
   "schema_version": "authorship/3.0.0",
