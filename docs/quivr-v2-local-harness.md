@@ -434,7 +434,7 @@ The Plugin Contract Runner separately checks plugin input/result schemas and
 timeouts. Do not build a plugin registry or force local calls over HTTP for the
 harness. Private customer fixtures are not prerequisites for the public CC0 journey.
 
-The harness pins one external normalizer and one alert rule together.
+The harness pins one external normalizer and two alert-rule plugins together.
 `scripts/normalizer_plugin.py` pins the normalizer in the stack configuration's
 single `plugin` entry and,
 for pdf-text and the template, runs it as its own process with the repository
@@ -485,17 +485,31 @@ Verification starts on the template and runs these steps in order:
     plugin's evidence, a non-matching one gives none, an invalid expression or
     configuration is 422 at Subscription creation, and a rule on the
     provenance producer matches only that producer's article.
-11. With the alert-rule plugin stopped, a matching article becomes searchable
+11. The keyword alerts plugin `plugins/alerts` decides a saved
+    `<word> AND (grève OR strike) NOT sport` query:
+    - only the article that satisfies it alerts, although it writes `GREVE`;
+    - it gives exactly one signed webhook;
+    - the Match evidence names the matched terms and their Parts;
+    - a malformed query tree is 422;
+    - a `source` filter alone matches only that source's article.
+12. With the alert-rule plugins stopped, a matching article becomes searchable
     and no Match appears; after the restart the delayed evaluation completes
     with one Match and one acknowledged webhook.
 
 Later steps keep the pdf-text pin.
 
-Every stack also pins the `quivr plugin init --kind subscription` template,
-scaffolded once as `alert-rules` in `.scratch/<project>/subscription-plugin`,
-through the configuration's `plugins` list (`scripts/subscription_plugin.py`).
-Its log is `.scratch/<project>/subscription-plugin.log`, and Subscriptions pin
-it as `{"plugin_id": "alert-rules", "version": "0.1.0"}`.
+Every stack also pins two alert-rule plugins through the configuration's
+`plugins` list (`scripts/subscription_plugin.py`):
+
+| Plugin | Subscriptions pin | Log |
+| --- | --- | --- |
+| The keyword alerts plugin [`plugins/alerts`](../plugins/alerts/README.md), installed into `.scratch/plugin-sdk/venv` ([guide](keyword-alerts.md)) | `{"plugin_id": "alerts", "version": "0.1.0"}` | `.scratch/<project>/alerts-plugin.log` |
+| The `quivr plugin init --kind subscription` template, scaffolded once as `alert-rules` in `.scratch/<project>/subscription-plugin` | `{"plugin_id": "alert-rules", "version": "0.1.0"}` | `.scratch/<project>/subscription-plugin.log` |
+
+`QUIVR_ALERTS=off make dev` leaves the keyword alerts plugin unpinned, and
+Subscriptions pinned to it are then refused with `422 unsupported_evaluator`.
+`make verify` always pins it. `make dev` prints the pinned alert-rule plugins
+under the API address.
 
 The PostgreSQL adapter suite also kills the test plugin process in the middle of an
 invocation, restarts it, and checks that the Version ends with exactly one published

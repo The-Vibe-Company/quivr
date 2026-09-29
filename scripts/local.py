@@ -91,7 +91,7 @@ class Stack:
             # The pinned external normalizer: pdf-text for application/pdf (make dev default), the
             # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
             plugin=normalizer_plugin.pin(self),
-            # The alert-rule template pinned beside it (scripts/subscription_plugin.py). The fixture
+            # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py). The fixture
             # evaluator stays installed for the notification-mechanics acceptance tests.
             plugins=subscription_plugin.pins(self),monitoring_fixture_evaluator=True)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
@@ -421,6 +421,8 @@ def verify(stack,steps):
     # none for a non-match, 422 for an invalid expression, metadata rules; then a rule-plugin outage
     # delays evaluation, which completes after the restart.
     steps.run('alert_plugin',subscription_plugin.verify,stack)
+    # Keyword alerts decided by plugins/alerts: the evidence names the matched terms, a filter alone alerts.
+    steps.run('keyword_alerts',subscription_plugin.keywords,stack)
     steps.run('alert_plugin_outage',subscription_plugin.outage,stack)
     steps.run('delivery_worker_restart',delivery_restart,stack)
     journey(stack,steps)
@@ -482,9 +484,10 @@ def main():
         if args.command in ['dev','verify']:
             # Verification starts on the template's text/markdown pin, then switches to pdf-text.
             normalizer_plugin.select(stack,'template' if verification else normalizer_plugin.from_environment())
+            subscription_plugin.select(stack,verification or subscription_plugin.from_environment())
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}")
         elif args.command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(args.command=='reset')
         status='passed'

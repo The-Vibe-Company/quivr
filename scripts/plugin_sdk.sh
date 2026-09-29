@@ -12,7 +12,10 @@
 #     and `quivr plugin test` (JSON report in
 #     .scratch/plugin-sdk/subscription-contract-report.json);
 #  5. the reference plugin plugins/pdf-text passes its tests and `quivr plugin
-#     test` (JSON report in .scratch/plugin-sdk/pdf-text-contract-report.json).
+#     test` (JSON report in .scratch/plugin-sdk/pdf-text-contract-report.json);
+#  6. the keyword alerts plugin plugins/alerts passes its tests, replays its
+#     fixture and passes `quivr plugin test` (JSON report in
+#     .scratch/plugin-sdk/alerts-contract-report.json).
 # Needs Python 3.12+ and network access for pip (like `make contracts`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -109,3 +112,16 @@ python3 -W error::ResourceWarning -m unittest discover -s tests
 "$quivr" plugin test --report "$work/pdf-text-contract-report.json" . > "$work/pdf-text-contract.log" 2>&1 || { cat "$work/pdf-text-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/pdf-text-contract.log" || { cat "$work/pdf-text-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-report.json"
+
+# The first-party keyword alerts plugin plugins/alerts: unit tests (grammar,
+# matching, evidence), a replayed fixture and Contract Runner certification.
+# CI uploads the report.
+cd "$root/plugins/alerts"
+"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+python3 -W error::ResourceWarning -m unittest discover -s tests
+"$quivr" plugin inspect . > "$work/alerts-inspect.log"
+"$quivr" plugin dev --fixture fixtures/sample.json > "$work/alerts-response.json" 2> "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
+grep -q "8 decisions in 1 batches (5 match, 2 no_match, 1 not_ready)" "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
+"$quivr" plugin test --report "$work/alerts-contract-report.json" . > "$work/alerts-contract.log" 2>&1 || { cat "$work/alerts-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
+echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.json"

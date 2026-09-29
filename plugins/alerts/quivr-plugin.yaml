@@ -1,0 +1,210 @@
+# Quivr plugin manifest (Plugin API 0.2). Check it with: quivr plugin inspect .
+# Reference: contracts/plugins/v0/README.md in the Quivr repository, and
+# README.md here for the expression reference.
+id: alerts
+version: 0.1.0
+description: Keyword alerts. An article matches a saved search when its title and body satisfy a boolean keyword query, optionally filtered on its metadata.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    # A saved search's expression. Each alert kind is one oneOf branch told
+    # apart by "kind". This version implements "keywords"; "described"
+    # (plain-language alerts) is reserved for a later version.
+    expression_schema:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, match]
+          properties:
+            kind:
+              const: keywords
+              description: A boolean keyword query over the title and body, with optional metadata filters.
+            match:
+              $ref: "#/$defs/node1"
+              description: The query tree. Groups nest at most 6 levels deep.
+      $defs:
+        term:
+          type: object
+          additionalProperties: false
+          required: [term]
+          properties:
+            term:
+              type: string
+              minLength: 1
+              maxLength: 256
+              pattern: "\\S"
+              description: A word or an exact phrase. Case, accents and punctuation between words are ignored; words match whole.
+        field:
+          type: object
+          additionalProperties: false
+          required: [field, equals]
+          properties:
+            field:
+              type: string
+              maxLength: 256
+              pattern: "^([a-z][a-z0-9_]{0,63}|/(source|provenance|extensions|accepted_at)(/.*)?)$"
+              description: A field name (built in, or mapped in the plugin configuration) or a JSON Pointer into the article's metadata.
+            equals:
+              type: [string, number, boolean]
+              maxLength: 256
+              description: The value the field must have. Strings compare without case or accents; a list field matches when one element does.
+        node1:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node2"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node2"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node2"}
+        node2:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node3"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node3"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node3"}
+        node3:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node4"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node4"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node4"}
+        node4:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node5"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node5"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node5"}
+        node5:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node6"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node6"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node6"}
+        node6:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/leaf"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/leaf"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/leaf"}
+        leaf:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+    # Per-Subscription settings, validated by the core when a Subscription is created.
+    configuration_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        wait_for_enrichment:
+          type: boolean
+          description: Answer not_ready until the article is enriched (embeddings attached). Default false for keyword alerts.
+    max_batch_size: 64
+    timeout_ms: 5000
+    retry:
+      max_attempts: 3
+# Installer configuration: set in the plugin pin's `configuration`.
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      fields:
+        type: object
+        maxProperties: 64
+        description: Field names usable in field filters, each mapped to a JSON Pointer into the article's metadata, for example author -> /extensions/<namespace>/data/author. They add to or replace the built-in names.
+        propertyNames:
+          pattern: "^[a-z][a-z0-9_]{0,63}$"
+        additionalProperties:
+          type: string
+          maxLength: 256
+          pattern: "^/(source|provenance|extensions|accepted_at)(/.*)?$"
+      text_roles:
+        type: array
+        minItems: 1
+        maxItems: 16
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description: Part roles whose text keyword terms search (default title and body).
+run:
+  command: [python3, -m, alerts]

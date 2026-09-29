@@ -1,0 +1,145 @@
+# Keyword alerts: writing alert queries
+
+A keyword alert sends a webhook when a new article matches a keyword query, such as
+`"Airbus" AND (grève OR strike) NOT sport`. The alert says which words matched and
+where. This guide is for the people who write those queries and the operators who
+set them up. The [`alerts` plugin README](../plugins/alerts/README.md) is the
+reference for the expression format.
+
+## Write a query
+
+| You want | Write |
+| --- | --- |
+| A word | `strike` |
+| An exact phrase | `"on strike over pay"` |
+| All of several words, anywhere | `harbour strike` or `harbour AND strike` |
+| Any of several words | `strike OR walkout OR stoppage` |
+| None of these words | `strike NOT football` or `strike AND NOT (football OR rugby)` |
+| Grouping | `(harbour OR port) AND (strike OR walkout)` |
+| A metadata filter | `author:"Jane Doe"`, `source:wire`, `category:economy` |
+| Every new article from one source | `source:wire` |
+
+Rules:
+
+- **Operators.** `AND`, `OR` and `NOT` are written in capitals; in lower case they are
+  ordinary words. `NOT` binds tighter than `AND`, which binds tighter than `OR`: in
+  `a OR b AND c`, `b AND c` is grouped first. Use parentheses when in doubt.
+- **Case, accents and punctuation do not matter.** `greve` finds "Grève", and
+  `Saint-Denis` finds "Saint Denis".
+- **Words match whole.** `bus` does not find "Airbus", and `strike` does not find
+  "strikes", because there is no stemming: list the forms you need, for example
+  `strike OR strikes OR striking`.
+- **Title and body are searched**, not captions or other Parts, unless the operator
+  changes `text_roles`.
+- **Exclusions.** Write `NOT` to exclude a word; a leading `-` is refused. A query made
+  only of exclusions (`NOT sport`) alerts on almost every article.
+- **Nesting.** Groups nest at most 6 levels deep, and a group holds at most 64 items.
+- **Colons.** A word shaped `name:value` is a field filter. To search it as text,
+  quote it: `"re:Invent"`. A URL such as `https://example.com` stays text.
+
+## Save it as an alert
+
+Quivr stores the query as a JSON tree, which it validates in full when the
+Subscription is created: a malformed query is a `422 invalid_expression` naming the
+part at fault. Two mistakes still pass that check and never match: a term with no
+letter or digit (`"!!!"`), and a field name the operator has not mapped (the plugin
+logs a warning). To get the tree from the text, use the
+plugin's parser:
+
+```bash
+python3 -m alerts.notation '"Airbus" AND (grève OR strike) NOT sport'
+```
+
+```json
+{
+  "kind": "keywords",
+  "match": {"all": [
+    {"term": "Airbus"},
+    {"any": [{"term": "grève"}, {"term": "strike"}]},
+    {"not": {"term": "sport"}}
+  ]}
+}
+```
+
+An application can also build the tree directly, for example from a form with "all of
+these words", "any of these words", "none of these words" and "this exact phrase"
+fields.
+
+Then create a Saved Query with that expression, and a Subscription pinned to the
+`alerts` evaluator:
+
+```bash
+curl -s -X POST "$QUIVR_API/v0/saved-queries" -H "Authorization: Bearer $QUIVR_KEY" -H 'Content-Type: application/json' -d '{
+  "idempotency_key": "airbus-strikes", "name": "Airbus strikes",
+  "definition": {"corpus_ids": ["<corpus id>"], "retrieval_profile": "balanced", "temporal_policy": "from_activation",
+    "expression": {"kind": "keywords", "match": {"all": [{"term": "Airbus"}, {"any": [{"term": "grève"}, {"term": "strike"}]}, {"not": {"term": "sport"}}]}}}}'
+
+curl -s -X POST "$QUIVR_API/v0/subscriptions" -H "Authorization: Bearer $QUIVR_KEY" -H 'Content-Type: application/json' -d '{
+  "idempotency_key": "airbus-strikes-alert", "name": "Airbus strikes",
+  "saved_query_id": "<saved_query_id>", "saved_query_version_id": "<current_version.version_id>",
+  "evaluator": {"plugin_id": "alerts", "version": "0.1.0", "configuration": {}},
+  "destination_id": "<destination id>"}'
+```
+
+To change the query, commit a new Saved Query Version and pin it with a new
+Subscription Version. The new rule applies to articles that arrive afterwards
+([walkthrough](api-walkthrough.md#changes-catalog-and-monitoring)).
+
+## Read what matched
+
+Each alert is a Match. `GET /v0/matches/{match_id}` shows its evidence:
+
+```json
+{
+  "explanation": "Matched \"Airbus\" in title, body; \"grève\" in body.",
+  "part_keys": ["title", "body"],
+  "details": {"kind": "keywords",
+              "terms": [{"term": "Airbus", "part_keys": ["title", "body"]}, {"term": "grève", "part_keys": ["body"]}],
+              "fields": []}
+}
+```
+
+- **Terms.** The explanation lists the terms that made the article match, as written
+  in the query, and the Parts where each one was found. Terms under `NOT`, and
+  alternatives that did not match, are not listed.
+- **Filters.** A matched filter reads `Matched source "wire".`
+
+## Set up metadata filters (operators)
+
+These built-in filter names work everywhere:
+- `source`: the Source Namespace;
+- `producer`: the producer the client declared, or the Connector Instance;
+- `origin`: `client` or `connector`;
+- `connector`: the Connector Instance id;
+- `connector_kind`: for example `rss`.
+
+Names such as `author` or `category` depend on where your sources store that
+metadata, usually in a Version extension. Map them in the `alerts` pin's
+`configuration`, in the core's startup config:
+
+```json
+{"plugins": [{"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
+  "configuration": {"fields": {"author": "/extensions/example.news/data/author",
+                               "category": "/extensions/example.news/data/categories"}}}]}
+```
+
+A list field (several categories) matches when one element does. An unmapped name
+never matches, and the plugin logs a warning. A query can also name a JSON Pointer
+directly, for example `{"field": "/extensions/example.news/data/author", "equals":
+"Jane Doe"}`; the text notation accepts only names.
+
+## Timing
+
+A keyword alert is decided as soon as an article becomes searchable. To wait until
+the article is enriched instead, set `{"wait_for_enrichment": true}` in the
+Subscription's `evaluator.configuration`. The plugin then answers "not ready", and
+Quivr asks again once embeddings are attached.
+
+## In the local stack
+
+`make dev` and `make verify` pin the `alerts` plugin next to pdf-text, from
+`plugins/alerts`, with the built-in field names only. Its log is
+`.scratch/<project>/alerts-plugin.log`. To run without it, start the stack with
+`QUIVR_ALERTS=off make dev`; Subscriptions pinned to `alerts` are then refused with
+`422 unsupported_evaluator`
+([harness](quivr-v2-local-harness.md#plugin-substitution-and-handoff)).

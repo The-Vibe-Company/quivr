@@ -123,6 +123,15 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
   Delivery. Matching is decided by a pinned alert-rule plugin (the
   `subscription` Contribution), batched per article.
+- **Keyword alerts** through the first-party plugin [`plugins/alerts`](plugins/alerts/README.md),
+  pinned by default in the local stack:
+  - queries such as `"Airbus" AND (grève OR strike) NOT sport`, with exact phrases,
+    "any of", "none of" and grouping;
+  - case, accents and punctuation are ignored, and words match whole;
+  - metadata filters such as `source:wire` or `author:"Jane Doe"` (names mapped in the
+    plugin configuration), and a filter alone is a valid alert;
+  - each Match's evidence names the matched terms and the Parts where they matched
+    ([guide](docs/keyword-alerts.md)).
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list
@@ -199,10 +208,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Plugin-owned match criteria.
+- Alerts described in plain language, and alerts that catch rephrased or translated articles.
 - Filtering on typed field mappings (filter roles are validated and stored today).
 - X Filtered Stream webhooks as a lower-latency alternative to list polling.
-- The rest of the plugin platform: pinning several plugins at once.
 - Reprocessing quarantined Versions.
 
 The contract already describes some of these routes; the ones not implemented yet are
@@ -213,6 +221,7 @@ listed here, not in "What works today".
 | Read | For |
 | --- | --- |
 | [API walkthrough](docs/api-walkthrough.md) | Endpoint semantics, limits, processing and search details |
+| [Keyword alerts](docs/keyword-alerts.md) | Writing alert queries and setting up metadata filters |
 | [OpenAPI contract](contracts/http/v0/openapi.yaml) | Authoritative request and response shapes |
 | [Plugin Protocol v0](contracts/plugins/v0/README.md) | Plugin manifest, routes, schemas and fixtures |
 | [Write a normalizer](docs/plugins/write-a-normalizer.md) | From `quivr plugin init` to a searchable, observable Record |

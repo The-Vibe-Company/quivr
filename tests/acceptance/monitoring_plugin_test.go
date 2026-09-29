@@ -28,8 +28,15 @@ func alertEvaluator(t *testing.T) (string, string) {
 // pinned alert-rule evaluator.
 func alertSubscription(t *testing.T, key, corpusID string, expression, configuration map[string]any, destination string, want int) (map[string]any, map[string]any) {
 	t.Helper()
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	id, version := alertEvaluator(t)
+	return pinnedSubscription(t, id, version, key, corpusID, expression, configuration, destination, want)
+}
+
+// pinnedSubscription creates a Saved Query with the expression and a
+// Subscription pinned to the evaluator plugin id and version.
+func pinnedSubscription(t *testing.T, id, version, key, corpusID string, expression, configuration map[string]any, destination string, want int) (map[string]any, map[string]any) {
+	t.Helper()
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	query := request(t, "POST", "/v0/saved-queries", admin, map[string]any{"idempotency_key": "alert-query-" + key, "name": "Alert " + key, "definition": map[string]any{
 		"corpus_ids": []string{corpusID}, "expression": expression, "retrieval_profile": "balanced", "temporal_policy": "from_activation"}}, 201)
 	if configuration == nil {

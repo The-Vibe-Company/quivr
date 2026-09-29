@@ -55,6 +55,7 @@ excluded = [
 "docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/rss.md" = { audience = "functional", kind = "guide" }
 "docs/connectors/x.md" = { audience = "functional", kind = "guide" }
+"docs/keyword-alerts.md" = { audience = "functional", kind = "guide" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide" }
 "docs/quivr-v2-architecture-overview.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-backend-mvp-scope.md" = { audience = "contributor", kind = "concept" }
@@ -65,6 +66,7 @@ excluded = [
 "docs/quivr-v2-monitoring-tracer.md" = { audience = "contributor", kind = "concept" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept" }
 "docs/quivr-v2-search-contracts.md" = { audience = "contributor", kind = "concept" }
+"plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide" }

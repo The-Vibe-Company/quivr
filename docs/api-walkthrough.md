@@ -326,6 +326,11 @@ Operations are supported.
   (`plugins` in the configuration), named by `plugin_id` and `version`; a Saved Query
   expression or evaluator configuration its schemas refuse is 422 `invalid_expression`
   or `invalid_subscription_configuration`. A plugin outage delays alerts, never skips them.
+  The first-party keyword alerts plugin (`{"plugin_id": "alerts", "version": "0.1.0"}`,
+  pinned in the local stack) takes an expression such as
+  `{"kind": "keywords", "match": {"all": [{"term": "Airbus"}, {"not": {"term": "sport"}}]}}`.
+  Its Match evidence names the matched terms and their Parts
+  ([Keyword alerts](keyword-alerts.md)).
 - The worker POSTs each notice to the Subscription's destination, signed with
   Standard Webhooks headers (`webhook-id` is the notice `event_id`). A 2xx response
   marks the Delivery `delivered`. Network errors, timeouts, 408, 429 and 5xx are
