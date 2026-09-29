@@ -1,0 +1,50 @@
+internal/connectors/kinds_test.go
+  s_54b80c92daa9cb::t_edbe4e3fd277b9 26,30,80-87,89-92
+  s_54b80c92daa9cb::t_8675887d1c0742 93
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_541bf577ba4d94 690,707,745
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_bd06bcb590f105 10
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_541bf577ba4d94 2153-2155
+README.md
+  s_54b80c92daa9cb::t_a26cf0090fa801 141
+client/client.gen.go
+  s_54b80c92daa9cb::t_541bf577ba4d94 690,707,745
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_541bf577ba4d94 2803,2813
+tests/acceptance/connectors_x_test.go
+  s_54b80c92daa9cb::t_5358e0aac6bcfb 97-98,102
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_6efd854892e550 11-17,55,168
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_245ff264347788 41,44-46
+scripts/local.py
+  s_54b80c92daa9cb::t_245ff264347788 96,435-436
+docs/inventory.toml
+  s_54b80c92daa9cb::t_70b9a1c4bf4388 96,129
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_4618be0e50cb12 1-44
+internal/transport/httpapi/connectors_test.go
+  s_54b80c92daa9cb::t_f469f1f99d85f8 104-113,127,265,269-270
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_a26cf0090fa801 21
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_342071ae71fb8f 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fe6598fd29e20b95d7184168ee5c9914e5642ad6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
