@@ -3,9 +3,9 @@
 Nothing is committed: every file is downloaded by URL and sha256 into the cache, then a fixed,
 seeded sample is written as a TREC-layout set (trec.py) with a manifest.json recording where it
 came from. Every set keeps all its judged queries; the document budget keeps one nightly run
-under an hour on a 2-CPU runner, where ingestion dominates (about 5 short passages or 9,000
-characters of long text per second). Changing a size or a seed changes the set's fingerprint,
-so runs on different samples are never compared.
+at about 90 minutes on a 2-CPU runner, where ingestion dominates (about 4 short passages or
+3,500 characters of long text per second; THE-775 baseline run 36701251774). Changing a size
+or a seed changes the set's fingerprint, so runs on different samples are never compared.
 
 Licences were checked at their source on 2026-09-30 (THE-775):
 - MIRACL-fr: the MIRACL collection is Apache-2.0 (huggingface.co/datasets/miracl/miracl); its

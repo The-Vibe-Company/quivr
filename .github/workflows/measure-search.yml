@@ -24,7 +24,8 @@ concurrency:
 jobs:
   search-quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # The baseline run took 91 minutes (THE-775); the margin absorbs slower runners.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

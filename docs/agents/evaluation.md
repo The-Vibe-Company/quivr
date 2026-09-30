@@ -34,10 +34,10 @@ changes the folder). Downloads are cached in `.scratch/eval/cache`.
 
 `scripts/eval/public_sets.py` pins every file by URL and sha256 and records each licence
 and where it was checked. Every judged query is kept; the documents are sampled so that a
-nightly run takes under an hour on a 2-CPU runner: every judged document is kept, and a
-fixed seed picks distractors for the rest (the source's own hard negatives first when it
-lists them). Documents over the
-engine's `max_source_bytes` are left out. Sampled corpora are much smaller than the
+nightly run fits a 2-CPU runner (about 90 minutes, mostly ingestion; `mldr-fr` alone takes
+40): every judged document is kept, and a fixed seed picks distractors for the rest (the
+source's own hard negatives first when it lists them). Documents over the engine's
+`max_source_bytes` are left out. Sampled corpora are much smaller than the
 originals, so scores are higher than published full-corpus numbers; compare runs with each
 other, not with papers.
 
@@ -75,6 +75,8 @@ licence on its ticket.
   reliably detect only large differences (about 0.1 nDCG@10); 0.05 needs several hundred.
 - **Against the baseline run**: the same system in an earlier run, only for sets whose
   sample fingerprint is identical.
+- **Failures** are searches the API refused or could not answer; they score 0. Two
+  `mldr-fr` queries are longer than the engine's query token limit and always fail.
 - **Latency** is client wall time per search (p50, p95), one search at a time.
   **Paid calls** is 0 on the local stack, which calls no paid service, and unknown (`—`)
   with `--api-url`. **Ingestion to vectors** is the time from the first submission until
