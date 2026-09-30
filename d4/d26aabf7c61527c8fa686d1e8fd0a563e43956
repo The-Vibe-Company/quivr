@@ -1,0 +1,65 @@
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_302f941d9dc348 4,9-10,66,68,554-560,779
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_cb202c0caa0d20 1412,1414-1417,1467-1476
+contracts/plugins/v0/fixtures/responses/ingestion/segment-only.json
+  s_54b80c92daa9cb::t_f462b8c97aa583 1-17
+contracts/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_fc232a5f300ce9 100,106
+contracts/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_94589fa1b6f7b1 42,56
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_7aea3e7519fb89 162-163
+docs/plugins/write-an-ingestion-plugin.md
+  s_54b80c92daa9cb::t_a66d77f4f87034 19,55-58,115
+internal/plugins/devhost/fakeplugin/ingestion.go
+  s_54b80c92daa9cb::t_ed59f9ff175e1d 26-27,67
+internal/plugins/devhost/ingestion.go
+  s_54b80c92daa9cb::t_39477be128a34e 187-199
+internal/plugins/ingestion.go
+  s_54b80c92daa9cb::t_f4bad618590b69 289-302
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_18fd8887927751 22,28,44-48
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_c4041ee0eab0bd 77
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_6d9e8ee348a67a 179
+internal/plugins/runner/ingestion.go
+  s_54b80c92daa9cb::t_e56b6c19e6984f 20-23,173-207
+sdks/go/examples/hash-embedder/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_25d9ce0e411a17 10
+sdks/go/quivrplugin/ingestion.go
+  s_54b80c92daa9cb::t_f9f0de2eac2e15 20-21,51-52,218-222
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_04f5ad4e6b9ace 19,23
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_990584a180b007 85
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_d52ca2775306f5 100,106
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_e216ad0b01dfef 42,56
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_81fbe0ab6823be 100,106
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_243a1288fe8b71 42,56
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_a432f3b244e831 237,243,252
+tests/plugin-contract/ingestion-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_c35593679d3fb6 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4d26aabf7c61527c8fa686d1e8fd0a563e43956",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
