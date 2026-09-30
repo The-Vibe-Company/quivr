@@ -1,0 +1,21 @@
+internal/plugins/live.go
+  s_54b80c92daa9cb::t_f7e30a5d3d55d2 62-67
+internal/plugins/live_test.go
+  s_54b80c92daa9cb::t_bf2fc5658e2882 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "51c72437ca8f026d6b95e28b381241aa7dcf76e9",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
