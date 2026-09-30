@@ -9,20 +9,20 @@ one unless another ingestion plugin is pinned (`scripts/connector_plugin.py`
 
 ## What it does
 
-- **Segments.** Title and body text Parts only. Each body Part is cut into
-  windows of at most 384 tokens of the pinned tokenizer that prefer paragraph,
-  line and sentence ends, overlapping by 48 tokens. Recipe values are in
-  `profile.json`. A request with no space answers the segments alone (Plugin
-  API 0.8), which is how a Version becomes searchable by keyword while the
-  embedding service is down.
+- **Segments** title and body text Parts only: each body Part into windows of
+  at most 384 tokens (`profile.json`) that prefer paragraph, line and sentence
+  ends, overlapping by 48; a title with no body Part is one segment. With no
+  space, it answers the segments alone (Plugin API 0.8), for keyword search.
 - **Embeds** each window as `passage: <title, at most 64 tokens>\n\n<window>`
   through the deployment's TEI (`core.ingest.e5-small@1`, 384 dims, cosine). A
   call stops after 30 s with the retryable `embedding_incomplete`, keeping its
   vectors for the next one. `embed_query` encodes `query: <at most 256 tokens>`.
-- **Refuses** (`segmentation_limit`, the Version is blocked as
-  `ingestion_refused`) text over 256 KiB, more than 64 Parts or 256 windows, a
-  window over 4,096 code points or a model input over 512 tokens. A window TEI
-  refuses (`inference_refused`) blocks enrichment: keyword search only.
+- **Refuses** (the blocked Version's diagnostic shows the code and message) no
+  title or body text (`no_indexable_text`), invalid UTF-8 or a NUL
+  (`invalid_text`) and, naming the limit (`segmentation_limit`), text over 256
+  KiB, two titles, 64 Parts or 256 windows, a window over 4,096 code points or
+  a model input over 512 tokens. A window TEI refuses (`inference_refused`)
+  blocks enrichment: keyword search only.
 - **Provenance.** Each segment records its token range, overlap, hard cuts,
   title and model-input token counts and the SHA-256 of its model input.
 

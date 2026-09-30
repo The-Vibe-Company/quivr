@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -48,9 +49,33 @@ var Parameters = func() profileParameters {
 	return p
 }()
 
-// ErrUnsupported is content the recipe can never segment: a limit is exceeded
-// or the text is invalid. The plugin refuses it with a terminal error.
-var ErrUnsupported = errors.New("segmentation_limit")
+// Refusal is content the recipe can never segment, with the code and plain
+// message the plugin refuses the Version with, terminally: no title or body
+// text to index (no_indexable_text), text that is not valid (invalid_text),
+// or a limit of the recipe, which the message names (segmentation_limit).
+type Refusal struct{ Code, Message string }
+
+func (r *Refusal) Error() string { return r.Code + ": " + r.Message }
+
+func limit(format string, args ...any) error {
+	return &Refusal{Code: "segmentation_limit", Message: fmt.Sprintf(format, args...)}
+}
+
+var (
+	errNoText      = &Refusal{Code: "no_indexable_text", Message: "the Version has no title or body text to index"}
+	errInvalidText = &Refusal{Code: "invalid_text", Message: "a title or body Part is not valid UTF-8 or contains a NUL character"}
+	errOffsets     = &Refusal{Code: "invalid_text", Message: "the tokenizer's offsets do not match a title or body Part"}
+	errTwoTitles   = limit("the Version has more than one title Part; the recipe takes one")
+	errCut         = limit("a body Part cannot be cut into overlapping windows of at most %d tokens", Parameters.BodyTokens)
+)
+
+func segmentsLimit() error {
+	return limit("the Version makes more than %d segments", Parameters.MaxSegments)
+}
+
+func excerptLimit(n int) error {
+	return limit("a segment excerpt is %d code points; the recipe takes at most %d", n, Parameters.MaxExcerptCodepoints)
+}
 
 // errInvalidQuery is a query the model cannot take without truncation.
 var errInvalidQuery = errors.New("invalid query")
@@ -131,30 +156,37 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 		input TokenInput
 	}
 	sources := []source{}
-	total := 0
+	total, bodies := 0, 0
 	titleSlot := -1
 	for _, part := range parts {
 		if part.Role != "title" && part.Role != "body" {
 			continue
 		}
 		if !validText(part.Text) {
-			return out, ErrUnsupported
+			return out, errInvalidText
 		}
 		total += len(part.Text)
 		if part.Role == "title" {
 			if titleSlot >= 0 {
-				return out, ErrUnsupported
+				return out, errTwoTitles
 			}
 			titleSlot = len(sources)
 		}
 		inputText := part.Text
 		if part.Role == "title" {
 			inputText = strings.TrimSpace(inputText)
+		} else {
+			bodies++
 		}
 		sources = append(sources, source{part: part, input: TokenInput{Text: inputText}})
 	}
-	if total > Parameters.MaxSourceBytes || len(sources) == 0 || len(sources) > Parameters.MaxParts {
-		return out, ErrUnsupported
+	switch {
+	case len(sources) == 0:
+		return out, errNoText
+	case total > Parameters.MaxSourceBytes:
+		return out, limit("the title and body text is %d bytes; the recipe takes at most %d", total, Parameters.MaxSourceBytes)
+	case len(sources) > Parameters.MaxParts:
+		return out, limit("the Version has %d title and body Parts; the recipe takes at most %d", len(sources), Parameters.MaxParts)
 	}
 	inputs := make([]TokenInput, len(sources))
 	for i, s := range sources {
@@ -166,7 +198,7 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 	}
 	for i, e := range enc {
 		if !validOffsets([]rune(inputs[i].Text), e) {
-			return out, ErrUnsupported
+			return out, errOffsets
 		}
 	}
 	title, titleUsed := "", ""
@@ -184,7 +216,7 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 				cut--
 			}
 			if cut == 0 {
-				return out, ErrUnsupported
+				return out, limit("the title cannot be cut at a token boundary within %d tokens", Parameters.TitleTokens)
 			}
 			titleUsed = strings.TrimSpace(string([]rune(titleUsed)[:offsets[cut-1][1]]))
 			titleTokens = cut
@@ -207,8 +239,8 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 		}
 		for _, w := range spans {
 			raw := string(runes[w.start:w.end])
-			if utf8.RuneCountInString(raw) > Parameters.MaxExcerptCodepoints {
-				return out, ErrUnsupported
+			if n := utf8.RuneCountInString(raw); n > Parameters.MaxExcerptCodepoints {
+				return out, excerptLimit(n)
 			}
 			modelInput := "passage: " + strings.TrimSpace(raw)
 			if titleUsed != "" {
@@ -224,12 +256,27 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 			}
 			out = append(out, Window{PartKey: part.Key, Start: w.start, End: w.end, Derivation: d})
 			if len(out) > Parameters.MaxSegments {
-				return out, ErrUnsupported
+				return out, segmentsLimit()
 			}
 		}
 	}
+	// A title with no body Part, such as a feed item without a description,
+	// is its own segment: the whole title Part, embedded as the title alone.
+	// The recipe refused it before (THE-815); every Version it accepted keeps
+	// the same segments.
+	if bodies == 0 && titleUsed != "" {
+		part := sources[titleSlot].part
+		runes := []rune(part.Text)
+		if len(runes) > Parameters.MaxExcerptCodepoints {
+			return out, excerptLimit(len(runes))
+		}
+		modelInput := "passage: " + titleUsed
+		d := Derivation{UTF8End: len(part.Text), TokenEnd: enc[titleSlot].Tokens, NormalizedSHA256: hash([]byte(part.Text)), ModelInput: modelInput, ModelInputSHA256: hash([]byte(modelInput)),
+			TitleFullSHA256: hash([]byte(title)), TitleUsedSHA256: hash([]byte(titleUsed)), TitleTokens: titleTokens, TitleTruncated: truncated}
+		out = append(out, Window{PartKey: part.Key, End: len(runes), Derivation: d})
+	}
 	if len(out) == 0 {
-		return out, ErrUnsupported
+		return out, errNoText
 	}
 	modelInputs := make([]TokenInput, len(out))
 	for i, s := range out {
@@ -243,7 +290,7 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 		batchBytes += len(item.Text)
 	}
 	if batchBytes > Parameters.MaxModelBatchBytes {
-		return out, ErrUnsupported
+		return out, limit("the model inputs are %d bytes; the recipe takes at most %d", batchBytes, Parameters.MaxModelBatchBytes)
 	}
 	counts, err := p.Tokenizer.Encode(ctx, modelInputs)
 	if err != nil {
@@ -252,13 +299,13 @@ func (p TokenWindows) Process(ctx context.Context, parts []Part) ([]Window, erro
 	if title != "" {
 		titleTokens = counts[len(out)].Tokens
 		if titleTokens > Parameters.TitleTokens {
-			return out, ErrUnsupported
+			return out, limit("the title is %d tokens once cut; the recipe takes at most %d", titleTokens, Parameters.TitleTokens)
 		}
 	}
 	for i, e := range counts[:len(out)] {
 		out[i].Derivation.TitleTokens = titleTokens
 		if e.Tokens > Parameters.ModelTokens {
-			return out, ErrUnsupported
+			return out, limit("a segment's model input is %d tokens; the model takes at most %d", e.Tokens, Parameters.ModelTokens)
 		}
 		out[i].Derivation.ModelTokens = e.Tokens
 	}
@@ -322,11 +369,10 @@ func safeStart(text []rune, pos int) bool {
 	return pos == 0 || unicode.IsSpace(text[pos-1]) || strings.ContainsRune("([{\"'“‘«", text[pos-1])
 }
 func windows(text []rune, e Encoding) ([]span, error) {
-	if len(text) == 0 {
+	// A body with no token, such as blank text, has nothing to cut: like an
+	// empty body, it gives no window of its own.
+	if len(text) == 0 || e.Tokens == 0 {
 		return nil, nil
-	}
-	if e.Tokens == 0 {
-		return nil, ErrUnsupported
 	}
 	spans := []span{}
 	first := 0
@@ -350,7 +396,7 @@ func windows(text []rune, e Encoding) ([]span, error) {
 				}
 			}
 			if best < 0 {
-				return nil, ErrUnsupported
+				return nil, errCut
 			}
 			last = best
 			hardEnd = bestCategory == 4
@@ -360,15 +406,12 @@ func windows(text []rune, e Encoding) ([]span, error) {
 			start = 0
 		}
 		end := boundary(text, e, last)
-		if end <= start {
-			return nil, ErrUnsupported
-		}
-		if len(spans) > 0 && end <= spans[len(spans)-1].end {
-			return nil, ErrUnsupported
+		if end <= start || len(spans) > 0 && end <= spans[len(spans)-1].end {
+			return nil, errCut
 		}
 		spans = append(spans, span{start: start, end: end, first: first, last: last, overlap: overlap, hardStart: hardStart, hardEnd: hardEnd})
 		if len(spans) > Parameters.MaxSegments {
-			return nil, ErrUnsupported
+			return nil, segmentsLimit()
 		}
 		if last == e.Tokens {
 			break
@@ -379,7 +422,7 @@ func windows(text []rune, e Encoding) ([]span, error) {
 			next--
 		}
 		if next-first < Parameters.MinimumBoundaryTokens-Parameters.OverlapTokens-Parameters.OverlapBacktrack {
-			return nil, ErrUnsupported
+			return nil, errCut
 		}
 		hardStart = !safeStart(text, boundary(text, e, next))
 		overlap = last - next

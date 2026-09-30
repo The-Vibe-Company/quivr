@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"reflect"
@@ -150,7 +151,8 @@ func TestServerReportsStartupFailure(t *testing.T) {
 
 func TestServerKeepsGoSideLimits(t *testing.T) {
 	s := fake(t, fakeServer)
-	if _, err := s.Encode(context.Background(), make([]TokenInput, 513)); err != ErrUnsupported || s.spawns != 0 {
+	var refusal *Refusal
+	if _, err := s.Encode(context.Background(), make([]TokenInput, 513)); !errors.As(err, &refusal) || refusal.Code != "segmentation_limit" || s.spawns != 0 {
 		t.Fatal("batch limit", err)
 	}
 }

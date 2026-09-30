@@ -258,7 +258,7 @@ curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$WITHDRAWAL_RECEIPT_ID" -H "Author
 | One uploaded file | 1 GiB |
 | Text indexed per Version (first-party ingestion) | 256 KiB, 64 `title` and `body` Parts |
 
-A Version over the indexing limits is stored and readable, but not searchable: its Receipt shows `ingestion_refused`.
+A Version over the indexing limits, or with no title or body text, is stored and readable, but not searchable: its Receipt shows `ingestion_refused`, and the Version's diagnostic says which limit, or that it has no text to index.
 
 ## Next
 

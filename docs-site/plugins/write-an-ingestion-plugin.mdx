@@ -62,7 +62,7 @@ Bump a space's `version` whenever its vectors change: a new model, new weights, 
 
 Replace `hashWords` with a call to your model. Both methods must be deterministic: rebuilds reuse stored segments and vectors, and Quivr refuses a different answer for the same Version. When a Version arrives, Quivr first asks for the segments alone, with no spaces, so the article is searchable by keyword even while your model is down; it asks for the vectors afterwards. Return the same segments both times.
 
-Return `quivrplugin.RetryableIngestError` when your model is unavailable: the Version waits and is retried. Return `TerminalIngestError` for content you can never handle: the Version is blocked with `ingestion_refused`.
+Return `quivrplugin.RetryableIngestError` when your model is unavailable: the Version waits and is retried. Return `TerminalIngestError` for content you can never handle: the Version is blocked with `ingestion_refused`, and its diagnostic shows your error's code and message, so say in plain words why, such as `no_indexable_text`.
 
 A call that runs past `timeout_ms` (at most 5 minutes) is cancelled and retried, and after three such calls the Version's enrichment stops. If your model is slow on long Versions, keep the vectors you already computed and return a retryable error before the deadline: the next call resumes instead of starting over.
 
@@ -118,7 +118,7 @@ The response lists the Corpus's spaces with their owner, their role (`served` or
 | Symptom | Cause |
 | --- | --- |
 | New Versions wait, semantic search answers 503 | The plugin is down or returns a retryable error. Keyword search keeps working. |
-| A Version is blocked with `ingestion_refused` | The plugin returned a terminal error, or segments and vectors the checks refuse (offsets out of range, wrong dimensions, too many segments). |
+| A Version is blocked with `ingestion_refused` | The plugin returned a terminal error, or segments and vectors the checks refuse (offsets out of range, wrong dimensions, too many segments). The Version's diagnostic names which. |
 | Enrichment is blocked with `derivation_conflict` | The segments returned with vectors differ from those first returned alone, or the plugin answered the request for vectors with a terminal error. |
 | Enrichment is blocked with `enrichment_timeout` | Three calls for the Version ran past `timeout_ms`. The Version stays searchable by keyword. |
 | Searches fail with `422 query_too_long` | `embed_query` refused the query with the code `query_too_long`; its message, such as `query exceeds 256 tokens`, is returned to the client. |

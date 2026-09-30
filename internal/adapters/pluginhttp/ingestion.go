@@ -101,9 +101,12 @@ type segmentAndEmbedRequest struct {
 	Spaces         []string                `json:"spaces"`
 }
 
-// refused wraps a terminal refusal as content.ErrIngestionRefused.
-func refused(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", content.ErrIngestionRefused, fmt.Sprintf(format, args...))
+// refused is content.ErrIngestionRefused for the reason message states, which
+// a Version quarantined for it shows with the plugin's name and version.
+func (i Ingestor) refused(format string, args ...any) error {
+	reason := content.Diagnostic{Code: content.ErrIngestionRefused.Error(), Message: fmt.Sprintf(format, args...),
+		Plugin: i.Pin.Manifest.ID, PluginVersion: i.Pin.Manifest.Version, Contribution: "ingestion"}
+	return &content.Refusal{Reason: reason}
 }
 
 // SegmentAndEmbed asks the plugin for a Version's segments with a vector in
@@ -119,7 +122,7 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	for _, key := range keys {
 		id, _, ok := i.declared(key)
 		if !ok {
-			return nil, refused("space %s is not declared by %s@%s", key, i.Pin.Manifest.ID, i.Pin.Manifest.Version)
+			return nil, i.refused("space %s is not declared by %s@%s", key, i.Pin.Manifest.ID, i.Pin.Manifest.Version)
 		}
 		ids = append(ids, id)
 		byID[id] = key
@@ -131,8 +134,11 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 			parts = append(parts, plugins.IngestionPart{Key: p.Key, Role: p.Role, Text: p.Content.Text})
 		}
 	}
-	if len(parts) == 0 || len(parts) > 256 {
-		return nil, refused("the Version has %d text Parts; segment_and_embed takes 1 to 256", len(parts))
+	switch {
+	case len(parts) == 0:
+		return nil, i.refused("the Version has no text Part to index")
+	case len(parts) > 256:
+		return nil, i.refused("the Version has %d text Parts; segment_and_embed takes at most 256", len(parts))
 	}
 	identity := append([]string{i.Pin.Generation(), "segment_and_embed", org, v.ID}, ids...)
 	request := segmentAndEmbedRequest{InvocationID: invocationID(), IdempotencyKey: content.StableID("ingestion", identity...), Contribution: "ingestion",
@@ -156,12 +162,12 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	if err := judgeIngestion(result); err != nil {
+	if err := i.judge(result); err != nil {
 		return nil, err
 	}
 	answer, err := plugins.DecodeSegmentAndEmbed(result.Body)
 	if err != nil {
-		return nil, refused("%v", err)
+		return nil, i.refused("%s@%s answered segments the engine cannot read: %v", m.ID, m.Version, err)
 	}
 	out := make([]processing.PluginSegment, len(answer.Segments))
 	for n, s := range answer.Segments {
@@ -184,18 +190,21 @@ func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, e
 	return plugins.Unreachable(ctx, i.Pin, "ingestion")
 }
 
-// judgeIngestion maps an invocation result: unavailability and retryable errors are
-// retried, terminal errors and refused output are content.ErrIngestionRefused.
-func judgeIngestion(result *devhost.Result) error {
+// judge maps an invocation result: unavailability and retryable errors are
+// retried, terminal errors and refused output are content.ErrIngestionRefused,
+// whose reason names the plugin's code and message, each cut to
+// maxRefusalMessage code points.
+func (i Ingestor) judge(result *devhost.Result) error {
+	m := &i.Pin.Manifest
 	switch {
 	case result.Error != nil && result.Error.Retryable:
 		return &PluginError{Status: result.Status, Code: result.Error.Code, Message: result.Error.Message, Retryable: true}
 	case result.Error != nil:
-		return refused("%s (HTTP %d): %s", result.Error.Code, result.Status, result.Error.Message)
+		return i.refused("%s@%s refused it (%s): %s", m.ID, m.Version, bounded(result.Error.Code, maxRefusalMessage), bounded(result.Error.Message, maxRefusalMessage))
 	case len(result.Issues) > 0 && (result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope):
 		return fmt.Errorf("%w: %s", ErrUnavailable, describe(result.Issues))
 	case len(result.Issues) > 0:
-		return refused("invalid answer: %s", describe(result.Issues))
+		return i.refused("%s@%s gave an answer the engine refuses: %s", m.ID, m.Version, bounded(describe(result.Issues), maxRefusalMessage))
 	}
 	return nil
 }
@@ -255,7 +264,7 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	if err := judgeIngestion(result); err != nil {
+	if err := i.judge(result); err != nil {
 		if errors.Is(err, content.ErrIngestionRefused) && result.Error != nil {
 			if result.Error.Code == QueryTooLongCode {
 				return nil, publicerr.WithDetail(retrieval.ErrQueryTooLong, "%s", bounded(result.Error.Message, maxRefusalMessage))

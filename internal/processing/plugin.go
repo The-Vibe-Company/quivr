@@ -169,7 +169,7 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 			input := content.EmbeddingInput(org, corpusID, v, seg, p, space, d.Plugin.Producer())
 			artifact, err := d.Content.SaveEmbedding(ctx, input, space, vector)
 			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
-				return seg, nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
+				return seg, nil, content.Refused("the ingestion plugin answered a vector that differs from the stored artifact")
 			}
 			if err != nil {
 				return seg, nil, err
@@ -190,11 +190,11 @@ func (d PluginDeriver) save(ctx context.Context, org string, v content.Version, 
 	}
 	seg, err := content.PluginSegmentation(org, v, d.Plugin.Recipe(), d.Plugin.Provenance(), inputs)
 	if err != nil {
-		return seg, fmt.Errorf("%w: segments outside the Version's text Parts", content.ErrIngestionRefused)
+		return seg, content.Refused("the ingestion plugin answered segments outside the Version's text Parts")
 	}
 	if err = d.Content.SaveSegmentation(ctx, org, v, seg); err != nil {
 		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
-			return seg, fmt.Errorf("%w: the segments differ from the segmentation stored for this Version", content.ErrIngestionRefused)
+			return seg, content.Refused("the ingestion plugin answered segments that differ from the segmentation stored for this Version")
 		}
 		return seg, err
 	}

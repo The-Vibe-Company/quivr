@@ -569,7 +569,9 @@ within `query_timeout_ms`, which a search waits for.
 
 **Errors.** Unavailability or a `retryable: true` envelope delays the Version,
 retried with backoff; a terminal envelope, or an answer the checks below
-refuse, blocks it as `ingestion_refused` (at enrichment, `derivation_conflict`:
+refuse, blocks it as `ingestion_refused`, with a diagnostic that says why: the
+plugin and its envelope's code and message (each at most 256 code points), or
+the check that failed (at enrichment, `derivation_conflict`:
 the Version keeps its keyword search). The core caps `timeout_ms` at 5
 minutes. A call that reaches it counts; after 3 for one Version, enrichment
 stops as `enrichment_timeout`. A plugin with long work answers a retryable

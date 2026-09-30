@@ -171,7 +171,9 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 	if errors.Is(err, content.ErrIngestionRefused) {
 		slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
 		s.outcome(org, "baseline", "blocked", receiptID, v, started, "ingestion_refused")
-		return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "ingestion_refused", true)
+		// The Version's diagnostic says why: no text to index, invalid
+		// text or which limit, as the plugin or the engine's checks put it.
+		return s.Content.QuarantineVersion(ctx, org, v.ID, content.RefusalReason(err))
 	}
 	if err != nil {
 		// Work pinned to a plan whose ingestion plugin left the active plan

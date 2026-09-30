@@ -54,6 +54,31 @@ func TestSemanticEnrichmentPreservesVersion(t *testing.T) {
 	}
 }
 
+// A Version whose only text is its title, like a feed item with a title and a
+// link but no description, is found by keyword and by meaning (THE-815).
+func TestSemanticSearchFindsATitleOnlyVersion(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := monitoringRun()
+	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Title only", "idempotency_key": "title-only-" + run}, 201)["corpus_id"].(string)
+	start := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
+	parts := []any{manifestPart("title", "title", "text", "Lighthouse keepers return to the northern island"), manifestPart("link", "link", "text", "https://example.org/articles/lighthouse")}
+	accepted := request(t, "POST", "/v0/records", admin, manifestCommandBody(c, "title-only-"+run, "example-feed", "lighthouse", parts, nil, nil), 202)
+	ready := awaitRetrievalReady(t, accepted["receipt_id"].(string))
+	awaitEnriched(t, admin, c, start, ready["record_id"].(string))
+	for mode, query := range map[string]string{"lexical": "lighthouse keepers", "semantic": "Who looks after the beacon on the island?"} {
+		items := request(t, "POST", "/v0/search", admin, map[string]any{"query": query, "corpus_ids": []string{c}, "mode": mode}, 200)["items"].([]any)
+		if len(items) == 0 {
+			t.Fatalf("%s search %q found nothing in Corpus %s", mode, query, c)
+		}
+		if hit := items[0].(map[string]any); hit["version_id"] != ready["version_id"] || hit["part_key"] != "title" {
+			t.Fatalf("%s search %q: %v, want Version %s on its title Part", mode, query, hit, ready["version_id"])
+		}
+	}
+}
+
 // assertStepTimeline checks that an enriched Version reports when each step
 // finished, and that its admin timeline lists them in order, each timed from
 // the step that caused it.

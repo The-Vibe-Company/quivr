@@ -218,21 +218,21 @@ type TokenizerConfig struct {
 // request applies the batch limits of the recipe.
 func request(input []TokenInput) ([]byte, error) {
 	if len(input) > 512 {
-		return nil, ErrUnsupported
+		return nil, limit("the Version makes %d tokenizer inputs; the recipe takes at most 512", len(input))
 	}
 	b, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
 	}
 	if len(b) > Parameters.MaxSerializedBatchBytes {
-		return nil, ErrUnsupported
+		return nil, limit("the text sent to the tokenizer is %d bytes; the recipe takes at most %d", len(b), Parameters.MaxSerializedBatchBytes)
 	}
 	rawBytes := 0
 	for _, item := range input {
 		rawBytes += len(item.Text)
 	}
 	if rawBytes > Parameters.MaxModelBatchBytes {
-		return nil, ErrUnsupported
+		return nil, limit("the text sent to the tokenizer is %d bytes; the recipe takes at most %d", rawBytes, Parameters.MaxModelBatchBytes)
 	}
 	return b, nil
 }

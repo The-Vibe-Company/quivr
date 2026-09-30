@@ -18,6 +18,28 @@ var (
 	ErrIngestionRefused = errors.New("ingestion_refused")
 )
 
+// Refusal is ErrIngestionRefused with its reason: the diagnostic a Version
+// quarantined for it shows.
+type Refusal struct{ Reason Diagnostic }
+
+func (r *Refusal) Error() string { return ErrIngestionRefused.Error() + ": " + r.Reason.Message }
+func (r *Refusal) Unwrap() error { return ErrIngestionRefused }
+
+// Refused is ErrIngestionRefused for the reason message states.
+func Refused(format string, args ...any) error {
+	return &Refusal{Reason: Diagnostic{Code: ErrIngestionRefused.Error(), Message: fmt.Sprintf(format, args...)}}
+}
+
+// RefusalReason is the diagnostic of an ingestion refusal: its reason, or a
+// generic one when err carries none.
+func RefusalReason(err error) Diagnostic {
+	var r *Refusal
+	if errors.As(err, &r) {
+		return r.Reason
+	}
+	return Diagnostic{Code: ErrIngestionRefused.Error(), Message: "the ingestion plugin refused the Version; it is withheld from search"}
+}
+
 // SpaceError names the space a registry refusal is about.
 type SpaceError struct {
 	Kind   error

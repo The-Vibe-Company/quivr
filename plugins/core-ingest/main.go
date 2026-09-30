@@ -76,9 +76,11 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 		parts[n] = Part{Key: p.Key, Role: p.Role, Text: p.Text}
 	}
 	windows, err := b.windows.Process(ctx, parts)
+	var refusal *Refusal
 	switch {
-	case errors.Is(err, ErrUnsupported):
-		return nil, quivrplugin.TerminalIngestError("segmentation_limit", "the Version exceeds a limit of the token-window recipe (text size, Parts, segments, excerpt or model input length) or holds invalid text")
+	case errors.As(err, &refusal):
+		// The engine shows the code and message in the Version's diagnostic.
+		return nil, quivrplugin.TerminalIngestError(refusal.Code, refusal.Message)
 	case err != nil:
 		return nil, quivrplugin.RetryableIngestError("tokenizer_unavailable", "the pinned tokenizer is unavailable")
 	}

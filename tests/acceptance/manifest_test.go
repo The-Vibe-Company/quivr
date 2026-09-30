@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,6 +41,40 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// A Version with no title or body text to index is quarantined, and its
+// diagnostic says so in plain words, naming the plugin that refused it
+// (THE-815).
+func TestManifestWithoutTextToIndexSaysWhy(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := monitoringRun()
+	c := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "No text to index", "idempotency_key": "no-text-" + run}, 201)["corpus_id"].(string)
+	parts := []any{manifestPart("caption", "caption", "text", "A caption with no title or body")}
+	r := awaitReceipt(t, request(t, "POST", "/v0/records", admin, manifestCommandBody(c, "no-text-"+run, "example-feed", "caption-only", parts, nil, nil), 202)["receipt_id"].(string))
+	path := "/v0/records/" + r["record_id"].(string) + "/versions/" + r["version_id"].(string)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		v := request(t, "GET", path, admin, nil, 200)
+		if v["availability"].(map[string]any)["state"] == "quarantined" {
+			ds, _ := v["diagnostics"].([]any)
+			if len(ds) != 1 {
+				t.Fatalf("diagnostics of %s: %v", path, v)
+			}
+			d := ds[0].(map[string]any)
+			if d["code"] != "ingestion_refused" || d["plugin"] != "core.ingest" || d["contribution"] != "ingestion" || !strings.Contains(d["message"].(string), "no_indexable_text") || !strings.Contains(d["message"].(string), "no title or body text") {
+				t.Fatalf("diagnostic of %s: %v, want core.ingest's no_indexable_text reason", path, d)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never quarantined: %v", path, v)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func manifestCommandBody(corpusID, key, namespace, record string, parts, relations []any, extensions map[string]any) map[string]any {

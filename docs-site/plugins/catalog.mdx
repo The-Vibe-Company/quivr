@@ -42,7 +42,7 @@ The pin's `kinds` lists the alert kinds the deployment accepts; pin `["keywords"
 
 ## core-ingest
 
-The default ingestion plugin. It cuts the `title` and `body` Parts of each Version into windows of at most 384 tokens that overlap by 48 and prefer paragraph and sentence ends, then embeds each window in the space `core.ingest.e5-small@1` (384 dimensions, cosine) through a Text Embeddings Inference server. It refuses a Version with more than 256 KiB of text, 64 Parts or 256 windows, which is then blocked with `ingestion_refused`, and a query longer than 256 tokens.
+The default ingestion plugin. It cuts the `title` and `body` Parts of each Version into windows of at most 384 tokens that overlap by 48 and prefer paragraph and sentence ends, then embeds each window in the space `core.ingest.e5-small@1` (384 dimensions, cosine) through a Text Embeddings Inference server. A Version with a title and no body, such as a feed item without a description, gets one segment: its title. It refuses a Version with no title or body text, more than 256 KiB of text, 64 Parts or 256 windows, which is then blocked with `ingestion_refused` and a diagnostic that names the reason, and a query longer than 256 tokens.
 
 | Configuration | Meaning |
 | --- | --- |

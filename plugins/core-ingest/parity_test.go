@@ -248,9 +248,11 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 				"configuration": run.config, "version": map[string]string{"corpus_id": "c", "record_id": "r", "record_version_id": "v-" + d.ID},
 				"parts": parts, "spaces": requested})
 			if g.Refused {
-				var e struct{ Code string }
+				// The engine recorded a refusal, not its reason: any terminal
+				// refusal holds (windows_test.go owns the reasons).
+				var e struct{ Retryable bool }
 				_ = json.Unmarshal(body, &e)
-				if status != 422 || e.Code != "segmentation_limit" {
+				if status != 422 || e.Retryable {
 					t.Errorf("%s: the engine refused it; the plugin answered %d %s", d.ID, status, body)
 				}
 				continue
