@@ -1,0 +1,23 @@
+internal/transport/httpapi/batch_test.go
+  s_54b80c92daa9cb::t_293af3d5574460 91,94,115-119,123,226,242,252-256,298-300,304-305,308-312,323,335-337,343-347,363,380,390,399
+internal/transport/httpapi/extensions_test.go
+  s_54b80c92daa9cb::t_3a100512295ce7 15-19
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_f5b5d199d491f7 40-50,53-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ec89d533b64adc1c52a5e520a97d2e3b9855f744",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
