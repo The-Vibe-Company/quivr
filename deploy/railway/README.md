@@ -85,12 +85,12 @@ Set `QUIVR_DEMO_PLUGINS=1` on api and worker and `QUIVR_DEMO_DESTINATION_ID=demo
 on web, then redeploy api, worker and web. `core-entrypoint.py` then:
 
 - pins both through the `plugins` list: pdf-text on `127.0.0.1:9900` (`application/pdf`),
-  alerts on `127.0.0.1:9910`. Only the worker calls plugins, so only the worker runs
-  them, as sidecar processes; the API reads the manifests and never contacts them. If
-  any worker process exits, the container stops and Railway restarts it;
+  alerts on `127.0.0.1:9910`. The worker runs both as sidecar processes. The API also
+  runs alerts, which it calls for alert previews. If any sidecar exits, its container
+  stops and Railway restarts it;
 - offers [described alerts](../../docs/described-alerts.md) (the pin's `kinds`) only when
   `TYPESAFE_API_KEY` is set, with the same value on api and worker; only the alerts
-  sidecar receives it. Without it, only keyword alerts can be created. With it, also set
+  sidecars receive it. Without it, only keyword alerts can be created. With it, also set
   `DEMO_DESCRIBED_ALERTS=true` on web so the **Alertes** tab offers them;
 - gives the demo key `monitoring:read` and `monitoring:write`;
 - declares the webhook destination `demo-alerts-sink`, which every Subscription needs.

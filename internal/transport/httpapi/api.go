@@ -101,7 +101,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 		return nil, err
 	}
 	var monitored monitoringSchemas
-	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SavedQueryVersionCreate": &monitored.savedQueryVersion, "SubscriptionCreate": &monitored.subscription, "SubscriptionVersionCreate": &monitored.subscriptionVersion, "ActionRequest": &monitored.action} {
+	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SavedQueryVersionCreate": &monitored.savedQueryVersion, "SubscriptionCreate": &monitored.subscription, "SubscriptionVersionCreate": &monitored.subscriptionVersion, "ActionRequest": &monitored.action, "SubscriptionPreviewRequest": &monitored.preview} {
 		if *target, err = compiler.Compile(contracts.HTTPSchema(name)); err != nil {
 			return nil, err
 		}

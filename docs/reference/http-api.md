@@ -54,6 +54,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/subscriptions/{subscription_id}/delete`](#post-v0subscriptionssubscription_iddelete) | `deleteSubscription` | `monitoring:write` |
 | [`POST /v0/subscriptions/{subscription_id}/disable`](#post-v0subscriptionssubscription_iddisable) | `disableSubscription` | `monitoring:write` |
 | [`POST /v0/subscriptions/{subscription_id}/enable`](#post-v0subscriptionssubscription_idenable) | `enableSubscription` | `monitoring:write` |
+| [`POST /v0/subscription-previews`](#post-v0subscription-previews) | `previewSubscription` | `monitoring:write` |
 | [`GET /v0/matches`](#get-v0matches) | `listMatches` | `monitoring:read` |
 | [`GET /v0/matches/{match_id}`](#get-v0matchesmatch_id) | `getMatch` | `monitoring:read` |
 | [`GET /v0/deliveries/{delivery_id}`](#get-v0deliveriesdelivery_id) | `getDelivery` | `monitoring:read` |
@@ -745,6 +746,23 @@ Commit re-enable of a disabled Subscription on the same Subscription Version. Ev
 | --- | --- | --- |
 | `200` | `application/json` [`Subscription`](#subscription) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error. Existing /v0 authentication, scope, pagination and idempotency semantics apply. |
+
+### Subscription previews
+
+#### `POST /v0/subscription-previews`
+
+Operation `previewSubscription`. Requires `monitoring:write`.
+
+Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+
+**Request body** (required): `application/json` [`SubscriptionPreviewRequest`](#subscriptionpreviewrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`SubscriptionPreview`](#subscriptionpreview) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error. Existing /v0 authentication and scope semantics apply. |
 
 ### Matches
 
@@ -4742,6 +4760,152 @@ properties:
     minLength: 1
 required:
   - items
+```
+
+</details>
+
+### `SubscriptionPreviewRequest`
+
+A proposed Subscription to preview. Give either definition, an inline Saved Query definition, or saved_query_id with saved_query_version_id, an existing Saved Query Version; not both.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `definition` | [`SavedQueryDefinition`](#savedquerydefinition) |  |  |
+| `saved_query_id` | string |  | Minimum length `1`. |
+| `saved_query_version_id` | string |  | Minimum length `1`. |
+| `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
+| `limit` | integer |  | The most Record Versions to judge, newest first. Each one costs an evaluator call. Default `20`. Minimum `1`. Maximum `50`. |
+| `accepted_after` | string (date-time) |  | Judge only revisions accepted after this instant. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  definition:
+    $ref: '#/components/schemas/SavedQueryDefinition'
+  saved_query_id:
+    type: string
+    minLength: 1
+  saved_query_version_id:
+    type: string
+    minLength: 1
+  evaluator:
+    $ref: '#/components/schemas/EvaluatorConfig'
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 50
+    default: 20
+    description: The most Record Versions to judge, newest first. Each one costs an evaluator call.
+  accepted_after:
+    type: string
+    format: date-time
+    description: Judge only revisions accepted after this instant.
+required:
+  - evaluator
+description: A proposed Subscription to preview. Give either definition, an inline Saved Query definition, or saved_query_id with saved_query_version_id, an existing Saved Query Version; not both.
+```
+
+</details>
+
+### `SubscriptionPreviewMatch`
+
+A Record Version the proposed Subscription would have matched, with the evidence a Match would carry. It is not a Match and is not stored.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `corpus_id` | string | yes | Minimum length `1`. |
+| `record_id` | string | yes | Minimum length `1`. |
+| `record_version_id` | string | yes | Minimum length `1`. |
+| `accepted_at` | string (date-time) | yes |  |
+| `evidence` | [`MatchEvidence`](#matchevidence) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  corpus_id:
+    type: string
+    minLength: 1
+  record_id:
+    type: string
+    minLength: 1
+  record_version_id:
+    type: string
+    minLength: 1
+  accepted_at:
+    type: string
+    format: date-time
+  evidence:
+    $ref: '#/components/schemas/MatchEvidence'
+required:
+  - corpus_id
+  - record_id
+  - record_version_id
+  - accepted_at
+  - evidence
+description: A Record Version the proposed Subscription would have matched, with the evidence a Match would carry. It is not a Match and is not stored.
+```
+
+</details>
+
+### `SubscriptionPreview`
+
+What a proposed Subscription would have matched among recent Record Versions.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `evaluated` | integer | yes | Record Versions the evaluator decided. Minimum `0`. |
+| `matched` | integer | yes | Minimum `0`. |
+| `not_ready` | integer | yes | Record Versions the evaluator could not decide yet (for example before enrichment). Minimum `0`. |
+| `complete` | boolean | yes | False when the time budget ran out before every listed Record Version was decided. |
+| `oldest_accepted_at` | string (date-time) |  | When the oldest decided Record Version was accepted; absent when none was decided. |
+| `matches` | array of [`SubscriptionPreviewMatch`](#subscriptionpreviewmatch) | yes | Most recently accepted first. At most `50` items. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  evaluated:
+    type: integer
+    minimum: 0
+    description: Record Versions the evaluator decided.
+  matched:
+    type: integer
+    minimum: 0
+  not_ready:
+    type: integer
+    minimum: 0
+    description: Record Versions the evaluator could not decide yet (for example before enrichment).
+  complete:
+    type: boolean
+    description: False when the time budget ran out before every listed Record Version was decided.
+  oldest_accepted_at:
+    type: string
+    format: date-time
+    description: When the oldest decided Record Version was accepted; absent when none was decided.
+  matches:
+    type: array
+    maxItems: 50
+    items:
+      $ref: '#/components/schemas/SubscriptionPreviewMatch'
+    description: Most recently accepted first.
+required:
+  - evaluated
+  - matched
+  - not_ready
+  - complete
+  - matches
+description: What a proposed Subscription would have matched among recent Record Versions.
 ```
 
 </details>

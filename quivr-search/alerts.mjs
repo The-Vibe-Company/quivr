@@ -13,6 +13,10 @@
 // whatever happens to webhook delivery: the demo needs no webhook receiver.
 // The core lists only active Subscriptions, so the facade remembers the ids of
 // the alerts it created (paused ones included) in a small registry.
+//
+// POST /demo/alerts/preview asks the core what an alert being written would
+// have caught among the newest articles (POST /v0/subscription-previews),
+// with the same forced corpus and evaluator; it saves nothing.
 
 const MATCH_PAGES = 10; // 1,000 Matches per alert at most, counted and shown
 const SHOWN = 30; // newest caught articles returned by an alert's page
@@ -20,6 +24,10 @@ const PARALLEL = 6;
 // Bounds of a described alert's description, as in the plugin's schema.
 const DESCRIPTION = { min: 3, max: 1000 };
 const ACTION = /^\/demo\/alerts\/([\w-]+)(?:\/(pause|resume|edit|delete))?$/;
+// A preview judges this many of the newest articles (POST /v0/subscription-previews).
+// Each article of a described preview is one paid classifier call: fewer of them.
+const PREVIEW = { keywords: 50, described: 20 };
+const PREVIEW_SHOWN = 3; // caught articles a preview shows
 
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -409,6 +417,32 @@ export function alertRoutes({
     };
   }
 
+  // What an alert being written would have caught among the newest articles,
+  // judged by the core with the plugin itself: nothing is saved or sent.
+  async function preview(req, corpus) {
+    const body = await jsonBody(req);
+    const match = expression(body);
+    const response = await upstream("/v0/subscription-previews", "POST", {
+      definition: definition(corpus, match),
+      evaluator: pin,
+      limit: PREVIEW[match.kind],
+    });
+    if (response.status !== 200) return response;
+    const result = response.data;
+    const shown = result.matches.slice(0, PREVIEW_SHOWN);
+    return {
+      status: 200,
+      data: {
+        evaluated: result.evaluated,
+        matched: result.matched,
+        complete: result.complete,
+        items: await mapLimit(shown, PARALLEL, (m) =>
+          article({ ...m, match_id: null }),
+        ),
+      },
+    };
+  }
+
   /** The response for an alerts route, or undefined when the path is not one. */
   return async function route(req, path, corpus) {
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
@@ -426,6 +460,8 @@ export function alertRoutes({
           : req.method === "POST"
             ? await create(req, corpus)
             : undefined;
+      if (path === "/demo/alerts/preview")
+        return req.method === "POST" ? await preview(req, corpus) : undefined;
       const match = path.match(ACTION);
       if (!match) return;
       if (!match[2])

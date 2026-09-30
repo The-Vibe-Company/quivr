@@ -335,6 +335,10 @@ Operations are supported.
   (`plugins` in the configuration), named by `plugin_id` and `version`; a Saved Query
   expression or evaluator configuration its schemas refuse is 422 `invalid_expression`
   or `invalid_subscription_configuration`. A plugin outage delays alerts, never skips them.
+- Preview a Subscription before creating it: `POST /v0/subscription-previews` (an inline
+  `definition` or an existing Saved Query Version, the `evaluator`, `limit` 1 to 50) runs
+  the evaluator on the newest eligible Record Versions and returns what it would match,
+  with evidence. It writes nothing; each Record Version costs one plugin call.
   The first-party alerts plugin (`{"plugin_id": "alerts", "version": "0.2.0"}`,
   pinned in the local stack) takes an expression such as
   `{"kind": "keywords", "match": {"all": [{"term": "Airbus"}, {"not": {"term": "sport"}}]}}`.

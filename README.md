@@ -118,6 +118,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - the browser demo's **Alertes** tab offers them next to keyword alerts when the
     deployment has a classifier, and shows each caught article's score
     ([`quivr-search/`](quivr-search/README.md#alertes)).
+- **Subscription previews** (`POST /v0/subscription-previews`): before saving an alert,
+  see which of the most recent articles it would have caught, judged by the same plugin
+  with the same rules. A preview saves nothing and sends nothing, and it judges at most
+  50 articles; the demo's alert form shows it as you type.
 - **Subscription owners**: an application can create a Subscription for one of its
   end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
   the Subscription, its Matches, webhooks and change feed to route each alert, and list

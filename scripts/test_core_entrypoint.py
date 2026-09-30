@@ -71,8 +71,11 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss'], 'x-list': ['/usr/local/bin/quivr-x-list'], 'm365-mail': ['/usr/local/bin/quivr-m365-mail']})
         both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
         self.assertEqual(both, {'rss', 'x-list', 'm365-mail', 'pdf-text', 'alerts'})
-        # The API runs only the push connector plugins, to relay webhook deliveries to them.
+        # The API runs only the push connector plugins, to relay webhook deliveries to them,
+        # and the alerts plugin, for Subscription previews.
         api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'}, 'api')}
+        self.assertEqual(api, {'x-list', 'alerts'})
+        api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'}, 'api')}
         self.assertEqual(api, {'x-list'})
 
     def test_public_url_is_passed_when_set(self):

@@ -226,8 +226,9 @@ def keywords(stack):
 
 def described(stack):
     """Described alerts through plugins/alerts and the fake System One server: rephrased and
-    translated articles alert, an unrelated one does not, and one call serves every described alert."""
-    stack.tests('^TestDescribedAlerts', environment(stack))
+    translated articles alert, an unrelated one does not, and one call serves every described alert.
+    A Subscription preview judges recent articles through the same plugin and saves nothing."""
+    stack.tests('^(TestDescribedAlerts|TestSubscriptionPreview)', environment(stack))
 
 
 def outage(stack):

@@ -1446,6 +1446,53 @@ type SubscriptionPage struct {
 	NextPageCursor *string        `json:"next_page_cursor,omitempty"`
 }
 
+// SubscriptionPreview What a proposed Subscription would have matched among recent Record Versions.
+type SubscriptionPreview struct {
+	// Complete False when the time budget ran out before every listed Record Version was decided.
+	Complete bool `json:"complete"`
+
+	// Evaluated Record Versions the evaluator decided.
+	Evaluated int `json:"evaluated"`
+	Matched   int `json:"matched"`
+
+	// Matches Most recently accepted first.
+	Matches []SubscriptionPreviewMatch `json:"matches"`
+
+	// NotReady Record Versions the evaluator could not decide yet (for example before enrichment).
+	NotReady int `json:"not_ready"`
+
+	// OldestAcceptedAt When the oldest decided Record Version was accepted; absent when none was decided.
+	OldestAcceptedAt *time.Time `json:"oldest_accepted_at,omitempty"`
+}
+
+// SubscriptionPreviewMatch A Record Version the proposed Subscription would have matched, with the evidence a Match would carry. It is not a Match and is not stored.
+type SubscriptionPreviewMatch struct {
+	AcceptedAt time.Time `json:"accepted_at"`
+	CorpusId   string    `json:"corpus_id"`
+
+	// Evidence Immutable evidence for a positive result, including evaluator version/configuration. Details are plugin-defined, bounded to 16 KiB and schema-validated by its adapter; core checks referenced Parts. Access is rechecked on reads.
+	Evidence        MatchEvidence `json:"evidence"`
+	RecordId        string        `json:"record_id"`
+	RecordVersionId string        `json:"record_version_id"`
+}
+
+// SubscriptionPreviewRequest A proposed Subscription to preview. Give either definition, an inline Saved Query definition, or saved_query_id with saved_query_version_id, an existing Saved Query Version; not both.
+type SubscriptionPreviewRequest struct {
+	// AcceptedAfter Judge only revisions accepted after this instant.
+	AcceptedAfter *time.Time `json:"accepted_after,omitempty"`
+
+	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
+	Definition *SavedQueryDefinition `json:"definition,omitempty"`
+
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	Evaluator EvaluatorConfig `json:"evaluator"`
+
+	// Limit The most Record Versions to judge, newest first. Each one costs an evaluator call.
+	Limit               *int    `json:"limit,omitempty"`
+	SavedQueryId        *string `json:"saved_query_id,omitempty"`
+	SavedQueryVersionId *string `json:"saved_query_version_id,omitempty"`
+}
+
 // SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
 type SubscriptionVersion struct {
 	DestinationId string `json:"destination_id"`
@@ -1657,6 +1704,9 @@ type CreateSavedQueryVersionJSONRequestBody = SavedQueryVersionCreate
 
 // SearchRecordsJSONRequestBody defines body for SearchRecords for application/json ContentType.
 type SearchRecordsJSONRequestBody = SearchRequest
+
+// PreviewSubscriptionJSONRequestBody defines body for PreviewSubscription for application/json ContentType.
+type PreviewSubscriptionJSONRequestBody = SubscriptionPreviewRequest
 
 // CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
 type CreateSubscriptionJSONRequestBody = SubscriptionCreate
@@ -1991,6 +2041,9 @@ type ServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(w http.ResponseWriter, r *http.Request)
+
+	// (POST /v0/subscription-previews)
+	PreviewSubscription(w http.ResponseWriter, r *http.Request)
 
 	// (GET /v0/subscriptions)
 	ListSubscriptions(w http.ResponseWriter, r *http.Request, params ListSubscriptionsParams)
@@ -3167,6 +3220,20 @@ func (siw *ServerInterfaceWrapper) SearchRecords(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// PreviewSubscription operation middleware
+func (siw *ServerInterfaceWrapper) PreviewSubscription(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewSubscription(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSubscriptions operation middleware
 func (siw *ServerInterfaceWrapper) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 
@@ -3624,6 +3691,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/delete", wrapper.DeleteSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/disable", wrapper.DisableSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/enable", wrapper.EnableSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscription-previews", wrapper.PreviewSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches", wrapper.ListMatches)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches/{match_id}", wrapper.GetMatch)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}", wrapper.GetDelivery)
@@ -5183,6 +5251,45 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 	return err
 }
 
+type PreviewSubscriptionRequestObject struct {
+	Body *PreviewSubscriptionJSONRequestBody
+}
+
+type PreviewSubscriptionResponseObject interface {
+	VisitPreviewSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type PreviewSubscription200JSONResponse SubscriptionPreview
+
+func (response PreviewSubscription200JSONResponse) VisitPreviewSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewSubscriptiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PreviewSubscriptiondefaultJSONResponse) VisitPreviewSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSubscriptionsRequestObject struct {
 	Params ListSubscriptionsParams
 }
@@ -5733,6 +5840,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(ctx context.Context, request SearchRecordsRequestObject) (SearchRecordsResponseObject, error)
+
+	// (POST /v0/subscription-previews)
+	PreviewSubscription(ctx context.Context, request PreviewSubscriptionRequestObject) (PreviewSubscriptionResponseObject, error)
 
 	// (GET /v0/subscriptions)
 	ListSubscriptions(ctx context.Context, request ListSubscriptionsRequestObject) (ListSubscriptionsResponseObject, error)
@@ -6894,6 +7004,37 @@ func (sh *strictHandler) SearchRecords(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SearchRecordsResponseObject); ok {
 		if err := validResponse.VisitSearchRecordsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewSubscription operation middleware
+func (sh *strictHandler) PreviewSubscription(w http.ResponseWriter, r *http.Request) {
+	var request PreviewSubscriptionRequestObject
+
+	var body PreviewSubscriptionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewSubscription(ctx, request.(PreviewSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PreviewSubscriptionResponseObject); ok {
+		if err := validResponse.VisitPreviewSubscriptionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

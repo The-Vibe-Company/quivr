@@ -19,6 +19,7 @@ import {
 import { Interpretation } from "./Interpretation";
 import { QueryPreview, useParsed } from "./QueryPreview";
 import { DescribedNote } from "./DescribedNote";
+import { AlertPreview } from "./AlertPreview";
 
 type Kind = "keywords" | "described";
 
@@ -445,12 +446,26 @@ export function AlertForm({
               <p className="query-preview" data-state="valid">
                 <Interpretation node={chipsExpression.match} />
               </p>
+              <AlertPreview
+                expression={chipsExpression}
+                onDemand={false}
+                onUnauthorized={onUnauthorized}
+              />
             </>
           ) : (
             <p className="form-preview-title" data-empty="true">
               Ajoutez au moins un mot pour voir comment Quivr lira l’alerte.
             </p>
           )}
+        </div>
+      )}
+      {(isDescribed || advanced) && expression && (
+        <div className="form-preview">
+          <AlertPreview
+            expression={expression}
+            onDemand={isDescribed}
+            onUnauthorized={onUnauthorized}
+          />
         </div>
       )}
       {error && (

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -217,6 +218,12 @@ type Service struct {
 	MatchStore MatchStore
 	// Evaluators are the installed evaluators a Subscription Version may pin.
 	Evaluators Evaluators
+	// Recent and Versions read what a preview judges; without them previews
+	// are not served.
+	Recent   RecentReader
+	Versions VersionReader
+	// PreviewBudget bounds the evaluator calls of one preview (default 6 s).
+	PreviewBudget time.Duration
 }
 
 func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in SavedQueryInput) (SavedQuery, error) {

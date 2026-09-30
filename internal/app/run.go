@@ -370,7 +370,9 @@ func Run(command string) error {
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators}), httpapi.WithOperations(operations.Service{Store: store}),
+		// Subscription previews call the subscription plugins from the API.
+		previews := postgres.EvaluationStore{ContentStore: store}
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))

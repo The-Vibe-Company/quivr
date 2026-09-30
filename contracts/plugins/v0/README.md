@@ -239,6 +239,15 @@ arrives while it is being decided, so a rule that calls a paid backend pays
 once per Record Version. One worker at a time claims the due evaluations of a
 Record Version, so they are not split between concurrent requests.
 
+**Previews.** The API also asks when a client previews a proposed Subscription
+(`POST /v0/subscription-previews`): one request per recent Record Version,
+each with one evaluation whose `subscriptions` holds a single synthetic
+reference whose Subscription and Subscription Version ids are `preview` (its
+Saved Query ids too, when the Saved Query is inline). The decision is
+returned to the client and never stored. So the API process must reach the
+plugin's endpoint too, and a plugin that calls a paid backend pays for each
+Record Version a preview judges (at most 50 per preview).
+
 **Request** (`subscription-request.schema.json`):
 
 - `invocation_id`, `idempotency_key`, `organization_id` and the validated

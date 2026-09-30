@@ -1127,6 +1127,42 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ActionRequest'
+  /v0/subscription-previews:
+    post:
+      operationId: previewSubscription
+      description: Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted
+        current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it
+        would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event -
+        and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query
+        Version; the pair is validated as at Subscription creation (422 unsupported_evaluator,
+        invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator
+        call, sent with the synthetic Subscription reference preview. At most limit Record Versions
+        (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided
+        when it runs out are left out and complete is false. An evaluator that cannot be reached or
+        reports a transient failure fails the preview with 503 evaluator_unavailable, and one that
+        refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a
+        layer above can limit who previews and how often.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPreview'
+        default:
+          description: Structured error. Existing /v0 authentication and scope semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPreviewRequest'
   /v0/matches:
     get:
       operationId: listMatches
@@ -3104,6 +3140,96 @@ components:
           minLength: 1
       required:
       - items
+    SubscriptionPreviewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: '#/components/schemas/SavedQueryDefinition'
+        saved_query_id:
+          type: string
+          minLength: 1
+        saved_query_version_id:
+          type: string
+          minLength: 1
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorConfig'
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          description: The most Record Versions to judge, newest first. Each one costs an evaluator call.
+        accepted_after:
+          type: string
+          format: date-time
+          description: Judge only revisions accepted after this instant.
+      required:
+      - evaluator
+      description: A proposed Subscription to preview. Give either definition, an inline Saved Query
+        definition, or saved_query_id with saved_query_version_id, an existing Saved Query Version; not
+        both.
+    SubscriptionPreviewMatch:
+      type: object
+      additionalProperties: false
+      properties:
+        corpus_id:
+          type: string
+          minLength: 1
+        record_id:
+          type: string
+          minLength: 1
+        record_version_id:
+          type: string
+          minLength: 1
+        accepted_at:
+          type: string
+          format: date-time
+        evidence:
+          $ref: '#/components/schemas/MatchEvidence'
+      required:
+      - corpus_id
+      - record_id
+      - record_version_id
+      - accepted_at
+      - evidence
+      description: A Record Version the proposed Subscription would have matched, with the evidence a
+        Match would carry. It is not a Match and is not stored.
+    SubscriptionPreview:
+      type: object
+      additionalProperties: false
+      properties:
+        evaluated:
+          type: integer
+          minimum: 0
+          description: Record Versions the evaluator decided.
+        matched:
+          type: integer
+          minimum: 0
+        not_ready:
+          type: integer
+          minimum: 0
+          description: Record Versions the evaluator could not decide yet (for example before enrichment).
+        complete:
+          type: boolean
+          description: False when the time budget ran out before every listed Record Version was decided.
+        oldest_accepted_at:
+          type: string
+          format: date-time
+          description: When the oldest decided Record Version was accepted; absent when none was decided.
+        matches:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/SubscriptionPreviewMatch'
+          description: Most recently accepted first.
+      required:
+      - evaluated
+      - matched
+      - not_ready
+      - complete
+      - matches
+      description: What a proposed Subscription would have matched among recent Record Versions.
     MatchEvidence:
       type: object
       additionalProperties: false

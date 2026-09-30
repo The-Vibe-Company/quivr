@@ -156,19 +156,23 @@ func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.S
 
 func matchToTransport(m monitoring.Match) transport.Match {
 	out := transport.Match{MatchId: m.ID, SubscriptionId: m.SubscriptionID, SubscriptionVersionId: m.SubscriptionVersionID, SavedQueryId: m.SavedQueryID, SavedQueryVersionId: m.SavedQueryVersionID,
-		RecordId: m.RecordID, RecordVersionId: m.RecordVersionID,
-		Evidence: transport.MatchEvidence{Evaluator: transport.EvaluatorConfig{PluginId: m.Evidence.Evaluator.PluginID, Version: m.Evidence.Evaluator.Version, Configuration: m.Evidence.Evaluator.Configuration}, Explanation: m.Evidence.Explanation}}
+		RecordId: m.RecordID, RecordVersionId: m.RecordVersionID, Evidence: evidenceToTransport(m.Evidence)}
 	if m.PreviousMatchID != "" {
 		out.PreviousMatchId = &m.PreviousMatchID
 	}
 	out.Owner = owner(m.Owner)
-	if len(m.Evidence.PartKeys) > 0 {
-		keys := m.Evidence.PartKeys
-		out.Evidence.PartKeys = &keys
+	return out
+}
+
+func evidenceToTransport(e monitoring.MatchEvidence) transport.MatchEvidence {
+	out := transport.MatchEvidence{Evaluator: transport.EvaluatorConfig{PluginId: e.Evaluator.PluginID, Version: e.Evaluator.Version, Configuration: e.Evaluator.Configuration}, Explanation: e.Explanation}
+	if len(e.PartKeys) > 0 {
+		keys := e.PartKeys
+		out.PartKeys = &keys
 	}
-	if m.Evidence.Details != nil {
-		details := m.Evidence.Details
-		out.Evidence.Details = &details
+	if e.Details != nil {
+		details := e.Details
+		out.Details = &details
 	}
 	return out
 }

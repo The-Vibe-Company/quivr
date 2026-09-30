@@ -1667,3 +1667,49 @@ mark {
     animation: none;
   }
 }
+.alert-preview {
+  margin-top: 10px;
+}
+.form-preview > .alert-preview:first-child {
+  margin-top: 0;
+}
+.alert-preview-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--success);
+}
+.alert-preview-title[data-empty] {
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+.alert-preview-title[data-state="error"] {
+  color: var(--error);
+  font-weight: 500;
+}
+.alert-preview-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.alert-preview-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  min-width: 0;
+}
+.alert-preview-article {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alert-preview-source {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+}

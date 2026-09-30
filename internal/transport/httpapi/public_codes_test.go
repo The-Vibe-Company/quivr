@@ -102,6 +102,25 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 	}
 }
 
+// A preview's evaluator failure always carries the plugin's detail; only an
+// unreachable or transient evaluator is worth retrying.
+func TestPreviewFailureCodesIgnoreDetail(t *testing.T) {
+	for sentinel, want := range map[error]struct {
+		status int
+		code   string
+	}{
+		monitoring.ErrPreviewUnavailable: {503, "evaluator_unavailable"},
+		monitoring.ErrPreviewFailed:      {502, "evaluator_error"},
+	} {
+		for style, err := range detailed(sentinel) {
+			status, code := written(t, func(w *httptest.ResponseRecorder) { monitoringFailure(w, err) })
+			if status != want.status || code != want.code {
+				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			}
+		}
+	}
+}
+
 // A schema refusal of a pinned expression or configuration names the request
 // member and the first schema issue.
 func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {

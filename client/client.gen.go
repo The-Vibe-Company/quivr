@@ -1446,6 +1446,53 @@ type SubscriptionPage struct {
 	NextPageCursor *string        `json:"next_page_cursor,omitempty"`
 }
 
+// SubscriptionPreview What a proposed Subscription would have matched among recent Record Versions.
+type SubscriptionPreview struct {
+	// Complete False when the time budget ran out before every listed Record Version was decided.
+	Complete bool `json:"complete"`
+
+	// Evaluated Record Versions the evaluator decided.
+	Evaluated int `json:"evaluated"`
+	Matched   int `json:"matched"`
+
+	// Matches Most recently accepted first.
+	Matches []SubscriptionPreviewMatch `json:"matches"`
+
+	// NotReady Record Versions the evaluator could not decide yet (for example before enrichment).
+	NotReady int `json:"not_ready"`
+
+	// OldestAcceptedAt When the oldest decided Record Version was accepted; absent when none was decided.
+	OldestAcceptedAt *time.Time `json:"oldest_accepted_at,omitempty"`
+}
+
+// SubscriptionPreviewMatch A Record Version the proposed Subscription would have matched, with the evidence a Match would carry. It is not a Match and is not stored.
+type SubscriptionPreviewMatch struct {
+	AcceptedAt time.Time `json:"accepted_at"`
+	CorpusId   string    `json:"corpus_id"`
+
+	// Evidence Immutable evidence for a positive result, including evaluator version/configuration. Details are plugin-defined, bounded to 16 KiB and schema-validated by its adapter; core checks referenced Parts. Access is rechecked on reads.
+	Evidence        MatchEvidence `json:"evidence"`
+	RecordId        string        `json:"record_id"`
+	RecordVersionId string        `json:"record_version_id"`
+}
+
+// SubscriptionPreviewRequest A proposed Subscription to preview. Give either definition, an inline Saved Query definition, or saved_query_id with saved_query_version_id, an existing Saved Query Version; not both.
+type SubscriptionPreviewRequest struct {
+	// AcceptedAfter Judge only revisions accepted after this instant.
+	AcceptedAfter *time.Time `json:"accepted_after,omitempty"`
+
+	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
+	Definition *SavedQueryDefinition `json:"definition,omitempty"`
+
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	Evaluator EvaluatorConfig `json:"evaluator"`
+
+	// Limit The most Record Versions to judge, newest first. Each one costs an evaluator call.
+	Limit               *int    `json:"limit,omitempty"`
+	SavedQueryId        *string `json:"saved_query_id,omitempty"`
+	SavedQueryVersionId *string `json:"saved_query_version_id,omitempty"`
+}
+
 // SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
 type SubscriptionVersion struct {
 	DestinationId string `json:"destination_id"`
@@ -1657,6 +1704,9 @@ type CreateSavedQueryVersionJSONRequestBody = SavedQueryVersionCreate
 
 // SearchRecordsJSONRequestBody defines body for SearchRecords for application/json ContentType.
 type SearchRecordsJSONRequestBody = SearchRequest
+
+// PreviewSubscriptionJSONRequestBody defines body for PreviewSubscription for application/json ContentType.
+type PreviewSubscriptionJSONRequestBody = SubscriptionPreviewRequest
 
 // CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
 type CreateSubscriptionJSONRequestBody = SubscriptionCreate
@@ -2257,6 +2307,18 @@ type ClientInterface interface {
 	//
 	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PreviewSubscriptionWithBody performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+	PreviewSubscriptionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PreviewSubscription performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+	PreviewSubscription(ctx context.Context, body PreviewSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSubscriptions performs a GET /v0/subscriptions (the `ListSubscriptions` operationId) request.
 	//
@@ -3205,6 +3267,38 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PreviewSubscriptionWithBody performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
+// with any type of body and a specified content type.
+//
+// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+func (c *Client) PreviewSubscriptionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPreviewSubscriptionRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PreviewSubscription performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+func (c *Client) PreviewSubscription(ctx context.Context, body PreviewSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPreviewSubscriptionRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5231,6 +5325,46 @@ func NewSearchRecordsRequestWithBody(server string, contentType string, body io.
 	return req, nil
 }
 
+// NewPreviewSubscriptionRequest calls the generic PreviewSubscription builder with application/json body
+func NewPreviewSubscriptionRequest(server string, body PreviewSubscriptionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPreviewSubscriptionRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPreviewSubscriptionRequestWithBody constructs an http.Request for the PreviewSubscription method, with any body, and a specified content type
+func NewPreviewSubscriptionRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/subscription-previews")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListSubscriptionsRequest constructs an http.Request for the ListSubscriptions method
 func NewListSubscriptionsRequest(server string, params *ListSubscriptionsParams) (*http.Request, error) {
 	var err error
@@ -6144,6 +6278,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
+
+	// PreviewSubscriptionWithBodyWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	PreviewSubscriptionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSubscriptionResponse, error)
+
+	// PreviewSubscriptionWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+	PreviewSubscriptionWithResponse(ctx context.Context, body PreviewSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*PreviewSubscriptionResponse, error)
 
 	// ListSubscriptionsWithResponse performs a GET /v0/subscriptions (the `ListSubscriptions` operationId) request.
 	//
@@ -8061,6 +8209,54 @@ func (r SearchRecordsResponse) ContentType() string {
 	return ""
 }
 
+type PreviewSubscriptionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SubscriptionPreview
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PreviewSubscriptionResponse) GetJSON200() *SubscriptionPreview {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PreviewSubscriptionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PreviewSubscriptionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PreviewSubscriptionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PreviewSubscriptionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PreviewSubscriptionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListSubscriptionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9302,6 +9498,32 @@ func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, bod
 		return nil, err
 	}
 	return ParseSearchRecordsResponse(rsp)
+}
+
+// PreviewSubscriptionWithBodyWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
+// with any type of body and a specified content type.
+//
+// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) PreviewSubscriptionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSubscriptionResponse, error) {
+	rsp, err := c.PreviewSubscriptionWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePreviewSubscriptionResponse(rsp)
+}
+
+// PreviewSubscriptionWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Dry run of a proposed Subscription. Runs the evaluator on the most recently accepted current eligible Record Versions of the Saved Query's Corpora, newest first, and returns what it would have matched. Nothing is written - no Saved Query, Subscription, Match, Delivery or event - and it is not idempotent. The Saved Query is an inline definition or an existing Saved Query Version; the pair is validated as at Subscription creation (422 unsupported_evaluator, invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator call, sent with the synthetic Subscription reference preview. At most limit Record Versions (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided when it runs out are left out and complete is false. An evaluator that cannot be reached or reports a transient failure fails the preview with 503 evaluator_unavailable, and one that refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a layer above can limit who previews and how often.
+func (c *ClientWithResponses) PreviewSubscriptionWithResponse(ctx context.Context, body PreviewSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*PreviewSubscriptionResponse, error) {
+	rsp, err := c.PreviewSubscription(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePreviewSubscriptionResponse(rsp)
 }
 
 // ListSubscriptionsWithResponse performs a GET /v0/subscriptions (the `ListSubscriptions` operationId) request.
@@ -10734,6 +10956,39 @@ func ParseSearchRecordsResponse(rsp *http.Response) (*SearchRecordsResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SearchResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePreviewSubscriptionResponse parses an HTTP response from a PreviewSubscriptionWithResponse call
+func ParsePreviewSubscriptionResponse(rsp *http.Response) (*PreviewSubscriptionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PreviewSubscriptionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SubscriptionPreview
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

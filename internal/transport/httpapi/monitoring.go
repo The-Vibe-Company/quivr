@@ -23,7 +23,7 @@ func WithMonitoring(service monitoring.Service) Option {
 }
 
 type monitoringSchemas struct {
-	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action *jsonschema.Schema
+	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action, preview *jsonschema.Schema
 }
 
 func monitoringFailure(w http.ResponseWriter, err error) {
@@ -54,6 +54,10 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 			}
 		}
 		send(w, 422, e)
+	case errors.Is(err, monitoring.ErrPreviewUnavailable):
+		failure(w, 503, "evaluator_unavailable")
+	case errors.Is(err, monitoring.ErrPreviewFailed):
+		failure(w, 502, "evaluator_error")
 	default:
 		failure(w, 503, "storage_unavailable")
 	}
@@ -63,6 +67,10 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 // reads, the Subscription listing by owner, editing by new Version, disable,
 // enable and deletion.
 func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+	if r.URL.Path == "/v0/subscription-previews" {
+		a.previewSubscription(w, r, scope)
+		return true
+	}
 	var resource string
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/v0/saved-queries"):
@@ -331,4 +339,43 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 		page.Items = append(page.Items, subscriptionToTransport(s))
 	}
 	send(w, 200, page)
+}
+
+// previewSubscription serves the dry run of a proposed Subscription. It
+// writes nothing, so it takes no idempotency key.
+func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if a.Monitoring.Store == nil {
+		failure(w, 404, "not_found")
+		return
+	}
+	if r.Method != "POST" {
+		failure(w, 405, "method_not_allowed")
+		return
+	}
+	if !scope.Allows("monitoring:write") {
+		failure(w, 403, "forbidden")
+		return
+	}
+	var in monitoring.PreviewInput
+	if !a.decodeMonitoring(w, r, a.monitoringSchemas.preview, &in) {
+		return
+	}
+	result, err := a.Monitoring.Preview(r.Context(), scope, in)
+	if err != nil {
+		monitoringFailure(w, err)
+		return
+	}
+	out := transport.SubscriptionPreview{Evaluated: result.Evaluated, Matched: len(result.Matches), NotReady: result.NotReady, Complete: result.Complete,
+		Matches: make([]transport.SubscriptionPreviewMatch, 0, len(result.Matches))}
+	if !result.Oldest.IsZero() {
+		out.OldestAcceptedAt = &result.Oldest
+	}
+	for _, m := range result.Matches {
+		evidence := evidenceToTransport(m.Evidence)
+		if evidence.Evaluator.Configuration == nil {
+			evidence.Evaluator.Configuration = map[string]any{}
+		}
+		out.Matches = append(out.Matches, transport.SubscriptionPreviewMatch{CorpusId: m.CorpusID, RecordId: m.RecordID, RecordVersionId: m.VersionID, AcceptedAt: m.AcceptedAt, Evidence: evidence})
+	}
+	send(w, 200, out)
 }

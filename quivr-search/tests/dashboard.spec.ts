@@ -246,6 +246,45 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   await expect(list.getByRole("listitem").filter({ hasText: "Orages et grêle" })).toHaveCount(0);
 });
 
+test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait attrapés, sans rien enregistrer", async ({
+  page,
+}) => {
+  await page.goto("/?view=alerts");
+  const form = page.getByRole("form", { name: "Nouvelle alerte" });
+  const preview = form.locator(".alert-preview");
+  const words = form.getByLabel("Mots à surveiller");
+  await words.fill("grêle");
+  await words.press("Enter");
+  await expect(preview.locator(".alert-preview-title")).toHaveText(
+    "Sur les 8 derniers articles, 3 auraient été attrapés.",
+  );
+  await expect(preview.getByRole("listitem")).toHaveCount(3);
+  // The words to ignore are part of the previewed alert.
+  const excluded = posted(page, "/demo/alerts/preview");
+  await form.getByLabel(/Ignorer les articles/).fill("football");
+  expect((await excluded).expression).toEqual({
+    kind: "keywords",
+    match: { all: [{ term: "grêle" }, { not: { term: "football" } }] },
+  });
+  await expect(preview.locator(".alert-preview-title")).toHaveText(
+    "Sur les 8 derniers articles, 2 auraient été attrapés.",
+  );
+
+  // A described alert costs a classifier call per article: only on request.
+  await form.getByRole("group", { name: "Type d’alerte" }).getByRole("button", { name: "Un sujet décrit" }).click();
+  await form.getByLabel("Décrivez le sujet en une phrase").fill("Une grève des transports");
+  const before = sent("/demo/alerts/preview").length;
+  const asked = posted(page, "/demo/alerts/preview");
+  await form.getByRole("button", { name: "Tester sur les derniers articles" }).click();
+  expect((await asked).expression).toEqual({ kind: "described", description: "Une grève des transports" });
+  await expect(preview.locator(".alert-preview-title")).toHaveText(
+    "Sur les 8 derniers articles, 1 aurait été attrapé.",
+  );
+  await expect(preview.getByRole("listitem")).toHaveText([/Les conducteurs de tramway cessent le travail/]);
+  expect(sent("/demo/alerts/preview").length).toBe(before + 1);
+  expect(sent("/demo/alerts")).toEqual([]);
+});
+
 test("Sources : l’adresse d’un site trouve son fil, une adresse privée est refusée", async ({
   page,
 }) => {

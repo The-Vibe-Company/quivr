@@ -161,6 +161,24 @@ const MEANINGS: Record<string, string[]> = {
   greve: ["social", "transports"],
 };
 
+// A stand-in for the alerts plugin in previews: a keyword tree over the
+// title and body (folded substrings), a source filter, and a described alert
+// that fits the articles sharing a topic with its words (MEANINGS).
+function caughtBy(expression: any, a: Article): boolean {
+  if (expression.kind === "described") {
+    const meaning = new Set(words(expression.description).flatMap((w) => MEANINGS[w] || []));
+    return a.topics.some((t) => meaning.has(t));
+  }
+  const text = fold(`${a.title} ${a.body}`);
+  const test = (node: any): boolean =>
+    "term" in node ? text.includes(fold(node.term))
+    : "field" in node ? a.namespace === node.equals
+    : "all" in node ? node.all.every(test)
+    : "any" in node ? node.any.some(test)
+    : !test(node.not);
+  return test(expression.match);
+}
+
 export interface Engine {
   ws: Workspace;
   /** POST bodies the app sent, by path. */
@@ -307,6 +325,27 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       };
       ws.alerts.unshift(a);
       return json(route, alertView(a), 201);
+    }
+    if (path === "/demo/alerts/preview") {
+      const caught = ws.articles.filter((a) => caughtBy(body.expression, a));
+      return json(route, {
+        evaluated: ws.articles.length,
+        matched: caught.length,
+        complete: true,
+        items: caught.slice(0, 3).map((a) => ({
+          record_id: a.record_id,
+          version_id: a.version_id,
+          available: true,
+          title: a.title,
+          excerpt: "",
+          source: a.namespace,
+          explanation: "",
+          terms: [],
+          fields: [],
+          score: null,
+          threshold: null,
+        })),
+      });
     }
     const action = path.match(/^\/demo\/alerts\/([\w-]+)(?:\/(\w+))?$/);
     if (action) {

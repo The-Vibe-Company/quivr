@@ -85,6 +85,21 @@ export const resumeAlert = (id: string) =>
 export const editAlert = (id: string, expression: AlertExpression) =>
   request<Alert>(`${path(id)}/edit`, { expression, idempotency_key: key() });
 
+/** What an alert being written would have caught among the newest articles. */
+export interface AlertPreview {
+  /** Articles the alert engine judged, newest first. */
+  evaluated: number;
+  matched: number;
+  /** False when the engine ran out of time before judging them all. */
+  complete: boolean;
+  /** The first caught articles, newest first (at most three); they are not Matches. */
+  items: Omit<CaughtArticle, "match_id">[];
+}
+
+/** Nothing is saved: the engine judges recent articles with the alert's own rules. */
+export const previewAlert = (expression: AlertExpression, signal?: AbortSignal) =>
+  request<AlertPreview>("/demo/alerts/preview", { expression }, signal);
+
 export const deleteAlert = (id: string) =>
   request<{ deleted: true }>(`${path(id)}/delete`, { idempotency_key: key() });
 
@@ -105,6 +120,11 @@ export function alertMessage(
     case "subscription_deleted":
     case "saved_query_deleted":
       return "Cette alerte a été supprimée entre-temps.";
+    case "evaluator_unavailable":
+    case "evaluator_error":
+      return kind === "described"
+        ? "Le classifieur ne répond pas pour le moment. Réessayez dans un instant."
+        : "Le moteur d’alertes ne répond pas pour le moment. Réessayez dans un instant.";
     case "idempotency_conflict":
       return "Une demande précédente différente est en cours. Rechargez la page puis réessayez.";
     default:

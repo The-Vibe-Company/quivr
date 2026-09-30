@@ -11,9 +11,9 @@ import sys
 import time
 
 # First-party plugins baked into the core image (core.Dockerfile), pinned when
-# QUIVR_DEMO_PLUGINS=1. Only the worker calls them (normalization, alert
-# evaluation), so only the worker runs them, on loopback; the API loads the same
-# pins from the manifests and never contacts them.
+# QUIVR_DEMO_PLUGINS=1. The worker calls them (normalization, alert
+# evaluation), so it runs them all on loopback. The API also calls a
+# ``preview`` plugin, for Subscription previews, so it runs that one beside it.
 PLUGIN_ROOT = pathlib.Path('/app/plugins')
 PLUGIN_PYTHON = '/opt/quivr-plugins/bin/python'
 PLUGINS = [
@@ -21,7 +21,7 @@ PLUGINS = [
      'routes': [{'media_type': 'application/pdf', 'mode': 'required'}]},
     # TYPESAFE_API_KEY lets alerts decide described alerts (docs/described-alerts.md).
     # Only this plugin receives it, and its pin offers "described" only when it is set.
-    {'id': 'alerts', 'module': 'alerts', 'port': 9910, 'secrets': ['TYPESAFE_API_KEY']},
+    {'id': 'alerts', 'module': 'alerts', 'port': 9910, 'secrets': ['TYPESAFE_API_KEY'], 'preview': True},
 ]
 # First-party Go connector plugins: core.Dockerfile builds every plugins/<id> with a
 # go.mod into /usr/local/bin/quivr-<id> and keeps its manifest in /app/plugins/<id>.
@@ -125,7 +125,8 @@ def build_config(env):
 
 def sidecar_commands(env, role='worker'):
     """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
-    plugin, the API only the connector plugins it relays push deliveries to. Its
+    plugin, the API only the connector plugins it relays push deliveries to and the
+    subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts:
     TYPESAFE_API_KEY), never the core's.
 
@@ -140,9 +141,11 @@ def sidecar_commands(env, role='worker'):
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
                  'QUIVR_PLUGIN_MANIFEST': str(directory / 'quivr-plugin.yaml')}
         commands.append((connector['id'], ['/usr/local/bin/quivr-' + connector['id']], str(directory), child))
-    if role == 'api' or not plugins_enabled(env):
+    if not plugins_enabled(env):
         return commands
     for plugin in PLUGINS:
+        if role == 'api' and not plugin.get('preview'):
+            continue
         directory = PLUGIN_ROOT / plugin['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'PYTHONUNBUFFERED': '1',
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(plugin['port']),

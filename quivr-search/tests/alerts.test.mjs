@@ -22,6 +22,8 @@ function fakeCore() {
   const records = new Map();
   let refuse = null;
   let forbidden = false;
+  // What POST /v0/subscription-previews answers.
+  const preview = { evaluated: 0, matched: 0, not_ready: 0, complete: true, matches: [] };
   let n = 0;
   const query = (corpus, match) => {
     const version = {
@@ -133,6 +135,8 @@ function fakeCore() {
         Object.assign(sub, { enabled: false, deleted: true });
       return send(200, sub);
     }
+    if (p === "/v0/subscription-previews" && req.method === "POST")
+      return send(200, preview);
     if (p === "/v0/matches")
       return send(200, {
         items: matches.filter(
@@ -159,6 +163,7 @@ function fakeCore() {
     records,
     query,
     subscription,
+    preview,
     refuse: (error) => (refuse = error),
     forbid: () => (forbidden = true),
   };
@@ -477,5 +482,61 @@ test("a described alert reaches the core only where the deployment offers it, an
   assert.deepEqual(
     page.data.matches.map((m) => [m.title, m.score, m.threshold, m.terms]),
     [["Les dockers cessent le travail.", 0.92, 0.5, []]],
+  );
+});
+
+test("a preview asks the core about the newest articles with the alert's own rules, saves nothing, and shows at most three caught articles", async (t) => {
+  const { core, call } = await start(t, { DEMO_DESCRIBED_ALERTS: "1" });
+  for (const id of ["r1", "r2", "r3", "r4"])
+    core.records.set(id, {
+      source: { corpus_id: "demo", namespace: "wire" },
+      version: {
+        record_id: id,
+        version_id: `${id}v`,
+        manifest: {
+          parts: [
+            { key: "t", role: "title", content: { kind: "text", text: `Orage ${id}` } },
+          ],
+        },
+      },
+    });
+  Object.assign(core.preview, {
+    evaluated: 50,
+    matched: 4,
+    matches: ["r1", "r2", "r3", "r4"].map((id) => ({
+      corpus_id: "demo",
+      record_id: id,
+      record_version_id: `${id}v`,
+      accepted_at: "2026-09-30T08:00:00Z",
+      evidence: {
+        evaluator: {},
+        explanation: "Matched",
+        part_keys: ["t"],
+        details: { kind: "keywords", terms: [{ term: "orage", part_keys: ["t"] }], fields: [] },
+      },
+    })),
+  });
+  const keywords = { kind: "keywords", match: { all: [{ term: "orage" }, { not: { term: "sport" } }] } };
+  const shown = await call("/demo/alerts/preview", { expression: keywords, corpus_ids: ["private"] });
+  assert.equal(shown.status, 200);
+  assert.deepEqual(
+    [shown.data.evaluated, shown.data.matched, shown.data.items.map((i) => [i.title, i.source])],
+    [50, 4, [["Orage r1", "wire"], ["Orage r2", "wire"], ["Orage r3", "wire"]]],
+  );
+  await call("/demo/alerts/preview", {
+    expression: { kind: "described", description: "Des orages violents" },
+  });
+  const asked = core.seen.filter((r) => r.url === "/v0/subscription-previews");
+  assert.deepEqual(
+    asked.map((r) => [r.body.definition.corpus_ids, r.body.definition.expression, r.body.evaluator.plugin_id, r.body.limit]),
+    [
+      [["demo"], keywords, "alerts", 50],
+      // Each article of a described preview is a paid classifier call.
+      [["demo"], { kind: "described", description: "Des orages violents" }, "alerts", 20],
+    ],
+  );
+  assert.ok(
+    core.seen.every((r) => r.method === "GET" || r.url === "/v0/subscription-previews"),
+    "a preview creates nothing",
   );
 });
