@@ -8,7 +8,7 @@ Several coding agents may work on Quivr V2 at the same time. **Linear is the fle
 ## Roles {#roles}
 
 - **Worker.** Plans, implements and ships one ticket as a green pull request. A worker never merges, never enables auto-merge and never approves its own plan.
-- **Coordinator.** Dispatches tickets to workers, approves plans, merges green pull requests, closes tickets and tells the remaining workers what changed on `main`. There is one coordinator at a time. A human, or an agent the human has explicitly designated as coordinator in its session, fills this role. Assume you are a worker unless you were told otherwise.
+- **Coordinator.** Dispatches tickets to workers, approves plans, merges green pull requests, closes tickets and tells the remaining workers what changed on `main`. There is one coordinator at a time. A human, or an agent the human has explicitly designated as coordinator in its session, fills this role. Assume you are a worker unless you were told otherwise. A coordinator follows the `coordinate-fleet` skill; workers get its worker brief.
 
 ## Worker lifecycle {#worker-lifecycle}
 

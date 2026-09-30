@@ -7,6 +7,15 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "0cd14026efa0330083cbc7adf590976c162b60e02f696a8dcce96f0b4dab8a72"
     },
+    "audit-tests-dev": {
+      "source": "openclaw/openclaw",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/test-audit/SKILL.md",
+      "ref": "80930af448ebabc84174146b56bc106d37fab3b4",
+      "license": "MIT",
+      "modified": "portable adaptation, see SOURCE.md",
+      "computedHash": "7d80232ed46baf20040acabc976c82dfa6d0e6a3a01a0afce3bf28bbcd2a3f7c"
+    },
     "better-ui": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",
@@ -30,6 +39,14 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
       "computedHash": "37b5e9c624513551da790b52864dc8c84bff996a6d03a380cc6facdcc0a88354"
+    },
+    "documentation-writer": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/documentation-writer/SKILL.md",
+      "ref": "caab1f623bb68a330f294a11279597d7ae7be737",
+      "license": "MIT",
+      "computedHash": "7e8244988c9f4eb63bf8c0edf160578544621eb96e5e51e2d848f1401c5de8f1"
     },
     "domain-modeling": {
       "source": "mattpocock/skills",
@@ -67,6 +84,14 @@
       "skillPath": "skills/productivity/handoff/SKILL.md",
       "computedHash": "20e5f4afdef502637510bc5c64d27645d3c85c88df9cb006824bbb0980166319"
     },
+    "humanizer": {
+      "source": "blader/humanizer",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "ref": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8",
+      "license": "MIT",
+      "computedHash": "0612f1dfb1672b0ea9b97e139bf1f06cabe98d8b27424fe8ff01e1fb4cc99cad"
+    },
     "implement": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -78,6 +103,14 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "2449db6ab1ded9581f69fcc56c1f64818112d05e271fd4c5da23c6523f9d3d9d"
+    },
+    "mintlify": {
+      "source": "mintlify/docs",
+      "sourceType": "github",
+      "skillPath": "skill.md",
+      "ref": "7e27426f36a0d7ec791c4c00f4783bae993edce9",
+      "license": "MIT",
+      "computedHash": "1e33070f5a73ff45a53bc591805665bbd9720f7b9d61f8983f6c7b99d9a4f824"
     },
     "prototype": {
       "source": "mattpocock/skills",
