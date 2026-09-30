@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/url"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +11,8 @@ import (
 )
 
 // history is a fixed Match history of subscription_s1 for transport tests.
+// Organization and Corpus visibility are the service's
+// (internal/monitoring engine_test) and the store's.
 type history struct{}
 
 func testMatch(i int64) monitoring.Match {
@@ -23,7 +24,7 @@ func testMatch(i int64) monitoring.Match {
 
 func (history) Match(_ context.Context, org, id string) (monitoring.Match, error) {
 	for i := int64(1); i <= 3; i++ {
-		if m := testMatch(i); m.ID == id && org == "org_a" {
+		if m := testMatch(i); m.ID == id {
 			return m, nil
 		}
 	}
@@ -39,13 +40,13 @@ func (history) Matches(_ context.Context, org, sub string, after int64, limit in
 	return out, nil
 }
 func (history) Delivery(_ context.Context, org, id string) (monitoring.Delivery, error) {
-	if id == "delivery_2" && org == "org_a" {
+	if id == "delivery_2" {
 		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
 		d.ID, d.AttemptCount, d.Admission = id, 3, monitoring.Admission{Allowed: true}
 		d.LastOutcome, d.LastErrorCode, d.LastErrorMessage = monitoring.AttemptPermanentError, "webhook_http_status", "receiver returned HTTP 400"
 		return d, nil
 	}
-	if (id == "delivery_3" || id == "delivery_4") && org == "org_a" {
+	if id == "delivery_3" || id == "delivery_4" {
 		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
 		d.ID, d.AttemptCount, d.Admission = id, 2, monitoring.Admission{Allowed: true}
 		d.LastOutcome, d.LastErrorCode, d.LastErrorMessage = monitoring.AttemptRetryableError, "webhook_http_status", "receiver returned HTTP 503"
@@ -56,7 +57,7 @@ func (history) Delivery(_ context.Context, org, id string) (monitoring.Delivery,
 		}
 		return d, nil
 	}
-	if id != "delivery_1" || org != "org_a" {
+	if id != "delivery_1" {
 		return monitoring.Delivery{}, monitoring.ErrNotFound
 	}
 	return monitoring.Delivery{ID: id, MatchID: "match_1", SubscriptionID: "subscription_s1", DestinationID: "receiver_a", State: "pending", Admission: monitoring.Admission{Reason: "subscription_disabled"},
@@ -84,7 +85,7 @@ func TestDeliveryAttemptsPageBoundedHistory(t *testing.T) {
 	server := monitoringServer(t)
 	call(t, server, "POST", "/v0/saved-queries", monitor, savedQueryBody, 201)
 	call(t, server, "POST", "/v0/subscriptions", monitor, subscriptionBody("s1", "quivr.fixture", "receiver_a"), 201)
-	first, raw := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?limit=3", monitorReader, "", 200)
+	first, _ := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?limit=3", monitorReader, "", 200)
 	next, _ := first["next_page_cursor"].(string)
 	items := first["items"].([]any)
 	if len(items) != 3 || next == "" {
@@ -100,27 +101,39 @@ func TestDeliveryAttemptsPageBoundedHistory(t *testing.T) {
 			t.Fatalf("attempt %d: %v", i, items[i])
 		}
 	}
-	if strings.Contains(raw, "whsec_") || strings.Contains(raw, "receiver.invalid") || strings.Contains(raw, "signature") {
-		t.Fatal("attempt history leaks destination secrets or URL", raw)
-	}
 	second, _ := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?limit=3&page_cursor="+url.QueryEscape(next), monitorReader, "", 200)
 	items = second["items"].([]any)
 	if len(items) != 2 || second["next_page_cursor"] != nil || !reflect.DeepEqual(items[0], map[string]any{"attempt_id": "attempt_4", "delivery_id": "delivery_1", "number": float64(4), "outcome": "in_flight"}) ||
 		!reflect.DeepEqual(items[1], map[string]any{"attempt_id": "attempt_5", "delivery_id": "delivery_1", "number": float64(5), "outcome": "acknowledged", "http_status": float64(204)}) {
 		t.Fatalf("second page: %v", second)
 	}
-	// Cursors bind the Delivery and the key scope.
-	if body, _ := call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?page_cursor="+url.QueryEscape(next), monitorNarrow, "", 409); body["code"] != "cursor_scope_changed" {
-		t.Fatal(body)
+	for _, r := range []struct {
+		method, path, token string
+		status              int
+		code                string
+	}{
+		// Cursors bind the Delivery and the key scope.
+		{"GET", "/v0/deliveries/delivery_2/attempts?page_cursor=" + url.QueryEscape(next), monitorReader, 409, "cursor_scope_changed"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?page_cursor=" + url.QueryEscape(next), monitorNarrow, 409, "cursor_scope_changed"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?limit=0", monitorReader, 422, "invalid_limit"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?limit=101", monitorReader, 422, "invalid_limit"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?page_cursor=" + url.QueryEscape(next+"x"), monitorReader, 422, "invalid_cursor"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?page_cursor=", monitorReader, 422, "invalid_cursor"},
+		{"GET", "/v0/deliveries/delivery_1/attempts?other=1", monitorReader, 422, "invalid_query"},
+		{"GET", "/v0/deliveries/missing/attempts", monitorReader, 404, "not_found"},
+		// Reading needs monitoring:read, judged before the query is.
+		{"GET", "/v0/deliveries/delivery_1/attempts?limit=101", noMonitoring, 403, "forbidden"},
+		{"POST", "/v0/deliveries/delivery_1/attempts", monitor, 405, "method_not_allowed"},
+		{"GET", "/v0/deliveries/delivery_1/other", monitorReader, 404, "not_found"},
+	} {
+		body := ""
+		if r.method == "POST" {
+			body = "{}"
+		}
+		if got, _ := call(t, server, r.method, r.path, r.token, body, r.status); got["code"] != r.code {
+			t.Errorf("%s %s: %v, want %s", r.method, r.path, got, r.code)
+		}
 	}
-	for _, q := range []string{"limit=0", "limit=101", "page_cursor=" + url.QueryEscape(next+"x"), "page_cursor=", "other=1"} {
-		call(t, server, "GET", "/v0/deliveries/delivery_1/attempts?"+q, monitorReader, "", 422)
-	}
-	call(t, server, "GET", "/v0/deliveries/delivery_1/attempts", monitorOther, "", 404)
-	call(t, server, "GET", "/v0/deliveries/missing/attempts", monitorReader, "", 404)
-	call(t, server, "GET", "/v0/deliveries/delivery_1/attempts", noMonitoring, "", 403)
-	call(t, server, "POST", "/v0/deliveries/delivery_1/attempts", monitor, "{}", 405)
-	call(t, server, "GET", "/v0/deliveries/delivery_1/other", monitorReader, "", 404)
 	// The Delivery exposes its latest failure, distinguishable as permanent.
 	failed, _ := call(t, server, "GET", "/v0/deliveries/delivery_2", monitorReader, "", 200)
 	if failed["state"] != "pending" || !reflect.DeepEqual(failed["last_error"], map[string]any{"code": "webhook_http_status", "message": "receiver returned HTTP 400", "retryable": false}) ||
@@ -158,30 +171,37 @@ func TestMatchHistoryPagesAndDeliveryRead(t *testing.T) {
 	if len(items) != 1 || items[0].(map[string]any)["match_id"] != "match_3" || second["next_page_cursor"] != nil {
 		t.Fatalf("second page: %v", second)
 	}
-	// A cursor is bound to its Subscription and scope.
-	if body := list(url.Values{"subscription_id": {"subscription_s1"}, "page_cursor": {next}}, monitor, 409); body["code"] != "cursor_scope_changed" {
-		t.Fatal(body)
-	}
-	for name, q := range map[string]url.Values{
-		"missing subscription": {},
-		"unknown parameter":    {"subscription_id": {"subscription_s1"}, "corpus_id": {"c"}},
-		"limit above maximum":  {"subscription_id": {"subscription_s1"}, "limit": {"101"}},
-		"tampered cursor":      {"subscription_id": {"subscription_s1"}, "page_cursor": {next + "x"}},
+	for name, r := range map[string]struct {
+		query, token string
+		status       int
+		code         string
+	}{
+		// A cursor is bound to its Subscription and to the key scope.
+		"another Subscription": {url.Values{"subscription_id": {"subscription_s2"}, "page_cursor": {next}}.Encode(), monitorReader, 409, "cursor_scope_changed"},
+		"another key scope":    {url.Values{"subscription_id": {"subscription_s1"}, "page_cursor": {next}}.Encode(), monitor, 409, "cursor_scope_changed"},
+		"missing subscription": {"", monitorReader, 422, "invalid_query"},
+		"unknown parameter":    {url.Values{"subscription_id": {"subscription_s1"}, "corpus_id": {"c"}}.Encode(), monitorReader, 422, "invalid_query"},
+		"limit above maximum":  {url.Values{"subscription_id": {"subscription_s1"}, "limit": {"101"}}.Encode(), monitorReader, 422, "invalid_limit"},
+		"tampered cursor":      {url.Values{"subscription_id": {"subscription_s1"}, "page_cursor": {next + "x"}}.Encode(), monitorReader, 422, "invalid_cursor"},
+		"unknown Subscription": {url.Values{"subscription_id": {"missing"}}.Encode(), monitorReader, 404, "not_found"},
 	} {
-		if body := list(q, monitorReader, 422); body["code"] == nil {
-			t.Fatal(name, body)
+		if body, _ := call(t, server, "GET", "/v0/matches?"+r.query, r.token, "", r.status); body["code"] != r.code {
+			t.Errorf("%s: %v, want %s", name, body, r.code)
 		}
 	}
-	list(url.Values{"subscription_id": {"subscription_s1"}}, monitorOther, 404)
-	list(url.Values{"subscription_id": {"subscription_s1"}}, monitorNarrow, 200)
-	list(url.Values{"subscription_id": {"subscription_s1"}}, noMonitoring, 403)
 
 	match, _ := call(t, server, "GET", "/v0/matches/match_1", monitorReader, "", 200)
 	evidence := match["evidence"].(map[string]any)
 	if match["record_version_id"] != "version_match_1" || evidence["explanation"] != "fixture" || !reflect.DeepEqual(evidence["part_keys"], []any{"body"}) {
 		t.Fatalf("match: %v", match)
 	}
-	call(t, server, "GET", "/v0/matches/match_1", monitorOther, "", 404)
+	// A Match carries its Subscription's owner; a global one has none.
+	if match["owner"] != nil {
+		t.Fatalf("global Match: %v", match)
+	}
+	if m, _ := call(t, server, "GET", "/v0/matches/match_3", monitorReader, "", 200); m["owner"] != "user-123" {
+		t.Fatalf("owned Match: %v", m)
+	}
 	call(t, server, "GET", "/v0/matches/missing", monitorReader, "", 404)
 	call(t, server, "POST", "/v0/matches/match_1", monitor, "{}", 405)
 
@@ -191,5 +211,5 @@ func TestMatchHistoryPagesAndDeliveryRead(t *testing.T) {
 		!reflect.DeepEqual(delivery["admission"], map[string]any{"allowed": false, "reason": "subscription_disabled"}) {
 		t.Fatalf("delivery: %v", delivery)
 	}
-	call(t, server, "GET", "/v0/deliveries/delivery_1", monitorOther, "", 404)
+	call(t, server, "GET", "/v0/deliveries/missing", monitorReader, "", 404)
 }

@@ -4,7 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
-import json, os, pathlib, re, shutil, stat, tempfile, unittest, uuid
+import json, os, pathlib, shutil, stat, tempfile, unittest, uuid
 from unittest import mock
 
 import local
@@ -74,12 +74,6 @@ class Isolation(unittest.TestCase):
         with mock.patch.object(stack, 'running', return_value=False):
             with self.assertRaisesRegex(RuntimeError, 'make dev'):
                 stack.migrate()
-
-    def test_harness_reads_no_personal_credentials_from_the_environment(self):
-        allowed = {'GO', 'CONTRACT_PYTHON', 'QUIVR_PROJECT', 'QUIVR_KEEP_ON_FAILURE'}
-        source = (local.ROOT / 'scripts/local.py').read_text()
-        read = set(re.findall(r"os\.environ\.get\('([A-Z_]+)'", source))
-        self.assertLessEqual(read, allowed)
 
 
 class Readiness(unittest.TestCase):

@@ -61,7 +61,9 @@ class Described(unittest.TestCase):
         return next(pin for pin in sp.pins(self.stack, **kwargs) if pin['manifest'] == ALERTS_MANIFEST)
 
     def test_verification_judges_described_alerts_with_the_fake_server(self):
-        sp.select(self.stack, True, sp.described_mode(True))
+        # make verify never uses a personal credential, even one set in the environment.
+        with mock.patch.dict(os.environ, {'TYPESAFE_API_KEY': 'personal-key'}):
+            sp.select(self.stack, True, sp.described_mode(True))
         self.stack.state['fake_system_one_port'] = 18765
         self.assertEqual(self.alerts_pin()['kinds'], ['keywords', 'described'])
         self.assertEqual(sp.classifier_environment(self.stack), {'TYPESAFE_API_KEY': 'test-key', 'TYPESAFE_API_URL': 'http://127.0.0.1:18765/v1/systemone'})

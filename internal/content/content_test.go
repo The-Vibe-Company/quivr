@@ -267,7 +267,6 @@ func TestOversizedGenericJSONIsBounded(t *testing.T) {
 // A verification lookup that cannot complete is an infrastructure failure, not
 // proof that the Blob is unverified: callers must be able to retry it.
 func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
-	outage := stubSource{err: context.DeadlineExceeded}
 	withSourceBlob := manifestCommand()
 	withSourceBlob.Manifest.Parts = withSourceBlob.Manifest.Parts[:2]
 	withSourceBlob.Provenance = map[string]any{"source_blob_ids": []any{"blob_1"}}
@@ -276,11 +275,15 @@ func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
 		"Manifest Blob Part":   manifestCommand(),
 		"provenance Blob refs": withSourceBlob,
 	}
-	for name, command := range cases {
-		service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: outage}
-		_, err := service.Accept(context.Background(), scope(), command)
-		if errors.Is(err, content.ErrUnverifiedBlob) || !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("%s: outage reported as %v", name, err)
+	// An expired deadline and a client that went away mid-batch both leave the
+	// Blob unjudged: the command stays retryable, never unverified_blob.
+	for _, outage := range []error{context.DeadlineExceeded, context.Canceled} {
+		for name, command := range cases {
+			service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: outage}}
+			_, err := service.Accept(context.Background(), scope(), command)
+			if errors.Is(err, content.ErrUnverifiedBlob) || !errors.Is(err, outage) {
+				t.Fatalf("%s (%v): outage reported as %v", name, outage, err)
+			}
 		}
 	}
 }

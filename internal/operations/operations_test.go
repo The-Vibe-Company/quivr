@@ -21,8 +21,9 @@ func (s *controlStore) AcceptRetrievalConfiguration(_ context.Context, org, corp
 	return operations.Operation{ID: "config", Organization: org, Kind: operations.KindRetrievalConfiguration, CorpusID: corpusID, State: operations.StateQueued}, nil
 }
 
-func (s *controlStore) AcceptRebuild(context.Context, string, string, string, []byte) (operations.Operation, error) {
-	return operations.Operation{}, errors.New("unused")
+func (s *controlStore) AcceptRebuild(_ context.Context, org, corpusID, _ string, canonical []byte) (operations.Operation, error) {
+	s.canonical = string(canonical)
+	return operations.Operation{ID: "rebuild", Organization: org, Kind: operations.KindProjectionRebuild, CorpusID: corpusID, State: operations.StateQueued}, nil
 }
 func (s *controlStore) Operation(_ context.Context, org, id string) (operations.Operation, error) {
 	if op, ok := s.ops[id]; ok && op.Organization == org {
@@ -37,6 +38,36 @@ func (s *controlStore) CancelOperation(_ context.Context, _, id string) (operati
 func (s *controlStore) AcceptRerun(_ context.Context, org, source, _ string, canonical []byte) (operations.Operation, error) {
 	s.canonical = string(canonical)
 	return operations.Operation{ID: "rerun", Organization: org, Kind: s.ops[source].Kind, PreviousID: source}, nil
+}
+
+// A rebuild needs projections:rebuild on an in-scope Corpus; its canonical
+// request, which idempotent replay compares, is the key alone.
+func TestRequestRebuildAuthorizesAndCanonicalizes(t *testing.T) {
+	store := &controlStore{}
+	service := operations.Service{Store: store}
+	ctx := context.Background()
+	rebuilder := corpus.Scope{Organization: "org", Actions: []string{"projections:rebuild"}, Corpora: []string{"corpus_a"}}
+	for _, tc := range []struct {
+		name     string
+		scope    corpus.Scope
+		corpusID string
+		want     error
+	}{
+		{"missing projections:rebuild", corpus.Scope{Organization: "org", Actions: []string{"operations:write"}, Corpora: []string{"*"}}, "corpus_a", corpus.ErrForbidden},
+		{"Corpus outside scope", rebuilder, "corpus_b", corpus.ErrNotFound},
+		{"no Corpus", corpus.Scope{Organization: "org", Actions: []string{"projections:rebuild"}, Corpora: []string{"*"}}, "", corpus.ErrNotFound},
+	} {
+		if _, err := service.RequestRebuild(ctx, tc.scope, tc.corpusID, "k"); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if store.canonical != "" {
+		t.Fatalf("rejected rebuild reached the store: %q", store.canonical)
+	}
+	op, err := service.RequestRebuild(ctx, rebuilder, "corpus_a", "k1")
+	if err != nil || op.Organization != "org" || op.CorpusID != "corpus_a" || store.canonical != `{"idempotency_key":"k1"}` {
+		t.Fatalf("rebuild %+v %v canonical %s", op, err, store.canonical)
+	}
 }
 
 // Control actions revalidate the caller's current permission and Corpus scope

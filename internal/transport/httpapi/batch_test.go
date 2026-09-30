@@ -88,14 +88,10 @@ func newAPI(t *testing.T, port *acceptancePort) http.Handler {
 	return handler
 }
 
-// verifiedBlobs verifies Blob IDs prefixed "verified" and, like a real lookup,
-// fails with the context error once the request is canceled.
+// verifiedBlobs verifies Blob IDs prefixed "verified".
 type verifiedBlobs struct{}
 
-func (verifiedBlobs) VerifiedBlob(ctx context.Context, _ string, id string) (content.VerifiedBlob, error) {
-	if err := ctx.Err(); err != nil {
-		return content.VerifiedBlob{}, err
-	}
+func (verifiedBlobs) VerifiedBlob(_ context.Context, _ string, id string) (content.VerifiedBlob, error) {
 	if !strings.HasPrefix(id, "verified") {
 		return content.VerifiedBlob{}, content.ErrUnverifiedBlob
 	}
@@ -117,9 +113,14 @@ func postJSON(t *testing.T, handler http.Handler, path, key string, body any) (i
 
 func postRaw(t *testing.T, handler http.Handler, path, key string, payload []byte) (int, map[string]any) {
 	t.Helper()
+	return postMedia(t, handler, path, key, "application/json", payload)
+}
+
+func postMedia(t *testing.T, handler http.Handler, path, key, media string, payload []byte) (int, map[string]any) {
+	t.Helper()
 	req := httptest.NewRequest("POST", path, bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", media)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	var out map[string]any
@@ -222,6 +223,7 @@ func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 	cases := []struct {
 		name   string
 		key    string
+		media  string
 		body   any
 		raw    string
 		status int
@@ -237,6 +239,7 @@ func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 		{name: "unknown envelope field", key: adminKey, body: map[string]any{"items": []any{valid}, "atomic": true}, status: 422, code: "invalid_schema"},
 		{name: "bare array", key: adminKey, body: []any{valid}, status: 422, code: "invalid_schema"},
 		{name: "no content:write", key: readerKey, body: map[string]any{"items": []any{valid}}, status: 403, code: "forbidden"},
+		{name: "not JSON", key: adminKey, media: "text/plain", body: map[string]any{"items": []any{valid}}, status: 415, code: "unsupported_media_type"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,7 +249,11 @@ func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 			if tc.body != nil {
 				payload, _ = json.Marshal(tc.body)
 			}
-			status, body := postRaw(t, handler, "/v0/records/batch", tc.key, payload)
+			media := tc.media
+			if media == "" {
+				media = "application/json"
+			}
+			status, body := postMedia(t, handler, "/v0/records/batch", tc.key, media, payload)
 			if status != tc.status || body["code"] != tc.code {
 				t.Fatalf("got %d code=%v with %d attempted acceptances", status, body["code"], len(port.accepted))
 			}
@@ -288,18 +295,23 @@ func TestBatchEntryBoundIsMeasuredOnRawBytes(t *testing.T) {
 	// sends is far larger than its decoded form; the raw bytes are what the
 	// same entry weighs when submitted alone.
 	entry := `{"idempotency_key":"escaped","source":{"corpus_id":"corpus_news","namespace":"feed","record_key":"escaped"},"content":{"kind":"text","text":"` + strings.Repeat(`\u00e9`, 180000) + `"}}`
-	status, body := postRaw(t, handler, "/v0/records/batch", adminKey, []byte(`{"items":[`+entry+`]}`))
+	before, _ := json.Marshal(inline("entry-before", "before", "Avant"))
+	after, _ := json.Marshal(inline("entry-after", "after", "Après"))
+	status, body := postRaw(t, handler, "/v0/records/batch", adminKey, []byte(`{"items":[`+string(before)+`,`+entry+`,`+string(after)+`]}`))
 	if status != 200 {
 		t.Fatalf("got %d code=%v", status, body["code"])
 	}
-	if e := entryError(t, entries(t, body)[0]); e["code"] != "entry_too_large" {
+	conforms(t, "BatchResult", body)
+	if e := entryError(t, entries(t, body)[1]); e["code"] != "entry_too_large" || e["retryable"] != false {
 		t.Fatalf("raw entry above 1 MiB: %v", e)
 	}
+	// The oversized entry fails alone: its peers on both sides are accepted in order.
+	if len(port.accepted) != 2 || port.accepted[0] != "entry-before" || port.accepted[1] != "entry-after" {
+		t.Fatalf("acceptance attempts: %v", port.accepted)
+	}
+	// A batch never admits what a single submission would refuse.
 	if status, _ := postRaw(t, handler, "/v0/records", adminKey, []byte(entry)); status != 413 {
 		t.Fatalf("single submission got %d", status)
-	}
-	if len(port.accepted) != 0 {
-		t.Fatalf("accepted %v", port.accepted)
 	}
 }
 
@@ -308,10 +320,7 @@ func TestBatchCanceledMidwayLeavesRemainingEntriesRetryable(t *testing.T) {
 	defer cancel()
 	port := &acceptancePort{cancelAfter: 2, cancel: cancel}
 	handler := newAPI(t, port)
-	withBlobPart := map[string]any{"idempotency_key": "cut-manifest", "source": map[string]any{"corpus_id": "corpus_news", "namespace": "feed", "record_key": "cut-manifest"}, "content": map[string]any{"kind": "manifest", "parts": []any{
-		map[string]any{"key": "source", "role": "source", "content": map[string]any{"kind": "blob", "blob_id": "verified-source", "media_type": "application/xml"}},
-	}}}
-	payload, _ := json.Marshal(map[string]any{"items": []any{inline("cut-1", "cut-1", "Un"), inline("cut-2", "cut-2", "Deux"), inline("cut-3", "cut-3", "Trois"), withBlobPart}})
+	payload, _ := json.Marshal(map[string]any{"items": []any{inline("cut-1", "cut-1", "Un"), inline("cut-2", "cut-2", "Deux"), inline("cut-3", "cut-3", "Trois")}})
 	req := httptest.NewRequest("POST", "/v0/records/batch", bytes.NewReader(payload)).WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer "+adminKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -323,56 +332,19 @@ func TestBatchCanceledMidwayLeavesRemainingEntriesRetryable(t *testing.T) {
 	}
 	conforms(t, "BatchResult", body)
 	items := entries(t, body)
+	if len(items) != 3 {
+		t.Fatalf("got %d outcomes for 3 entries: %v", len(items), items)
+	}
 	for _, i := range []int{0, 1} {
 		if _, ok := items[i]["receipt"]; !ok {
 			t.Fatalf("entry %d accepted before the cancellation lost its Receipt: %v", i, items[i])
 		}
 	}
-	// Entries after the cancellation, including one that must verify a Blob,
-	// are reported retryable so the client replays their keys.
-	for _, i := range []int{2, 3} {
-		if e := entryError(t, items[i]); e["code"] != "content_unavailable" || e["retryable"] != true {
-			t.Fatalf("entry %d: %v", i, e)
-		}
-	}
-}
-
-func TestBatchRequiresJSONMediaType(t *testing.T) {
-	handler := newAPI(t, &acceptancePort{})
-	req := httptest.NewRequest("POST", "/v0/records/batch", strings.NewReader(`{"items":[1]}`))
-	req.Header.Set("Authorization", "Bearer "+adminKey)
-	req.Header.Set("Content-Type", "text/plain")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != 415 {
-		t.Fatalf("got %d", rec.Code)
-	}
-}
-
-func TestBatchEntryAboveSingleRequestBoundFailsAlone(t *testing.T) {
-	port := &acceptancePort{}
-	handler := newAPI(t, port)
-	oversized := inline("entry-big", "big", strings.Repeat("a", 1<<20))
-	status, body := postJSON(t, handler, "/v0/records/batch", adminKey, map[string]any{"items": []any{
-		inline("entry-before", "before", "Avant"),
-		oversized,
-		inline("entry-after", "after", "Après"),
-	}})
-	if status != 200 {
-		t.Fatalf("got %d code=%v", status, body["code"])
-	}
-	conforms(t, "BatchResult", body)
-	items := entries(t, body)
-	if e := entryError(t, items[1]); e["code"] != "entry_too_large" || e["retryable"] != false {
-		t.Fatalf("oversized entry: %v", e)
-	}
-	if len(port.accepted) != 2 || port.accepted[0] != "entry-before" || port.accepted[1] != "entry-after" {
-		t.Fatalf("acceptance attempts: %v", port.accepted)
-	}
-	// The same command is not accepted alone either: a batch never admits what a
-	// single submission would refuse.
-	if status, single := postJSON(t, handler, "/v0/records", adminKey, oversized); status != 413 {
-		t.Fatalf("single submission got %d %v", status, single["code"])
+	// The entry after the cancellation is reported retryable so the client
+	// replays its key. That a canceled Blob lookup is not reported as an
+	// unverified Blob is internal/content TestBlobVerificationOutageStaysRetryable's.
+	if e := entryError(t, items[2]); e["code"] != "content_unavailable" || e["retryable"] != true {
+		t.Fatalf("entry 2: %v", e)
 	}
 }
 
@@ -388,6 +360,7 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 		failure   error
 		status    int
 		code      string
+		retryable bool
 	}{
 		{name: "Corpus outside the key's scope", key: scopedKey, entry: inline("scope", "scope", "Texte"), status: 404, code: "not_found"},
 		{name: "conflicting key reuse", key: adminKey, entry: inline("conflict", "conflict", "Texte"), failure: content.ErrConflict, status: 409, code: "idempotency_conflict"},
@@ -404,7 +377,7 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 		}), status: 422, code: "invalid_input"},
 		{name: "missing content", key: adminKey, entry: with("missing", func(e map[string]any) { delete(e, "content") }), status: 422, code: "invalid_schema"},
 		{name: "unknown core field", key: adminKey, entry: with("unknown", func(e map[string]any) { e["atomic"] = true }), status: 422, code: "invalid_schema"},
-		{name: "storage outage", key: adminKey, entry: inline("outage", "outage", "Texte"), failure: errors.New("connection refused"), status: 503, code: "content_unavailable"},
+		{name: "storage outage", key: adminKey, entry: inline("outage", "outage", "Texte"), failure: errors.New("connection refused"), status: 503, code: "content_unavailable", retryable: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -414,7 +387,7 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 			}
 			handler := newAPI(t, port)
 			status, single := postJSON(t, handler, "/v0/records", tc.key, tc.entry)
-			if status != tc.status || single["code"] != tc.code {
+			if status != tc.status || single["code"] != tc.code || single["retryable"] != tc.retryable {
 				t.Fatalf("single submission got %d %v", status, single)
 			}
 			status, body := postJSON(t, handler, "/v0/records/batch", tc.key, map[string]any{"items": []any{tc.entry}})
@@ -423,7 +396,7 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 			}
 			conforms(t, "BatchResult", body)
 			e := entryError(t, entries(t, body)[0])
-			if e["code"] != single["code"] || e["retryable"] != single["retryable"] {
+			if e["code"] != tc.code || e["retryable"] != tc.retryable {
 				t.Fatalf("batch entry %v differs from single submission %v", e, single)
 			}
 		})

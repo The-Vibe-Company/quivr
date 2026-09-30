@@ -19,25 +19,27 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
 
-// memoryJournal is an in-memory commit-ordered journal with a controllable expiry.
+// memoryJournal is an in-memory commit-ordered journal. Setting expired makes
+// every read report the caller's position as past retention; the retention
+// window itself is postgres TestChangeJournalWindowsAndRetention's.
 type memoryJournal struct {
 	mu      sync.Mutex
 	events  []changes.Event
-	expired func(after int64) bool
+	expired bool
 }
 
 func (j *memoryJournal) append(corpusID, kind, id string) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	p := int64(len(j.events) + 1)
-	j.events = append(j.events, changes.Event{Position: p, ID: "event_" + id + "_" + kind, Type: kind, CorpusID: corpusID, ResourceKind: "record", ResourceID: id, OccurredAt: time.Now().UTC()})
+	j.events = append(j.events, changes.Event{Position: p, ID: "event_" + id + "_" + kind, Type: kind, CorpusID: corpusID, ResourceKind: "record", ResourceID: id, OccurredAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)})
 }
 
 func (j *memoryJournal) ReadChanges(_ context.Context, _, corpusID string, after int64, limit int, _ time.Duration) (changes.Window, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	head := int64(len(j.events))
-	w := changes.Window{Head: head, Through: after, Expired: j.expired != nil && after < head && j.expired(after)}
+	w := changes.Window{Head: head, Through: after, Expired: j.expired}
 	if limit <= 0 {
 		return w, nil
 	}
@@ -126,9 +128,11 @@ type sse struct {
 	scanner *bufio.Scanner
 }
 
+// openStream gives the stream a deadline, so a stream that never sends or
+// never closes fails the test instead of hanging it.
 func openStream(t *testing.T, server *httptest.Server, path, token, lastEventID string) (*sse, *http.Response) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL+path, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -143,7 +147,9 @@ func openStream(t *testing.T, server *httptest.Server, path, token, lastEventID 
 	return &sse{res: res, scanner: bufio.NewScanner(res.Body)}, res
 }
 
-// next returns the next dispatched frame, skipping comments; ok is false at EOF.
+// next returns the next dispatched frame, skipping comments; ok is false when
+// the server closed the stream. A read error, such as the deadline, fails the
+// test: it is not a close.
 func (s *sse) next(t *testing.T) (frame, bool) {
 	t.Helper()
 	var f frame
@@ -163,6 +169,9 @@ func (s *sse) next(t *testing.T) (frame, bool) {
 		case strings.HasPrefix(line, "data: "):
 			f.data, seen = strings.TrimPrefix(line, "data: "), true
 		}
+	}
+	if err := s.scanner.Err(); err != nil {
+		t.Fatalf("stream read: %v", err)
 	}
 	return f, false
 }
@@ -204,21 +213,33 @@ func TestPollingRejectsForeignCursorsAndScopes(t *testing.T) {
 	server := changeServer(t, journal)
 	cursor := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", feedReader, 200)["next_cursor"].(string)
 
-	getJSON(t, server, "/v0/changes?corpus_id=corpus_a", noFeed, 403)
-	getJSON(t, server, "/v0/changes?corpus_id=corpus_b", otherScope, 404)
-	getJSON(t, server, "/v0/changes?corpus_id=missing", feedReader, 404)
-	getJSON(t, server, "/v0/changes", feedReader, 422)
-	getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor=", feedReader, 422)
-	getJSON(t, server, "/v0/changes?corpus_id=corpus_a&limit=101", feedReader, 422)
-	getJSON(t, server, "/v0/changes?corpus_id=corpus_a&api_key="+feedReader, feedReader, 422)
-	if e := getJSON(t, server, "/v0/changes?corpus_id=corpus_b&cursor="+cursor, feedReader, 409); e["code"] != "cursor_scope_changed" {
-		t.Fatal(e)
+	for _, tc := range []struct {
+		path, token string
+		status      int
+		code        string
+	}{
+		{"/v0/changes?corpus_id=corpus_a", noFeed, 403, "forbidden"},
+		{"/v0/changes?corpus_id=corpus_b", otherScope, 404, "not_found"},
+		{"/v0/changes?corpus_id=missing", feedReader, 404, "not_found"},
+		{"/v0/changes", feedReader, 422, "invalid_query"},
+		{"/v0/changes?corpus_id=corpus_a&cursor=", feedReader, 422, "invalid_cursor"},
+		{"/v0/changes?corpus_id=corpus_a&limit=0", feedReader, 422, "invalid_limit"},
+		{"/v0/changes?corpus_id=corpus_a&limit=101", feedReader, 422, "invalid_limit"},
+		// A key in the query string is refused, never used.
+		{"/v0/changes?corpus_id=corpus_a&api_key=" + feedReader, feedReader, 422, "invalid_query"},
+		{"/v0/changes?corpus_id=corpus_a&cursor=x" + cursor, feedReader, 422, "invalid_cursor"},
+	} {
+		if e := getJSON(t, server, tc.path, tc.token, tc.status); e["code"] != tc.code {
+			t.Errorf("GET %s: code %v, want %s", tc.path, e["code"], tc.code)
+		}
 	}
-	if e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor="+cursor, otherScope, 409); e["code"] != "cursor_scope_changed" {
-		t.Fatal(e)
-	}
-	if e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor=x"+cursor, feedReader, 422); e["code"] != "invalid_cursor" {
-		t.Fatal(e)
+	// A changed Corpus filter or authorization scope discards the traversal and
+	// names the Record catalog to resynchronize from.
+	for _, tc := range []struct{ corpusID, token string }{{"corpus_b", feedReader}, {"corpus_a", otherScope}} {
+		e := getJSON(t, server, "/v0/changes?corpus_id="+tc.corpusID+"&cursor="+cursor, tc.token, 409)
+		if e["code"] != "cursor_scope_changed" || e["resync_url"] != "/v0/records?corpus_id="+tc.corpusID {
+			t.Fatal(e)
+		}
 	}
 }
 
@@ -227,7 +248,7 @@ func TestExpiredCursorBeforeStreamIs410WithResync(t *testing.T) {
 	server := changeServer(t, journal)
 	cursor := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", feedReader, 200)["next_cursor"].(string)
 	journal.append("corpus_a", "record.accepted", "aged")
-	journal.expired = func(int64) bool { return true }
+	journal.expired = true
 
 	e := getJSON(t, server, "/v0/changes?corpus_id=corpus_a&cursor="+cursor, feedReader, 410)
 	if e["code"] != "cursor_expired" || e["resync_url"] != "/v0/records?corpus_id=corpus_a" {
@@ -281,7 +302,9 @@ func TestStreamCheckpointsChangesAndResumesFromLastEventID(t *testing.T) {
 	if !ok || f.event != "change" || f.data != got[1].data || f.id != got[1].id {
 		t.Fatal("resume lost or invented an event", f, got[1])
 	}
-	// Replaying from the checkpoint duplicates delivery with the same event identity.
+	// The start-now checkpoint is itself a resume point: resuming from it
+	// delivers the first change again (identity across replays is acceptance
+	// TestChangeStreamResumesWithoutLoss's).
 	replay, _ := openStream(t, server, "/v0/changes/stream?corpus_id=corpus_a", feedReader, checkpoint.id)
 	if f, ok := replay.next(t); !ok || f.data != got[0].data {
 		t.Fatal("replay changed event identity", f)
@@ -296,7 +319,7 @@ func TestStreamErrorOnInStreamExpiryDoesNotAdvanceID(t *testing.T) {
 		t.Fatal(f)
 	}
 	journal.mu.Lock()
-	journal.expired = func(int64) bool { return true }
+	journal.expired = true
 	journal.mu.Unlock()
 	journal.append("corpus_a", "record.accepted", "late")
 	f, ok := stream.next(t)

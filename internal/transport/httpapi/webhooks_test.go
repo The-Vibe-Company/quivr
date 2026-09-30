@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -51,7 +50,7 @@ func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 	}
 	store := onePushInstance{connectors.Target{Instance: connectors.Instance{Organization: "org_a", ID: "connector_push", CorpusID: "corpus_news", Namespace: "echo", Kind: "echo", Config: json.RawMessage(`{}`), Enabled: true}}}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{}, []byte("cursor-key-0123456789abcdef0123456789"),
-		httpapi.WithRelay(connectors.Relay{Store: store, Registry: registry, Now: func() time.Time { return time.Unix(0, 0) }}))
+		httpapi.WithRelay(connectors.Relay{Store: store, Registry: registry}))
 	if err != nil {
 		t.Fatal(err)
 	}

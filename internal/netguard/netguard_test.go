@@ -78,8 +78,10 @@ func TestRefusedErrorCarriesTheAddressForOperatorsOnly(t *testing.T) {
 	}
 }
 
-func TestCheckLiteral(t *testing.T) {
-	for _, host := range []string{"127.0.0.1", "::1", "169.254.169.254", "10.0.0.1", "localhost", "LOCALHOST", "api.localhost", "localhost.", "::ffff:127.0.0.1"} {
+// CheckLiteral's own rule is the localhost names; an IP literal is judged by
+// Allowed, whose ranges TestRefusesEveryNonPublicRange owns.
+func TestCheckLiteralRefusesLocalhostNamesAndNonPublicLiterals(t *testing.T) {
+	for _, host := range []string{"localhost", "LOCALHOST", "api.localhost", "localhost.", "127.0.0.1", "::1"} {
 		if err := CheckLiteral(host); !errors.Is(err, ErrRefused) {
 			t.Errorf("%s accepted", host)
 		}

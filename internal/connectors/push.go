@@ -195,14 +195,6 @@ type Relay struct {
 	Registry *Registry
 	Sealer   Sealer
 	Ingest   Ingestor
-	Now      func() time.Time
-}
-
-func (r Relay) now() time.Time {
-	if r.Now != nil {
-		return r.Now()
-	}
-	return time.Now()
 }
 
 func unavailable() RelayAnswer {
@@ -230,7 +222,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	org := target.Organization
 	fail := func(class ErrorClass, code string) (RelayAnswer, error) {
 		slog.Warn("connector delivery failed", "connector_id", id, "class", string(class), "code", code)
-		if err := r.Store.RecordDelivery(ctx, org, id, DeliveryOutcome{Failure: &RunError{Class: class, Code: code, At: r.now()}}); err != nil {
+		if err := r.Store.RecordDelivery(ctx, org, id, DeliveryOutcome{Failure: &RunError{Class: class, Code: code, At: time.Now()}}); err != nil {
 			slog.Warn("connector delivery outcome not recorded", "connector_id", id)
 		}
 		if class == ClassTransient {
@@ -240,7 +232,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	}
 	var credential json.RawMessage
 	if target.Sealed != nil {
-		if target.Sealed.ExpiresAt != nil && !target.Sealed.ExpiresAt.After(r.now()) {
+		if target.Sealed.ExpiresAt != nil && !target.Sealed.ExpiresAt.After(time.Now()) {
 			return fail(ClassAccess, "credential_expired")
 		}
 		if credential, err = r.Sealer.Open(org, id, *target.Sealed); err != nil {
@@ -248,7 +240,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		}
 	}
 	delivery, err := receiver.Receive(ctx, ReceiveRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace,
-		Config: target.Config, Credential: credential, Checkpoint: target.Checkpoint, Now: r.now(), ReadsToday: target.ReadsToday, Request: req})
+		Config: target.Config, Credential: credential, Checkpoint: target.Checkpoint, Now: time.Now(), ReadsToday: target.ReadsToday, Request: req})
 	if err != nil {
 		var typed *Error
 		if errors.As(err, &typed) {
@@ -265,7 +257,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
 	}
 	scope := corpus.Scope{Organization: org, Actions: []string{"content:write", "content:read"}, Corpora: []string{target.CorpusID}}
-	submitter := Acquirer{Ingest: r.Ingest, Now: r.Now}
+	submitter := Acquirer{Ingest: r.Ingest}
 	rc := runContext{connector: connector, target: target, credential: credential}
 	outcome := DeliveryOutcome{Accepted: true, Carried: len(delivery.Items) > 0, Reads: delivery.Reads}
 	for _, item := range delivery.Items {
@@ -277,7 +269,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 			return fail(ClassAccess, "corpus_unavailable")
 		case errors.Is(err, content.ErrConflict), errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported), errors.Is(err, content.ErrUnverifiedBlob):
 			// One bad item never blocks the source; the source is still answered.
-			outcome.Failure = &RunError{Class: ClassSource, Code: "item_rejected", At: r.now()}
+			outcome.Failure = &RunError{Class: ClassSource, Code: "item_rejected", At: time.Now()}
 		default:
 			// The source retries; the items already accepted replay their Receipts.
 			return fail(ClassTransient, "ingestion_unavailable")

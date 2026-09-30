@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"testing"
@@ -37,16 +38,21 @@ func written(t *testing.T, write func(*httptest.ResponseRecorder)) (int, string)
 
 // Adding detail to a domain error must never change its public code.
 func TestContentFailureCodesIgnoreDetail(t *testing.T) {
-	for sentinel, want := range map[error]string{
-		content.ErrInvalid:        "invalid_input",
-		content.ErrUnsupported:    "unsupported_content",
-		content.ErrConflict:       "idempotency_conflict",
-		content.ErrExtensionOwned: "extension_namespace_owned",
-		&content.ManifestViolation{Kind: content.ErrInvalid, Detail: `duplicate Part key "a"`}: "invalid_input",
+	type public struct {
+		status int
+		code   string
+	}
+	for sentinel, want := range map[error]public{
+		content.ErrInvalid:        {422, "invalid_input"},
+		content.ErrUnsupported:    {422, "unsupported_content"},
+		content.ErrConflict:       {409, "idempotency_conflict"},
+		content.ErrExtensionOwned: {422, "extension_namespace_owned"},
+		&content.ManifestViolation{Kind: content.ErrInvalid, Detail: `duplicate Part key "a"`}:    {422, "invalid_input"},
+		&content.ManifestViolation{Kind: content.ErrUnsupported, Detail: `Part "a" kind "video"`}: {422, "unsupported_content"},
 	} {
 		for style, err := range detailed(sentinel) {
-			if _, code := contentFailure(err); code != want {
-				t.Errorf("%v (%s): code %q, want %q", sentinel, style, code, want)
+			if status, code := contentFailure(err); status != want.status || code != want.code {
+				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
 		}
 	}
@@ -83,40 +89,46 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 	}
 }
 
+// monitoringFailure owns every monitoring refusal's status, code and
+// retryability. A preview's evaluator failure always carries the plugin's
+// detail; only an unreachable or transient evaluator is worth retrying.
 func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
-	for sentinel, want := range map[error]string{
-		monitoring.ErrUnsupportedProfile:            "unsupported_profile",
-		monitoring.ErrUnsupportedEvaluator:          "unsupported_evaluator",
-		monitoring.ErrUnknownDestination:            "unknown_destination",
-		monitoring.ErrUnknownSavedQuery:             "unknown_saved_query",
-		monitoring.ErrTooLarge:                      "definition_too_large",
-		monitoring.ErrInvalidOwner:                  "invalid_owner",
-		monitoring.ErrInvalidExpression:             "invalid_expression",
-		monitoring.ErrInvalidEvaluatorConfiguration: "invalid_subscription_configuration",
-	} {
-		for style, err := range detailed(sentinel) {
-			status, code := written(t, func(w *httptest.ResponseRecorder) { monitoringFailure(w, err) })
-			if status != 422 || code != want {
-				t.Errorf("%v (%s): %d %q, want 422 %q", sentinel, style, status, code, want)
-			}
-		}
+	type public struct {
+		status    int
+		code      string
+		retryable bool
 	}
-}
-
-// A preview's evaluator failure always carries the plugin's detail; only an
-// unreachable or transient evaluator is worth retrying.
-func TestPreviewFailureCodesIgnoreDetail(t *testing.T) {
-	for sentinel, want := range map[error]struct {
-		status int
-		code   string
-	}{
-		monitoring.ErrPreviewUnavailable: {503, "evaluator_unavailable"},
-		monitoring.ErrPreviewFailed:      {502, "evaluator_error"},
+	for sentinel, want := range map[error]public{
+		monitoring.ErrForbidden:                     {403, "forbidden", false},
+		monitoring.ErrNotFound:                      {404, "not_found", false},
+		monitoring.ErrConflict:                      {409, "idempotency_conflict", false},
+		monitoring.ErrSubscriptionDeleted:           {409, "subscription_deleted", false},
+		monitoring.ErrSavedQueryDeleted:             {409, "saved_query_deleted", false},
+		monitoring.ErrSavedQueryInUse:               {409, "saved_query_in_use", false},
+		monitoring.ErrUnsupportedProfile:            {422, "unsupported_profile", false},
+		monitoring.ErrUnsupportedEvaluator:          {422, "unsupported_evaluator", false},
+		monitoring.ErrUnknownDestination:            {422, "unknown_destination", false},
+		monitoring.ErrUnknownSavedQuery:             {422, "unknown_saved_query", false},
+		monitoring.ErrTooLarge:                      {422, "definition_too_large", false},
+		monitoring.ErrInvalidOwner:                  {422, "invalid_owner", false},
+		monitoring.ErrInvalidExpression:             {422, "invalid_expression", false},
+		monitoring.ErrInvalidEvaluatorConfiguration: {422, "invalid_subscription_configuration", false},
+		monitoring.ErrPreviewUnavailable:            {503, "evaluator_unavailable", true},
+		monitoring.ErrPreviewFailed:                 {502, "evaluator_error", false},
+		errors.New("connection refused"):            {503, "storage_unavailable", true},
 	} {
 		for style, err := range detailed(sentinel) {
-			status, code := written(t, func(w *httptest.ResponseRecorder) { monitoringFailure(w, err) })
-			if status != want.status || code != want.code {
-				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			rec := httptest.NewRecorder()
+			monitoringFailure(rec, err)
+			var body struct {
+				Code      string
+				Retryable *bool
+			}
+			if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Retryable == nil {
+				t.Fatalf("%v (%s): undecodable failure %q", sentinel, style, rec.Body.String())
+			}
+			if rec.Code != want.status || body.Code != want.code || *body.Retryable != want.retryable {
+				t.Errorf("%v (%s): %d %q retryable=%v, want %+v", sentinel, style, rec.Code, body.Code, *body.Retryable, want)
 			}
 		}
 	}
@@ -127,11 +139,14 @@ func TestPreviewFailureCodesIgnoreDetail(t *testing.T) {
 func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {
 	rec := httptest.NewRecorder()
 	monitoringFailure(rec, monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", "/expression/text: minLength: got 0, want 1"))
-	var body struct{ Code, Message, Field string }
+	var body struct {
+		Code, Message, Field string
+		Retryable            bool
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 422 || body.Code != "invalid_expression" || body.Field != "/saved_query_version_id" || body.Message != "/expression/text: minLength: got 0, want 1" {
+	if rec.Code != 422 || body.Code != "invalid_expression" || body.Field != "/saved_query_version_id" || body.Message != "/expression/text: minLength: got 0, want 1" || body.Retryable {
 		t.Fatalf("%d %+v", rec.Code, body)
 	}
 }

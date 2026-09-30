@@ -338,9 +338,10 @@ which each report times.
 - a private directory under `.scratch/` (mode 0700);
 - freshly generated keys, database password, S3 and cursor secrets (state file mode 0600).
 
-The harness reads no personal credential from the environment. The only variables
-it reads are `GO`, `CONTRACT_PYTHON`, `QUIVR_PROJECT` and `QUIVR_KEEP_ON_FAILURE`;
-`scripts/test_local.py` enforces this.
+`make verify` uses no personal credential from the environment: described alerts
+are judged by a fake server with a test key even when `TYPESAFE_API_KEY` is set
+(`scripts/test_subscription_plugin.py`). Only `make dev` reads opt-in variables
+such as `TYPESAFE_API_KEY`, `QUIVR_ALERTS` and `QUIVR_NORMALIZER`.
 
 **Steps and report.**
 - Every scenario is a named step of one part. The `quivr` CLI step (`TestCLI*`)
