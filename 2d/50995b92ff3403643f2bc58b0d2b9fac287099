@@ -1,0 +1,53 @@
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_3c5247dbeead95 572-575
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_7e9da68e436801 54-69
+plugins/core-ingest/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_7442cfe2aa4de5 22-25
+plugins/core-ingest/README.md
+  s_54b80c92daa9cb::t_8f7ccbbb3afe2d 25-27
+  s_54b80c92daa9cb::t_bc82d2208f6adc 19-22
+internal/processing/enrichment_test.go
+  s_54b80c92daa9cb::t_e6cfc012aeaa88 60
+  s_54b80c92daa9cb::t_9682b4fd633541 1-59,61-106
+migrations/20260930T1538Z_enrichment_timeouts.sql
+  s_54b80c92daa9cb::t_d6dfc443e83826 1-11
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_198d220835eb05 18,124,188-190,195-216
+  s_54b80c92daa9cb::t_b2b79d8bcf86e7 7,191-194
+  s_54b80c92daa9cb::t_1ad728e476c404 217
+internal/adapters/postgres/embeddings_test.go
+  s_54b80c92daa9cb::t_3f0d5bfbbffcef 14
+  s_54b80c92daa9cb::t_3b3ce8d0e4f07a 142-160
+  s_54b80c92daa9cb::t_054fec395dba26 161
+internal/content/embeddings.go
+  s_54b80c92daa9cb::t_4a955ce61796ef 66-68,205-208,213,219-225
+  s_54b80c92daa9cb::t_25769d0b9ba64a 226-227
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_4c45432217e952 91-92,95-101,189
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_f8d4e8528abc7c 41-53
+  s_54b80c92daa9cb::t_a7f6d5b0b8f0e9 61-63
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_2e2163867db1d3 146,153-155
+internal/adapters/postgres/embeddings.go
+  s_54b80c92daa9cb::t_d6dfc443e83826 61-66
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_b3da3a0c41668d 67-68,123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d50995b92ff3403643f2bc58b0d2b9fac287099",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
