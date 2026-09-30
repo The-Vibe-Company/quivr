@@ -1,0 +1,107 @@
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_f38cb5a860f780 219-220
+CONTEXT.md
+  s_54b80c92daa9cb::t_b5cce8f3d814dd 64
+README.md
+  s_54b80c92daa9cb::t_b16a619f572389 41-42,243-244
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_d47ffe70d06686 64-72
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_dfcd50dc83e8eb 33-37,43-45,83-86,88,110,127,144-145,154,230-231
+deploy/railway/core.Dockerfile
+  s_54b80c92daa9cb::t_eec89653358da5 12-14,30,33,35
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_222458d080a492 198,208-216
+docs/inventory.toml
+  s_54b80c92daa9cb::t_795c6d586586a2 97,111,134
+docs/plugins/write-a-normalizer.md
+  s_54b80c92daa9cb::t_fc3394b24ffdac 156-157
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_5ad8750892efcc 10
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_3e7b17941e9d93 63-75,108
+internal/adapters/postgres/embeddings_test.go
+  s_54b80c92daa9cb::t_32b63820c121c2 29-31,37,64,72
+internal/adapters/postgres/searchable_test.go
+  s_54b80c92daa9cb::t_8649f51813fdf6 28,60,182-192
+internal/adapters/weaviate/relevance_test.go
+  s_54b80c92daa9cb::t_732e8a5f6435de 15,36-37,60-63,68,81,86
+internal/app/run.go
+  s_54b80c92daa9cb::t_390d8246dbd02b 44-45,239-243,264,267-270,283
+internal/app/spaces.go
+  s_54b80c92daa9cb::t_3d8e57380076e5 12-16,32-34
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_32645073258bcf 6,33-35,48-52,57
+internal/processing/plugin.go
+  s_54b80c92daa9cb::t_a978a6a552371a 26-30,32-33,56-83,90-96,100-106,121,144-164
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_cf95935350409a 1-2,18-21,31,33,35-39,48-51,54-66,70,74,76-82,84,137-146
+internal/retrieval/rebuild.go
+  s_54b80c92daa9cb::t_d9b5dbc10de10d 50,55-58,61-64,68-72,83-84,86-87,158-160,163,166-174,195-207,209-210
+internal/retrieval/rebuild_test.go
+  s_54b80c92daa9cb::t_1ec754c12b6361 90,94,115-137,139-140,142-143,147,164-168,170-175,177,182-191,195-196,198-201,206,208-210,249-250,270-280,282-283,294-296
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_ffdf57b45c3d31 104-107,204,257-259
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_c6b2a703077322 98
+internal/retrieval/spaces_test.go
+  s_54b80c92daa9cb::t_356ce40ea37891 88
+plugins/core-ingest/README.md
+  s_54b80c92daa9cb::t_73b36945ae5a45 1-55
+plugins/core-ingest/go.mod
+  s_54b80c92daa9cb::t_f2260d5fd6e25b 1-13
+plugins/core-ingest/go.sum
+  s_54b80c92daa9cb::t_de932d6855bbb5 1-10
+plugins/core-ingest/main.go
+  s_54b80c92daa9cb::t_d3ed5219e5084d 1-6,11-13,15,17,20-24,27-32,34-36,39-42,44-48,50-58,60-62,64-82,84-92,94-99,101-105,108-120,122-128
+plugins/core-ingest/parity_test.go
+  s_54b80c92daa9cb::t_a58b3f46883cc9 1,4-7,9-11,13,16,18,21-28,30-34,37,48,53,55,61,63,67,69,72,81-164,168-173,176-177,179,181-183,187-252,256-264,266-271,273,275-276,278-290,292
+plugins/core-ingest/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_480eb1d502eef0 1-52
+plugins/core-ingest/tei.go
+  s_54b80c92daa9cb::t_5024c27c326ed8 1,9-11,15-18,20-21,23-27,30-31,33,35-36,38,40-42,44-46,48-49,51,54-57,59-62,64-66,68-69,71,74-102,104
+plugins/core-ingest/testdata/golden.json
+  s_54b80c92daa9cb::t_45064b24bf222f 1-2334
+plugins/core-ingest/tokenizer.go
+  s_54b80c92daa9cb::t_8989e7753bc728 1,16-18,20,35,56,75,103,124,210-238
+plugins/core-ingest/tokenizer.py
+  s_54b80c92daa9cb::t_9a4e4667be4e53 1,3-5
+plugins/core-ingest/tokenizer_test.go
+  s_54b80c92daa9cb::t_a1025d30fc2992 1,38,43-44,51,55,140,153,170,174,177
+plugins/core-ingest/windows.go
+  s_54b80c92daa9cb::t_712f159d513779 1,5,7,9,15-21,23,25-39,42-45,51-92,108-109,113,120,124-126,130,136,140,143,150,172,177,199,220,222-223,225-226,231,234-235,253,258-259,263
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_3777cee42c8817 58,60
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_213ae5e9b7ccd3 17,19-20,31,53-55,100
+scripts/core_ingest_plugin.py
+  s_54b80c92daa9cb::t_b5f9a9ca7f7740 1-50
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_2662bae65e22a8 3-12,14,35-36,53-54,62
+scripts/local.py
+  s_54b80c92daa9cb::t_a4d5ad61b97d77 12,96-98,141,271,274,419,489-490
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_f463de82d5fa9c 10-11,13-15,59
+scripts/prepare_tokenizer.py
+  s_54b80c92daa9cb::t_bc914e11a77974 2,5,22
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_fa2d3757ae99b0 81-82,84,86,88,90-101,113,123,159-161
+tests/acceptance/ingestion_plugin_test.go
+  s_54b80c92daa9cb::t_373b9269cc45f8 30-35,39-63,66-67,69-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0ba0b21a62813e880e4c0825b0a3463b7e501ac2",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
