@@ -1,0 +1,23 @@
+.claude/skills/writing-docs/SKILL.md
+  s_54b80c92daa9cb::t_1ab64252f53f88 1-39
+.claude/skills/writing-docs/STYLE.md
+  s_54b80c92daa9cb::t_f45dca909c3ab3 1-58
+.claude/skills/writing-docs/PAGE-TYPES.md
+  s_54b80c92daa9cb::t_ad455129edd6f1 1-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5df2c4e8f207055ce8dc7ca899777aef1a4d8fe6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
