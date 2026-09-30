@@ -1,0 +1,118 @@
+quivr-search/src/main.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 7
+quivr-search/README.md
+  s_54b80c92daa9cb::t_03d649e4c89e39 15,67-74,93
+internal/adapters/postgres/telemetry.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 6-7,20-24,26-29
+internal/transport/httpapi/plugins_test.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 144-189
+scripts/local.py
+  s_54b80c92daa9cb::t_03d649e4c89e39 116-118
+quivr-search/package.json
+  s_54b80c92daa9cb::t_03d649e4c89e39 12
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 655,671-678,683,704-841
+client/client.gen.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 1076-1093,3068-3070,3172,3657-3659,3662-3671,3952,5296-5322,8595-8601,8730,9331-9378,12828-12840,13077,14193-14208,14221,14224
+  s_54b80c92daa9cb::t_3ad3d4c6ea8404 3067,3071,3660-3661,14209-14220,14222-14223,14225
+quivr-search/src/components/admin/AdminSection.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-101
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 97-99,103
+quivr-search/src/lib/admin.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-407
+internal/app/metrics_test.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 4,8,14-15,43-52,54-65,68-79,82-102
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 354-364
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 57-59
+quivr-search/tests/admin-plugins.test.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-58
+quivr-search/tests/admin.test.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-289
+quivr-search/src/lib/adminStats.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-161
+internal/adapters/postgres/steps_test.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 154-161
+quivr-search/tests/fake-admin.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-339
+quivr-search/feed.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 139-144,159,285,335,356-362
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 266-268
+docs/inventory.toml
+  s_54b80c92daa9cb::t_03d649e4c89e39 90,113
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_03d649e4c89e39 2119-2141,2285-2287,3848-3882
+  s_54b80c92daa9cb::t_92a7814a9ed842 3883
+docs/start/functional.md
+  s_54b80c92daa9cb::t_03d649e4c89e39 14
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 1076-1093,2996-2998,3225-3238,5439,5454-5491,8399-8401,8658-8667,8679-8680
+  s_54b80c92daa9cb::t_f9a2cdef9f6950 8668-8678,8681
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_03d649e4c89e39 87,1348-1360,1442,4735-4793,4795,4797
+  s_54b80c92daa9cb::t_25078dca329450 4794,4796,4798
+quivr-search/src/lib/health.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-482
+quivr-search/src/components/admin/Plugins.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-476
+quivr-search/src/dashboard.css
+  s_54b80c92daa9cb::t_03d649e4c89e39 143,1672-1687
+  s_54b80c92daa9cb::t_4091bbdcd5b2b4 1688
+quivr-search/admin.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-588
+quivr-search/src/health.css
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-624
+quivr-search/src/components/admin/AdminView.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-559
+internal/app/metrics.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 7,10,16,20,42-44,46-69,72-83
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 10-11,59-70,322-324,338-348,352-362
+quivr-search/src/components/admin/Throughput.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-117
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_03d649e4c89e39 68
+quivr-search/src/admin.css
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-959
+quivr-search/tests/admin.spec.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-76
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_03d649e4c89e39 2221-2245,2397-2400,4122-4156
+  s_54b80c92daa9cb::t_3238e21b1757bf 4157
+quivr-search/src/components/admin/TimelinePanel.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-388
+quivr-search/tests/health.spec.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-211
+quivr-search/tests/admin-health.spec.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-138
+quivr-search/tests/admin-health-live.spec.ts
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-83
+quivr-search/src/App.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1,8,18,21,26,32,39-40,45-46,180,203-206,231,247,280,284,456-469
+  s_54b80c92daa9cb::t_73f4faf949bbcc 470-471
+internal/transport/httpapi/admin_plugins.go
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-66
+quivr-search/admin-plugins.mjs
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-46
+quivr-search/src/components/admin/Bottlenecks.tsx
+  s_54b80c92daa9cb::t_03d649e4c89e39 1-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a585fb315818788d51ce1a6655bcd335b2d4d49",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
