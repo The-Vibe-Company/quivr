@@ -1,0 +1,23 @@
+internal/adapters/postgres/withdrawal_disabled_test.go
+  s_54b80c92daa9cb::t_f00f441db12b81 197-204
+  s_54b80c92daa9cb::t_bb3ff93441cf35 45-47,59-60,63
+tests/acceptance/corrections_test.go
+  s_54b80c92daa9cb::t_c4a56fce6fb271 305-311,321-323
+  s_54b80c92daa9cb::t_9f472044469f06 110-120,126-128,132-133,152-164,166,168-170,173,178-182,184-185,189,192-193,196-197,200,204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6a77336430d38e6125c9b55e99095be23387cef",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
