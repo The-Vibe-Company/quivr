@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
@@ -64,5 +65,57 @@ func TestEncodeQueryPassesOnTheLimitAPluginNames(t *testing.T) {
 				t.Fatalf("error %v (detail %q), want %v (detail %q)", err, publicerr.Detail(err), c.err, c.want)
 			}
 		})
+	}
+}
+
+// Every invocation reaches the observer with its plugin, operation and
+// Organization: a valid answer without an error code, a declared error with
+// the plugin's code, and a plugin that does not answer as unavailable.
+func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
+	var calls []pluginhttp.Call
+	pluginhttp.Observe(func(c pluginhttp.Call) {
+		if c.Organization == "org_observed" {
+			calls = append(calls, c)
+		}
+	})
+	defer pluginhttp.Observe(func(pluginhttp.Call) {})
+	answers := []func(http.ResponseWriter){
+		func(w http.ResponseWriter) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"vector": []float64{0.6, 0.8}})
+		},
+		func(w http.ResponseWriter) {
+			w.WriteHeader(422)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": "unsupported_query", "message": "no", "retryable": false})
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		answers[0](w)
+		answers = answers[1:]
+	}))
+	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
+	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingestor := pluginhttp.Ingestor{Pin: pin}
+	space := plugins.SpaceKey("acme.embedder.small", "1")
+	for range 2 {
+		_, _ = ingestor.EncodeQuery(context.Background(), "org_observed", space, "a query")
+	}
+	server.Close()
+	_, _ = ingestor.EncodeQuery(context.Background(), "org_observed", space, "a query")
+	var codes []string
+	for _, c := range calls {
+		if c.PluginID != "acme.embedder" || c.Version != "0.1.0" || c.Operation != pluginhttp.OpEmbedQuery {
+			t.Fatalf("observed call %+v; want acme.embedder 0.1.0 embed_query", c)
+		}
+		codes = append(codes, c.ErrorCode)
+	}
+	if want := []string{"", "unsupported_query", "plugin_unavailable"}; !slices.Equal(codes, want) {
+		t.Fatalf("observed error codes %q; want %q", codes, want)
 	}
 }

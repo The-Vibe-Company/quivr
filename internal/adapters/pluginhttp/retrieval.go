@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -37,7 +38,9 @@ func (r Retriever) Round(ctx context.Context, request plugins.SearchRequest) ([]
 	if err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	result, err := devhost.InvokeSearch(ctx, r.Pin.Endpoint, body, plugins.RetrievalMaxResponseBytes(&r.Pin.Manifest), func([]byte) []plugins.Issue { return nil })
+	observe(r.Pin, request.OrganizationID, OpSearchRound, started, result, err)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

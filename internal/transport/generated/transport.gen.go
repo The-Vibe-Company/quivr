@@ -402,6 +402,48 @@ func (e PipelinePlanSource) Valid() bool {
 	}
 }
 
+// Defines values for PluginCallStatsOperation.
+const (
+	CheckCredential      PluginCallStatsOperation = "check_credential"
+	ConnectorFetch       PluginCallStatsOperation = "connector_fetch"
+	ConnectorReceive     PluginCallStatsOperation = "connector_receive"
+	DescribeAttachment   PluginCallStatsOperation = "describe_attachment"
+	EmbedQuery           PluginCallStatsOperation = "embed_query"
+	EvaluateSubscription PluginCallStatsOperation = "evaluate_subscription"
+	Normalize            PluginCallStatsOperation = "normalize"
+	SearchRound          PluginCallStatsOperation = "search_round"
+	SegmentAndEmbed      PluginCallStatsOperation = "segment_and_embed"
+	UploadAttachment     PluginCallStatsOperation = "upload_attachment"
+)
+
+// Valid indicates whether the value is a known member of the PluginCallStatsOperation enum.
+func (e PluginCallStatsOperation) Valid() bool {
+	switch e {
+	case CheckCredential:
+		return true
+	case ConnectorFetch:
+		return true
+	case ConnectorReceive:
+		return true
+	case DescribeAttachment:
+		return true
+	case EmbedQuery:
+		return true
+	case EvaluateSubscription:
+		return true
+	case Normalize:
+		return true
+	case SearchRound:
+		return true
+	case SegmentAndEmbed:
+		return true
+	case UploadAttachment:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginCheckStatus.
 const (
 	Fail PluginCheckStatus = "fail"
@@ -647,19 +689,61 @@ func (e SearchProfileDescriptionProviderKind) Valid() bool {
 
 // Defines values for SearchRequestMode.
 const (
-	Hybrid   SearchRequestMode = "hybrid"
-	Lexical  SearchRequestMode = "lexical"
-	Semantic SearchRequestMode = "semantic"
+	SearchRequestModeHybrid   SearchRequestMode = "hybrid"
+	SearchRequestModeLexical  SearchRequestMode = "lexical"
+	SearchRequestModeSemantic SearchRequestMode = "semantic"
 )
 
 // Valid indicates whether the value is a known member of the SearchRequestMode enum.
 func (e SearchRequestMode) Valid() bool {
 	switch e {
-	case Hybrid:
+	case SearchRequestModeHybrid:
 		return true
-	case Lexical:
+	case SearchRequestModeLexical:
 		return true
-	case Semantic:
+	case SearchRequestModeSemantic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchStatsMode.
+const (
+	SearchStatsModeHybrid   SearchStatsMode = "hybrid"
+	SearchStatsModeLexical  SearchStatsMode = "lexical"
+	SearchStatsModeSemantic SearchStatsMode = "semantic"
+)
+
+// Valid indicates whether the value is a known member of the SearchStatsMode enum.
+func (e SearchStatsMode) Valid() bool {
+	switch e {
+	case SearchStatsModeHybrid:
+		return true
+	case SearchStatsModeLexical:
+		return true
+	case SearchStatsModeSemantic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatsWindowName.
+const (
+	StatsWindowNameN1h  StatsWindowName = "1h"
+	StatsWindowNameN24h StatsWindowName = "24h"
+	StatsWindowNameN7d  StatsWindowName = "7d"
+)
+
+// Valid indicates whether the value is a known member of the StatsWindowName enum.
+func (e StatsWindowName) Valid() bool {
+	switch e {
+	case StatsWindowNameN1h:
+		return true
+	case StatsWindowNameN24h:
+		return true
+	case StatsWindowNameN7d:
 		return true
 	default:
 		return false
@@ -849,6 +933,90 @@ func (e WebhookEventType) Valid() bool {
 	case MatchNoLongerMatches:
 		return true
 	case MatchWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPluginCallStatsParamsWindow.
+const (
+	GetPluginCallStatsParamsWindowN1h  GetPluginCallStatsParamsWindow = "1h"
+	GetPluginCallStatsParamsWindowN24h GetPluginCallStatsParamsWindow = "24h"
+	GetPluginCallStatsParamsWindowN7d  GetPluginCallStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPluginCallStatsParamsWindow enum.
+func (e GetPluginCallStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetPluginCallStatsParamsWindowN1h:
+		return true
+	case GetPluginCallStatsParamsWindowN24h:
+		return true
+	case GetPluginCallStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetSearchStatsParamsWindow.
+const (
+	GetSearchStatsParamsWindowN1h  GetSearchStatsParamsWindow = "1h"
+	GetSearchStatsParamsWindowN24h GetSearchStatsParamsWindow = "24h"
+	GetSearchStatsParamsWindowN7d  GetSearchStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetSearchStatsParamsWindow enum.
+func (e GetSearchStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetSearchStatsParamsWindowN1h:
+		return true
+	case GetSearchStatsParamsWindowN24h:
+		return true
+	case GetSearchStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetStepStatsParamsWindow.
+const (
+	GetStepStatsParamsWindowN1h  GetStepStatsParamsWindow = "1h"
+	GetStepStatsParamsWindowN24h GetStepStatsParamsWindow = "24h"
+	GetStepStatsParamsWindowN7d  GetStepStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetStepStatsParamsWindow enum.
+func (e GetStepStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetStepStatsParamsWindowN1h:
+		return true
+	case GetStepStatsParamsWindowN24h:
+		return true
+	case GetStepStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetTopQueriesParamsWindow.
+const (
+	GetTopQueriesParamsWindowN1h  GetTopQueriesParamsWindow = "1h"
+	GetTopQueriesParamsWindowN24h GetTopQueriesParamsWindow = "24h"
+	GetTopQueriesParamsWindowN7d  GetTopQueriesParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetTopQueriesParamsWindow enum.
+func (e GetTopQueriesParamsWindow) Valid() bool {
+	switch e {
+	case GetTopQueriesParamsWindowN1h:
+		return true
+	case GetTopQueriesParamsWindowN24h:
+		return true
+	case GetTopQueriesParamsWindowN7d:
 		return true
 	default:
 		return false
@@ -1482,6 +1650,31 @@ type PipelinePlanRole struct {
 	Version        string `json:"version"`
 }
 
+// PluginCallStats defines model for PluginCallStats.
+type PluginCallStats struct {
+	Operation     PluginCallStatsOperation `json:"operation"`
+	PluginId      string                   `json:"plugin_id"`
+	PluginVersion string                   `json:"plugin_version"`
+
+	// Points Non-empty buckets, oldest first.
+	Points []StatsPoint `json:"points"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// PluginCallStatsOperation defines model for PluginCallStats.Operation.
+type PluginCallStatsOperation string
+
+// PluginCallStatsList defines model for PluginCallStatsList.
+type PluginCallStatsList struct {
+	From              time.Time         `json:"from"`
+	Items             []PluginCallStats `json:"items"`
+	ResolutionSeconds int               `json:"resolution_seconds"`
+	To                time.Time         `json:"to"`
+	Window            StatsWindowName   `json:"window"`
+}
+
 // PluginCheck defines model for PluginCheck.
 type PluginCheck struct {
 	Contribution *string           `json:"contribution,omitempty"`
@@ -1825,6 +2018,33 @@ type SearchResponse struct {
 	Usage *SearchUsage `json:"usage,omitempty"`
 }
 
+// SearchStats defines model for SearchStats.
+type SearchStats struct {
+	Mode SearchStatsMode `json:"mode"`
+
+	// Points Non-empty buckets, oldest first.
+	Points  []StatsPoint `json:"points"`
+	Profile string       `json:"profile"`
+
+	// Results Results returned by these searches in total.
+	Results int `json:"results"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// SearchStatsMode defines model for SearchStats.Mode.
+type SearchStatsMode string
+
+// SearchStatsList defines model for SearchStatsList.
+type SearchStatsList struct {
+	From              time.Time       `json:"from"`
+	Items             []SearchStats   `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	To                time.Time       `json:"to"`
+	Window            StatsWindowName `json:"window"`
+}
+
 // SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
 type SearchUsage struct {
 	CostCents float32 `json:"cost_cents"`
@@ -1838,6 +2058,48 @@ type SourceIdentity struct {
 	CorpusId  string `json:"corpus_id"`
 	Namespace string `json:"namespace"`
 	RecordKey string `json:"record_key"`
+}
+
+// StatsPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+type StatsPoint struct {
+	Count  int       `json:"count"`
+	Errors int       `json:"errors"`
+	P50Ms  float32   `json:"p50_ms"`
+	P95Ms  float32   `json:"p95_ms"`
+	Start  time.Time `json:"start"`
+}
+
+// StatsSummary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+type StatsSummary struct {
+	Count         int        `json:"count"`
+	Errors        int        `json:"errors"`
+	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
+	LastErrorCode *string    `json:"last_error_code,omitempty"`
+	MeanMs        *float32   `json:"mean_ms,omitempty"`
+	P50Ms         *float32   `json:"p50_ms,omitempty"`
+	P95Ms         *float32   `json:"p95_ms,omitempty"`
+}
+
+// StatsWindowName defines model for StatsWindowName.
+type StatsWindowName string
+
+// StepStats defines model for StepStats.
+type StepStats struct {
+	// Points Non-empty buckets, oldest first.
+	Points []StatsPoint `json:"points"`
+	Step   string       `json:"step"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// StepStatsList defines model for StepStatsList.
+type StepStatsList struct {
+	From              time.Time       `json:"from"`
+	Items             []StepStats     `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	To                time.Time       `json:"to"`
+	Window            StatsWindowName `json:"window"`
 }
 
 // Subscription Absent owner means a global, organization-wide Subscription.
@@ -1976,6 +2238,22 @@ type TimelineStep struct {
 
 // TimelineStepStep defines model for TimelineStep.Step.
 type TimelineStepStep string
+
+// TopQuery defines model for TopQuery.
+type TopQuery struct {
+	Count int    `json:"count"`
+	Query string `json:"query"`
+}
+
+// TopQueryList defines model for TopQueryList.
+type TopQueryList struct {
+	// Items Most frequent first.
+	Items []TopQuery `json:"items"`
+
+	// Recording Whether this deployment records query text (observability.record_query_text).
+	Recording bool            `json:"recording"`
+	Window    StatsWindowName `json:"window"`
+}
 
 // Upload Upload URL and headers are transfer capabilities. Only verified uploads expose a usable Blob ID. Repeated confirmation of the same session observes the same verification, never a second upload.
 type Upload struct {
@@ -2125,6 +2403,39 @@ type ListAdminDocumentsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetPluginCallStatsParams defines parameters for GetPluginCallStats.
+type GetPluginCallStatsParams struct {
+	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPluginCallStatsParamsWindow defines parameters for GetPluginCallStats.
+type GetPluginCallStatsParamsWindow string
+
+// GetSearchStatsParams defines parameters for GetSearchStats.
+type GetSearchStatsParams struct {
+	Window *GetSearchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetSearchStatsParamsWindow defines parameters for GetSearchStats.
+type GetSearchStatsParamsWindow string
+
+// GetStepStatsParams defines parameters for GetStepStats.
+type GetStepStatsParams struct {
+	Window *GetStepStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetStepStatsParamsWindow defines parameters for GetStepStats.
+type GetStepStatsParamsWindow string
+
+// GetTopQueriesParams defines parameters for GetTopQueries.
+type GetTopQueriesParams struct {
+	Window *GetTopQueriesParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetTopQueriesParamsWindow defines parameters for GetTopQueries.
+type GetTopQueriesParamsWindow string
 
 // PollChangesParams defines parameters for PollChanges.
 type PollChangesParams struct {
@@ -2488,6 +2799,18 @@ type ServerInterface interface {
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(w http.ResponseWriter, r *http.Request, registrationId string)
 
+	// (GET /v0/admin/stats/plugins)
+	GetPluginCallStats(w http.ResponseWriter, r *http.Request, params GetPluginCallStatsParams)
+
+	// (GET /v0/admin/stats/searches)
+	GetSearchStats(w http.ResponseWriter, r *http.Request, params GetSearchStatsParams)
+
+	// (GET /v0/admin/stats/steps)
+	GetStepStats(w http.ResponseWriter, r *http.Request, params GetStepStatsParams)
+
+	// (GET /v0/admin/stats/top-queries)
+	GetTopQueries(w http.ResponseWriter, r *http.Request, params GetTopQueriesParams)
+
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(w http.ResponseWriter, r *http.Request, blobId string)
 
@@ -2843,6 +3166,151 @@ func (siw *ServerInterfaceWrapper) ActivatePlugin(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ActivatePlugin(w, r, registrationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginCallStats operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginCallStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPluginCallStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginCallStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSearchStats operation middleware
+func (siw *ServerInterfaceWrapper) GetSearchStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSearchStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSearchStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetStepStats operation middleware
+func (siw *ServerInterfaceWrapper) GetStepStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetStepStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStepStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTopQueries operation middleware
+func (siw *ServerInterfaceWrapper) GetTopQueries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTopQueriesParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTopQueries(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4572,6 +5040,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents", wrapper.ListAdminDocuments)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents/{version_id}/timeline", wrapper.GetDocumentTimeline)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/plugins", wrapper.GetPluginCallStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/searches", wrapper.GetSearchStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/steps", wrapper.GetStepStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/top-queries", wrapper.GetTopQueries)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/search/profiles", wrapper.ListSearchProfiles)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/vector-spaces", wrapper.ListVectorSpaces)
@@ -4889,6 +5361,162 @@ type ActivatePlugindefaultJSONResponse struct {
 }
 
 func (response ActivatePlugindefaultJSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginCallStatsRequestObject struct {
+	Params GetPluginCallStatsParams
+}
+
+type GetPluginCallStatsResponseObject interface {
+	VisitGetPluginCallStatsResponse(w http.ResponseWriter) error
+}
+
+type GetPluginCallStats200JSONResponse PluginCallStatsList
+
+func (response GetPluginCallStats200JSONResponse) VisitGetPluginCallStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginCallStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetPluginCallStatsdefaultJSONResponse) VisitGetPluginCallStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSearchStatsRequestObject struct {
+	Params GetSearchStatsParams
+}
+
+type GetSearchStatsResponseObject interface {
+	VisitGetSearchStatsResponse(w http.ResponseWriter) error
+}
+
+type GetSearchStats200JSONResponse SearchStatsList
+
+func (response GetSearchStats200JSONResponse) VisitGetSearchStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSearchStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetSearchStatsdefaultJSONResponse) VisitGetSearchStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetStepStatsRequestObject struct {
+	Params GetStepStatsParams
+}
+
+type GetStepStatsResponseObject interface {
+	VisitGetStepStatsResponse(w http.ResponseWriter) error
+}
+
+type GetStepStats200JSONResponse StepStatsList
+
+func (response GetStepStats200JSONResponse) VisitGetStepStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetStepStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetStepStatsdefaultJSONResponse) VisitGetStepStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTopQueriesRequestObject struct {
+	Params GetTopQueriesParams
+}
+
+type GetTopQueriesResponseObject interface {
+	VisitGetTopQueriesResponse(w http.ResponseWriter) error
+}
+
+type GetTopQueries200JSONResponse TopQueryList
+
+func (response GetTopQueries200JSONResponse) VisitGetTopQueriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTopQueriesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetTopQueriesdefaultJSONResponse) VisitGetTopQueriesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -7096,6 +7724,18 @@ type StrictServerInterface interface {
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(ctx context.Context, request ActivatePluginRequestObject) (ActivatePluginResponseObject, error)
 
+	// (GET /v0/admin/stats/plugins)
+	GetPluginCallStats(ctx context.Context, request GetPluginCallStatsRequestObject) (GetPluginCallStatsResponseObject, error)
+
+	// (GET /v0/admin/stats/searches)
+	GetSearchStats(ctx context.Context, request GetSearchStatsRequestObject) (GetSearchStatsResponseObject, error)
+
+	// (GET /v0/admin/stats/steps)
+	GetStepStats(ctx context.Context, request GetStepStatsRequestObject) (GetStepStatsResponseObject, error)
+
+	// (GET /v0/admin/stats/top-queries)
+	GetTopQueries(ctx context.Context, request GetTopQueriesRequestObject) (GetTopQueriesResponseObject, error)
+
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(ctx context.Context, request GetBlobRequestObject) (GetBlobResponseObject, error)
 
@@ -7500,6 +8140,110 @@ func (sh *strictHandler) ActivatePlugin(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ActivatePluginResponseObject); ok {
 		if err := validResponse.VisitActivatePluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginCallStats operation middleware
+func (sh *strictHandler) GetPluginCallStats(w http.ResponseWriter, r *http.Request, params GetPluginCallStatsParams) {
+	var request GetPluginCallStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginCallStats(ctx, request.(GetPluginCallStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginCallStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginCallStatsResponseObject); ok {
+		if err := validResponse.VisitGetPluginCallStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSearchStats operation middleware
+func (sh *strictHandler) GetSearchStats(w http.ResponseWriter, r *http.Request, params GetSearchStatsParams) {
+	var request GetSearchStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSearchStats(ctx, request.(GetSearchStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSearchStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSearchStatsResponseObject); ok {
+		if err := validResponse.VisitGetSearchStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetStepStats operation middleware
+func (sh *strictHandler) GetStepStats(w http.ResponseWriter, r *http.Request, params GetStepStatsParams) {
+	var request GetStepStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetStepStats(ctx, request.(GetStepStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetStepStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetStepStatsResponseObject); ok {
+		if err := validResponse.VisitGetStepStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTopQueries operation middleware
+func (sh *strictHandler) GetTopQueries(w http.ResponseWriter, r *http.Request, params GetTopQueriesParams) {
+	var request GetTopQueriesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTopQueries(ctx, request.(GetTopQueriesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTopQueries")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTopQueriesResponseObject); ok {
+		if err := validResponse.VisitGetTopQueriesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

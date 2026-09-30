@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -95,7 +96,9 @@ func (c Client) Discover(ctx context.Context) (string, error) {
 // carries the invocation deadline.
 func (c Client) Normalize(ctx context.Context, request []byte, oc plugins.OutputContext) (Response, error) {
 	check := func(body []byte) []plugins.Issue { return plugins.CheckNormalizerOutput(ctx, body, oc) }
+	started := time.Now()
 	result, err := devhost.InvokeNormalizerWith(ctx, c.Pin.Endpoint, request, plugins.MaxResponseBytes(oc.Manifest), check)
+	observe(c.Pin, requestOrganization(request), OpNormalize, started, result, err)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -113,4 +116,14 @@ func (c Client) Normalize(ctx context.Context, request []byte, oc plugins.Output
 		return Response{}, &InvalidOutput{Issues: []plugins.Issue{{Code: plugins.CodeSchema, Message: err.Error()}}}
 	}
 	return response, nil
+}
+
+// requestOrganization reads the organization_id of a request body built by
+// the caller; empty when it has none.
+func requestOrganization(request []byte) string {
+	var r struct {
+		OrganizationID string `json:"organization_id"`
+	}
+	_ = json.Unmarshal(request, &r)
+	return r.OrganizationID
 }

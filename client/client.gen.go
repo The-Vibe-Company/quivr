@@ -402,6 +402,48 @@ func (e PipelinePlanSource) Valid() bool {
 	}
 }
 
+// Defines values for PluginCallStatsOperation.
+const (
+	CheckCredential      PluginCallStatsOperation = "check_credential"
+	ConnectorFetch       PluginCallStatsOperation = "connector_fetch"
+	ConnectorReceive     PluginCallStatsOperation = "connector_receive"
+	DescribeAttachment   PluginCallStatsOperation = "describe_attachment"
+	EmbedQuery           PluginCallStatsOperation = "embed_query"
+	EvaluateSubscription PluginCallStatsOperation = "evaluate_subscription"
+	Normalize            PluginCallStatsOperation = "normalize"
+	SearchRound          PluginCallStatsOperation = "search_round"
+	SegmentAndEmbed      PluginCallStatsOperation = "segment_and_embed"
+	UploadAttachment     PluginCallStatsOperation = "upload_attachment"
+)
+
+// Valid indicates whether the value is a known member of the PluginCallStatsOperation enum.
+func (e PluginCallStatsOperation) Valid() bool {
+	switch e {
+	case CheckCredential:
+		return true
+	case ConnectorFetch:
+		return true
+	case ConnectorReceive:
+		return true
+	case DescribeAttachment:
+		return true
+	case EmbedQuery:
+		return true
+	case EvaluateSubscription:
+		return true
+	case Normalize:
+		return true
+	case SearchRound:
+		return true
+	case SegmentAndEmbed:
+		return true
+	case UploadAttachment:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginCheckStatus.
 const (
 	Fail PluginCheckStatus = "fail"
@@ -647,19 +689,61 @@ func (e SearchProfileDescriptionProviderKind) Valid() bool {
 
 // Defines values for SearchRequestMode.
 const (
-	Hybrid   SearchRequestMode = "hybrid"
-	Lexical  SearchRequestMode = "lexical"
-	Semantic SearchRequestMode = "semantic"
+	SearchRequestModeHybrid   SearchRequestMode = "hybrid"
+	SearchRequestModeLexical  SearchRequestMode = "lexical"
+	SearchRequestModeSemantic SearchRequestMode = "semantic"
 )
 
 // Valid indicates whether the value is a known member of the SearchRequestMode enum.
 func (e SearchRequestMode) Valid() bool {
 	switch e {
-	case Hybrid:
+	case SearchRequestModeHybrid:
 		return true
-	case Lexical:
+	case SearchRequestModeLexical:
 		return true
-	case Semantic:
+	case SearchRequestModeSemantic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchStatsMode.
+const (
+	SearchStatsModeHybrid   SearchStatsMode = "hybrid"
+	SearchStatsModeLexical  SearchStatsMode = "lexical"
+	SearchStatsModeSemantic SearchStatsMode = "semantic"
+)
+
+// Valid indicates whether the value is a known member of the SearchStatsMode enum.
+func (e SearchStatsMode) Valid() bool {
+	switch e {
+	case SearchStatsModeHybrid:
+		return true
+	case SearchStatsModeLexical:
+		return true
+	case SearchStatsModeSemantic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatsWindowName.
+const (
+	StatsWindowNameN1h  StatsWindowName = "1h"
+	StatsWindowNameN24h StatsWindowName = "24h"
+	StatsWindowNameN7d  StatsWindowName = "7d"
+)
+
+// Valid indicates whether the value is a known member of the StatsWindowName enum.
+func (e StatsWindowName) Valid() bool {
+	switch e {
+	case StatsWindowNameN1h:
+		return true
+	case StatsWindowNameN24h:
+		return true
+	case StatsWindowNameN7d:
 		return true
 	default:
 		return false
@@ -849,6 +933,90 @@ func (e WebhookEventType) Valid() bool {
 	case MatchNoLongerMatches:
 		return true
 	case MatchWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetPluginCallStatsParamsWindow.
+const (
+	GetPluginCallStatsParamsWindowN1h  GetPluginCallStatsParamsWindow = "1h"
+	GetPluginCallStatsParamsWindowN24h GetPluginCallStatsParamsWindow = "24h"
+	GetPluginCallStatsParamsWindowN7d  GetPluginCallStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetPluginCallStatsParamsWindow enum.
+func (e GetPluginCallStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetPluginCallStatsParamsWindowN1h:
+		return true
+	case GetPluginCallStatsParamsWindowN24h:
+		return true
+	case GetPluginCallStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetSearchStatsParamsWindow.
+const (
+	GetSearchStatsParamsWindowN1h  GetSearchStatsParamsWindow = "1h"
+	GetSearchStatsParamsWindowN24h GetSearchStatsParamsWindow = "24h"
+	GetSearchStatsParamsWindowN7d  GetSearchStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetSearchStatsParamsWindow enum.
+func (e GetSearchStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetSearchStatsParamsWindowN1h:
+		return true
+	case GetSearchStatsParamsWindowN24h:
+		return true
+	case GetSearchStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetStepStatsParamsWindow.
+const (
+	GetStepStatsParamsWindowN1h  GetStepStatsParamsWindow = "1h"
+	GetStepStatsParamsWindowN24h GetStepStatsParamsWindow = "24h"
+	GetStepStatsParamsWindowN7d  GetStepStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetStepStatsParamsWindow enum.
+func (e GetStepStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetStepStatsParamsWindowN1h:
+		return true
+	case GetStepStatsParamsWindowN24h:
+		return true
+	case GetStepStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetTopQueriesParamsWindow.
+const (
+	GetTopQueriesParamsWindowN1h  GetTopQueriesParamsWindow = "1h"
+	GetTopQueriesParamsWindowN24h GetTopQueriesParamsWindow = "24h"
+	GetTopQueriesParamsWindowN7d  GetTopQueriesParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetTopQueriesParamsWindow enum.
+func (e GetTopQueriesParamsWindow) Valid() bool {
+	switch e {
+	case GetTopQueriesParamsWindowN1h:
+		return true
+	case GetTopQueriesParamsWindowN24h:
+		return true
+	case GetTopQueriesParamsWindowN7d:
 		return true
 	default:
 		return false
@@ -1482,6 +1650,31 @@ type PipelinePlanRole struct {
 	Version        string `json:"version"`
 }
 
+// PluginCallStats defines model for PluginCallStats.
+type PluginCallStats struct {
+	Operation     PluginCallStatsOperation `json:"operation"`
+	PluginId      string                   `json:"plugin_id"`
+	PluginVersion string                   `json:"plugin_version"`
+
+	// Points Non-empty buckets, oldest first.
+	Points []StatsPoint `json:"points"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// PluginCallStatsOperation defines model for PluginCallStats.Operation.
+type PluginCallStatsOperation string
+
+// PluginCallStatsList defines model for PluginCallStatsList.
+type PluginCallStatsList struct {
+	From              time.Time         `json:"from"`
+	Items             []PluginCallStats `json:"items"`
+	ResolutionSeconds int               `json:"resolution_seconds"`
+	To                time.Time         `json:"to"`
+	Window            StatsWindowName   `json:"window"`
+}
+
 // PluginCheck defines model for PluginCheck.
 type PluginCheck struct {
 	Contribution *string           `json:"contribution,omitempty"`
@@ -1825,6 +2018,33 @@ type SearchResponse struct {
 	Usage *SearchUsage `json:"usage,omitempty"`
 }
 
+// SearchStats defines model for SearchStats.
+type SearchStats struct {
+	Mode SearchStatsMode `json:"mode"`
+
+	// Points Non-empty buckets, oldest first.
+	Points  []StatsPoint `json:"points"`
+	Profile string       `json:"profile"`
+
+	// Results Results returned by these searches in total.
+	Results int `json:"results"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// SearchStatsMode defines model for SearchStats.Mode.
+type SearchStatsMode string
+
+// SearchStatsList defines model for SearchStatsList.
+type SearchStatsList struct {
+	From              time.Time       `json:"from"`
+	Items             []SearchStats   `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	To                time.Time       `json:"to"`
+	Window            StatsWindowName `json:"window"`
+}
+
 // SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
 type SearchUsage struct {
 	CostCents float32 `json:"cost_cents"`
@@ -1838,6 +2058,48 @@ type SourceIdentity struct {
 	CorpusId  string `json:"corpus_id"`
 	Namespace string `json:"namespace"`
 	RecordKey string `json:"record_key"`
+}
+
+// StatsPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+type StatsPoint struct {
+	Count  int       `json:"count"`
+	Errors int       `json:"errors"`
+	P50Ms  float32   `json:"p50_ms"`
+	P95Ms  float32   `json:"p95_ms"`
+	Start  time.Time `json:"start"`
+}
+
+// StatsSummary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+type StatsSummary struct {
+	Count         int        `json:"count"`
+	Errors        int        `json:"errors"`
+	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
+	LastErrorCode *string    `json:"last_error_code,omitempty"`
+	MeanMs        *float32   `json:"mean_ms,omitempty"`
+	P50Ms         *float32   `json:"p50_ms,omitempty"`
+	P95Ms         *float32   `json:"p95_ms,omitempty"`
+}
+
+// StatsWindowName defines model for StatsWindowName.
+type StatsWindowName string
+
+// StepStats defines model for StepStats.
+type StepStats struct {
+	// Points Non-empty buckets, oldest first.
+	Points []StatsPoint `json:"points"`
+	Step   string       `json:"step"`
+
+	// Summary A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+	Summary StatsSummary `json:"summary"`
+}
+
+// StepStatsList defines model for StepStatsList.
+type StepStatsList struct {
+	From              time.Time       `json:"from"`
+	Items             []StepStats     `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	To                time.Time       `json:"to"`
+	Window            StatsWindowName `json:"window"`
 }
 
 // Subscription Absent owner means a global, organization-wide Subscription.
@@ -1976,6 +2238,22 @@ type TimelineStep struct {
 
 // TimelineStepStep defines model for TimelineStep.Step.
 type TimelineStepStep string
+
+// TopQuery defines model for TopQuery.
+type TopQuery struct {
+	Count int    `json:"count"`
+	Query string `json:"query"`
+}
+
+// TopQueryList defines model for TopQueryList.
+type TopQueryList struct {
+	// Items Most frequent first.
+	Items []TopQuery `json:"items"`
+
+	// Recording Whether this deployment records query text (observability.record_query_text).
+	Recording bool            `json:"recording"`
+	Window    StatsWindowName `json:"window"`
+}
 
 // Upload Upload URL and headers are transfer capabilities. Only verified uploads expose a usable Blob ID. Repeated confirmation of the same session observes the same verification, never a second upload.
 type Upload struct {
@@ -2125,6 +2403,39 @@ type ListAdminDocumentsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GetPluginCallStatsParams defines parameters for GetPluginCallStats.
+type GetPluginCallStatsParams struct {
+	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetPluginCallStatsParamsWindow defines parameters for GetPluginCallStats.
+type GetPluginCallStatsParamsWindow string
+
+// GetSearchStatsParams defines parameters for GetSearchStats.
+type GetSearchStatsParams struct {
+	Window *GetSearchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetSearchStatsParamsWindow defines parameters for GetSearchStats.
+type GetSearchStatsParamsWindow string
+
+// GetStepStatsParams defines parameters for GetStepStats.
+type GetStepStatsParams struct {
+	Window *GetStepStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetStepStatsParamsWindow defines parameters for GetStepStats.
+type GetStepStatsParamsWindow string
+
+// GetTopQueriesParams defines parameters for GetTopQueries.
+type GetTopQueriesParams struct {
+	Window *GetTopQueriesParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetTopQueriesParamsWindow defines parameters for GetTopQueries.
+type GetTopQueriesParamsWindow string
 
 // PollChangesParams defines parameters for PollChanges.
 type PollChangesParams struct {
@@ -2581,6 +2892,26 @@ type ClientInterface interface {
 	//
 	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginCallStats performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
+	//
+	// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
+	GetPluginCallStats(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSearchStats performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
+	//
+	// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+	GetSearchStats(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetStepStats performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
+	//
+	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+	GetStepStats(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTopQueries performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
+	//
+	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+	GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
@@ -3162,6 +3493,66 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 // Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActivatePluginRequest(c.Server, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginCallStats performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
+//
+// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetPluginCallStats(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginCallStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSearchStats performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
+//
+// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetSearchStats(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSearchStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetStepStats performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
+//
+// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetStepStats(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetStepStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetTopQueries performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
+//
+// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTopQueriesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4713,6 +5104,234 @@ func NewActivatePluginRequest(server string, registrationId string) (*http.Reque
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginCallStatsRequest constructs an http.Request for the GetPluginCallStats method
+func NewGetPluginCallStatsRequest(server string, params *GetPluginCallStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/plugins")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetSearchStatsRequest constructs an http.Request for the GetSearchStats method
+func NewGetSearchStatsRequest(server string, params *GetSearchStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/searches")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetStepStatsRequest constructs an http.Request for the GetStepStats method
+func NewGetStepStatsRequest(server string, params *GetStepStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/steps")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTopQueriesRequest constructs an http.Request for the GetTopQueries method
+func NewGetTopQueriesRequest(server string, params *GetTopQueriesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/top-queries")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7256,6 +7875,34 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
 
+	// GetPluginCallStatsWithResponse performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
+	//
+	// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetPluginCallStatsWithResponse(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*GetPluginCallStatsResponse, error)
+
+	// GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
+	//
+	// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetSearchStatsWithResponse(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*GetSearchStatsResponse, error)
+
+	// GetStepStatsWithResponse performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
+	//
+	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetStepStatsWithResponse(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*GetStepStatsResponse, error)
+
+	// GetTopQueriesWithResponse performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
+	//
+	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error)
+
 	// GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
 	// Inspect verified Blob metadata within authorized Organization scope; ID possession does not grant access.
@@ -8202,6 +8849,198 @@ func (r ActivatePluginResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ActivatePluginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginCallStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginCallStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginCallStatsResponse) GetJSON200() *PluginCallStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetPluginCallStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginCallStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginCallStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginCallStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginCallStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetSearchStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SearchStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSearchStatsResponse) GetJSON200() *SearchStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetSearchStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSearchStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSearchStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSearchStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSearchStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetStepStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *StepStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetStepStatsResponse) GetJSON200() *StepStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetStepStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetStepStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetStepStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetStepStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetStepStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetTopQueriesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *TopQueryList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetTopQueriesResponse) GetJSON200() *TopQueryList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetTopQueriesResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetTopQueriesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTopQueriesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTopQueriesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetTopQueriesResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -10889,6 +11728,58 @@ func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, re
 	return ParseActivatePluginResponse(rsp)
 }
 
+// GetPluginCallStatsWithResponse performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
+//
+// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetPluginCallStatsWithResponse(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*GetPluginCallStatsResponse, error) {
+	rsp, err := c.GetPluginCallStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginCallStatsResponse(rsp)
+}
+
+// GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
+//
+// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetSearchStatsWithResponse(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*GetSearchStatsResponse, error) {
+	rsp, err := c.GetSearchStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSearchStatsResponse(rsp)
+}
+
+// GetStepStatsWithResponse performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
+//
+// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetStepStatsWithResponse(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*GetStepStatsResponse, error) {
+	rsp, err := c.GetStepStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetStepStatsResponse(rsp)
+}
+
+// GetTopQueriesWithResponse performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
+//
+// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error) {
+	rsp, err := c.GetTopQueries(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTopQueriesResponse(rsp)
+}
+
 // GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 //
 // Inspect verified Blob metadata within authorized Organization scope; ID possession does not grant access.
@@ -12189,6 +13080,138 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginCallStatsResponse parses an HTTP response from a GetPluginCallStatsWithResponse call
+func ParseGetPluginCallStatsResponse(rsp *http.Response) (*GetPluginCallStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginCallStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginCallStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSearchStatsResponse parses an HTTP response from a GetSearchStatsWithResponse call
+func ParseGetSearchStatsResponse(rsp *http.Response) (*GetSearchStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSearchStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SearchStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetStepStatsResponse parses an HTTP response from a GetStepStatsWithResponse call
+func ParseGetStepStatsResponse(rsp *http.Response) (*GetStepStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetStepStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StepStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTopQueriesResponse parses an HTTP response from a GetTopQueriesWithResponse call
+func ParseGetTopQueriesResponse(rsp *http.Response) (*GetTopQueriesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTopQueriesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TopQueryList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

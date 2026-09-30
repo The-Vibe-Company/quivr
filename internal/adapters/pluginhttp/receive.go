@@ -57,9 +57,11 @@ func (c Connector) Receive(ctx context.Context, r connectors.ReceiveRequest) (co
 	invoke, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	manifest := &c.Pin.Manifest
+	started := time.Now()
 	result, err := devhost.InvokeConnectorReceive(invoke, c.Pin.Endpoint, request, plugins.ConnectorMaxResponseBytes(manifest), func(body []byte) []plugins.Issue {
 		return plugins.CheckReceiveOutput(invoke, body, manifest)
 	})
+	observe(c.Pin, r.Organization, OpConnectorReceive, started, result, err)
 	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
 		return connectors.Delivery{}, failure
 	}

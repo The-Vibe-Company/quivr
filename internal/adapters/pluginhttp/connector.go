@@ -190,8 +190,10 @@ func (c Connector) served(ctx context.Context, pageInRun int) (string, error) {
 // looked for in the answer: an answer that echoes it is refused before
 // anything from it is used.
 func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
+	started := time.Now()
 	served, err := c.served(ctx, r.PageInRun)
 	if err != nil {
+		observe(c.Pin, r.Organization, OpConnectorFetch, started, nil, err)
 		return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
 	}
 	checkpoint := orNull(r.Checkpoint)
@@ -215,6 +217,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		return plugins.CheckConnectorOutput(invoke, body, checkpoint, manifest)
 	}
 	result, err := devhost.InvokeConnectorFetch(invoke, c.Pin.Endpoint, request, plugins.ConnectorMaxResponseBytes(manifest), check)
+	observe(c.Pin, r.Organization, OpConnectorFetch, started, result, err)
 	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
 		return connectors.Page{}, failure
 	}
@@ -242,7 +245,9 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 // CheckCredential asks the plugin whether the source accepts a credential. A
 // reported expires_at is not used yet.
 func (c Connector) CheckCredential(ctx context.Context, r connectors.CredentialRequest) error {
+	started := time.Now()
 	if err := (Client{Pin: c.Pin}).CheckDiscovery(ctx); err != nil {
+		observe(c.Pin, r.Organization, OpCheckCredential, started, nil, err)
 		return connectors.TransientError(CodePluginUnavailable)
 	}
 	request, err := json.Marshal(credentialRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
@@ -253,6 +258,7 @@ func (c Connector) CheckCredential(ctx context.Context, r connectors.CredentialR
 	invoke, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 	result, err := devhost.InvokeCheckCredential(invoke, c.Pin.Endpoint, request)
+	observe(c.Pin, r.Organization, OpCheckCredential, started, result, err)
 	return judge(result, err, plugins.CredentialSecrets(r.Credential))
 }
 
@@ -308,9 +314,11 @@ func (c Connector) DescribeAttachment(ctx context.Context, r connectors.Attachme
 	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
 	defer cancel()
 	manifest := &c.Pin.Manifest
+	started := time.Now()
 	result, err := devhost.InvokeDescribeAttachment(invoke, c.Pin.Endpoint, request, func(body []byte) []plugins.Issue {
 		return plugins.CheckAttachmentAnswer(invoke, body, manifest)
 	})
+	observe(c.Pin, r.Organization, OpDescribeAttachment, started, result, err)
 	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
 		return connectors.AttachmentDescription{}, failure
 	}
@@ -335,7 +343,9 @@ func (c Connector) UploadAttachment(ctx context.Context, r connectors.Attachment
 	}
 	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
 	defer cancel()
+	started := time.Now()
 	result, err := devhost.InvokeUploadAttachment(invoke, c.Pin.Endpoint, request)
+	observe(c.Pin, r.Organization, OpUploadAttachment, started, result, err)
 	return judge(result, err, grantSecrets(r.Credential, g))
 }
 

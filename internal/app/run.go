@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
+	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -96,6 +97,12 @@ type Config struct {
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
+	// Observability configures the plugin call, search and step counters
+	// (THE-795): record_query_text (default false) also counts searches by
+	// their normalized text, which then stays in PostgreSQL for 7 days, and
+	// flush_interval (default 5s) is how often each process writes its
+	// counts, so how much a crash can lose.
+	Observability observability.Config `json:"observability"`
 }
 
 // connectorSealer builds the Deposited Credential sealer. credential_key is
@@ -244,6 +251,9 @@ func Run(command string) error {
 			return errors.New("projection_purge_grace must be a positive duration")
 		}
 	}
+	if _, ok := cfg.Observability.Interval(); !ok {
+		return errors.New("observability.flush_interval must be a positive Go duration")
+	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
@@ -364,6 +374,27 @@ func Run(command string) error {
 	if err != nil {
 		return fmt.Errorf("vector space registry: %w", err)
 	}
+	// Plugin calls, searches and processing steps are counted in memory and
+	// flushed as rollups; only the worker deletes expired ones.
+	rollups := postgres.ObservabilityStore{Pool: pool}
+	recorder := observability.NewRecorder(rollups, cfg.Observability, command == "worker")
+	pluginhttp.Observe(func(c pluginhttp.Call) {
+		recorder.PluginCall(observability.PluginCall{Organization: c.Organization, Plugin: c.PluginID, Version: c.Version, Operation: c.Operation, Duration: c.Duration, ErrorCode: c.ErrorCode})
+	})
+	recorderDone := make(chan struct{})
+	go func() {
+		defer close(recorderDone)
+		recorder.Run(ctx)
+	}()
+	// Registered before the loops below, so it runs after their shutdown and
+	// flushes the counts they recorded last.
+	defer func() {
+		stop()
+		select {
+		case <-recorderDone:
+		case <-time.After(5 * time.Second):
+		}
+	}()
 	// Subscription evaluators are resolved at startup: an activation never
 	// switches one (registry.PlanActivation).
 	evaluators := cfg.evaluators(resolved)
@@ -418,19 +449,20 @@ func Run(command string) error {
 		// Delivery attempt outcomes and admissible backlog, processing outcomes and
 		// acceptance-to-searchable durations, in Prometheus text format.
 		processingMetrics := telemetry.NewProcessing()
-		processor.Observer = processingObserver{metrics: processingMetrics, store: store}
+		processor.Observer = processingObserver{metrics: processingMetrics, store: store, steps: recorder}
 		deliveryMetrics.Extra = func(w io.Writer) {
 			processingMetrics.Write(w)
 			pruneMetrics.Write(w)
 			purgeMetrics.Write(w)
 			evaluationMetrics.Write(w)
+			recorder.WriteMetrics(w)
 		}
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", apiMetrics(commands, store.IngestionBacklog))
+		probes.Handle("GET /metrics", apiMetrics(commands, store.IngestionBacklog, recorder.WriteMetrics))
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
@@ -445,6 +477,8 @@ func Run(command string) error {
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators follow documents through their steps (observability:read).
 			httpapi.WithActivity(content.Activities{Store: store}),
+			// Searches are counted, and the rollups read back (observability:read).
+			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))
 		if err != nil {

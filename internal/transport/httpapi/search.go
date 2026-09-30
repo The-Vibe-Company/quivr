@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -39,7 +40,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if wire.Filter != nil && wire.Filter.SourceNamespaces != nil {
 		q.SourceNamespaces = *wire.Filter.SourceNamespaces
 	}
+	started := time.Now()
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
+	a.recordSearch(scope.Organization, q, result, started, err)
 	if err != nil {
 		status, body := searchError(err)
 		send(w, status, body)

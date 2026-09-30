@@ -84,17 +84,18 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	return out, ErrSpaceUnowned
 }
 
-// Observer is told each processing outcome (bounded stage and outcome names)
-// and when a Receipt's Version became searchable.
+// Observer is told each processing outcome (bounded stage and outcome names,
+// the failure code and how long the stage ran) and when a Receipt's Version
+// became searchable.
 type Observer interface {
-	Outcome(stage, outcome string)
+	Outcome(org, stage, outcome, code string, d time.Duration)
 	Searchable(ctx context.Context, org, receiptID string)
 }
 
 // outcome reports one stage outcome to the Observer and a correlated log line.
-func (s Service) outcome(stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
+func (s Service) outcome(org, stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
 	if s.Observer != nil {
-		s.Observer.Outcome(stage, outcome)
+		s.Observer.Outcome(org, stage, outcome, code, time.Since(started))
 	}
 	level := slog.LevelInfo
 	if outcome != "succeeded" {
@@ -142,18 +143,18 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 	}
 	if errors.Is(err, content.ErrIngestionRefused) {
 		slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
-		s.outcome("baseline", "blocked", receiptID, v, started, "ingestion_refused")
+		s.outcome(org, "baseline", "blocked", receiptID, v, started, "ingestion_refused")
 		return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "ingestion_refused", true)
 	}
 	if err == nil {
 		err = s.Retrieval.Index(ctx, org, v, result)
 	}
 	if err != nil {
-		s.outcome("baseline", "retrying", receiptID, v, started, "baseline_unavailable")
+		s.outcome(org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable")
 		_ = s.Content.BaselineProgress(ctx, org, v.ID, "retrying", "baseline_unavailable", false)
 		return errors.New("baseline processing unavailable")
 	}
-	s.outcome("baseline", "succeeded", receiptID, v, started, "")
+	s.outcome(org, "baseline", "succeeded", receiptID, v, started, "")
 	if s.Observer != nil {
 		s.Observer.Searchable(ctx, org, receiptID)
 	}

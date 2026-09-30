@@ -23,6 +23,7 @@ for (const c of cases) {
     PluginRegistration: [['created_at'], ['updated_at'], ['check', 'checked_at']],
     DocumentTimeline: [['steps', '*', 'at'], ...['accepted_at', 'materialized_at', 'segmented_at', 'retrieval_ready_at', 'enriched_at']
       .map((step) => ['document', 'steps', step])],
+    PluginCallStatsList: [['from'], ['to'], ['items', '*', 'summary', 'last_error_at'], ['items', '*', 'points', '*', 'start']],
   };
   const expand = (parts) => {
     const star = parts.indexOf('*');

@@ -117,6 +117,9 @@ def build_config(env):
         'keys': {key: {'organization': 'quivr-demo',
                        'actions': actions,
                        'corpora': ['*']}},
+        # The demo lists its most frequent searches, so it records query text (7 days).
+        # Its queries are demo traffic; a deployment with private queries leaves this off.
+        'observability': {'record_query_text': True},
     }
     # Optional operator key, never given to the web app: rebuilds a Corpus projection
     # (for example after a migration adds a projected field), reads the plugin

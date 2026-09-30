@@ -34,14 +34,14 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 			// segments it returned alone at baseline, or another refusal.
 			slog.Warn("enrichment blocked", "component", "worker", "version_id", v.ID, "error", err.Error())
 		}
-		s.outcome("enrichment", state, receiptID, v, started, code)
+		s.outcome(org, "enrichment", state, receiptID, v, started, code)
 		_ = s.Content.EnrichmentProgress(ctx, org, v.ID, state, code)
 		if state == "blocked" {
 			return nil
 		}
 		return errors.New("enrichment unavailable")
 	}
-	s.outcome("enrichment", "succeeded", receiptID, v, started, "")
+	s.outcome(org, "enrichment", "succeeded", receiptID, v, started, "")
 	return nil
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) error {

@@ -177,7 +177,9 @@ func (e Evaluator) Evaluate(ctx context.Context, b monitoring.Batch) ([]monitori
 	if len(request) > plugins.SubscriptionMaxRequestBytes {
 		return nil, fmt.Errorf("%w: %d bytes", monitoring.ErrRequestTooLarge, len(request))
 	}
+	started := time.Now()
 	if err := (Client{Pin: e.Pin}).CheckDiscovery(ctx); err != nil {
+		observe(e.Pin, b.Organization, OpEvaluateSubscription, started, nil, err)
 		return nil, fmt.Errorf("%w: %v", monitoring.ErrEvaluatorUnavailable, err)
 	}
 	view, err := plugins.ViewSubscriptionRequest(request)
@@ -192,6 +194,7 @@ func (e Evaluator) Evaluate(ctx context.Context, b monitoring.Batch) ([]monitori
 	defer cancel()
 	check := func(body []byte) []plugins.Issue { return plugins.CheckSubscriptionOutput(body, view, &e.Pin.Manifest) }
 	result, err := devhost.InvokeSubscriptionWith(invoke, e.Pin.Endpoint, request, plugins.SubscriptionMaxResponseBytes(&e.Pin.Manifest), check)
+	observe(e.Pin, b.Organization, OpEvaluateSubscription, started, result, err)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", monitoring.ErrEvaluatorUnavailable, err)
 	}

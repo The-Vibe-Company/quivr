@@ -2047,6 +2047,162 @@ paths:
       tags:
       - Admin
       summary: Get document timeline
+  /v0/admin/stats/plugins:
+    get:
+      operationId: getPluginCallStats
+      description: Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window,
+        per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output).
+        Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1
+        minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated
+        from fixed buckets. Requires observability:read on a key that grants every Corpus.
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginCallStatsList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get plugin call stats
+  /v0/admin/stats/searches:
+    get:
+      operationId: getSearchStats
+      description: Searches of the key's Organization over the window per mode and search profile, with errors, latency and
+        the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named
+        a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchStatsList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get search stats
+  /v0/admin/stats/steps:
+    get:
+      operationId: getStepStats
+      description: 'Processing steps of the key''s Organization over the window, in the buckets of getPluginCallStats: baseline
+        (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance
+        to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read
+        on a key that grants every Corpus.'
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StepStatsList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get step stats
+  /v0/admin/stats/top-queries:
+    get:
+      operationId: getTopQueries
+      description: The most frequent search queries of the key's Organization over the window, normalized (lowercased, white
+        space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets
+        observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on
+        a key that grants every Corpus.
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopQueryList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window
+            or invalid_limit, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get top queries
   /v0/search:
     post:
       operationId: searchRecords
@@ -3453,6 +3609,258 @@ components:
       - activated_at
       - source
       - roles
+    StatsSummary:
+      type: object
+      additionalProperties: false
+      description: A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        errors:
+          type: integer
+          minimum: 0
+        p50_ms:
+          type: number
+          minimum: 0
+        p95_ms:
+          type: number
+          minimum: 0
+        mean_ms:
+          type: number
+          minimum: 0
+        last_error_code:
+          type: string
+          minLength: 1
+        last_error_at:
+          type: string
+          format: date-time
+      required:
+      - count
+      - errors
+    StatsPoint:
+      type: object
+      additionalProperties: false
+      description: One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+      properties:
+        start:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          minimum: 1
+        errors:
+          type: integer
+          minimum: 0
+        p50_ms:
+          type: number
+          minimum: 0
+        p95_ms:
+          type: number
+          minimum: 0
+      required:
+      - start
+      - count
+      - errors
+      - p50_ms
+      - p95_ms
+    PluginCallStats:
+      type: object
+      additionalProperties: false
+      properties:
+        plugin_id:
+          type: string
+          minLength: 1
+        plugin_version:
+          type: string
+          minLength: 1
+        operation:
+          type: string
+          enum:
+          - normalize
+          - segment_and_embed
+          - embed_query
+          - search_round
+          - connector_fetch
+          - connector_receive
+          - check_credential
+          - describe_attachment
+          - upload_attachment
+          - evaluate_subscription
+        summary:
+          $ref: '#/components/schemas/StatsSummary'
+        points:
+          type: array
+          description: Non-empty buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/StatsPoint'
+      required:
+      - plugin_id
+      - plugin_version
+      - operation
+      - summary
+      - points
+    SearchStats:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum:
+          - lexical
+          - semantic
+          - hybrid
+        profile:
+          type: string
+          minLength: 1
+        results:
+          type: integer
+          minimum: 0
+          description: Results returned by these searches in total.
+        summary:
+          $ref: '#/components/schemas/StatsSummary'
+        points:
+          type: array
+          description: Non-empty buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/StatsPoint'
+      required:
+      - mode
+      - profile
+      - results
+      - summary
+      - points
+    StepStats:
+      type: object
+      additionalProperties: false
+      properties:
+        step:
+          type: string
+          minLength: 1
+        summary:
+          $ref: '#/components/schemas/StatsSummary'
+        points:
+          type: array
+          description: Non-empty buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/StatsPoint'
+      required:
+      - step
+      - summary
+      - points
+    PluginCallStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginCallStats'
+      required:
+      - window
+      - resolution_seconds
+      - from
+      - to
+      - items
+    SearchStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchStats'
+      required:
+      - window
+      - resolution_seconds
+      - from
+      - to
+      - items
+    StepStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StepStats'
+      required:
+      - window
+      - resolution_seconds
+      - from
+      - to
+      - items
+    StatsWindowName:
+      type: string
+      enum:
+      - 1h
+      - 24h
+      - 7d
+    TopQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+        count:
+          type: integer
+          minimum: 1
+      required:
+      - query
+      - count
+    TopQueryList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        recording:
+          type: boolean
+          description: Whether this deployment records query text (observability.record_query_text).
+        items:
+          type: array
+          description: Most frequent first.
+          items:
+            $ref: '#/components/schemas/TopQuery'
+      required:
+      - window
+      - recording
+      - items
     ConnectorKindCatalog:
       type: object
       additionalProperties: false

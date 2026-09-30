@@ -34,6 +34,10 @@ through them). The generated configuration never sets
 `delivery.allow_private_destinations` or the rss pin's `allow_private_addresses`;
 those allowances exist for the local harness only.
 
+The generated configuration also sets `observability.record_query_text`, off by default in
+the engine, so the admin view can list the most frequent searches: query text is stored,
+lowercased and cut to 200 characters, for 7 days. Remove it where queries must not be kept.
+
 The RSS connector is the first-party plugin [`plugins/rss`](../../plugins/rss/README.md),
 built into the core image as `/usr/local/bin/quivr-rss`. `core-entrypoint.py` always
 pins it and the worker always runs it on `127.0.0.1:9920`, whatever `QUIVR_DEMO_PLUGINS`

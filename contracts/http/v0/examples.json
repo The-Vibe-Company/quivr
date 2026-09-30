@@ -1394,5 +1394,65 @@
         }
       ]
     }
+  },
+  {
+    "name": "plugin_call_stats",
+    "schema": "PluginCallStatsList",
+    "value": {
+      "window": "1h",
+      "resolution_seconds": 60,
+      "from": "2026-09-30T09:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "items": [
+        {
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0",
+          "operation": "embed_query",
+          "summary": {
+            "count": 42,
+            "errors": 1,
+            "p50_ms": 18.5,
+            "p95_ms": 61,
+            "mean_ms": 24.2,
+            "last_error_code": "plugin_unavailable",
+            "last_error_at": "2026-09-30T09:41:07Z"
+          },
+          "points": [
+            {
+              "start": "2026-09-30T09:41:00Z",
+              "count": 12,
+              "errors": 1,
+              "p50_ms": 17,
+              "p95_ms": 48.75
+            },
+            {
+              "start": "2026-09-30T09:59:00Z",
+              "count": 30,
+              "errors": 0,
+              "p50_ms": 19.2,
+              "p95_ms": 62.5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "top_queries",
+    "schema": "TopQueryList",
+    "value": {
+      "window": "24h",
+      "recording": true,
+      "items": [
+        {
+          "query": "solar energy",
+          "count": 14
+        },
+        {
+          "query": "storm warning",
+          "count": 6
+        }
+      ]
+    }
   }
 ]

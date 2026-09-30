@@ -38,6 +38,7 @@ DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'2s','window':'20s','allow_
 # The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
 # short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
 PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}
+OBSERVABILITY_OVERRIDES={'flush_interval':'200ms','record_query_text':True}
 # Every harness service port comes from one allocator that never hands a port out twice and stays
 # outside the kernel's ephemeral range, so two services cannot end up on one port (THE-728).
 port=ports.allocate
@@ -74,7 +75,7 @@ class Stack:
         ports.reserve([v for k,v in self.state.items() if k.endswith('_port')]+[self.state.get('custom_plugin',{}).get('port')])
         for key in PORT_KEYS:
             if key not in self.state:self.state[key]=port()
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention','operator']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention','operator','observer']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -116,6 +117,8 @@ class Stack:
             # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets,
             # and the admin views (observability:read).
             s['operator']:scope('org_ops',['plugins:admin','observability:read'],['*']),
+            # Observability acceptance owns org_o: its stats reads see only its own ingestion and searches.
+            s['observer']:scope('org_o',['corpora:read','corpora:write','content:read','content:write','search:query','observability:read'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*']),
@@ -140,7 +143,9 @@ class Stack:
             # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
             # verification the sample connector plugin (scripts/connector_plugin.py). The fixture
             # evaluator stays installed for the notification-mechanics acceptance tests.
-            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self),monitoring_fixture_evaluator=True)
+            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self),monitoring_fixture_evaluator=True,
+            # Counts reach the stats reads within 200 ms; query text is recorded so top queries can be read back.
+            observability=OBSERVABILITY_OVERRIDES)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
@@ -274,7 +279,7 @@ class Stack:
                 if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator','observer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         self.go_test(['-count=1','-run',pattern,'./tests/acceptance'],env,'acceptance')
     def go_test(self,args,env,name,cwd=ROOT):
         """go test with its text in <name>.log; failed tests and every test's duration reach the report (THE-755)."""
@@ -507,6 +512,8 @@ def parts():
             acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions'),
             # The built quivr binary searches through the public API and keeps its offline plugin tools (THE-702).
             acceptance('cli','^TestCLI'),
+            # Plugin calls, searches and steps counted and read back through the admin stats (THE-795).
+            acceptance('observability','^TestObservabilityStats$'),
             step('validate_captures',validate_captures)],
         # Monitoring, webhook delivery across a worker restart, and the assembled public journey (THE-662).
         'monitoring':setup+[
@@ -602,7 +609,7 @@ def finish(stack,steps,status,start):
         dirty=bool(run(['git','status','--porcelain','--untracked-files=no'],capture_output=True,text=True).stdout.strip())
         verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'part':getattr(stack,'part',None),'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
             'scope':f"Part {getattr(stack,'part',None)} of the stack verification (steps below; parts in scripts/local.py) over real PostgreSQL, Temporal, S3, Weaviate and TEI",
-            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s','change_prune':PRUNE_OVERRIDES},'pins':pins(),
+            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s','change_prune':PRUNE_OVERRIDES,'observability':OBSERVABILITY_OVERRIDES},'pins':pins(),
             'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
             'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
         verify_report.redact_tree(stack.directory,verify_report.secrets_of(stack.state)+[CAPTURE_SECRET])

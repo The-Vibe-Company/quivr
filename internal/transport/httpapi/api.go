@@ -26,6 +26,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -71,6 +72,10 @@ type API struct {
 	pluginSchema *jsonschema.Schema
 	// Activity serves the operator reads of document activity.
 	Activity content.Activities
+	// Recorder counts searches; nil counts nothing.
+	Recorder *observability.Recorder
+	// Stats serves the admin stats reads; without a Store they answer 404.
+	Stats observability.Reader
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -232,6 +237,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.adminDocumentRoutes(w, r, scope) {
+		return
+	}
+	if a.statsRoutes(w, r, scope) {
 		return
 	}
 	if a.operationRoutes(w, r, scope) {

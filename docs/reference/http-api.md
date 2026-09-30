@@ -80,6 +80,10 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/documents`](#get-v0admindocuments) | `listAdminDocuments` | `observability:read` |
 | [`GET /v0/admin/documents/{version_id}/timeline`](#get-v0admindocumentsversion_idtimeline) | `getDocumentTimeline` | `observability:read` |
+| [`GET /v0/admin/stats/plugins`](#get-v0adminstatsplugins) | `getPluginCallStats` | `observability:read` |
+| [`GET /v0/admin/stats/searches`](#get-v0adminstatssearches) | `getSearchStats` | `observability:read` |
+| [`GET /v0/admin/stats/steps`](#get-v0adminstatssteps) | `getStepStats` | `observability:read` |
+| [`GET /v0/admin/stats/top-queries`](#get-v0adminstatstop-queries) | `getTopQueries` | `observability:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
 
@@ -1259,6 +1263,83 @@ One Record Version's finished steps in time order, each with how long it took si
 | --- | --- | --- |
 | `200` | `application/json` [`DocumentTimeline`](#documenttimeline) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read, 404 not found, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/plugins`
+
+Operation `getPluginCallStats`. Requires `observability:read`.
+
+Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PluginCallStatsList`](#plugincallstatslist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/searches`
+
+Operation `getSearchStats`. Requires `observability:read`.
+
+Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`SearchStatsList`](#searchstatslist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/steps`
+
+Operation `getStepStats`. Requires `observability:read`.
+
+Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`StepStatsList`](#stepstatslist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/top-queries`
+
+Operation `getTopQueries`. Requires `observability:read`.
+
+The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+| `limit` | query | integer |  | Default `20`. Minimum `1`. Maximum `100`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`TopQueryList`](#topquerylist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window or invalid_limit, 503 storage unavailable. |
 
 ### Search
 
@@ -4142,6 +4223,500 @@ required:
   - activated_at
   - source
   - roles
+```
+
+</details>
+
+### `StatsSummary`
+
+A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `count` | integer | yes | Minimum `0`. |
+| `errors` | integer | yes | Minimum `0`. |
+| `p50_ms` | number |  | Minimum `0`. |
+| `p95_ms` | number |  | Minimum `0`. |
+| `mean_ms` | number |  | Minimum `0`. |
+| `last_error_code` | string |  | Minimum length `1`. |
+| `last_error_at` | string (date-time) |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: A series over the whole window. Latencies are in milliseconds and present only when count is positive.
+properties:
+  count:
+    type: integer
+    minimum: 0
+  errors:
+    type: integer
+    minimum: 0
+  p50_ms:
+    type: number
+    minimum: 0
+  p95_ms:
+    type: number
+    minimum: 0
+  mean_ms:
+    type: number
+    minimum: 0
+  last_error_code:
+    type: string
+    minLength: 1
+  last_error_at:
+    type: string
+    format: date-time
+required:
+  - count
+  - errors
+```
+
+</details>
+
+### `StatsPoint`
+
+One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `start` | string (date-time) | yes |  |
+| `count` | integer | yes | Minimum `1`. |
+| `errors` | integer | yes | Minimum `0`. |
+| `p50_ms` | number | yes | Minimum `0`. |
+| `p95_ms` | number | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+properties:
+  start:
+    type: string
+    format: date-time
+  count:
+    type: integer
+    minimum: 1
+  errors:
+    type: integer
+    minimum: 0
+  p50_ms:
+    type: number
+    minimum: 0
+  p95_ms:
+    type: number
+    minimum: 0
+required:
+  - start
+  - count
+  - errors
+  - p50_ms
+  - p95_ms
+```
+
+</details>
+
+### `PluginCallStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_id` | string | yes | Minimum length `1`. |
+| `plugin_version` | string | yes | Minimum length `1`. |
+| `operation` | string | yes | One of `normalize`, `segment_and_embed`, `embed_query`, `search_round`, `connector_fetch`, `connector_receive`, `check_credential`, `describe_attachment`, `upload_attachment`, `evaluate_subscription`. |
+| `summary` | [`StatsSummary`](#statssummary) | yes |  |
+| `points` | array of [`StatsPoint`](#statspoint) | yes | Non-empty buckets, oldest first. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plugin_id:
+    type: string
+    minLength: 1
+  plugin_version:
+    type: string
+    minLength: 1
+  operation:
+    type: string
+    enum:
+      - normalize
+      - segment_and_embed
+      - embed_query
+      - search_round
+      - connector_fetch
+      - connector_receive
+      - check_credential
+      - describe_attachment
+      - upload_attachment
+      - evaluate_subscription
+  summary:
+    $ref: '#/components/schemas/StatsSummary'
+  points:
+    type: array
+    description: Non-empty buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/StatsPoint'
+required:
+  - plugin_id
+  - plugin_version
+  - operation
+  - summary
+  - points
+```
+
+</details>
+
+### `SearchStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `mode` | string | yes | One of `lexical`, `semantic`, `hybrid`. |
+| `profile` | string | yes | Minimum length `1`. |
+| `results` | integer | yes | Results returned by these searches in total. Minimum `0`. |
+| `summary` | [`StatsSummary`](#statssummary) | yes |  |
+| `points` | array of [`StatsPoint`](#statspoint) | yes | Non-empty buckets, oldest first. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  mode:
+    type: string
+    enum:
+      - lexical
+      - semantic
+      - hybrid
+  profile:
+    type: string
+    minLength: 1
+  results:
+    type: integer
+    minimum: 0
+    description: Results returned by these searches in total.
+  summary:
+    $ref: '#/components/schemas/StatsSummary'
+  points:
+    type: array
+    description: Non-empty buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/StatsPoint'
+required:
+  - mode
+  - profile
+  - results
+  - summary
+  - points
+```
+
+</details>
+
+### `StepStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `step` | string | yes | Minimum length `1`. |
+| `summary` | [`StatsSummary`](#statssummary) | yes |  |
+| `points` | array of [`StatsPoint`](#statspoint) | yes | Non-empty buckets, oldest first. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  step:
+    type: string
+    minLength: 1
+  summary:
+    $ref: '#/components/schemas/StatsSummary'
+  points:
+    type: array
+    description: Non-empty buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/StatsPoint'
+required:
+  - step
+  - summary
+  - points
+```
+
+</details>
+
+### `PluginCallStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `items` | array of [`PluginCallStats`](#plugincallstats) | yes |  |
+
+Example `plugin_call_stats`:
+
+```json
+{
+  "window": "1h",
+  "resolution_seconds": 60,
+  "from": "2026-09-30T09:00:00Z",
+  "to": "2026-09-30T10:00:12Z",
+  "items": [
+    {
+      "plugin_id": "core.ingest",
+      "plugin_version": "1.0.0",
+      "operation": "embed_query",
+      "summary": {
+        "count": 42,
+        "errors": 1,
+        "p50_ms": 18.5,
+        "p95_ms": 61,
+        "mean_ms": 24.2,
+        "last_error_code": "plugin_unavailable",
+        "last_error_at": "2026-09-30T09:41:07Z"
+      },
+      "points": [
+        {
+          "start": "2026-09-30T09:41:00Z",
+          "count": 12,
+          "errors": 1,
+          "p50_ms": 17,
+          "p95_ms": 48.75
+        },
+        {
+          "start": "2026-09-30T09:59:00Z",
+          "count": 30,
+          "errors": 0,
+          "p50_ms": 19.2,
+          "p95_ms": 62.5
+        }
+      ]
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+  from:
+    type: string
+    format: date-time
+  to:
+    type: string
+    format: date-time
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/PluginCallStats'
+required:
+  - window
+  - resolution_seconds
+  - from
+  - to
+  - items
+```
+
+</details>
+
+### `SearchStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `items` | array of [`SearchStats`](#searchstats) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+  from:
+    type: string
+    format: date-time
+  to:
+    type: string
+    format: date-time
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/SearchStats'
+required:
+  - window
+  - resolution_seconds
+  - from
+  - to
+  - items
+```
+
+</details>
+
+### `StepStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `items` | array of [`StepStats`](#stepstats) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+  from:
+    type: string
+    format: date-time
+  to:
+    type: string
+    format: date-time
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/StepStats'
+required:
+  - window
+  - resolution_seconds
+  - from
+  - to
+  - items
+```
+
+</details>
+
+### `StatsWindowName`
+
+Type: string. One of `1h`, `24h`, `7d`.
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: string
+enum:
+  - 1h
+  - 24h
+  - 7d
+```
+
+</details>
+
+### `TopQuery`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `query` | string | yes | Minimum length `1`. Maximum length `200`. |
+| `count` | integer | yes | Minimum `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  query:
+    type: string
+    minLength: 1
+    maxLength: 200
+  count:
+    type: integer
+    minimum: 1
+required:
+  - query
+  - count
+```
+
+</details>
+
+### `TopQueryList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `recording` | boolean | yes | Whether this deployment records query text (observability.record_query_text). |
+| `items` | array of [`TopQuery`](#topquery) | yes | Most frequent first. |
+
+Example `top_queries`:
+
+```json
+{
+  "window": "24h",
+  "recording": true,
+  "items": [
+    {
+      "query": "solar energy",
+      "count": 14
+    },
+    {
+      "query": "storm warning",
+      "count": 6
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  recording:
+    type: boolean
+    description: Whether this deployment records query text (observability.record_query_text).
+  items:
+    type: array
+    description: Most frequent first.
+    items:
+      $ref: '#/components/schemas/TopQuery'
+required:
+  - window
+  - recording
+  - items
 ```
 
 </details>

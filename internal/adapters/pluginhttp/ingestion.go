@@ -141,9 +141,11 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	m := &i.Pin.Manifest
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().TimeoutMS)*time.Millisecond)
 	defer cancel()
+	started := time.Now()
 	result, err := devhost.InvokeSegmentAndEmbed(callCtx, i.Pin.Endpoint, body, plugins.IngestionMaxResponseBytes(m), func(b []byte) []plugins.Issue {
 		return plugins.CheckSegmentAndEmbedOutput(b, view, m)
 	})
+	observe(i.Pin, org, OpSegmentAndEmbed, started, result, err)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -228,9 +230,11 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 	m := &i.Pin.Manifest
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().QueryTimeoutMS)*time.Millisecond)
 	defer cancel()
+	started := time.Now()
 	result, err := devhost.InvokeEmbedQuery(callCtx, i.Pin.Endpoint, body, func(b []byte) []plugins.Issue {
 		return plugins.CheckEmbedQueryOutput(b, id, m)
 	})
+	observe(i.Pin, org, OpEmbedQuery, started, result, err)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

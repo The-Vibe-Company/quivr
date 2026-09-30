@@ -31,6 +31,10 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertNotIn('credential_key', config)
             self.assertEqual(config['cursor_key'], 'placeholder-cursor-key')
 
+    def test_demo_records_query_text(self):
+        # The engine default is off; the demo's usage view lists its most frequent queries.
+        self.assertIs(core_entrypoint.build_config(ENV)['observability']['record_query_text'], True)
+
     def test_operator_key_is_separate_and_opt_in(self):
         self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
         keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']

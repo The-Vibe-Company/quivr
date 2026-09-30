@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func TestAPIMetricsExposeCommandsAndIngestionBacklog(t *testing.T) {
 	commands.Accepted(telemetry.CommandRecord, 2)
 	serve := func(backlog func(context.Context) (int64, time.Duration, error)) string {
 		rec := httptest.NewRecorder()
-		apiMetrics(commands, backlog).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+		apiMetrics(commands, backlog, func(io.Writer) {}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 		if rec.Header().Get("Content-Type") != "text/plain; version=0.0.4; charset=utf-8" {
 			t.Fatal(rec.Header())
 		}
@@ -44,7 +45,7 @@ func (f fakeAges) ReceiptAge(context.Context, string, string) (time.Duration, er
 func TestProcessingObserverMeasuresFromAcceptance(t *testing.T) {
 	m := telemetry.NewProcessing()
 	o := processingObserver{metrics: m, store: fakeAges{}}
-	o.Outcome(telemetry.StageBaseline, telemetry.OutcomeSucceeded)
+	o.Outcome("org", telemetry.StageBaseline, telemetry.OutcomeSucceeded, "", time.Second)
 	o.Searchable(context.Background(), "org", "receipt")
 	processingObserver{metrics: m, store: fakeAges{err: errors.New("gone")}}.Searchable(context.Background(), "org", "receipt")
 	var b strings.Builder
