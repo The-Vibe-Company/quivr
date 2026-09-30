@@ -9,8 +9,13 @@ evaluation, restarts the API and the worker on that pin, and runs
 TestIngestionPlugin through the public API: the Corpus keeps core.ingest's
 space until it is rebuilt, a Corpus created after the swap starts on the
 plugin's spaces, the rebuild moves the first one to the plugin's named spaces,
-and search then encodes queries with the plugin. The stack's configuration
-and processes are restored afterwards, even on failure.
+and search then encodes queries with the plugin.
+
+Then, with no restart (THE-781), the same plugin built as 0.2.0 runs at a
+second address: TestPluginActivation registers, checks and activates it
+through the operator API; the step stops 0.1.0, and TestPluginActivationIngests
+ingests and searches through 0.2.0 alone. The stack's configuration and
+processes are restored afterwards, even on failure.
 """
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -30,6 +35,32 @@ def healthy(port):
         return False
 
 
+def start_plugin(directory, binary, port, manifest, log_name):
+    """Run the sample plugin binary at a port, serving the given manifest's digest in discovery."""
+    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
+    with (directory / log_name).open('a') as log:
+        return subprocess.Popen([str(binary)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
+
+
+def await_healthy(plugin, port, log):
+    deadline = time.monotonic() + 30
+    while not healthy(port):
+        if plugin.poll() is not None or time.monotonic() > deadline:
+            raise RuntimeError('ingestion plugin not healthy; inspect ' + str(log))
+        time.sleep(.1)
+
+
+def stop_plugin(plugin):
+    try:
+        os.killpg(plugin.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        plugin.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def verify(stack):
     """Pin the sample ingestion plugin, run its acceptance test, then restore the stack's pins."""
     directory = stack.directory / 'ingestion-plugin'
@@ -39,16 +70,15 @@ def verify(stack):
     binary = directory / 'hash-embedder'
     subprocess.run([GO, 'build', '-o', str(binary), './examples/hash-embedder'], cwd=ROOT / 'sdks' / 'go', check=True)
     port = ports.allocate()
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
-    with (directory / 'plugin.log').open('a') as log:
-        plugin = subprocess.Popen([str(binary)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
+    plugin = start_plugin(directory, binary, port, SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
+    # The next build of the same plugin: its manifest at version 0.2.0, same spaces.
+    next_manifest = directory / 'quivr-plugin-0.2.0.yaml'
+    next_manifest.write_text((SAMPLE / 'quivr-plugin.yaml').read_text().replace('version: 0.1.0', 'version: 0.2.0', 1))
+    next_port = ports.allocate()
+    next_plugin = None
     configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
     try:
-        deadline = time.monotonic() + 30
-        while not healthy(port):
-            if plugin.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError('ingestion plugin not healthy; inspect ' + str(directory / 'plugin.log'))
-            time.sleep(.1)
+        await_healthy(plugin, port, directory / 'plugin.log')
         for name, text in configs.items():
             cfg = json.loads(text)
             others = [p for p in cfg.get('plugins', []) if not p['manifest'].endswith('/core-ingest/quivr-plugin.yaml')]
@@ -61,13 +91,20 @@ def verify(stack):
         stack.stop_processes()
         stack.start_processes()
         stack.tests('^TestIngestionPlugin$', run)
+        next_plugin = start_plugin(directory, binary, next_port, next_manifest, 'plugin-0.2.0.log')
+        await_healthy(next_plugin, next_port, directory / 'plugin-0.2.0.log')
+        activation = {**run, 'QUIVR_TEST_ACTIVATION_ENDPOINT': f'http://127.0.0.1:{next_port}',
+                      'QUIVR_TEST_ACTIVATION_PINNED_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml'), 'QUIVR_TEST_ACTIVATION_MANIFEST': str(next_manifest)}
+        stack.tests('^TestPluginActivation$', activation)
+        # Only 0.2.0 is left to segment, embed and encode queries.
+        stop_plugin(plugin)
+        stack.tests('^TestPluginActivationIngests$', activation)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)
-        try:
-            os.killpg(plugin.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        for p in [plugin, next_plugin]:
+            if p is not None:
+                stop_plugin(p)
         stack.stop_processes()
         stack.start_processes()
         stack.start_short_retention_api()

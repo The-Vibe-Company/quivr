@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -246,31 +247,54 @@ type registered struct {
 	credential *jsonschema.Schema
 }
 
-// Registry resolves the connector kinds enabled in this deployment.
-type Registry struct{ kinds map[string]registered }
+// Registry resolves the connector kinds enabled in this deployment. The kinds
+// of plugins follow the active Pipeline Plan: Replace swaps them whole, and
+// a lookup that already resolved its connector keeps it.
+type Registry struct {
+	kinds atomic.Pointer[map[string]registered]
+}
 
 // NewRegistry compiles each connector's schemas. Each kind resolves to
 // exactly one provider: a kind listed twice (for example a built-in kind and
 // a pinned plugin's) refuses startup.
 func NewRegistry(list ...Connector) (*Registry, error) {
-	r := &Registry{kinds: map[string]registered{}}
+	r := &Registry{}
+	return r, r.Replace(list...)
+}
+
+// Replace resolves the kinds of list instead of the current ones, with the
+// rules of NewRegistry; on error the current kinds stay.
+func (r *Registry) Replace(list ...Connector) error {
+	kinds := map[string]registered{}
 	for _, c := range list {
-		if other, exists := r.kinds[c.Kind()]; exists {
-			return nil, fmt.Errorf("connector kind %q is provided by %s and by %s; each kind resolves to one provider", c.Kind(), providerOf(other.connector), providerOf(c))
+		if other, exists := kinds[c.Kind()]; exists {
+			return fmt.Errorf("connector kind %q is provided by %s and by %s; each kind resolves to one provider", c.Kind(), providerOf(other.connector), providerOf(c))
 		}
 		entry := registered{connector: c}
 		var err error
 		if entry.config, err = compile(c.Kind()+"/config", c.ConfigSchema()); err != nil {
-			return nil, err
+			return err
 		}
 		if c.CredentialSchema() != nil {
 			if entry.credential, err = compile(c.Kind()+"/credential", c.CredentialSchema()); err != nil {
-				return nil, err
+				return err
 			}
 		}
-		r.kinds[c.Kind()] = entry
+		kinds[c.Kind()] = entry
 	}
-	return r, nil
+	r.kinds.Store(&kinds)
+	return nil
+}
+
+// current is the kinds resolved now.
+func (r *Registry) current() map[string]registered {
+	if r == nil {
+		return nil
+	}
+	if kinds := r.kinds.Load(); kinds != nil {
+		return *kinds
+	}
+	return nil
 }
 
 func compile(name string, schema []byte) (*jsonschema.Schema, error) {
@@ -288,8 +312,9 @@ func compile(name string, schema []byte) (*jsonschema.Schema, error) {
 
 // Enabled lists enabled kinds.
 func (r *Registry) Enabled() []string {
-	kinds := make([]string, 0, len(r.kinds))
-	for k := range r.kinds {
+	current := r.current()
+	kinds := make([]string, 0, len(current))
+	for k := range current {
 		kinds = append(kinds, k)
 	}
 	sort.Strings(kinds)
@@ -298,10 +323,7 @@ func (r *Registry) Enabled() []string {
 
 // Lookup returns the connector of an enabled kind.
 func (r *Registry) Lookup(kind string) (Connector, bool) {
-	if r == nil {
-		return nil, false
-	}
-	e, ok := r.kinds[kind]
+	e, ok := r.current()[kind]
 	return e.connector, ok
 }
 
@@ -309,7 +331,7 @@ func (r *Registry) Lookup(kind string) (Connector, bool) {
 // carry the JSON Pointer of the offending member: config under /config, the
 // secret under secretAt (its location in the calling request).
 func (r *Registry) validate(kind string, config, secret json.RawMessage, secretAt string) error {
-	e, ok := r.kinds[kind]
+	e, ok := r.current()[kind]
 	if !ok {
 		return ErrUnsupportedKind
 	}

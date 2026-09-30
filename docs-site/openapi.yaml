@@ -1793,8 +1793,8 @@ paths:
       operationId: listPluginRegistrations
       description: Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest,
         the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint.
-        On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration.
-        Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+        Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin,
+        an operator action that organization keys do not get.
       x-required-permissions:
       - plugins:admin
       responses:
@@ -1813,11 +1813,150 @@ paths:
       tags:
       - Admin
       summary: List plugin registrations
+    post:
+      operationId: registerPlugin
+      description: Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml
+        the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in
+        the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr
+        then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's
+        digest. The registration is registered while its check runs, then validated or rejected with the report. The same
+        idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict;
+        a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest
+        or settings. Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PluginRegistrationRequest'
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginRegistration'
+          headers:
+            Location:
+              description: The registration's read URL, which reports the check once it ran.
+              schema:
+                type: string
+                format: uri-reference
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 409 idempotency_conflict,
+            422 invalid_schema or invalid_plugin, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Register plugin
+  /v0/admin/plugins/{registration_id}:
+    get:
+      operationId: getPluginRegistration
+      description: One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - name: registration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginRegistration'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 503 storage
+            unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get plugin registration
+  /v0/admin/plugins/{registration_id}/activate:
+    post:
+      operationId: activatePlugin
+      description: Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and
+        worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves
+        the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the
+        engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval
+        plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated
+        for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration
+        pins. Activating the registration that is already active returns the active plan. Work already started may finish
+        on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - name: registration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinePlan'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 409 registration_not_validated
+            or plugin_conflict, 422 unsupported_role, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Activate plugin
+  /v0/admin/plugins/plans/{plan_id}:
+    get:
+      operationId: getPipelinePlan
+      description: Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays
+        readable after an activation. Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinePlan'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get pipeline plan
   /v0/admin/plugins/plan:
     get:
       operationId: getActivePipelinePlan
       description: The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving
-        it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+        it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin.
+        Requires plugins:admin.
       x-required-permissions:
       - plugins:admin
       responses:
@@ -2877,6 +3016,10 @@ components:
           - draining
           - inactive
           - rejected
+          description: registered while the Contract Runner checks it, then validated or rejected; active while the active
+            plan names it, inactive once a later plan leaves it out.
+        check:
+          $ref: '#/components/schemas/PluginCheckReport'
         created_at:
           type: string
           format: date-time
@@ -2894,6 +3037,140 @@ components:
       - state
       - created_at
       - updated_at
+    PluginRegistrationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs
+            https unless it is on loopback.
+        manifest:
+          type: string
+          minLength: 1
+          maxLength: 262144
+          description: The exact text of the quivr-plugin.yaml the plugin was built from; its sha256 must be the manifest
+            digest the plugin's discovery reports.
+        configuration:
+          type: object
+          description: Plugin configuration, validated against the manifest's configuration schema.
+        routes:
+          type: array
+          maxItems: 100
+          description: Media types routed to the plugin's normalizer.
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              media_type:
+                type: string
+                minLength: 1
+              mode:
+                type: string
+                enum:
+                - required
+                - optional
+            required:
+            - media_type
+        kinds:
+          type: array
+          maxItems: 100
+          description: Alert kinds offered, a subset of those the manifest declares; absent offers them all.
+          items:
+            type: string
+            minLength: 1
+        spaces:
+          type: object
+          description: Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared
+            space.
+          additionalProperties:
+            type: string
+            enum:
+            - served
+            - evaluation
+      required:
+      - idempotency_key
+      - endpoint
+      - manifest
+    PluginCheckReport:
+      type: object
+      additionalProperties: false
+      description: What the Contract Runner reported on a registration; certified plugins are validated.
+      properties:
+        certified:
+          type: boolean
+        checked_at:
+          type: string
+          format: date-time
+        passed:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginCheck'
+      required:
+      - certified
+      - checked_at
+      - passed
+      - failed
+      - skipped
+      - checks
+    PluginCheck:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        contribution:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum:
+          - pass
+          - fail
+          - skip
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginIssue'
+      required:
+      - id
+      - title
+      - status
+      - issues
+    PluginIssue:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+        path:
+          type: string
+        message:
+          type: string
+          minLength: 1
+      required:
+      - code
+      - message
     PluginRegistrationList:
       type: object
       additionalProperties: false
@@ -2938,6 +3215,13 @@ components:
         activated_at:
           type: string
           format: date-time
+        source:
+          type: string
+          enum:
+          - configuration
+          - activation
+          description: What recorded the plan. configuration is the startup configuration, which applies the roles its pins
+            changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
         roles:
           type: array
           description: One entry per role, sorted by role.
@@ -2947,6 +3231,7 @@ components:
       - plan_id
       - created_at
       - activated_at
+      - source
       - roles
     ConnectorKindCatalog:
       type: object

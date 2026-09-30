@@ -104,19 +104,19 @@ func (e ConnectorKindCatalogCredentialDeposits) Valid() bool {
 
 // Defines values for ConnectorKindDescriptionCredential.
 const (
-	None     ConnectorKindDescriptionCredential = "none"
-	Optional ConnectorKindDescriptionCredential = "optional"
-	Required ConnectorKindDescriptionCredential = "required"
+	ConnectorKindDescriptionCredentialNone     ConnectorKindDescriptionCredential = "none"
+	ConnectorKindDescriptionCredentialOptional ConnectorKindDescriptionCredential = "optional"
+	ConnectorKindDescriptionCredentialRequired ConnectorKindDescriptionCredential = "required"
 )
 
 // Valid indicates whether the value is a known member of the ConnectorKindDescriptionCredential enum.
 func (e ConnectorKindDescriptionCredential) Valid() bool {
 	switch e {
-	case None:
+	case ConnectorKindDescriptionCredentialNone:
 		return true
-	case Optional:
+	case ConnectorKindDescriptionCredentialOptional:
 		return true
-	case Required:
+	case ConnectorKindDescriptionCredentialRequired:
 		return true
 	default:
 		return false
@@ -354,6 +354,45 @@ func (e OperationState) Valid() bool {
 	}
 }
 
+// Defines values for PipelinePlanSource.
+const (
+	Activation    PipelinePlanSource = "activation"
+	Configuration PipelinePlanSource = "configuration"
+)
+
+// Valid indicates whether the value is a known member of the PipelinePlanSource enum.
+func (e PipelinePlanSource) Valid() bool {
+	switch e {
+	case Activation:
+		return true
+	case Configuration:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginCheckStatus.
+const (
+	Fail PluginCheckStatus = "fail"
+	Pass PluginCheckStatus = "pass"
+	Skip PluginCheckStatus = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PluginCheckStatus enum.
+func (e PluginCheckStatus) Valid() bool {
+	switch e {
+	case Fail:
+		return true
+	case Pass:
+		return true
+	case Skip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginRegistrationState.
 const (
 	PluginRegistrationStateActive     PluginRegistrationState = "active"
@@ -378,6 +417,42 @@ func (e PluginRegistrationState) Valid() bool {
 	case PluginRegistrationStateRejected:
 		return true
 	case PluginRegistrationStateValidated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginRegistrationRequestRoutesMode.
+const (
+	PluginRegistrationRequestRoutesModeOptional PluginRegistrationRequestRoutesMode = "optional"
+	PluginRegistrationRequestRoutesModeRequired PluginRegistrationRequestRoutesMode = "required"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationRequestRoutesMode enum.
+func (e PluginRegistrationRequestRoutesMode) Valid() bool {
+	switch e {
+	case PluginRegistrationRequestRoutesModeOptional:
+		return true
+	case PluginRegistrationRequestRoutesModeRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginRegistrationRequestSpaces.
+const (
+	PluginRegistrationRequestSpacesEvaluation PluginRegistrationRequestSpaces = "evaluation"
+	PluginRegistrationRequestSpacesServed     PluginRegistrationRequestSpaces = "served"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationRequestSpaces enum.
+func (e PluginRegistrationRequestSpaces) Valid() bool {
+	switch e {
+	case PluginRegistrationRequestSpacesEvaluation:
+		return true
+	case PluginRegistrationRequestSpacesServed:
 		return true
 	default:
 		return false
@@ -659,16 +734,16 @@ func (e VectorSpaceOwnerKind) Valid() bool {
 
 // Defines values for VectorSpaceRole.
 const (
-	Evaluation VectorSpaceRole = "evaluation"
-	Served     VectorSpaceRole = "served"
+	VectorSpaceRoleEvaluation VectorSpaceRole = "evaluation"
+	VectorSpaceRoleServed     VectorSpaceRole = "served"
 )
 
 // Valid indicates whether the value is a known member of the VectorSpaceRole enum.
 func (e VectorSpaceRole) Valid() bool {
 	switch e {
-	case Evaluation:
+	case VectorSpaceRoleEvaluation:
 		return true
-	case Served:
+	case VectorSpaceRoleServed:
 		return true
 	default:
 		return false
@@ -1291,7 +1366,13 @@ type PipelinePlan struct {
 
 	// Roles One entry per role, sorted by role.
 	Roles []PipelinePlanRole `json:"roles"`
+
+	// Source What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+	Source PipelinePlanSource `json:"source"`
 }
+
+// PipelinePlanSource What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+type PipelinePlanSource string
 
 // PipelinePlanRole defines model for PipelinePlanRole.
 type PipelinePlanRole struct {
@@ -1301,12 +1382,44 @@ type PipelinePlanRole struct {
 	Version        string `json:"version"`
 }
 
+// PluginCheck defines model for PluginCheck.
+type PluginCheck struct {
+	Contribution *string           `json:"contribution,omitempty"`
+	Id           string            `json:"id"`
+	Issues       []PluginIssue     `json:"issues"`
+	Status       PluginCheckStatus `json:"status"`
+	Title        string            `json:"title"`
+}
+
+// PluginCheckStatus defines model for PluginCheck.Status.
+type PluginCheckStatus string
+
+// PluginCheckReport What the Contract Runner reported on a registration; certified plugins are validated.
+type PluginCheckReport struct {
+	Certified bool          `json:"certified"`
+	CheckedAt time.Time     `json:"checked_at"`
+	Checks    []PluginCheck `json:"checks"`
+	Failed    int           `json:"failed"`
+	Passed    int           `json:"passed"`
+	Skipped   int           `json:"skipped"`
+}
+
+// PluginIssue defines model for PluginIssue.
+type PluginIssue struct {
+	Code    string  `json:"code"`
+	Message string  `json:"message"`
+	Path    *string `json:"path,omitempty"`
+}
+
 // PluginRegistration defines model for PluginRegistration.
 type PluginRegistration struct {
 	// ArtifactDigest Artifact digest the plugin reports, recorded as information. Absent when it reports none.
-	ArtifactDigest *string   `json:"artifact_digest,omitempty"`
-	Contributions  []string  `json:"contributions"`
-	CreatedAt      time.Time `json:"created_at"`
+	ArtifactDigest *string `json:"artifact_digest,omitempty"`
+
+	// Check What the Contract Runner reported on a registration; certified plugins are validated.
+	Check         *PluginCheckReport `json:"check,omitempty"`
+	Contributions []string           `json:"contributions"`
+	CreatedAt     time.Time          `json:"created_at"`
 
 	// Endpoint Base URL where the operator runs this plugin version.
 	Endpoint       string `json:"endpoint"`
@@ -1315,19 +1428,52 @@ type PluginRegistration struct {
 	RegistrationId string `json:"registration_id"`
 
 	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
-	Roles     []string                `json:"roles"`
+	Roles []string `json:"roles"`
+
+	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
 	State     PluginRegistrationState `json:"state"`
 	UpdatedAt time.Time               `json:"updated_at"`
 	Version   string                  `json:"version"`
 }
 
-// PluginRegistrationState defines model for PluginRegistration.State.
+// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
 type PluginRegistrationState string
 
 // PluginRegistrationList defines model for PluginRegistrationList.
 type PluginRegistrationList struct {
 	Items []PluginRegistration `json:"items"`
 }
+
+// PluginRegistrationRequest defines model for PluginRegistrationRequest.
+type PluginRegistrationRequest struct {
+	// Configuration Plugin configuration, validated against the manifest's configuration schema.
+	Configuration *map[string]interface{} `json:"configuration,omitempty"`
+
+	// Endpoint Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs https unless it is on loopback.
+	Endpoint       string `json:"endpoint"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// Kinds Alert kinds offered, a subset of those the manifest declares; absent offers them all.
+	Kinds *[]string `json:"kinds,omitempty"`
+
+	// Manifest The exact text of the quivr-plugin.yaml the plugin was built from; its sha256 must be the manifest digest the plugin's discovery reports.
+	Manifest string `json:"manifest"`
+
+	// Routes Media types routed to the plugin's normalizer.
+	Routes *[]struct {
+		MediaType string                               `json:"media_type"`
+		Mode      *PluginRegistrationRequestRoutesMode `json:"mode,omitempty"`
+	} `json:"routes,omitempty"`
+
+	// Spaces Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared space.
+	Spaces *map[string]PluginRegistrationRequestSpaces `json:"spaces,omitempty"`
+}
+
+// PluginRegistrationRequestRoutesMode defines model for PluginRegistrationRequest.Routes.Mode.
+type PluginRegistrationRequestRoutesMode string
+
+// PluginRegistrationRequestSpaces defines model for PluginRegistrationRequest.Spaces.
+type PluginRegistrationRequestSpaces string
 
 // ProcessingSummary Live read view, not a Receipt lifecycle or public workflow identifier. blocked means an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently pending, not a promise of final enrichment. Phase is omitted when idle; required and optional progress do not override Version Availability.
 type ProcessingSummary struct {
@@ -1882,6 +2028,9 @@ type ListSubscriptionsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
+type RegisterPluginJSONRequestBody = PluginRegistrationRequest
+
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
 
@@ -2235,13 +2384,40 @@ type ClientInterface interface {
 
 	// ListPluginRegistrations performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
 	//
-	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
 	ListPluginRegistrations(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RegisterPluginWithBody performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+	RegisterPluginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RegisterPlugin performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+	RegisterPlugin(ctx context.Context, body RegisterPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetActivePipelinePlan performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
 	//
-	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 	GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPipelinePlan performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
+	//
+	// Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
+	GetPipelinePlan(ctx context.Context, planId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginRegistration performs a GET /v0/admin/plugins/{registration_id} (the `GetPluginRegistration` operationId) request.
+	//
+	// One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+	GetPluginRegistration(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	//
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
@@ -2698,7 +2874,7 @@ type ClientInterface interface {
 
 // ListPluginRegistrations performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
 //
-// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
 func (c *Client) ListPluginRegistrations(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPluginRegistrationsRequest(c.Server)
 	if err != nil {
@@ -2711,11 +2887,88 @@ func (c *Client) ListPluginRegistrations(ctx context.Context, reqEditors ...Requ
 	return c.Client.Do(req)
 }
 
+// RegisterPluginWithBody performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request,
+// with any type of body and a specified content type.
+//
+// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+func (c *Client) RegisterPluginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRegisterPluginRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RegisterPlugin performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+func (c *Client) RegisterPlugin(ctx context.Context, body RegisterPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRegisterPluginRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetActivePipelinePlan performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
 //
-// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 func (c *Client) GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetActivePipelinePlanRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPipelinePlan performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
+//
+// Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
+func (c *Client) GetPipelinePlan(ctx context.Context, planId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPipelinePlanRequest(c.Server, planId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginRegistration performs a GET /v0/admin/plugins/{registration_id} (the `GetPluginRegistration` operationId) request.
+//
+// One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+func (c *Client) GetPluginRegistration(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginRegistrationRequest(c.Server, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+//
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivatePluginRequest(c.Server, registrationId)
 	if err != nil {
 		return nil, err
 	}
@@ -4005,6 +4258,46 @@ func NewListPluginRegistrationsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewRegisterPluginRequest calls the generic RegisterPlugin builder with application/json body
+func NewRegisterPluginRequest(server string, body RegisterPluginJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRegisterPluginRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRegisterPluginRequestWithBody constructs an http.Request for the RegisterPlugin method, with any body, and a specified content type
+func NewRegisterPluginRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetActivePipelinePlanRequest constructs an http.Request for the GetActivePipelinePlan method
 func NewGetActivePipelinePlanRequest(server string) (*http.Request, error) {
 	var err error
@@ -4025,6 +4318,108 @@ func NewGetActivePipelinePlanRequest(server string) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPipelinePlanRequest constructs an http.Request for the GetPipelinePlan method
+func NewGetPipelinePlanRequest(server string, planId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "plan_id", planId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/plans/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginRegistrationRequest constructs an http.Request for the GetPluginRegistration method
+func NewGetPluginRegistrationRequest(server string, registrationId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "registration_id", registrationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewActivatePluginRequest constructs an http.Request for the ActivatePlugin method
+func NewActivatePluginRequest(server string, registrationId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "registration_id", registrationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/%s/activate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -6507,17 +6902,52 @@ type ClientWithResponsesInterface interface {
 
 	// ListPluginRegistrationsWithResponse performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
 	//
-	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListPluginRegistrationsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPluginRegistrationsResponse, error)
 
+	// RegisterPluginWithBodyWithResponse performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RegisterPluginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RegisterPluginResponse, error)
+
+	// RegisterPluginWithResponse performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+	RegisterPluginWithResponse(ctx context.Context, body RegisterPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterPluginResponse, error)
+
 	// GetActivePipelinePlanWithResponse performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
 	//
-	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetActivePipelinePlanWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetActivePipelinePlanResponse, error)
+
+	// GetPipelinePlanWithResponse performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
+	//
+	// Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetPipelinePlanWithResponse(ctx context.Context, planId string, reqEditors ...RequestEditorFn) (*GetPipelinePlanResponse, error)
+
+	// GetPluginRegistrationWithResponse performs a GET /v0/admin/plugins/{registration_id} (the `GetPluginRegistration` operationId) request.
+	//
+	// One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetPluginRegistrationWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*GetPluginRegistrationResponse, error)
+
+	// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+	//
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
 
 	// GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
@@ -7128,6 +7558,61 @@ func (r ListPluginRegistrationsResponse) ContentType() string {
 	return ""
 }
 
+// RegisterPluginResponse202Headers the declared response headers of an HTTP 202 response for RegisterPlugin
+type RegisterPluginResponse202Headers struct {
+	Location *string
+}
+
+type RegisterPluginResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *PluginRegistration
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *RegisterPluginResponse202Headers
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RegisterPluginResponse) GetJSON202() *PluginRegistration {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RegisterPluginResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RegisterPluginResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RegisterPluginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RegisterPluginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RegisterPluginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetActivePipelinePlanResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7170,6 +7655,150 @@ func (r GetActivePipelinePlanResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetActivePipelinePlanResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPipelinePlanResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PipelinePlan
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPipelinePlanResponse) GetJSON200() *PipelinePlan {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetPipelinePlanResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPipelinePlanResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPipelinePlanResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPipelinePlanResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPipelinePlanResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginRegistrationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginRegistration
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginRegistrationResponse) GetJSON200() *PluginRegistration {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetPluginRegistrationResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginRegistrationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginRegistrationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginRegistrationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginRegistrationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ActivatePluginResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PipelinePlan
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ActivatePluginResponse) GetJSON200() *PipelinePlan {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ActivatePluginResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ActivatePluginResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ActivatePluginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ActivatePluginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ActivatePluginResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9742,7 +10371,7 @@ func (r ConfirmUploadResponse) ContentType() string {
 
 // ListPluginRegistrationsWithResponse performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
 //
-// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListPluginRegistrationsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPluginRegistrationsResponse, error) {
@@ -9753,9 +10382,35 @@ func (c *ClientWithResponses) ListPluginRegistrationsWithResponse(ctx context.Co
 	return ParseListPluginRegistrationsResponse(rsp)
 }
 
+// RegisterPluginWithBodyWithResponse performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request,
+// with any type of body and a specified content type.
+//
+// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RegisterPluginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RegisterPluginResponse, error) {
+	rsp, err := c.RegisterPluginWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRegisterPluginResponse(rsp)
+}
+
+// RegisterPluginWithResponse performs a POST /v0/admin/plugins (the `RegisterPlugin` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+func (c *ClientWithResponses) RegisterPluginWithResponse(ctx context.Context, body RegisterPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*RegisterPluginResponse, error) {
+	rsp, err := c.RegisterPlugin(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRegisterPluginResponse(rsp)
+}
+
 // GetActivePipelinePlanWithResponse performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
 //
-// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetActivePipelinePlanResponse, error) {
@@ -9764,6 +10419,45 @@ func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseGetActivePipelinePlanResponse(rsp)
+}
+
+// GetPipelinePlanWithResponse performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
+//
+// Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetPipelinePlanWithResponse(ctx context.Context, planId string, reqEditors ...RequestEditorFn) (*GetPipelinePlanResponse, error) {
+	rsp, err := c.GetPipelinePlan(ctx, planId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPipelinePlanResponse(rsp)
+}
+
+// GetPluginRegistrationWithResponse performs a GET /v0/admin/plugins/{registration_id} (the `GetPluginRegistration` operationId) request.
+//
+// One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetPluginRegistrationWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*GetPluginRegistrationResponse, error) {
+	rsp, err := c.GetPluginRegistration(ctx, registrationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginRegistrationResponse(rsp)
+}
+
+// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
+//
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
+	rsp, err := c.ActivatePlugin(ctx, registrationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivatePluginResponse(rsp)
 }
 
 // GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
@@ -10839,6 +11533,52 @@ func ParseListPluginRegistrationsResponse(rsp *http.Response) (*ListPluginRegist
 	return response, nil
 }
 
+// ParseRegisterPluginResponse parses an HTTP response from a RegisterPluginWithResponse call
+func ParseRegisterPluginResponse(rsp *http.Response) (*RegisterPluginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RegisterPluginResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest PluginRegistration
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers RegisterPluginResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "uri-reference"}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers202 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseGetActivePipelinePlanResponse parses an HTTP response from a GetActivePipelinePlanWithResponse call
 func ParseGetActivePipelinePlanResponse(rsp *http.Response) (*GetActivePipelinePlanResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10848,6 +11588,105 @@ func ParseGetActivePipelinePlanResponse(rsp *http.Response) (*GetActivePipelineP
 	}
 
 	response := &GetActivePipelinePlanResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPipelinePlanResponse parses an HTTP response from a GetPipelinePlanWithResponse call
+func ParseGetPipelinePlanResponse(rsp *http.Response) (*GetPipelinePlanResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPipelinePlanResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginRegistrationResponse parses an HTTP response from a GetPluginRegistrationWithResponse call
+func ParseGetPluginRegistrationResponse(rsp *http.Response) (*GetPluginRegistrationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginRegistrationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginRegistration
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseActivatePluginResponse parses an HTTP response from a ActivatePluginWithResponse call
+func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ActivatePluginResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

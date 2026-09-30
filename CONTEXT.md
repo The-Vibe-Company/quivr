@@ -239,7 +239,7 @@ An immutable distribution unit containing a plugin manifest, schemas, and refere
 _Avoid_: Mutable image tag, contribution
 
 **Plugin Registration**:
-A plugin version the operator runs at an address, as the engine records it: identity, version, endpoint, manifest digest, the roles its manifest declares and a lifecycle state (registered, validated, active, draining, inactive or rejected). The first start registers the plugins pinned in the startup configuration.
+A plugin version the operator runs at an address, as the engine records it: identity, version, endpoint, exact manifest, the settings it is installed with, the roles its manifest declares and a lifecycle state (registered, validated, active, draining, inactive or rejected). The startup configuration registers the plugins it pins; an operator registers others, and only one the Contract Runner validated can be activated.
 _Avoid_: Installation, pin, deployment
 
 **Contribution**:
@@ -267,7 +267,7 @@ An activated, internally consistent set of plugin registrations and configuratio
 _Avoid_: Deployment, plugin version, started process
 
 **Pipeline Plan**:
-The immutable mapping of every role of a deployment (a normalizer per media type, an alert rule per plugin, a connector per kind) to the plugin registration that serves it. One plan is active at a time, and each bounded processing execution keeps the plan it started with.
+The immutable mapping of every role of a deployment (a normalizer per media type, an alert rule per plugin, a connector per kind, the ingestion and retrieval plugins) to the plugin registration that serves it. One plan is active at a time and api and worker follow it without restarting; an operator activation or the startup configuration, for the roles its pins changed, records the next one. Each bounded processing execution keeps the plan it started with.
 _Avoid_: Live plugin registry, mutable workflow configuration
 
 **Quarantine**:

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
@@ -202,5 +205,38 @@ func TestSearchErrorNamesTheQueryLimit(t *testing.T) {
 	}
 	if _, body = searchError(publicerr.WithDetail(retrieval.ErrUnsupported, "internal detail")); body.Message != "unsupported search" {
 		t.Fatalf("detail leaked: %+v", body)
+	}
+}
+
+// pluginFailure owns every plugin registry refusal's status and code; a
+// refusal that lists issues keeps them in its message.
+func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
+	for sentinel, want := range map[error]struct {
+		status int
+		code   string
+	}{
+		corpus.ErrForbidden:              {403, "forbidden"},
+		registry.ErrNoPlan:               {404, "not_found"},
+		registry.ErrNotFound:             {404, "not_found"},
+		registry.ErrIdempotencyConflict:  {409, "idempotency_conflict"},
+		registry.ErrNotValidated:         {409, "registration_not_validated"},
+		registry.ErrConflict:             {409, "plugin_conflict"},
+		registry.ErrInvalid:              {422, "invalid_plugin"},
+		registry.ErrUnsupportedRole:      {422, "unsupported_role"},
+		content.ErrSpaceChanged:          {409, "plugin_conflict"},
+		content.ErrSpaceOwner:            {409, "plugin_conflict"},
+		errors.New("connection refused"): {503, "storage_unavailable"},
+	} {
+		for style, err := range detailed(sentinel) {
+			if status, code := written(t, func(w *httptest.ResponseRecorder) { pluginFailure(w, err) }); status != want.status || code != want.code {
+				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			}
+		}
+	}
+	rec := httptest.NewRecorder()
+	pluginFailure(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeKindConflict, Path: "/plugins/1/manifest", Message: "connector kind rss is also provided by connector.rss@1.0.0"}}})
+	var body struct{ Code, Message string }
+	if json.Unmarshal(rec.Body.Bytes(), &body) != nil || rec.Code != 409 || body.Code != "plugin_conflict" || !strings.Contains(body.Message, "kind_conflict") {
+		t.Fatalf("a conflict names its issues: %d %s", rec.Code, rec.Body.String())
 	}
 }

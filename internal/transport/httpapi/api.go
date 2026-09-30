@@ -66,8 +66,9 @@ type API struct {
 	Commands telemetry.Commands
 	// Relay serves the public webhook routes of push Connector Instances.
 	Relay *connectors.Relay
-	// Plugins serves the operator reads of the plugin registry.
-	Plugins registry.Service
+	// Plugins serves the operator routes of the plugin registry.
+	Plugins      registry.Service
+	pluginSchema *jsonschema.Schema
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -123,7 +124,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	pluginSchema, err := compiler.Compile(contracts.HTTPSchema("PluginRegistrationRequest"))
+	if err != nil {
+		return nil, err
+	}
+	a := &API{pluginSchema: pluginSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}

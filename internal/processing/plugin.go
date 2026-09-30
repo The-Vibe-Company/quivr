@@ -50,6 +50,21 @@ type PluginDeriver struct {
 	Plugin  IngestionPlugin
 }
 
+// Following is an ingestion plugin that follows the active Pipeline Plan
+// (Spec 5). A derivation resolves it once, so every call of one derivation
+// reaches the same plugin version even when the plan changes meanwhile.
+type Following interface {
+	Current() IngestionPlugin
+}
+
+// resolved is the deriver with the plugin the plan names now.
+func (d PluginDeriver) resolved() PluginDeriver {
+	if f, ok := d.Plugin.(Following); ok {
+		d.Plugin = f.Current()
+	}
+	return d
+}
+
 // Owns reports whether the pinned plugin owns a space.
 func (d PluginDeriver) Owns(space string) bool { return d.Plugin != nil && d.Plugin.Owns(space) }
 
@@ -60,6 +75,7 @@ func (d PluginDeriver) Owns(space string) bool { return d.Plugin != nil && d.Plu
 // are stored, the vectors in the generation's spaces it owns or, for a
 // generation it does not serve, in the spaces the deployment enables.
 func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, error) {
+	d = d.resolved()
 	seg, err := d.Content.PluginSegmentationOf(ctx, org, v, d.Plugin.Recipe())
 	if !errors.Is(err, corpus.ErrNotFound) {
 		return seg, err
@@ -93,6 +109,7 @@ func (d PluginDeriver) owned(g content.Generation) []string {
 // Derive returns a Version's plugin segmentation and its vectors in every
 // space of the generation the plugin owns, the served one included.
 func (d PluginDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	d = d.resolved()
 	spaces := d.owned(g)
 	if !d.Owns(g.SpaceID) || len(spaces) == 0 {
 		return content.Segmentation{}, nil, fmt.Errorf("the pinned ingestion plugin does not own space %s", g.SpaceID)

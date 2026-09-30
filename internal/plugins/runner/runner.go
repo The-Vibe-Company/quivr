@@ -147,6 +147,30 @@ type Options struct {
 	StartupTimeout time.Duration
 	// Output receives the launched plugin's stdout and stderr; nil discards.
 	Output io.Writer
+	// Configuration, when set, is the installation's plugin configuration:
+	// the normative ingestion and retrieval fixtures run with it instead of
+	// their own, as the engine calls a registered plugin (Spec 5).
+	Configuration json.RawMessage
+}
+
+// configured returns a normative fixture whose section runs with the
+// installation's configuration, when the run has one.
+func (r *run) configured(raw []byte, section string) []byte {
+	if len(r.opts.Configuration) == 0 {
+		return raw
+	}
+	var doc map[string]json.RawMessage
+	var body map[string]json.RawMessage
+	if json.Unmarshal(raw, &doc) != nil || json.Unmarshal(doc[section], &body) != nil || body == nil {
+		return raw
+	}
+	body["configuration"] = r.opts.Configuration
+	doc[section], _ = json.Marshal(body)
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 type run struct {

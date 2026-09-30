@@ -58,8 +58,8 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 ## Operator key (optional)
 
 `QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild` and `plugins:admin`,
-which the web app never gets. Use it from inside the deployment (`railway ssh --service api`,
-port 8080) to rebuild a Corpus projection or to read the plugin registry (`GET /v0/admin/plugins`).
+which the web app never gets. Use it from inside the deployment (`railway ssh --service api`, port 8080) to rebuild a Corpus projection,
+or to register and activate plugins ([Switch plugins without restarting](../../docs/plugins/switch-plugins-without-restarting.md)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
 
 ## Ingestion plugin and the rebuild after THE-777
 

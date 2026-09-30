@@ -1,15 +1,21 @@
 // Package registry keeps the list of plugins a deployment knows about and the
 // active Pipeline Plan, which says which registered plugin serves each role
-// (THE-780, Spec 5 slice 1). Quivr never starts a plugin: the operator runs it
-// at an address, and the registry records it. In this slice the registry is
-// seeded from the startup pins and only read; the engine still resolves
-// plugins from the configuration.
+// (Spec 5). Quivr never starts a plugin: the operator runs it at an address,
+// registers it, and Quivr checks it with the Contract Runner. Activating a
+// checked registration records a new immutable plan, which api and worker
+// follow without restarting. The startup configuration seeds the registry and
+// applies the roles it changes (Reconcile).
 package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -22,7 +28,9 @@ import (
 // never do.
 const Action = "plugins:admin"
 
-// Registration states.
+// Registration states. A registration is registered while its check runs,
+// then validated or rejected; the plan makes it active, and a later plan that
+// leaves it out makes it inactive.
 const (
 	StateRegistered = "registered"
 	StateValidated  = "validated"
@@ -32,17 +40,102 @@ const (
 	StateRejected   = "rejected"
 )
 
-// ErrNoPlan is returned when no Pipeline Plan is active: the registry was
-// never seeded because the configuration pins no plugin.
-var ErrNoPlan = errors.New("no active pipeline plan")
+// Plan sources: the startup configuration, or an operator activation.
+const (
+	SourceConfiguration = "configuration"
+	SourceActivation    = "activation"
+)
 
-// Registration is one plugin version the operator runs at an address.
+var (
+	// ErrNoPlan is returned when no Pipeline Plan is active: the registry was
+	// never seeded because the configuration pins no plugin.
+	ErrNoPlan = errors.New("no active pipeline plan")
+	// ErrNotFound is an unknown registration or plan.
+	ErrNotFound = errors.New("not_found")
+	// ErrIdempotencyConflict is an idempotency key reused for another
+	// registration.
+	ErrIdempotencyConflict = errors.New("idempotency_conflict")
+	// ErrInvalid is a registration request whose manifest or settings the
+	// engine refuses; the error lists the issues.
+	ErrInvalid = errors.New("invalid_plugin")
+	// ErrNotValidated refuses to activate a registration the Contract Runner
+	// has not certified.
+	ErrNotValidated = errors.New("registration_not_validated")
+	// ErrConflict refuses an activation that breaks a startup rule; the error
+	// lists the issues.
+	ErrConflict = errors.New("plugin_conflict")
+	// ErrUnsupportedRole refuses to activate a plugin for a role that cannot
+	// switch without a restart yet.
+	ErrUnsupportedRole = errors.New("unsupported_role")
+)
+
+// IssueError carries the issues of an ErrInvalid or ErrConflict refusal.
+type IssueError struct {
+	Kind   error
+	Issues []plugins.Issue
+}
+
+func (e *IssueError) Error() string {
+	parts := make([]string, len(e.Issues))
+	for i, issue := range e.Issues {
+		parts[i] = fmt.Sprintf("%s %s: %s", issue.Code, issue.Path, issue.Message)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (e *IssueError) Unwrap() error { return e.Kind }
+
+// Settings are how the deployment installs a plugin version, with the shape
+// and meaning of a QUIVR_CONFIG pin: its configuration, the media types
+// routed to its normalizer, the alert kinds it offers and its vector spaces.
+type Settings struct {
+	Configuration json.RawMessage       `json:"configuration"`
+	Routes        []plugins.RouteConfig `json:"routes"`
+	Kinds         []string              `json:"kinds,omitempty"`
+	Spaces        map[string]string     `json:"spaces,omitempty"`
+}
+
+// SettingsOf are the resolved settings of a loaded pin.
+func SettingsOf(pin *plugins.Pin) Settings {
+	s := Settings{Configuration: canonicalJSON(pin.Configuration), Routes: pin.Routes(), Spaces: pin.Spaces}
+	if s.Routes == nil {
+		s.Routes = []plugins.RouteConfig{}
+	}
+	if pin.Kinds != nil {
+		s.Kinds = append([]string{}, pin.Kinds...)
+		sort.Strings(s.Kinds)
+	}
+	return s
+}
+
+// Digest identifies the settings: sha256 over their canonical JSON.
+func (s Settings) Digest() string {
+	b, _ := json.Marshal(s)
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func canonicalJSON(raw json.RawMessage) json.RawMessage {
+	var v any
+	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
+		return json.RawMessage(`{}`)
+	}
+	b, _ := json.Marshal(v)
+	return b
+}
+
+// Registration is one plugin version the operator runs at an address, with
+// the settings it is installed with.
 type Registration struct {
 	ID             string
 	PluginID       string
 	Version        string
 	Endpoint       string
 	ManifestDigest string
+	// Manifest is the exact quivr-plugin.yaml the digest covers. Registrations
+	// seeded before THE-781 have none and cannot serve a plan again.
+	Manifest []byte
+	Settings Settings
 	// ArtifactDigest is the artifact digest the plugin reports, if any.
 	ArtifactDigest string
 	Contributions  []string
@@ -51,7 +144,40 @@ type Registration struct {
 	State     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Check is the Contract Runner's report, once the check ran.
+	Check *CheckReport
 }
+
+// CheckReport is what the Contract Runner reported on a registration.
+type CheckReport struct {
+	Certified bool          `json:"certified"`
+	CheckedAt time.Time     `json:"checked_at"`
+	Passed    int           `json:"passed"`
+	Failed    int           `json:"failed"`
+	Skipped   int           `json:"skipped"`
+	Checks    []CheckResult `json:"checks"`
+}
+
+// CheckResult is one check of the report.
+type CheckResult struct {
+	ID           string          `json:"id"`
+	Title        string          `json:"title"`
+	Contribution string          `json:"contribution,omitempty"`
+	Status       string          `json:"status"`
+	Issues       []plugins.Issue `json:"issues"`
+}
+
+// Pin loads the registration as the engine calls it.
+func (r Registration) Pin() (*plugins.Pin, error) {
+	if len(r.Manifest) == 0 {
+		return nil, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/registrations/" + r.ID,
+			Message: fmt.Sprintf("%s@%s was recorded before registrations kept their manifest; register it again", r.PluginID, r.Version)}}}
+	}
+	return plugins.LoadPinManifest(r.Manifest, "registration "+r.ID, plugins.PinConfig{Endpoint: r.Endpoint, Configuration: r.Settings.Configuration, Routes: r.Settings.Routes, Kinds: r.Settings.Kinds, Spaces: r.Settings.Spaces})
+}
+
+// CodePlanUnresolvable is a plan member the engine cannot load.
+const CodePlanUnresolvable = "plan_unresolvable"
 
 // Assignment maps one role of the deployment to the registration serving it.
 type Assignment struct {
@@ -68,7 +194,10 @@ type Plan struct {
 	ID          string
 	CreatedAt   time.Time
 	ActivatedAt time.Time
-	Roles       []Assignment
+	// Source says what recorded the plan: the startup configuration or an
+	// operator activation.
+	Source string
+	Roles  []Assignment
 }
 
 // Seed is what the startup configuration declares: the registrations of the
@@ -78,29 +207,63 @@ type Seed struct {
 	Roles         []Assignment
 }
 
-// Difference is one role on which the configuration and the active plan
-// disagree. Configured and Active name the registration on each side as
-// plugin@version [registration id]; empty means the role is absent there.
-type Difference struct {
-	Role       string
-	Configured string
-	Active     string
-}
-
 // Store persists the registry.
 type Store interface {
-	// SeedPlugins writes seed as active registrations and the first active
-	// plan, in one transaction, when the registry has no registration, and
-	// reports whether it did. Otherwise it writes nothing.
-	SeedPlugins(ctx context.Context, seed Seed) (seeded bool, err error)
+	// ApplyConfiguration records seed's registrations and applies to the
+	// active plan the roles the configuration changed since it last applied
+	// (Reconcile), in one transaction serialized with the other processes.
+	ApplyConfiguration(ctx context.Context, seed Seed) (Applied, error)
 	PluginRegistrations(ctx context.Context) ([]Registration, error)
+	// PluginRegistration returns one registration with its manifest and
+	// check report, or ErrNotFound.
+	PluginRegistration(ctx context.Context, id string) (Registration, error)
 	// ActivePlan returns ErrNoPlan when no plan is active.
 	ActivePlan(ctx context.Context) (Plan, error)
+	// PipelinePlan returns any plan, active or not, or ErrNotFound.
+	PipelinePlan(ctx context.Context, id string) (Plan, error)
+	// ActivePlanID is the active plan's id, or "" when none is.
+	ActivePlanID(ctx context.Context) (string, error)
+	// ActiveMembers returns the active plan and its registrations by id.
+	ActiveMembers(ctx context.Context) (Plan, map[string]Registration, error)
+	// RegisterPlugin records a registration under an idempotency key: it
+	// replays the key's registration, refuses a key used for another one
+	// (ErrIdempotencyConflict), queues a new registration for its check and
+	// re-queues a rejected one under a new key. queued reports a check to run.
+	RegisterPlugin(ctx context.Context, r Registration, key string) (stored Registration, queued bool, err error)
+	// ClaimCheck leases the oldest registration waiting for its check.
+	ClaimCheck(ctx context.Context, lease time.Duration) (Registration, bool, error)
+	// RecordCheck stores the report and moves a registered registration to
+	// validated or rejected.
+	RecordCheck(ctx context.Context, id string, report CheckReport) error
+	// Activate records the plan decide returns for the target registration
+	// and makes it active, with the vector spaces it registers, in one
+	// transaction serialized with every other plan change.
+	Activate(ctx context.Context, id string, decide func(active Plan, members map[string]Registration, target Registration) (Activation, error)) (Plan, error)
 }
 
-// Service reads the registry for operators.
+// Applied is what ApplyConfiguration did.
+type Applied struct {
+	// Plan is the active plan after it.
+	Plan string
+	Reconciliation
+}
+
+// Service is the operator API of the registry.
 type Service struct {
 	Store Store
+	// Check runs the Contract Runner against a registration; nil uses
+	// RunCheck.
+	Check func(context.Context, Registration) CheckReport
+	// Spaces lists the vector spaces a plugin set registers.
+	Spaces func(*plugins.PinSet) []content.RegisteredSpace
+	// Validate applies checks of the running engine to a candidate set (for
+	// example connector kinds beside the built-in ones); nil checks nothing.
+	Validate func(*plugins.PinSet) error
+	// Wake nudges the checker after a registration is queued.
+	Wake chan struct{}
+	// Activated runs after an activation commits, so the process that served
+	// it follows the new plan at once.
+	Activated func(context.Context)
 }
 
 // Registrations lists every registration, oldest first.
@@ -111,6 +274,14 @@ func (s Service) Registrations(ctx context.Context, scope corpus.Scope) ([]Regis
 	return s.Store.PluginRegistrations(ctx)
 }
 
+// Registration returns one registration with its check report.
+func (s Service) Registration(ctx context.Context, scope corpus.Scope, id string) (Registration, error) {
+	if !scope.Allows(Action) {
+		return Registration{}, corpus.ErrForbidden
+	}
+	return s.Store.PluginRegistration(ctx, id)
+}
+
 // ActivePlan returns the active Pipeline Plan.
 func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, error) {
 	if !scope.Allows(Action) {
@@ -119,18 +290,13 @@ func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, erro
 	return s.Store.ActivePlan(ctx)
 }
 
-// SeedFrom seeds an empty registry from the startup configuration. On a
-// registry that is not empty it changes nothing and returns how the
-// configuration differs from the active plan, for the caller to warn about.
-func (s Service) SeedFrom(ctx context.Context, seed Seed) (seeded bool, differences []Difference, err error) {
-	if seeded, err = s.Store.SeedPlugins(ctx, seed); err != nil || seeded {
-		return seeded, nil, err
+// PipelinePlan returns any recorded plan: plans are immutable, so earlier
+// ones stay readable.
+func (s Service) PipelinePlan(ctx context.Context, scope corpus.Scope, id string) (Plan, error) {
+	if !scope.Allows(Action) {
+		return Plan{}, corpus.ErrForbidden
 	}
-	active, err := s.Store.ActivePlan(ctx)
-	if err != nil && !errors.Is(err, ErrNoPlan) {
-		return false, nil, err
-	}
-	return false, Compare(seed, active), nil
+	return s.Store.PipelinePlan(ctx, id)
 }
 
 // Role names.
@@ -144,48 +310,68 @@ const ingestionRole = "ingestion"
 // retrievalRole is the one retrieval role of a deployment (Plugin API 0.7).
 const retrievalRole = "retrieval"
 
-// RegistrationID identifies a plugin version at an address.
-func RegistrationID(pluginID, version, manifestDigest, endpoint string) string {
-	return content.StableID("plugin_registration", pluginID, version, manifestDigest, endpoint)
+// RegistrationID identifies a plugin version at an address with its settings.
+func RegistrationID(pluginID, version, manifestDigest, endpoint, settingsDigest string) string {
+	return content.StableID("plugin_registration", pluginID, version, manifestDigest, endpoint, settingsDigest)
+}
+
+// registrationOf is the registration of a loaded pin, in state.
+func registrationOf(pin *plugins.Pin, state string) Registration {
+	m := pin.Manifest
+	settings := SettingsOf(pin)
+	return Registration{ID: RegistrationID(m.ID, m.Version, pin.ManifestDigest, pin.Endpoint, settings.Digest()), PluginID: m.ID, Version: m.Version, Endpoint: pin.Endpoint,
+		ManifestDigest: pin.ManifestDigest, Manifest: pin.Source, Settings: settings, Contributions: m.Contributions.Names(), Roles: declaredRoles(m), State: state}
 }
 
 // FromPins derives the seed of the startup pins: one active registration per
 // pinned plugin, and a plan whose roles are the routed media types, the
-// subscription evaluators and the connector kinds the pins resolve to. A nil
-// set declares nothing.
+// subscription evaluators, the connector kinds and the ingestion and
+// retrieval roles the pins resolve to. A nil set declares nothing.
 func FromPins(pins *plugins.PinSet) Seed {
 	var seed Seed
 	byPin := map[*plugins.Pin]Registration{}
 	for _, pin := range pins.Pins() {
-		m := pin.Manifest
-		r := Registration{ID: RegistrationID(m.ID, m.Version, pin.ManifestDigest, pin.Endpoint), PluginID: m.ID, Version: m.Version, Endpoint: pin.Endpoint, ManifestDigest: pin.ManifestDigest, Contributions: m.Contributions.Names(), Roles: declaredRoles(m), State: StateActive}
+		r := registrationOf(pin, StateActive)
 		byPin[pin] = r
 		seed.Registrations = append(seed.Registrations, r)
-		if m.Contributions.Normalizer != nil {
-			for _, mediaType := range m.Contributions.Normalizer.MediaTypes {
+	}
+	seed.Roles = planRoles(pins, byPin)
+	return seed
+}
+
+// planRoles lists the roles a resolved set serves, sorted, each naming the
+// registration of its pin.
+func planRoles(set *plugins.PinSet, byPin map[*plugins.Pin]Registration) []Assignment {
+	roles := []Assignment{}
+	for _, pin := range set.Pins() {
+		if n := pin.Manifest.Contributions.Normalizer; n != nil {
+			for _, mediaType := range n.MediaTypes {
 				if pin.Routed(mediaType) {
-					seed.Roles = append(seed.Roles, assign(normalizerRole(mediaType), r))
+					roles = append(roles, assign(normalizerRole(mediaType), byPin[pin]))
 				}
 			}
 		}
 	}
-	for _, pin := range pins.Evaluators() {
-		seed.Roles = append(seed.Roles, assign(subscriptionRole(pin.Manifest.ID), byPin[pin]))
+	for _, pin := range set.Evaluators() {
+		roles = append(roles, assign(subscriptionRole(pin.Manifest.ID), byPin[pin]))
 	}
-	for _, pinned := range pins.Connectors() {
-		seed.Roles = append(seed.Roles, assign(connectorRole(pinned.Kind), byPin[pinned.Pin]))
+	for _, pinned := range set.Connectors() {
+		roles = append(roles, assign(connectorRole(pinned.Kind), byPin[pinned.Pin]))
 	}
-	if pin := pins.Ingestion(); pin != nil {
-		seed.Roles = append(seed.Roles, assign(ingestionRole, byPin[pin]))
+	if pin := set.Ingestion(); pin != nil {
+		roles = append(roles, assign(ingestionRole, byPin[pin]))
 	}
-	if pin := pins.Retrieval(); pin != nil {
-		seed.Roles = append(seed.Roles, assign(retrievalRole, byPin[pin]))
+	if pin := set.Retrieval(); pin != nil {
+		roles = append(roles, assign(retrievalRole, byPin[pin]))
 	}
-	sort.Slice(seed.Roles, func(i, j int) bool { return seed.Roles[i].Role < seed.Roles[j].Role })
-	return seed
+	sort.Slice(roles, func(i, j int) bool { return roles[i].Role < roles[j].Role })
+	return roles
 }
 
 func (a Assignment) describe() string {
+	if a.RegistrationID == "" {
+		return ""
+	}
 	return a.PluginID + "@" + a.Version + " [" + a.RegistrationID + "]"
 }
 
@@ -217,42 +403,4 @@ func declaredRoles(m plugins.Manifest) []string {
 	}
 	sort.Strings(roles)
 	return roles
-}
-
-// Compare lists, sorted by role, the roles on which the configured seed and
-// the active plan disagree: a role only one side has, or one served by
-// different registrations.
-func Compare(seed Seed, active Plan) []Difference {
-	configured, current := map[string]Assignment{}, map[string]Assignment{}
-	for _, a := range seed.Roles {
-		configured[a.Role] = a
-	}
-	for _, a := range active.Roles {
-		current[a.Role] = a
-	}
-	roles := map[string]bool{}
-	for role := range configured {
-		roles[role] = true
-	}
-	for role := range current {
-		roles[role] = true
-	}
-	var out []Difference
-	for role := range roles {
-		c, inConfig := configured[role]
-		a, inPlan := current[role]
-		if inConfig && inPlan && c.RegistrationID == a.RegistrationID {
-			continue
-		}
-		d := Difference{Role: role}
-		if inConfig {
-			d.Configured = c.describe()
-		}
-		if inPlan {
-			d.Active = a.describe()
-		}
-		out = append(out, d)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Role < out[j].Role })
-	return out
 }

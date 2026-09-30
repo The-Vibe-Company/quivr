@@ -59,7 +59,7 @@ func (r *run) ingestionFixtures(own []ownFixture) []ingestionRun {
 			continue
 		}
 		label := normativeFixturePrefix + name
-		built, issues := devhost.BuildIngestionRun(raw, r.m)
+		built, issues := devhost.BuildIngestionRun(r.configured(raw, "ingestion"), r.m)
 		if len(issues) > 0 {
 			notes = append(notes, fmt.Sprintf("%s skipped: %s", label, issues[0].Message))
 			continue

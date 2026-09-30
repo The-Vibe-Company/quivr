@@ -6,6 +6,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 ## Understand how it works
 
 - [Plugin Protocol v0](../../contracts/plugins/v0/README.md): the plugin manifest, routes, schemas and fixtures
+- [Switch plugins without restarting](../plugins/switch-plugins-without-restarting.md): register, check and activate a plugin version while api and worker keep running
 - [alerts](../../plugins/alerts/README.md): the first-party keyword alert plugin
 - [core.ingest](../../plugins/core-ingest/README.md): the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine
 - [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests

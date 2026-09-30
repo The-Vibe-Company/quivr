@@ -89,6 +89,10 @@ type Config struct {
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
+	// PluginPlanPoll is how often api and worker check whether the active
+	// Pipeline Plan changed, to follow it without restart (Go duration,
+	// default 2s).
+	PluginPlanPoll string `json:"plugin_plan_poll"`
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
@@ -160,13 +164,14 @@ func Run(command string) error {
 	if err != nil {
 		return err
 	}
-	// Pinned plugins own their declared extension namespaces beside the
-	// built-in ones: clients cannot write them, retrieval mappings may read them.
-	extensions, err := plugins.PinsExtensionRegistry(pins)
+	// api and worker follow the active Pipeline Plan, resolved once the
+	// database is reachable; until then, the pins. Its plugins own their
+	// declared extension namespaces beside the built-in ones: clients cannot
+	// write them, retrieval mappings may read them.
+	live, err := plugins.NewLive("", pins)
 	if err != nil {
 		return err
 	}
-	evaluators := cfg.evaluators(pins)
 	if cfg.LogDirectory != "" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
 	}
@@ -188,16 +193,25 @@ func Run(command string) error {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
 	}
-	var kinds []connectors.Connector
+	var builtinKinds []connectors.Connector
 	if cfg.ConnectorFixtures {
-		kinds = append(kinds, connectors.Fixture{})
+		builtinKinds = append(builtinKinds, connectors.Fixture{})
 	}
-	// Connector kinds of pinned plugins resolve beside the enabled built-in
-	// kinds; a kind with two providers refuses startup.
-	kinds = append(kinds, pluginhttp.Connectors(pins)...)
-	registry, err := connectors.NewRegistry(kinds...)
+	// Connector kinds of the plan's plugins resolve beside the enabled
+	// built-in kinds; a kind with two providers refuses startup, and an
+	// activation.
+	kindsOf := func(set *plugins.PinSet) []connectors.Connector {
+		return append(append([]connectors.Connector{}, builtinKinds...), pluginhttp.Connectors(set)...)
+	}
+	registry, err := connectors.NewRegistry(kindsOf(pins)...)
 	if err != nil {
 		return err
+	}
+	planPoll := 2 * time.Second
+	if cfg.PluginPlanPoll != "" {
+		if planPoll, err = time.ParseDuration(cfg.PluginPlanPoll); err != nil || planPoll <= 0 {
+			return errors.New("plugin_plan_poll must be a positive duration")
+		}
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
 		return err
@@ -253,35 +267,11 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: extensions, Normalizations: store, Supersession: store}
-	if pins != nil {
-		contents.Routes = pins
-	}
+	// Normalizer routes and extension namespaces follow the plan.
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: live, Normalizations: store, Supersession: store, Routes: live}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	projection.LegacySpace = tei.Space().ID
-	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
-	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents}
-	// External normalization runs in the worker only, before publication.
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: pins}
-	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
-	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Routing: store}
-	// The pinned ingestion plugin segments and embeds every Version, encodes
-	// the queries of its spaces and derives rebuild targets.
-	if pin := pins.Ingestion(); pin != nil {
-		ingestor := pluginhttp.Ingestor{Pin: pin}
-		deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
-		search.Spaces = ingestor
-		processor.Retrieval, processor.Enrichment = search, search
-		processor.Plugin = deriver
-		rebuilder.Plugin = deriver
-	}
-	// A pinned retrieval plugin answers every search: it requests candidates,
-	// which search serves after authorization and hydration, and ranks them.
-	// Without one the built-in path answers the default profile.
-	if pin := pins.Retrieval(); pin != nil {
-		search.Ranker, search.Registry = pluginhttp.Retriever{Pin: pin}, store
-	}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -343,15 +333,30 @@ func Run(command string) error {
 		slog.Error("schema readiness failed", "error", err)
 		return errors.New("database/schema unavailable; run migrate")
 	}
-	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}}
-	if err = seedPluginRegistry(ctx, pluginRegistry, pins); err != nil {
+	// The registry checks registered plugins with the Contract Runner (api)
+	// and records activations with the spaces they register, refusing one
+	// that breaks a startup rule of this engine.
+	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: DeploymentSpaces, Wake: make(chan struct{}, 1),
+		Validate: func(set *plugins.PinSet) error { _, err := connectors.NewRegistry(kindsOf(set)...); return err }}
+	planID, resolved, err := applyPluginConfiguration(ctx, pluginRegistry, pins)
+	if err != nil {
 		return err
 	}
+	if resolved.Ingestion() == nil {
+		return errors.New("the active pipeline plan has no ingestion plugin: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
+	}
+	if err = registry.Replace(kindsOf(resolved)...); err != nil {
+		return fmt.Errorf("pipeline plan %s: %w", planID, err)
+	}
+	if err = live.Store(planID, resolved); err != nil {
+		return fmt.Errorf("pipeline plan %s: %w", planID, err)
+	}
+	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) }}
 	// The registry records each space's owner and this deployment's roles; a
 	// space claimed by another owner, or changed under the same version,
 	// refuses startup. New Corpora then start on the registered spaces.
 	register, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = store.RegisterSpaces(register, DeploymentSpaces(pins))
+	err = store.RegisterSpaces(register, DeploymentSpaces(resolved))
 	if err == nil {
 		err = alignDefaultGeneration(register, store)
 	}
@@ -359,6 +364,39 @@ func Run(command string) error {
 	if err != nil {
 		return fmt.Errorf("vector space registry: %w", err)
 	}
+	// Subscription evaluators are resolved at startup: an activation never
+	// switches one (registry.PlanActivation).
+	evaluators := cfg.evaluators(resolved)
+	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
+	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents}
+	// External normalization runs in the worker only, before publication.
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: live}
+	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
+	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Routing: store}
+	// The plan's ingestion plugin segments and embeds every Version, encodes
+	// the queries of its spaces and derives rebuild targets; each call
+	// resolves the plugin the plan names at that moment.
+	ingestor := pluginhttp.LiveIngestor{Live: live}
+	deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
+	search.Spaces = ingestor
+	processor.Retrieval, processor.Enrichment = search, search
+	processor.Plugin = deriver
+	rebuilder.Plugin = deriver
+	// A retrieval plugin answers every search: it requests candidates, which
+	// search serves after authorization and hydration, and ranks them.
+	// Without one the built-in path answers the default profile.
+	if resolved.Retrieval() != nil {
+		search.Ranker, search.Registry = pluginhttp.LiveRetriever{Live: live, Started: resolved.Retrieval()}, store
+	}
+	// The api that served an activation follows it at once; new Corpora
+	// start on the spaces it registered.
+	pluginRegistry.Activated = func(ctx context.Context) {
+		follower.Refresh(ctx)
+		if err := alignDefaultGeneration(ctx, store); err != nil {
+			slog.Error("new Corpora stay on the previous vector spaces until the next start", "error", err)
+		}
+	}
+	go follower.Run(ctx, planPoll)
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	probes.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +426,7 @@ func Run(command string) error {
 			evaluationMetrics.Write(w)
 		}
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
-		slog.Info("plugins pinned", "plugins", pins.Describe(), "evaluators", len(evaluators))
+		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
@@ -396,11 +434,14 @@ func Run(command string) error {
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
+		// The api checks registered plugins with the Contract Runner in
+		// process; a check a restart interrupted runs again after its lease.
+		go pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute)
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{ContentStore: store}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
-			// Operators read the plugin registry (plugins:admin).
+			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))

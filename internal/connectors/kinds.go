@@ -52,8 +52,9 @@ func (r *Registry) Describe() []KindDescription {
 	if r == nil {
 		return out
 	}
+	current := r.current()
 	for _, name := range r.Enabled() {
-		c := r.kinds[name].connector
+		c := current[name].connector
 		d := KindDescription{Kind: name, Title: name, ConfigSchema: json.RawMessage(c.ConfigSchema()), Credential: CredentialNone, DefaultInterval: c.DefaultInterval()}
 		var annotations struct{ Title, Description string }
 		if json.Unmarshal(d.ConfigSchema, &annotations) == nil {

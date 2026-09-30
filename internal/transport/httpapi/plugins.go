@@ -1,33 +1,59 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-// WithPlugins enables the operator reads of the plugin registry.
+// WithPlugins enables the operator routes of the plugin registry.
 func WithPlugins(service registry.Service) Option {
 	return func(a *API) { a.Plugins = service }
 }
 
-// pluginRoutes serves GET /v0/admin/plugins and GET /v0/admin/plugins/plan,
-// both behind plugins:admin.
+const pluginsPath = "/v0/admin/plugins"
+
+// pluginRoutes serves the plugin registry, every route behind plugins:admin:
+// GET and POST /v0/admin/plugins, GET /v0/admin/plugins/plan,
+// GET /v0/admin/plugins/plans/{plan_id}, GET /v0/admin/plugins/{registration_id}
+// and POST /v0/admin/plugins/{registration_id}/activate.
 func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if r.URL.Path != "/v0/admin/plugins" && r.URL.Path != "/v0/admin/plugins/plan" {
+	rest, ok := strings.CutPrefix(r.URL.Path, pluginsPath)
+	if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
+		return false
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	segments := strings.Split(rest, "/")
+	method := "GET"
+	switch {
+	case rest == "":
+		if r.Method == "POST" {
+			method = "POST"
+		}
+	case len(segments) == 2 && segments[0] == "plans" && segments[1] != "":
+	case len(segments) == 2 && segments[1] == "activate" && segments[0] != "":
+		method = "POST"
+	case len(segments) == 1:
+	default:
 		return false
 	}
 	switch {
-	case r.Method != "GET":
+	case r.Method != method:
 		failure(w, 405, "method_not_allowed")
 	case !scope.Allows(registry.Action):
 		failure(w, 403, "forbidden")
 	case a.Plugins.Store == nil:
 		failure(w, 404, "not_found")
-	case r.URL.Path == "/v0/admin/plugins":
+	case rest == "" && method == "POST":
+		a.registerPlugin(w, r, scope)
+	case rest == "":
 		registrations, err := a.Plugins.Registrations(r.Context(), scope)
 		if err != nil {
 			pluginFailure(w, err)
@@ -35,35 +61,122 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 		}
 		out := transport.PluginRegistrationList{Items: make([]transport.PluginRegistration, 0, len(registrations))}
 		for _, reg := range registrations {
-			item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
-			if reg.ArtifactDigest != "" {
-				digest := reg.ArtifactDigest
-				item.ArtifactDigest = &digest
-			}
-			out.Items = append(out.Items, item)
+			reg.Check = nil
+			out.Items = append(out.Items, registrationToTransport(reg))
 		}
 		send(w, 200, out)
-	default:
+	case rest == "plan":
 		plan, err := a.Plugins.ActivePlan(r.Context(), scope)
+		sendPlan(w, plan, err)
+	case segments[0] == "plans":
+		plan, err := a.Plugins.PipelinePlan(r.Context(), scope, segments[1])
+		sendPlan(w, plan, err)
+	case len(segments) == 2:
+		plan, err := a.Plugins.Activate(r.Context(), scope, segments[0])
+		sendPlan(w, plan, err)
+	default:
+		reg, err := a.Plugins.Registration(r.Context(), scope, segments[0])
 		if err != nil {
 			pluginFailure(w, err)
 			return true
 		}
-		out := transport.PipelinePlan{PlanId: plan.ID, CreatedAt: plan.CreatedAt, ActivatedAt: plan.ActivatedAt, Roles: make([]transport.PipelinePlanRole, 0, len(plan.Roles))}
-		for _, role := range plan.Roles {
-			out.Roles = append(out.Roles, transport.PipelinePlanRole{Role: role.Role, RegistrationId: role.RegistrationID, PluginId: role.PluginID, Version: role.Version})
-		}
-		send(w, 200, out)
+		send(w, 200, registrationToTransport(reg))
 	}
 	return true
 }
 
+// pluginRegistrationRequest is the registration command; configuration stays
+// raw for the manifest's configuration schema.
+type pluginRegistrationRequest struct {
+	IdempotencyKey string                `json:"idempotency_key"`
+	Endpoint       string                `json:"endpoint"`
+	Manifest       string                `json:"manifest"`
+	Configuration  json.RawMessage       `json:"configuration"`
+	Routes         []plugins.RouteConfig `json:"routes"`
+	Kinds          []string              `json:"kinds"`
+	Spaces         map[string]string     `json:"spaces"`
+}
+
+func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	var in pluginRegistrationRequest
+	if !decodeInto(w, r, a.pluginSchema, &in) {
+		return
+	}
+	reg, err := a.Plugins.Register(r.Context(), scope, registry.Request{Key: in.IdempotencyKey, Manifest: []byte(in.Manifest), Endpoint: in.Endpoint,
+		Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces})
+	if err != nil {
+		pluginFailure(w, err)
+		return
+	}
+	w.Header().Set("Location", pluginsPath+"/"+reg.ID)
+	send(w, 202, registrationToTransport(reg))
+}
+
+func registrationToTransport(reg registry.Registration) transport.PluginRegistration {
+	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
+	if reg.ArtifactDigest != "" {
+		digest := reg.ArtifactDigest
+		item.ArtifactDigest = &digest
+	}
+	if c := reg.Check; c != nil {
+		report := transport.PluginCheckReport{Certified: c.Certified, CheckedAt: c.CheckedAt, Passed: c.Passed, Failed: c.Failed, Skipped: c.Skipped, Checks: make([]transport.PluginCheck, 0, len(c.Checks))}
+		for _, check := range c.Checks {
+			out := transport.PluginCheck{Id: check.ID, Title: check.Title, Status: transport.PluginCheckStatus(check.Status), Issues: make([]transport.PluginIssue, 0, len(check.Issues))}
+			if check.Contribution != "" {
+				contribution := check.Contribution
+				out.Contribution = &contribution
+			}
+			for _, issue := range check.Issues {
+				out.Issues = append(out.Issues, transport.PluginIssue{Code: issue.Code, Message: issue.Message, Path: optionalString(issue.Path)})
+			}
+			report.Checks = append(report.Checks, out)
+		}
+		item.Check = &report
+	}
+	return item
+}
+
+func sendPlan(w http.ResponseWriter, plan registry.Plan, err error) {
+	if err != nil {
+		pluginFailure(w, err)
+		return
+	}
+	out := transport.PipelinePlan{PlanId: plan.ID, CreatedAt: plan.CreatedAt, ActivatedAt: plan.ActivatedAt, Source: transport.PipelinePlanSource(plan.Source), Roles: make([]transport.PipelinePlanRole, 0, len(plan.Roles))}
+	if out.Source == "" {
+		out.Source = transport.PipelinePlanSource(registry.SourceConfiguration)
+	}
+	for _, role := range plan.Roles {
+		out.Roles = append(out.Roles, transport.PipelinePlanRole{Role: role.Role, RegistrationId: role.RegistrationID, PluginId: role.PluginID, Version: role.Version})
+	}
+	send(w, 200, out)
+}
+
+// pluginFailure maps registry errors; refusals that list issues carry them
+// in the message.
 func pluginFailure(w http.ResponseWriter, err error) {
+	detailed := func(status int, code string) {
+		e := apiError(status, code)
+		e.Message = err.Error()
+		send(w, status, e)
+	}
 	switch {
 	case errors.Is(err, corpus.ErrForbidden):
 		failure(w, 403, "forbidden")
-	case errors.Is(err, registry.ErrNoPlan):
+	case errors.Is(err, registry.ErrNoPlan), errors.Is(err, registry.ErrNotFound):
 		failure(w, 404, "not_found")
+	case errors.Is(err, registry.ErrIdempotencyConflict):
+		failure(w, 409, "idempotency_conflict")
+	case errors.Is(err, registry.ErrInvalid):
+		detailed(422, "invalid_plugin")
+	case errors.Is(err, registry.ErrUnsupportedRole):
+		detailed(422, "unsupported_role")
+	case errors.Is(err, registry.ErrNotValidated):
+		detailed(409, "registration_not_validated")
+	case errors.Is(err, registry.ErrConflict):
+		detailed(409, "plugin_conflict")
+	case errors.Is(err, content.ErrSpaceOwner), errors.Is(err, content.ErrSpaceChanged):
+		// The vector space registry refuses the plan's spaces.
+		detailed(409, "plugin_conflict")
 	default:
 		failure(w, 503, "storage_unavailable")
 	}

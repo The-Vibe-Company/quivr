@@ -1,10 +1,13 @@
 package plugins
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 
@@ -69,6 +72,8 @@ type RouteConfig struct {
 type Pin struct {
 	Manifest       Manifest
 	ManifestDigest string
+	// Source is the exact manifest bytes ManifestDigest covers.
+	Source []byte
 	// Path is the manifest file the pin was loaded from.
 	Path     string
 	Endpoint string
@@ -102,6 +107,20 @@ func (e *PinError) Error() string {
 // duplicate, a supported mode).
 func LoadPin(c PinConfig) (*Pin, error) {
 	report := Inspect(c.Manifest)
+	raw, _ := os.ReadFile(report.Path)
+	return loadPin(report, raw, c)
+}
+
+// LoadPinManifest validates a pin whose manifest is given as the exact bytes
+// of its quivr-plugin.yaml rather than a file, as a registered plugin's is
+// (Spec 5): the same rules as LoadPin. label names it in issues and logs.
+func LoadPinManifest(raw []byte, label string, c PinConfig) (*Pin, error) {
+	report := Validate(raw)
+	report.Path = label
+	return loadPin(report, raw, c)
+}
+
+func loadPin(report Report, raw []byte, c PinConfig) (*Pin, error) {
 	refuse := func(issues []Issue) error { return &PinError{Path: report.Path, Issues: issues} }
 	if !report.Valid || report.Manifest == nil {
 		return nil, refuse(report.Errors)
@@ -169,7 +188,13 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	if len(issues) > 0 {
 		return nil, refuse(issues)
 	}
-	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, Kinds: c.Kinds, Spaces: spaces, routes: routes}, nil
+	sum := sha256.Sum256(raw)
+	if "sha256:"+hex.EncodeToString(sum[:]) != report.ManifestDigest {
+		// The file changed between the two reads: keep no bytes that do not
+		// match the digest.
+		raw = nil
+	}
+	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Source: raw, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, Kinds: c.Kinds, Spaces: spaces, routes: routes}, nil
 }
 
 // checkSpaces resolves the vector spaces a pin enables: declared ones, each
@@ -378,6 +403,27 @@ func (p *Pin) Routed(mediaType string) bool {
 	}
 	_, ok := p.routes[mediaType]
 	return ok
+}
+
+// Routes lists the pin's routes, sorted by media type.
+func (p *Pin) Routes() []RouteConfig {
+	if p == nil {
+		return nil
+	}
+	out := make([]RouteConfig, 0, len(p.routes))
+	for _, mediaType := range sortedRouteKeys(p.routes) {
+		out = append(out, p.routes[mediaType])
+	}
+	return out
+}
+
+func sortedRouteKeys(m map[string]RouteConfig) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Route returns the route of a media type.

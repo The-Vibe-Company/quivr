@@ -1267,7 +1267,73 @@
           "plugin_id": "pdf-text",
           "version": "0.1.0"
         }
-      ]
+      ],
+      "source": "configuration"
+    }
+  },
+  {
+    "name": "plugin_registration_request",
+    "schema": "PluginRegistrationRequest",
+    "value": {
+      "idempotency_key": "register-embedder-2",
+      "endpoint": "http://127.0.0.1:9960",
+      "manifest": "id: example.embedder\nversion: 0.2.0\n...",
+      "spaces": {
+        "example.embedder.small": "served"
+      }
+    }
+  },
+  {
+    "name": "plugin_registration_checked",
+    "schema": "PluginRegistration",
+    "value": {
+      "registration_id": "plugin_registration_7c2e",
+      "plugin_id": "example.embedder",
+      "version": "0.2.0",
+      "endpoint": "http://127.0.0.1:9960",
+      "manifest_digest": "sha256:9d41",
+      "contributions": [
+        "ingestion"
+      ],
+      "roles": [
+        "ingestion"
+      ],
+      "state": "rejected",
+      "check": {
+        "certified": false,
+        "checked_at": "2026-09-30T13:00:00Z",
+        "passed": 2,
+        "failed": 1,
+        "skipped": 0,
+        "checks": [
+          {
+            "id": "manifest",
+            "title": "quivr-plugin.yaml is valid (quivr plugin inspect)",
+            "status": "pass",
+            "issues": []
+          },
+          {
+            "id": "health",
+            "title": "GET /v0/health answers 200",
+            "status": "pass",
+            "issues": []
+          },
+          {
+            "id": "discovery",
+            "title": "GET /v0/discovery matches quivr-plugin.yaml",
+            "status": "fail",
+            "issues": [
+              {
+                "code": "discovery_mismatch",
+                "path": "/manifest_digest",
+                "message": "discovery serves another manifest digest; the running plugin was built from a different quivr-plugin.yaml"
+              }
+            ]
+          }
+        ]
+      },
+      "created_at": "2026-09-30T13:00:00Z",
+      "updated_at": "2026-09-30T13:00:01Z"
     }
   }
 ]

@@ -20,6 +20,7 @@ for (const c of cases) {
     PipelinePlan: [['created_at'], ['activated_at']],
     // '*' stands for every index of an array.
     PluginRegistrationList: [['items', '*', 'created_at'], ['items', '*', 'updated_at']],
+    PluginRegistration: [['created_at'], ['updated_at'], ['check', 'checked_at']],
   };
   const expand = (parts) => {
     const star = parts.indexOf('*');

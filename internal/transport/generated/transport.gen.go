@@ -104,19 +104,19 @@ func (e ConnectorKindCatalogCredentialDeposits) Valid() bool {
 
 // Defines values for ConnectorKindDescriptionCredential.
 const (
-	None     ConnectorKindDescriptionCredential = "none"
-	Optional ConnectorKindDescriptionCredential = "optional"
-	Required ConnectorKindDescriptionCredential = "required"
+	ConnectorKindDescriptionCredentialNone     ConnectorKindDescriptionCredential = "none"
+	ConnectorKindDescriptionCredentialOptional ConnectorKindDescriptionCredential = "optional"
+	ConnectorKindDescriptionCredentialRequired ConnectorKindDescriptionCredential = "required"
 )
 
 // Valid indicates whether the value is a known member of the ConnectorKindDescriptionCredential enum.
 func (e ConnectorKindDescriptionCredential) Valid() bool {
 	switch e {
-	case None:
+	case ConnectorKindDescriptionCredentialNone:
 		return true
-	case Optional:
+	case ConnectorKindDescriptionCredentialOptional:
 		return true
-	case Required:
+	case ConnectorKindDescriptionCredentialRequired:
 		return true
 	default:
 		return false
@@ -354,6 +354,45 @@ func (e OperationState) Valid() bool {
 	}
 }
 
+// Defines values for PipelinePlanSource.
+const (
+	Activation    PipelinePlanSource = "activation"
+	Configuration PipelinePlanSource = "configuration"
+)
+
+// Valid indicates whether the value is a known member of the PipelinePlanSource enum.
+func (e PipelinePlanSource) Valid() bool {
+	switch e {
+	case Activation:
+		return true
+	case Configuration:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginCheckStatus.
+const (
+	Fail PluginCheckStatus = "fail"
+	Pass PluginCheckStatus = "pass"
+	Skip PluginCheckStatus = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PluginCheckStatus enum.
+func (e PluginCheckStatus) Valid() bool {
+	switch e {
+	case Fail:
+		return true
+	case Pass:
+		return true
+	case Skip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginRegistrationState.
 const (
 	PluginRegistrationStateActive     PluginRegistrationState = "active"
@@ -378,6 +417,42 @@ func (e PluginRegistrationState) Valid() bool {
 	case PluginRegistrationStateRejected:
 		return true
 	case PluginRegistrationStateValidated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginRegistrationRequestRoutesMode.
+const (
+	PluginRegistrationRequestRoutesModeOptional PluginRegistrationRequestRoutesMode = "optional"
+	PluginRegistrationRequestRoutesModeRequired PluginRegistrationRequestRoutesMode = "required"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationRequestRoutesMode enum.
+func (e PluginRegistrationRequestRoutesMode) Valid() bool {
+	switch e {
+	case PluginRegistrationRequestRoutesModeOptional:
+		return true
+	case PluginRegistrationRequestRoutesModeRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginRegistrationRequestSpaces.
+const (
+	PluginRegistrationRequestSpacesEvaluation PluginRegistrationRequestSpaces = "evaluation"
+	PluginRegistrationRequestSpacesServed     PluginRegistrationRequestSpaces = "served"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationRequestSpaces enum.
+func (e PluginRegistrationRequestSpaces) Valid() bool {
+	switch e {
+	case PluginRegistrationRequestSpacesEvaluation:
+		return true
+	case PluginRegistrationRequestSpacesServed:
 		return true
 	default:
 		return false
@@ -659,16 +734,16 @@ func (e VectorSpaceOwnerKind) Valid() bool {
 
 // Defines values for VectorSpaceRole.
 const (
-	Evaluation VectorSpaceRole = "evaluation"
-	Served     VectorSpaceRole = "served"
+	VectorSpaceRoleEvaluation VectorSpaceRole = "evaluation"
+	VectorSpaceRoleServed     VectorSpaceRole = "served"
 )
 
 // Valid indicates whether the value is a known member of the VectorSpaceRole enum.
 func (e VectorSpaceRole) Valid() bool {
 	switch e {
-	case Evaluation:
+	case VectorSpaceRoleEvaluation:
 		return true
-	case Served:
+	case VectorSpaceRoleServed:
 		return true
 	default:
 		return false
@@ -1291,7 +1366,13 @@ type PipelinePlan struct {
 
 	// Roles One entry per role, sorted by role.
 	Roles []PipelinePlanRole `json:"roles"`
+
+	// Source What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+	Source PipelinePlanSource `json:"source"`
 }
+
+// PipelinePlanSource What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+type PipelinePlanSource string
 
 // PipelinePlanRole defines model for PipelinePlanRole.
 type PipelinePlanRole struct {
@@ -1301,12 +1382,44 @@ type PipelinePlanRole struct {
 	Version        string `json:"version"`
 }
 
+// PluginCheck defines model for PluginCheck.
+type PluginCheck struct {
+	Contribution *string           `json:"contribution,omitempty"`
+	Id           string            `json:"id"`
+	Issues       []PluginIssue     `json:"issues"`
+	Status       PluginCheckStatus `json:"status"`
+	Title        string            `json:"title"`
+}
+
+// PluginCheckStatus defines model for PluginCheck.Status.
+type PluginCheckStatus string
+
+// PluginCheckReport What the Contract Runner reported on a registration; certified plugins are validated.
+type PluginCheckReport struct {
+	Certified bool          `json:"certified"`
+	CheckedAt time.Time     `json:"checked_at"`
+	Checks    []PluginCheck `json:"checks"`
+	Failed    int           `json:"failed"`
+	Passed    int           `json:"passed"`
+	Skipped   int           `json:"skipped"`
+}
+
+// PluginIssue defines model for PluginIssue.
+type PluginIssue struct {
+	Code    string  `json:"code"`
+	Message string  `json:"message"`
+	Path    *string `json:"path,omitempty"`
+}
+
 // PluginRegistration defines model for PluginRegistration.
 type PluginRegistration struct {
 	// ArtifactDigest Artifact digest the plugin reports, recorded as information. Absent when it reports none.
-	ArtifactDigest *string   `json:"artifact_digest,omitempty"`
-	Contributions  []string  `json:"contributions"`
-	CreatedAt      time.Time `json:"created_at"`
+	ArtifactDigest *string `json:"artifact_digest,omitempty"`
+
+	// Check What the Contract Runner reported on a registration; certified plugins are validated.
+	Check         *PluginCheckReport `json:"check,omitempty"`
+	Contributions []string           `json:"contributions"`
+	CreatedAt     time.Time          `json:"created_at"`
 
 	// Endpoint Base URL where the operator runs this plugin version.
 	Endpoint       string `json:"endpoint"`
@@ -1315,19 +1428,52 @@ type PluginRegistration struct {
 	RegistrationId string `json:"registration_id"`
 
 	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
-	Roles     []string                `json:"roles"`
+	Roles []string `json:"roles"`
+
+	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
 	State     PluginRegistrationState `json:"state"`
 	UpdatedAt time.Time               `json:"updated_at"`
 	Version   string                  `json:"version"`
 }
 
-// PluginRegistrationState defines model for PluginRegistration.State.
+// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
 type PluginRegistrationState string
 
 // PluginRegistrationList defines model for PluginRegistrationList.
 type PluginRegistrationList struct {
 	Items []PluginRegistration `json:"items"`
 }
+
+// PluginRegistrationRequest defines model for PluginRegistrationRequest.
+type PluginRegistrationRequest struct {
+	// Configuration Plugin configuration, validated against the manifest's configuration schema.
+	Configuration *map[string]interface{} `json:"configuration,omitempty"`
+
+	// Endpoint Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs https unless it is on loopback.
+	Endpoint       string `json:"endpoint"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// Kinds Alert kinds offered, a subset of those the manifest declares; absent offers them all.
+	Kinds *[]string `json:"kinds,omitempty"`
+
+	// Manifest The exact text of the quivr-plugin.yaml the plugin was built from; its sha256 must be the manifest digest the plugin's discovery reports.
+	Manifest string `json:"manifest"`
+
+	// Routes Media types routed to the plugin's normalizer.
+	Routes *[]struct {
+		MediaType string                               `json:"media_type"`
+		Mode      *PluginRegistrationRequestRoutesMode `json:"mode,omitempty"`
+	} `json:"routes,omitempty"`
+
+	// Spaces Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared space.
+	Spaces *map[string]PluginRegistrationRequestSpaces `json:"spaces,omitempty"`
+}
+
+// PluginRegistrationRequestRoutesMode defines model for PluginRegistrationRequest.Routes.Mode.
+type PluginRegistrationRequestRoutesMode string
+
+// PluginRegistrationRequestSpaces defines model for PluginRegistrationRequest.Spaces.
+type PluginRegistrationRequestSpaces string
 
 // ProcessingSummary Live read view, not a Receipt lifecycle or public workflow identifier. blocked means an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently pending, not a promise of final enrichment. Phase is omitted when idle; required and optional progress do not override Version Availability.
 type ProcessingSummary struct {
@@ -1882,6 +2028,9 @@ type ListSubscriptionsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
+type RegisterPluginJSONRequestBody = PluginRegistrationRequest
+
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
 
@@ -2165,8 +2314,20 @@ type ServerInterface interface {
 	// (GET /v0/admin/plugins)
 	ListPluginRegistrations(w http.ResponseWriter, r *http.Request)
 
+	// (POST /v0/admin/plugins)
+	RegisterPlugin(w http.ResponseWriter, r *http.Request)
+
 	// (GET /v0/admin/plugins/plan)
 	GetActivePipelinePlan(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/admin/plugins/plans/{plan_id})
+	GetPipelinePlan(w http.ResponseWriter, r *http.Request, planId string)
+
+	// (GET /v0/admin/plugins/{registration_id})
+	GetPluginRegistration(w http.ResponseWriter, r *http.Request, registrationId string)
+
+	// (POST /v0/admin/plugins/{registration_id}/activate)
+	ActivatePlugin(w http.ResponseWriter, r *http.Request, registrationId string)
 
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(w http.ResponseWriter, r *http.Request, blobId string)
@@ -2354,11 +2515,103 @@ func (siw *ServerInterfaceWrapper) ListPluginRegistrations(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// RegisterPlugin operation middleware
+func (siw *ServerInterfaceWrapper) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterPlugin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetActivePipelinePlan operation middleware
 func (siw *ServerInterfaceWrapper) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetActivePipelinePlan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPipelinePlan operation middleware
+func (siw *ServerInterfaceWrapper) GetPipelinePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plan_id" -------------
+	var planId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plan_id", r.PathValue("plan_id"), &planId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plan_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPipelinePlan(w, r, planId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginRegistration operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginRegistration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "registration_id" -------------
+	var registrationId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "registration_id", r.PathValue("registration_id"), &registrationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "registration_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginRegistration(w, r, registrationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ActivatePlugin operation middleware
+func (siw *ServerInterfaceWrapper) ActivatePlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "registration_id" -------------
+	var registrationId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "registration_id", r.PathValue("registration_id"), &registrationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "registration_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ActivatePlugin(w, r, registrationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4081,6 +4334,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins", wrapper.RegisterPlugin)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}", wrapper.GetPluginRegistration)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}/activate", wrapper.ActivatePlugin)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans/{plan_id}", wrapper.GetPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/search/profiles", wrapper.ListSearchProfiles)
@@ -4128,6 +4385,55 @@ func (response ListPluginRegistrationsdefaultJSONResponse) VisitListPluginRegist
 	return err
 }
 
+type RegisterPluginRequestObject struct {
+	Body *RegisterPluginJSONRequestBody
+}
+
+type RegisterPluginResponseObject interface {
+	VisitRegisterPluginResponse(w http.ResponseWriter) error
+}
+
+type RegisterPlugin202ResponseHeaders struct {
+	Location *string
+}
+
+type RegisterPlugin202JSONResponse struct {
+	Body    PluginRegistration
+	Headers RegisterPlugin202ResponseHeaders
+}
+
+func (response RegisterPlugin202JSONResponse) VisitRegisterPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegisterPlugindefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RegisterPlugindefaultJSONResponse) VisitRegisterPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetActivePipelinePlanRequestObject struct {
 }
 
@@ -4155,6 +4461,123 @@ type GetActivePipelinePlandefaultJSONResponse struct {
 }
 
 func (response GetActivePipelinePlandefaultJSONResponse) VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPipelinePlanRequestObject struct {
+	PlanId string `json:"plan_id"`
+}
+
+type GetPipelinePlanResponseObject interface {
+	VisitGetPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+type GetPipelinePlan200JSONResponse PipelinePlan
+
+func (response GetPipelinePlan200JSONResponse) VisitGetPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPipelinePlandefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetPipelinePlandefaultJSONResponse) VisitGetPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRegistrationRequestObject struct {
+	RegistrationId string `json:"registration_id"`
+}
+
+type GetPluginRegistrationResponseObject interface {
+	VisitGetPluginRegistrationResponse(w http.ResponseWriter) error
+}
+
+type GetPluginRegistration200JSONResponse PluginRegistration
+
+func (response GetPluginRegistration200JSONResponse) VisitGetPluginRegistrationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRegistrationdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetPluginRegistrationdefaultJSONResponse) VisitGetPluginRegistrationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActivatePluginRequestObject struct {
+	RegistrationId string `json:"registration_id"`
+}
+
+type ActivatePluginResponseObject interface {
+	VisitActivatePluginResponse(w http.ResponseWriter) error
+}
+
+type ActivatePlugin200JSONResponse PipelinePlan
+
+func (response ActivatePlugin200JSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ActivatePlugindefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ActivatePlugindefaultJSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -6341,8 +6764,20 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/plugins)
 	ListPluginRegistrations(ctx context.Context, request ListPluginRegistrationsRequestObject) (ListPluginRegistrationsResponseObject, error)
 
+	// (POST /v0/admin/plugins)
+	RegisterPlugin(ctx context.Context, request RegisterPluginRequestObject) (RegisterPluginResponseObject, error)
+
 	// (GET /v0/admin/plugins/plan)
 	GetActivePipelinePlan(ctx context.Context, request GetActivePipelinePlanRequestObject) (GetActivePipelinePlanResponseObject, error)
+
+	// (GET /v0/admin/plugins/plans/{plan_id})
+	GetPipelinePlan(ctx context.Context, request GetPipelinePlanRequestObject) (GetPipelinePlanResponseObject, error)
+
+	// (GET /v0/admin/plugins/{registration_id})
+	GetPluginRegistration(ctx context.Context, request GetPluginRegistrationRequestObject) (GetPluginRegistrationResponseObject, error)
+
+	// (POST /v0/admin/plugins/{registration_id}/activate)
+	ActivatePlugin(ctx context.Context, request ActivatePluginRequestObject) (ActivatePluginResponseObject, error)
 
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(ctx context.Context, request GetBlobRequestObject) (GetBlobResponseObject, error)
@@ -6570,6 +7005,37 @@ func (sh *strictHandler) ListPluginRegistrations(w http.ResponseWriter, r *http.
 	}
 }
 
+// RegisterPlugin operation middleware
+func (sh *strictHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+	var request RegisterPluginRequestObject
+
+	var body RegisterPluginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RegisterPlugin(ctx, request.(RegisterPluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RegisterPlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RegisterPluginResponseObject); ok {
+		if err := validResponse.VisitRegisterPluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetActivePipelinePlan operation middleware
 func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
 	var request GetActivePipelinePlanRequestObject
@@ -6587,6 +7053,84 @@ func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetActivePipelinePlanResponseObject); ok {
 		if err := validResponse.VisitGetActivePipelinePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPipelinePlan operation middleware
+func (sh *strictHandler) GetPipelinePlan(w http.ResponseWriter, r *http.Request, planId string) {
+	var request GetPipelinePlanRequestObject
+
+	request.PlanId = planId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPipelinePlan(ctx, request.(GetPipelinePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPipelinePlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPipelinePlanResponseObject); ok {
+		if err := validResponse.VisitGetPipelinePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginRegistration operation middleware
+func (sh *strictHandler) GetPluginRegistration(w http.ResponseWriter, r *http.Request, registrationId string) {
+	var request GetPluginRegistrationRequestObject
+
+	request.RegistrationId = registrationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginRegistration(ctx, request.(GetPluginRegistrationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginRegistration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginRegistrationResponseObject); ok {
+		if err := validResponse.VisitGetPluginRegistrationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ActivatePlugin operation middleware
+func (sh *strictHandler) ActivatePlugin(w http.ResponseWriter, r *http.Request, registrationId string) {
+	var request ActivatePluginRequestObject
+
+	request.RegistrationId = registrationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ActivatePlugin(ctx, request.(ActivatePluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ActivatePlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ActivatePluginResponseObject); ok {
+		if err := validResponse.VisitActivatePluginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

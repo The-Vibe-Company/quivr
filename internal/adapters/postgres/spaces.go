@@ -26,7 +26,16 @@ func (s ContentStore) RegisterSpaces(ctx context.Context, spaces []content.Regis
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
+	if err = registerSpaces(ctx, tx, spaces); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// registerSpaces is RegisterSpaces inside tx, which a plugin activation
+// commits with its plan.
+func registerSpaces(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSpace) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
 		return err
 	}
 	ids := make([]string, 0, len(spaces))
@@ -66,10 +75,8 @@ func (s ContentStore) RegisterSpaces(ctx context.Context, spaces []content.Regis
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE vector_spaces SET role='retired' WHERE NOT (id=ANY($1)) AND role<>'retired'`, ids); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err := tx.Exec(ctx, `UPDATE vector_spaces SET role='retired' WHERE NOT (id=ANY($1)) AND role<>'retired'`, ids)
+	return err
 }
 
 func ownerName(owner string) string {

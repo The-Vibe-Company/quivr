@@ -97,6 +97,8 @@ class Stack:
         # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
         s['tei_url']='http://'+tei;self.save()
         cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
+            # api and worker follow a plugin activation within this delay (THE-781).
+            plugin_plan_poll='200ms',
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
@@ -226,6 +228,10 @@ class Stack:
     def start_worker(self):
         self.spawn('worker','worker.json');self.await_ready('worker_probe_port')
     def start_short_retention_api(self):
+        # Its pins are the stack's current ones: a start with other pins would apply them to the plan all
+        # processes follow (THE-781).
+        cfg=json.loads((self.directory/'config.json').read_text());s=self.state
+        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.save()

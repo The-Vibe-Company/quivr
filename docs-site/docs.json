@@ -78,6 +78,7 @@
                   "contracts/plugins/v0/index",
                   "plugins/alerts/index",
                   "plugins/core-ingest/index",
+                  "plugins/switch-plugins-without-restarting",
                   "plugins/x-list/index"
                 ]
               },

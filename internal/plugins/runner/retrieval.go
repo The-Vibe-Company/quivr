@@ -55,7 +55,7 @@ func (r *run) retrievalFixtures(own []ownFixture) []retrievalRun {
 			continue
 		}
 		label := normativeFixturePrefix + name
-		built, issues := devhost.BuildRetrievalRun(raw, r.m)
+		built, issues := devhost.BuildRetrievalRun(r.configured(raw, "retrieval"), r.m)
 		if len(issues) > 0 {
 			notes = append(notes, fmt.Sprintf("%s skipped: %s", label, issues[0].Message))
 			continue

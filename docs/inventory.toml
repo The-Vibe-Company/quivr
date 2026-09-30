@@ -83,6 +83,7 @@ excluded = [
 "docs/first-search.md" = { audience = "functional", kind = "guide", summary = "create a Corpus, add a Record and search it, step by step" }
 "docs/keyword-alerts.md" = { audience = "functional", kind = "guide", summary = "write alert queries and set up metadata filters" }
 "docs/plugins/run-a-connector-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "pin a connector plugin and read the health it reports" }
+"docs/plugins/switch-plugins-without-restarting.md" = { audience = "plugin-author", kind = "concept", summary = "register, check and activate a plugin version while api and worker keep running" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide", summary = "from `quivr plugin init` to a searchable, observable Record" }
 "docs/plugins/write-a-retrieval-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "decide how search results are found and ranked, under named profiles" }
 "docs/plugins/write-an-ingestion-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "decide how articles are cut and embedded, and move a Corpus onto it" }

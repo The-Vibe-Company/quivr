@@ -74,6 +74,10 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
 | [`GET /v0/admin/plugins`](#get-v0adminplugins) | `listPluginRegistrations` | `plugins:admin` |
+| [`POST /v0/admin/plugins`](#post-v0adminplugins) | `registerPlugin` | `plugins:admin` |
+| [`GET /v0/admin/plugins/{registration_id}`](#get-v0adminpluginsregistration_id) | `getPluginRegistration` | `plugins:admin` |
+| [`POST /v0/admin/plugins/{registration_id}/activate`](#post-v0adminpluginsregistration_idactivate) | `activatePlugin` | `plugins:admin` |
+| [`GET /v0/admin/plugins/plans/{plan_id}`](#get-v0adminpluginsplansplan_id) | `getPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
@@ -1122,7 +1126,7 @@ Connector kinds enabled in this deployment, with the JSON Schemas that validate 
 
 Operation `listPluginRegistrations`. Requires `plugins:admin`.
 
-Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. Every start records the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
 
 **Responses**
 
@@ -1131,11 +1135,83 @@ Every plugin version this deployment has registered, oldest first, with its endp
 | `200` | `application/json` [`PluginRegistrationList`](#pluginregistrationlist) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 503 storage unavailable. |
 
+#### `POST /v0/admin/plugins` {#post-v0adminplugins}
+
+Operation `registerPlugin`. Requires `plugins:admin`.
+
+Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+
+**Request body** (required): `application/json` [`PluginRegistrationRequest`](#pluginregistrationrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `202` | `application/json` [`PluginRegistration`](#pluginregistration)<br /><br />Header `Location`: string (uri-reference). The registration's read URL, which reports the check once it ran. | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 409 idempotency_conflict, 422 invalid_schema or invalid_plugin, 503 storage unavailable. |
+
+#### `GET /v0/admin/plugins/{registration_id}` {#get-v0adminpluginsregistration_id}
+
+Operation `getPluginRegistration`. Requires `plugins:admin`.
+
+One registration with the Contract Runner's report once its check ran. Requires plugins:admin.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `registration_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PluginRegistration`](#pluginregistration) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 503 storage unavailable. |
+
+#### `POST /v0/admin/plugins/{registration_id}/activate` {#post-v0adminpluginsregistration_idactivate}
+
+Operation `activatePlugin`. Requires `plugins:admin`.
+
+Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `registration_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 409 registration_not_validated or plugin_conflict, 422 unsupported_role, 503 storage unavailable. |
+
+#### `GET /v0/admin/plugins/plans/{plan_id}` {#get-v0adminpluginsplansplan_id}
+
+Operation `getPipelinePlan`. Requires `plugins:admin`.
+
+Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `plan_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 503 storage unavailable. |
+
 #### `GET /v0/admin/plugins/plan` {#get-v0adminpluginsplan}
 
 Operation `getActivePipelinePlan`. Requires `plugins:admin`.
 
-The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 
 **Responses**
 
@@ -3188,9 +3264,64 @@ required:
 | `artifact_digest` | string |  | Artifact digest the plugin reports, recorded as information. Absent when it reports none. Minimum length `1`. |
 | `contributions` | array of string | yes |  |
 | `roles` | array of string | yes | Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:&lt;plugin id> or connector:&lt;kind>. The active plan says which it serves. |
-| `state` | string | yes | One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `state` | string | yes | registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out. One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `check` | [`PluginCheckReport`](#plugincheckreport) |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
+
+Example `plugin_registration_checked`:
+
+```json
+{
+  "registration_id": "plugin_registration_7c2e",
+  "plugin_id": "example.embedder",
+  "version": "0.2.0",
+  "endpoint": "http://127.0.0.1:9960",
+  "manifest_digest": "sha256:9d41",
+  "contributions": [
+    "ingestion"
+  ],
+  "roles": [
+    "ingestion"
+  ],
+  "state": "rejected",
+  "check": {
+    "certified": false,
+    "checked_at": "2026-09-30T13:00:00Z",
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0,
+    "checks": [
+      {
+        "id": "manifest",
+        "title": "quivr-plugin.yaml is valid (quivr plugin inspect)",
+        "status": "pass",
+        "issues": []
+      },
+      {
+        "id": "health",
+        "title": "GET /v0/health answers 200",
+        "status": "pass",
+        "issues": []
+      },
+      {
+        "id": "discovery",
+        "title": "GET /v0/discovery matches quivr-plugin.yaml",
+        "status": "fail",
+        "issues": [
+          {
+            "code": "discovery_mismatch",
+            "path": "/manifest_digest",
+            "message": "discovery serves another manifest digest; the running plugin was built from a different quivr-plugin.yaml"
+          }
+        ]
+      }
+    ]
+  },
+  "created_at": "2026-09-30T13:00:00Z",
+  "updated_at": "2026-09-30T13:00:01Z"
+}
+```
 
 <Accordion title="Full schema">
 
@@ -3236,6 +3367,9 @@ properties:
       - draining
       - inactive
       - rejected
+    description: registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
+  check:
+    $ref: '#/components/schemas/PluginCheckReport'
   created_at:
     type: string
     format: date-time
@@ -3253,6 +3387,219 @@ required:
   - state
   - created_at
   - updated_at
+```
+
+</Accordion>
+
+### `PluginRegistrationRequest` {#pluginregistrationrequest}
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idempotency_key` | string | yes | Minimum length `1`. Maximum length `200`. |
+| `endpoint` | string | yes | Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs https unless it is on loopback. Minimum length `1`. Maximum length `2048`. |
+| `manifest` | string | yes | The exact text of the quivr-plugin.yaml the plugin was built from; its sha256 must be the manifest digest the plugin's discovery reports. Minimum length `1`. Maximum length `262144`. |
+| `configuration` | object |  | Plugin configuration, validated against the manifest's configuration schema. |
+| `routes` | array of object |  | Media types routed to the plugin's normalizer. At most `100` items. |
+| `routes[].media_type` | string | yes | Minimum length `1`. |
+| `routes[].mode` | string |  | One of `required`, `optional`. |
+| `kinds` | array of string |  | Alert kinds offered, a subset of those the manifest declares; absent offers them all. At most `100` items. Each item: Minimum length `1`. |
+| `spaces` | map of string |  | Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared space. |
+
+Example `plugin_registration_request`:
+
+```json
+{
+  "idempotency_key": "register-embedder-2",
+  "endpoint": "http://127.0.0.1:9960",
+  "manifest": "id: example.embedder\nversion: 0.2.0\n...",
+  "spaces": {
+    "example.embedder.small": "served"
+  }
+}
+```
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+    maxLength: 200
+  endpoint:
+    type: string
+    minLength: 1
+    maxLength: 2048
+    description: Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs https unless it is on loopback.
+  manifest:
+    type: string
+    minLength: 1
+    maxLength: 262144
+    description: The exact text of the quivr-plugin.yaml the plugin was built from; its sha256 must be the manifest digest the plugin's discovery reports.
+  configuration:
+    type: object
+    description: Plugin configuration, validated against the manifest's configuration schema.
+  routes:
+    type: array
+    maxItems: 100
+    description: Media types routed to the plugin's normalizer.
+    items:
+      type: object
+      additionalProperties: false
+      properties:
+        media_type:
+          type: string
+          minLength: 1
+        mode:
+          type: string
+          enum:
+            - required
+            - optional
+      required:
+        - media_type
+  kinds:
+    type: array
+    maxItems: 100
+    description: Alert kinds offered, a subset of those the manifest declares; absent offers them all.
+    items:
+      type: string
+      minLength: 1
+  spaces:
+    type: object
+    description: Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared space.
+    additionalProperties:
+      type: string
+      enum:
+        - served
+        - evaluation
+required:
+  - idempotency_key
+  - endpoint
+  - manifest
+```
+
+</Accordion>
+
+### `PluginCheckReport` {#plugincheckreport}
+
+What the Contract Runner reported on a registration; certified plugins are validated.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `certified` | boolean | yes |  |
+| `checked_at` | string (date-time) | yes |  |
+| `passed` | integer | yes | Minimum `0`. |
+| `failed` | integer | yes | Minimum `0`. |
+| `skipped` | integer | yes | Minimum `0`. |
+| `checks` | array of [`PluginCheck`](#plugincheck) | yes |  |
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+description: What the Contract Runner reported on a registration; certified plugins are validated.
+properties:
+  certified:
+    type: boolean
+  checked_at:
+    type: string
+    format: date-time
+  passed:
+    type: integer
+    minimum: 0
+  failed:
+    type: integer
+    minimum: 0
+  skipped:
+    type: integer
+    minimum: 0
+  checks:
+    type: array
+    items:
+      $ref: '#/components/schemas/PluginCheck'
+required:
+  - certified
+  - checked_at
+  - passed
+  - failed
+  - skipped
+  - checks
+```
+
+</Accordion>
+
+### `PluginCheck` {#plugincheck}
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Minimum length `1`. |
+| `title` | string | yes | Minimum length `1`. |
+| `contribution` | string |  | Minimum length `1`. |
+| `status` | string | yes | One of `pass`, `fail`, `skip`. |
+| `issues` | array of [`PluginIssue`](#pluginissue) | yes |  |
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  id:
+    type: string
+    minLength: 1
+  title:
+    type: string
+    minLength: 1
+  contribution:
+    type: string
+    minLength: 1
+  status:
+    type: string
+    enum:
+      - pass
+      - fail
+      - skip
+  issues:
+    type: array
+    items:
+      $ref: '#/components/schemas/PluginIssue'
+required:
+  - id
+  - title
+  - status
+  - issues
+```
+
+</Accordion>
+
+### `PluginIssue` {#pluginissue}
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `code` | string | yes | Minimum length `1`. |
+| `path` | string |  |  |
+| `message` | string | yes | Minimum length `1`. |
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  code:
+    type: string
+    minLength: 1
+  path:
+    type: string
+  message:
+    type: string
+    minLength: 1
+required:
+  - code
+  - message
 ```
 
 </Accordion>
@@ -3364,6 +3711,7 @@ required:
 | `plan_id` | string | yes | Minimum length `1`. |
 | `created_at` | string (date-time) | yes |  |
 | `activated_at` | string (date-time) | yes |  |
+| `source` | string | yes | What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. One of `configuration`, `activation`. |
 | `roles` | array of [`PipelinePlanRole`](#pipelineplanrole) | yes | One entry per role, sorted by role. |
 
 Example `pipeline_plan`:
@@ -3386,7 +3734,8 @@ Example `pipeline_plan`:
       "plugin_id": "pdf-text",
       "version": "0.1.0"
     }
-  ]
+  ],
+  "source": "configuration"
 }
 ```
 
@@ -3405,6 +3754,12 @@ properties:
   activated_at:
     type: string
     format: date-time
+  source:
+    type: string
+    enum:
+      - configuration
+      - activation
+    description: What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
   roles:
     type: array
     description: One entry per role, sorted by role.
@@ -3414,6 +3769,7 @@ required:
   - plan_id
   - created_at
   - activated_at
+  - source
   - roles
 ```
 

@@ -44,16 +44,14 @@ type PinSet struct {
 // a connector kind provided by two plugins and a reserved evaluator id refuse
 // startup. Nothing contacts a plugin.
 func LoadPins(configs []PinConfig) (*PinSet, error) {
-	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}}
 	var issues []Issue
-	byID := map[string]int{}
+	pins := make([]*Pin, len(configs))
 	for i, c := range configs {
-		prefix := fmt.Sprintf("/plugins/%d", i)
 		pin, err := LoadPin(c)
 		if err != nil {
 			if pe, ok := err.(*PinError); ok {
 				for _, issue := range pe.Issues {
-					issue.Path = prefix + issue.Path
+					issue.Path = fmt.Sprintf("/plugins/%d", i) + issue.Path
 					issue.Message = fmt.Sprintf("%s (%s)", issue.Message, pe.Path)
 					issues = append(issues, issue)
 				}
@@ -61,6 +59,25 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 			}
 			return nil, err
 		}
+		pins[i] = pin
+	}
+	if len(issues) > 0 {
+		return nil, &PinError{Path: "plugins", Issues: issues}
+	}
+	return NewPinSet(pins)
+}
+
+// NewPinSet routes the Contributions of pins already validated one by one
+// (LoadPin, LoadPinManifest), with the rules of LoadPins: a plugin id twice,
+// a media type routed to two plugins, a connector kind provided by two, a
+// second ingestion or retrieval plugin and a reserved evaluator id are
+// conflicts. Issue paths name each pin by its position.
+func NewPinSet(pins []*Pin) (*PinSet, error) {
+	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}}
+	var issues []Issue
+	byID := map[string]int{}
+	for i, pin := range pins {
+		prefix := fmt.Sprintf("/plugins/%d", i)
 		id := pin.Manifest.ID
 		for _, reserved := range ReservedEvaluatorIDs {
 			if id == reserved {

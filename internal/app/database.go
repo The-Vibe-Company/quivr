@@ -13,16 +13,27 @@ import (
 )
 
 // BootstrapDatabase is the PostgreSQL part of `quivr migrate`: it applies the
-// embedded migrations, registers the deployment's vector spaces and routes
-// new Corpora to a default projection generation carrying them. It needs no
-// S3, Weaviate or tokenizer, so a bare database can be prepared for the
-// PostgreSQL adapter tests (make adapter-postgres). Every step is idempotent.
+// embedded migrations, registers the deployment's vector spaces (until a
+// Pipeline Plan is active: api and worker then register the plan's) and
+// routes new Corpora to a default projection generation carrying them. It
+// needs no S3, Weaviate or tokenizer, so a bare database can be prepared for
+// the PostgreSQL adapter tests (make adapter-postgres). Every step is
+// idempotent.
 func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content.RegisteredSpace) error {
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, spaces); err != nil {
-		return fmt.Errorf("vector space registry: %w", err)
+	// Once a Pipeline Plan is active, api and worker register the spaces of
+	// the plan they follow, which an operator may have changed since the
+	// configuration last applied; migrate leaves them alone.
+	plan, err := (postgres.PluginStore{Pool: pool}).ActivePlanID(ctx)
+	if err != nil {
+		return fmt.Errorf("pipeline plan: %w", err)
+	}
+	if plan == "" {
+		if err := (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, spaces); err != nil {
+			return fmt.Errorf("vector space registry: %w", err)
+		}
 	}
 	if err := (postgres.ContentStore{Pool: pool}).BootstrapGeneration(ctx, weaviate.InitialCollection, tei.Space().ID); err != nil {
 		return fmt.Errorf("default projection generation: %w", err)
