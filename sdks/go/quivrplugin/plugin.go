@@ -1,7 +1,8 @@
 // Package quivrplugin implements the Quivr Plugin Protocol v0 connector
 // Contribution (Plugin API 0.3) so that a source collector is one Go type,
-// and the ingestion Contribution (Plugin API 0.6) so that a segmenter and
-// embedder is one Go type.
+// the ingestion Contribution (Plugin API 0.6) so that a segmenter and
+// embedder is one Go type, and the retrieval Contribution (Plugin API 0.7)
+// so that a search strategy is one Go type.
 // See the contract in contracts/plugins/v0/README.md and the guide in
 // sdks/go/README.md.
 package quivrplugin
@@ -43,6 +44,7 @@ type Plugin struct {
 	configSch *jsonschema.Schema
 	spool     spool
 	ingester  Ingester
+	retriever Retriever
 }
 
 type kind struct {
@@ -125,6 +127,9 @@ func (p *Plugin) checkRegistered() error {
 	if p.m.Ingestion != nil && p.ingester == nil {
 		return fmt.Errorf("the manifest declares the ingestion Contribution; register an Ingester with Plugin.Ingestion")
 	}
+	if p.m.Retrieval != nil && p.retriever == nil {
+		return fmt.Errorf("the manifest declares the retrieval Contribution; register a Retriever with Plugin.Retrieval")
+	}
 	if p.m.Connector == nil {
 		return nil
 	}
@@ -175,6 +180,9 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/ingestion/segment_and_embed", p.serveSegmentAndEmbed)
 		mux.HandleFunc("POST /v0/contributions/ingestion/embed_query", p.serveEmbedQuery)
 	}
+	if p.m.Retrieval != nil {
+		mux.HandleFunc("POST /v0/contributions/retrieval/search", p.serveSearch)
+	}
 	if p.m.Connector == nil {
 		return mux, nil
 	}
@@ -198,6 +206,9 @@ func (p *Plugin) contributions() []string {
 	}
 	if p.m.Ingestion != nil {
 		names = append(names, "ingestion")
+	}
+	if p.m.Retrieval != nil {
+		names = append(names, "retrieval")
 	}
 	return names
 }

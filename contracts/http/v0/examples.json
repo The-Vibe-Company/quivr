@@ -792,7 +792,7 @@
         "corpus_news"
       ],
       "mode": "hybrid",
-      "profile": "balanced",
+      "profile": "default",
       "limit": 10
     }
   },
@@ -825,7 +825,7 @@
         }
       ],
       "retrieval_profile": {
-        "name": "balanced",
+        "name": "default",
         "version": "quivr.text.fixture.v1"
       }
     }
@@ -857,9 +857,67 @@
         }
       ],
       "retrieval_profile": {
-        "name": "balanced",
+        "name": "default",
         "version": "quivr.text.fixture.v1"
       }
+    }
+  },
+  {
+    "name": "plugin_ranked_search_results",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_1",
+          "version_id": "version_1",
+          "part_key": "body",
+          "segment_id": "segment_1",
+          "segmentation_id": "segmentation_1",
+          "projection_generation_id": "generation_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "énergie 🌞",
+            "start": 3,
+            "end": 12,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          },
+          "explanation": "rank 1 by keywords, rank 2 by the served space"
+        }
+      ],
+      "retrieval_profile": {
+        "name": "deep",
+        "version": "plugin:example.fusion@0.1.0/deep"
+      },
+      "usage": {
+        "rounds": 2,
+        "elapsed_ms": 84,
+        "paid_calls": 0,
+        "cost_cents": 0
+      }
+    }
+  },
+  {
+    "name": "search_profiles",
+    "schema": "SearchProfileList",
+    "value": {
+      "items": [
+        {
+          "name": "default",
+          "description": "Keywords and vectors fused by rank.",
+          "max_latency_ms": 500,
+          "max_cost_cents": 0,
+          "provider": {
+            "kind": "plugin",
+            "plugin_id": "example.fusion",
+            "plugin_version": "0.1.0"
+          }
+        }
+      ]
     }
   },
   {

@@ -7,7 +7,8 @@ schedules, checkpoints, credentials and health; your plugin only fetches pages
 from the source. It depends only on `gopkg.in/yaml.v3` and
 `santhosh-tekuri/jsonschema/v6`, never on Quivr's engine packages. Go 1.24 or
 later. It also serves the ingestion Contribution (Plugin API 0.6,
-[below](#an-ingestion-plugin)); write normalizers and alert rules with the
+[below](#an-ingestion-plugin)) and the retrieval Contribution (Plugin API 0.7,
+[below](#a-retrieval-plugin)); write normalizers and alert rules with the
 [Python SDK](../python/README.md).
 
 ```bash
@@ -86,6 +87,20 @@ dimensions and `max_segments` before answering; a `RetryableIngestError` delays
 the Version, a `TerminalIngestError` blocks it.
 [`examples/hash-embedder`](examples/hash-embedder/) is certified in CI, and
 [Write an ingestion plugin](../../docs/plugins/write-an-ingestion-plugin.md)
+covers pinning it.
+
+## A retrieval plugin
+
+Declare `contributions.retrieval` with its profiles (`default` required) and
+register a `Retriever` through `plugin.Retrieval(impl)`. Each round, `Search`
+answers `quivrplugin.Ask(requests...)` for candidates or
+`quivrplugin.Rank(hits...)` for the final ranking; `req.Served` holds every
+candidate served so far. Before answering, the SDK refuses undeclared profiles
+and checks what the core checks: no requests in the last round, request and `k`
+limits, and a ranking of served candidates only. A `TerminalSearchError`
+refuses the query. [`examples/fusion-retriever`](examples/fusion-retriever/) is
+certified in CI, and
+[Write a retrieval plugin](../../docs/plugins/write-a-retrieval-plugin.md)
 covers pinning it.
 
 ## What the SDK does

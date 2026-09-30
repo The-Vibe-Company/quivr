@@ -1,0 +1,11 @@
+{
+  "requests": [
+    {
+      "primitive": "bm25",
+      "field": "source",
+      "query_text": "harbour strike",
+      "k": 2,
+      "space": "example.words.small@1"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -362,20 +363,41 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		}
 		target = name
 	}
-	branch := fmt.Sprintf("bm25:{query:%s,properties:[\"title^2\",\"body\"]}", quote(q.Query))
+	// The source field ranks the title and body as written; the lexical field
+	// ranks the lexical text an ingestion plugin produced.
+	properties := `["title^2","body"]`
+	if q.Field == retrieval.FieldLexical {
+		properties = `["` + lexicalProperty + `"]`
+	}
+	alpha, fusion := 0.5, "relativeScoreFusion"
+	if q.Hybrid != nil {
+		alpha = q.Hybrid.Alpha
+		if q.Hybrid.Fusion == retrieval.FusionRanked {
+			fusion = "rankedFusion"
+		}
+	}
+	branch := fmt.Sprintf("bm25:{query:%s,properties:%s}", quote(q.Query), properties)
 	vector, _ := json.Marshal(q.Vector)
 	if q.Mode == "semantic" {
 		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]}", vector, quote(target))
 	}
 	if q.Mode == "hybrid" {
-		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:0.5,fusionType:relativeScoreFusion,properties:[\"title^2\",\"body\"],targetVectors:[%s]}", quote(q.Query), vector, quote(target))
+		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:%s,fusionType:%s,properties:%s,targetVectors:[%s]}", quote(q.Query), vector, strconv.FormatFloat(alpha, 'f', -1, 64), fusion, properties, quote(target))
 	}
-	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId}}}", collection, branch, where, retrieval.CandidateLimit)
+	limit := retrieval.CandidateLimit
+	if q.K > 0 {
+		limit = q.K
+	}
+	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId _additional{score distance}}}}", collection, branch, where, limit)
 	var response struct {
 		Data struct {
 			Get map[string][]struct {
 				SegmentID    string `json:"segmentId"`
 				GenerationID string `json:"generationId"`
+				Additional   struct {
+					Score    *string  `json:"score"`
+					Distance *float64 `json:"distance"`
+				} `json:"_additional"`
 			} `json:"Get"`
 		} `json:"data"`
 		Errors []any `json:"errors"`
@@ -396,7 +418,15 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		if r.SegmentID == "" || r.GenerationID == "" {
 			return nil, errors.New("projection candidate invalid")
 		}
-		result = append(result, content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID})
+		// Higher is better: the BM25F or fused score, or 1 minus the distance.
+		score := 0.0
+		switch {
+		case q.Mode == "semantic" && r.Additional.Distance != nil:
+			score = 1 - *r.Additional.Distance
+		case r.Additional.Score != nil:
+			score, _ = strconv.ParseFloat(*r.Additional.Score, 64)
+		}
+		result = append(result, content.Candidate{SegmentID: r.SegmentID, GenerationID: r.GenerationID, Score: score})
 	}
 	return result, nil
 }

@@ -116,7 +116,7 @@ Description the agent receives:
 
 ```text
 Search one or more Corpora for passages that answer a question. Use it to find evidence before answering or citing.
-Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is a ranked hit: rank, record_id, version_id (the Record Version the passage comes from), part_key (the Part of that Version), and excerpt {text, start, end}, where text is the exact slice [start,end) of that Part's text, counted in Unicode code points. Cite a hit with record_id, version_id, part_key and the offsets. An empty items list means nothing matched; an unauthorized corpus_id is an error, never silently dropped.
+Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is a ranked hit: rank, record_id, version_id (the Record Version the passage comes from), part_key (the Part of that Version), and excerpt {text, start, end}, where text is the exact slice [start,end) of that Part's text, counted in Unicode code points. An item may carry an explanation of why it ranks there. Cite a hit with record_id, version_id, part_key and the offsets. An empty items list means nothing matched; an unauthorized corpus_id is an error, never silently dropped.
 ```
 
 | Argument | Type | Required | Description |
@@ -124,7 +124,7 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
 | `query` | string | yes | what to look for, in natural language or keywords<br /><br />At least 1 character. At most 8192 characters. |
 | `corpus_ids` | array of string | yes | Corpora to search, from list_corpora<br /><br />At least 1 item. At most 16 items. Items are unique. Each item: at least 1 character. |
 | `mode` | string | no | lexical matches words, semantic matches meaning, hybrid combines both; the server default is hybrid<br /><br />One of `lexical`, `semantic`, `hybrid`. |
-| `profile` | string | no | retrieval profile; the server default is balanced<br /><br />One of `fast`, `balanced`, `deep`. |
+| `profile` | string | no | search profile name (for example deep, when the deployment's retrieval plugin declares it; GET /v0/search/profiles lists them); the server default is default |
 | `limit` | integer | no | maximum number of hits; the server default is 10<br /><br />Minimum 1. Maximum 50. |
 | `filter` | object | no | narrow the search before ranking |
 
@@ -167,12 +167,8 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
     },
     "profile": {
       "type": "string",
-      "enum": [
-        "fast",
-        "balanced",
-        "deep"
-      ],
-      "description": "retrieval profile; the server default is balanced"
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "search profile name (for example deep, when the deployment's retrieval plugin declares it; GET /v0/search/profiles lists them); the server default is default"
     },
     "limit": {
       "type": "integer",

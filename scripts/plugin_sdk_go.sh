@@ -3,8 +3,9 @@
 #  1. the SDK's embedded schema copies match the contracts;
 #  2. go vet and the SDK unit tests pass (sdks/go is its own module, which the
 #     root `go test ./...` does not enter);
-#  3. the sample connector sdks/go/examples/static-source and the sample
-#     ingestion plugin sdks/go/examples/hash-embedder pass `quivr plugin
+#  3. the sample connector sdks/go/examples/static-source, the sample
+#     ingestion plugin sdks/go/examples/hash-embedder and the sample retrieval
+#     plugin sdks/go/examples/fusion-retriever pass `quivr plugin
 #     inspect` and `quivr plugin test` (JSON reports in
 #     .scratch/plugin-sdk/<example>-contract-report.json);
 #  4. every first-party Go connector plugin under plugins/ passes its own
@@ -38,6 +39,13 @@ cd "$root/sdks/go/examples/hash-embedder"
 grep -q "^CERTIFIED" "$work/hash-embedder-contract.log" || { cat "$work/hash-embedder-contract.log"; exit 1; }
 grep -q "PASS  embed_query" "$work/hash-embedder-contract.log" || { cat "$work/hash-embedder-contract.log"; exit 1; }
 echo "quivr plugin test certified the Go SDK sample ingestion plugin: $work/hash-embedder-contract-report.json"
+cd "$root/sdks/go/examples/fusion-retriever"
+"$GO" build -o /dev/null .
+"$quivr" plugin inspect . > "$work/fusion-retriever-inspect.log"
+"$quivr" plugin test --startup-timeout 120s --report "$work/fusion-retriever-contract-report.json" . > "$work/fusion-retriever-contract.log" 2>&1 || { cat "$work/fusion-retriever-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/fusion-retriever-contract.log" || { cat "$work/fusion-retriever-contract.log"; exit 1; }
+grep -q "PASS  replay .*retrieval" "$work/fusion-retriever-contract.log" || { cat "$work/fusion-retriever-contract.log"; exit 1; }
+echo "quivr plugin test certified the Go SDK sample retrieval plugin: $work/fusion-retriever-contract-report.json"
 
 # First-party Go connector plugins (plugins/<id> with a go.mod, each its own
 # module on the SDK): go vet, their unit tests (parity with the connector they

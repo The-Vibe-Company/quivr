@@ -1,0 +1,102 @@
+# Write a retrieval plugin
+
+A retrieval plugin decides how Quivr finds and ranks search results: which
+candidates to fetch, how to fuse them, whether to re-rank or rewrite the
+query. The core keeps what must stay safe: the index, the query encoders,
+authorization, withdrawal and projection routing. The plugin only ever sees
+candidates the caller may read. The contract is the
+[retrieval Contribution](../../contracts/plugins/v0/README.md#retrieval-contribution);
+this page takes a plugin from its manifest to ranked search results.
+
+## How a search runs
+
+A search runs in rounds, three at most:
+
+1. The core sends the query, the scope, the profile and the vector spaces the
+   requested Corpora carry.
+2. The plugin answers either candidate requests or the final ranking.
+3. For each request, the core queries the index, drops what the caller may
+   not read or what was withdrawn, and serves the rest. It then calls the
+   plugin again with everything served so far.
+
+A candidate request is `bm25` (keywords on the source text, or on the lexical
+text an ingestion plugin produced), `near_vector` (one space's vectors; the
+core encodes `query_text` with the space's owner), or `hybrid` (both in one
+index query). The ranking may hold only served candidates. Each hit can carry
+an explanation, which the API returns with it.
+
+## Declare its profiles
+
+A profile is a named strategy with its budgets. Clients pick one with
+`profile` in `POST /v0/search`, and `default` answers when they name none:
+
+```yaml
+id: acme.ranker
+version: 0.1.0
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.7.0 <0.8.0"}
+contributions:
+  retrieval:
+    profiles:
+      default: {description: Keywords and vectors fused by rank., max_latency_ms: 500, max_cost_cents: 0}
+      deep: {description: The same candidates re-ranked by a model., max_latency_ms: 3000, max_cost_cents: 1}
+    limits: {max_rounds: 2, max_requests: 2, max_candidates: 50}
+```
+
+`max_latency_ms` is a hard deadline: the core stops a search that runs longer
+and answers 504 `search_deadline_exceeded`. `max_cost_cents` is what one
+search may report spending on paid calls (`usage.cost_cents`).
+
+## Implement it
+
+With the [Go SDK](../../sdks/go/README.md), one `Retriever` answers each round:
+`quivrplugin.Ask(requests...)` for candidates, `quivrplugin.Rank(hits...)`
+for the ranking. `req.Served` holds every earlier request with its
+candidates, text included, and `req.ServedSpace()` names the space that
+answers search by default. The answer must be deterministic, so the same
+search ranks the same way from one run to the next. Return
+`TerminalSearchError` for a query you can never answer.
+`sdks/go/examples/fusion-retriever` is a complete example: keyword and vector
+candidates fused by reciprocal rank, and a `deep` profile with one more round.
+
+## Certify it
+
+```sh
+quivr plugin test --report report.json .
+```
+
+The Contract Runner runs offline. It serves candidates from the normative
+fixture and your own retrieval fixtures (`fixtures/*.json` with a top-level
+`retrieval`: a query and a catalogue of candidates). It drives each search
+under every profile and judges every round as the engine does. It also checks
+each profile's deadline and budget, replays the search, and checks that
+invalid requests are refused and that no declared secret leaks. Set
+`expect.top` to pin the first hits of your ranking.
+
+## Pin it
+
+Add it to `plugins` in the `QUIVR_CONFIG` file of the `api` process:
+
+```json
+{"plugins": [
+  {"manifest": "/etc/quivr/plugins/acme-ranker/quivr-plugin.yaml",
+   "endpoint": "http://127.0.0.1:9920"}
+]}
+```
+
+A deployment pins one retrieval plugin (`retrieval_conflict`), and it answers
+every search. `GET /v0/search/profiles` lists its profiles; see the
+[HTTP API reference](../reference/http-api.md). The response names the
+profile that answered and reports `usage`: the rounds, the elapsed time and
+the plugin's reported spend. Without a retrieval plugin, the built-in search
+answers the `default` profile. `balanced` stays accepted as a deprecated name
+of `default` for one release.
+
+## When something fails
+
+| What happens | Effect |
+| --- | --- |
+| The plugin is down or answers a retryable error | 503 `search_unavailable` |
+| The plugin answers a terminal error | 422 `unsupported_search` |
+| The plugin ranks a candidate it was never served, asks for too much, or answers something the checks refuse | 502 `retrieval_plugin_invalid` |
+| The search outruns the profile's `max_latency_ms` | 504 `search_deadline_exceeded` |
+| A client names a profile the plugin does not declare | 422 `unsupported_profile` |

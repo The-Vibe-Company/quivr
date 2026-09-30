@@ -1,5 +1,5 @@
 {
-  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request), the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) or the engine ingestion output validation (segment_and_embed and embed_query answers, judged the same way) reports.",
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request), the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) or the engine ingestion output validation (segment_and_embed and embed_query answers, judged the same way) reports or the engine retrieval output validation (search answers, judged against the request named by request and the manifest named by manifest) reports.",
   "cases": [
     {
       "file": "manifests/valid/full.yaml",
@@ -1742,6 +1742,254 @@
       "schema_valid": true,
       "errors": [],
       "description": "The normative article every ingestion plugin is certified with."
+    },
+    {
+      "file": "manifests/valid/retrieval.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Two profiles and limits of a retrieval plugin (Plugin API 0.7)."
+    },
+    {
+      "file": "manifests/invalid/retrieval-no-default.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Every retrieval plugin declares the default profile."
+    },
+    {
+      "file": "manifests/invalid/retrieval-plugin-api-0.6.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "The retrieval Contribution exists since Plugin API 0.7."
+    },
+    {
+      "file": "manifests/invalid/retrieval-bad-limits.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "More than 3 rounds, k over 100 and a profile name with a capital letter."
+    },
+    {
+      "file": "requests/retrieval/search-round-1.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Round 1: the query, the scope, the profile and one served space."
+    },
+    {
+      "file": "requests/retrieval/search-round-2.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Round 2: the candidates served for two requests of round 1."
+    },
+    {
+      "file": "requests/retrieval/search-round-4.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A search has at most 3 rounds."
+    },
+    {
+      "file": "requests/retrieval/search-missing-spaces.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The spaces list is always sent, possibly empty."
+    },
+    {
+      "file": "responses/retrieval/requests.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Round 1 asks for keyword and vector candidates."
+    },
+    {
+      "file": "responses/retrieval/ranking.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "Round 2 ranks served candidates, with an explanation."
+    },
+    {
+      "file": "responses/retrieval/ranking-empty.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "An empty ranking is a valid answer."
+    },
+    {
+      "file": "responses/retrieval/unserved-candidate.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unserved_candidate"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "A hit the core never served in this search."
+    },
+    {
+      "file": "responses/retrieval/duplicate-hit.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_hit"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "A segment ranked twice."
+    },
+    {
+      "file": "responses/retrieval/too-many-hits.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_hits"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "More hits than the search's limit."
+    },
+    {
+      "file": "responses/retrieval/too-many-rounds.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_rounds"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "More candidates asked in the manifest's last round (max_rounds 2)."
+    },
+    {
+      "file": "responses/retrieval/too-many-requests.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_requests"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Three requests; the manifest allows two per round."
+    },
+    {
+      "file": "responses/retrieval/candidate-limit.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "candidate_limit"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "k over the manifest's max_candidates."
+    },
+    {
+      "file": "responses/retrieval/unknown-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unknown_space"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A space the search does not offer."
+    },
+    {
+      "file": "responses/retrieval/dimension-mismatch.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A query vector with the wrong dimensions."
+    },
+    {
+      "file": "responses/retrieval/filter-outside-scope.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "filter_outside_scope"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A filter that widens the search's scope."
+    },
+    {
+      "file": "responses/retrieval/requests-and-ranking.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Requests and a ranking together."
+    },
+    {
+      "file": "responses/retrieval/bm25-with-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "bm25 takes no space."
+    },
+    {
+      "file": "responses/retrieval/near-vector-without-query.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "near_vector needs query_text or a vector."
     }
   ]
 }

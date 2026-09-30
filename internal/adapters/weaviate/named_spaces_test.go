@@ -150,4 +150,21 @@ func TestNamedSpacesLiveBesideAGenerationBuiltBefore(t *testing.T) {
 	if !found {
 		t.Fatalf("lexical text not projected beside the source text: %+v %+v", rows.Data.Get[collection], object)
 	}
+
+	// A retrieval plugin's candidate requests: the lexical field ranks the
+	// lexical text alone, k bounds the candidates, and every candidate
+	// carries its score, best first.
+	if got := search(route, retrieval.Request{Mode: "lexical", Field: retrieval.FieldLexical}); len(got) != 1 || got[0] != "both" {
+		t.Fatalf("the lexical field matched %v; only the segment with lexical text holds it", got)
+	}
+	for _, q := range []retrieval.Request{
+		{Query: "harbour", Mode: "lexical", K: 1},
+		{Query: "harbour", Mode: "semantic", Vector: smallVector(1, 4), Space: "example.small@1", K: 1},
+		{Query: "harbour", Mode: "hybrid", Vector: smallVector(1, 4), Space: "example.small@1", K: 1, Hybrid: &retrieval.HybridOptions{Alpha: 0.9, Fusion: retrieval.FusionRanked}},
+	} {
+		candidates, err := f.store.Search(f.ctx, route, scope, q)
+		if err != nil || len(candidates) != 1 || candidates[0].Score <= 0 {
+			t.Fatalf("%s candidates with k=1: %+v, %v; want one scored candidate", q.Mode, candidates, err)
+		}
+	}
 }

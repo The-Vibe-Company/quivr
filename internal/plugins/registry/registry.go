@@ -141,6 +141,9 @@ func connectorRole(kind string) string        { return "connector:" + kind }
 // ingestionRole is the one ingestion role of a deployment (Plugin API 0.6).
 const ingestionRole = "ingestion"
 
+// retrievalRole is the one retrieval role of a deployment (Plugin API 0.7).
+const retrievalRole = "retrieval"
+
 // RegistrationID identifies a plugin version at an address.
 func RegistrationID(pluginID, version, manifestDigest, endpoint string) string {
 	return content.StableID("plugin_registration", pluginID, version, manifestDigest, endpoint)
@@ -175,6 +178,9 @@ func FromPins(pins *plugins.PinSet) Seed {
 	if pin := pins.Ingestion(); pin != nil {
 		seed.Roles = append(seed.Roles, assign(ingestionRole, byPin[pin]))
 	}
+	if pin := pins.Retrieval(); pin != nil {
+		seed.Roles = append(seed.Roles, assign(retrievalRole, byPin[pin]))
+	}
 	sort.Slice(seed.Roles, func(i, j int) bool { return seed.Roles[i].Role < seed.Roles[j].Role })
 	return seed
 }
@@ -205,6 +211,9 @@ func declaredRoles(m plugins.Manifest) []string {
 	}
 	if m.Contributions.Ingestion != nil {
 		roles = append(roles, ingestionRole)
+	}
+	if m.Contributions.Retrieval != nil {
+		roles = append(roles, retrievalRole)
 	}
 	sort.Strings(roles)
 	return roles

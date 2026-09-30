@@ -256,6 +256,9 @@ func (r *run) execute(ctx context.Context) {
 	if r.m.Contributions.Ingestion != nil {
 		r.ingestion(ctx, own)
 	}
+	if r.m.Contributions.Retrieval != nil {
+		r.retrieval(ctx, own)
+	}
 }
 
 type ownFixture struct {
@@ -309,6 +312,8 @@ func (r *run) ownFixtures() []ownFixture {
 			contribution = ContributionConnector
 		case devhost.IsIngestionFixture(raw):
 			contribution = ContributionIngestion
+		case devhost.IsRetrievalFixture(raw):
+			contribution = ContributionRetrieval
 		}
 		out = append(out, ownFixture{label: label, path: file, contribution: contribution})
 	}
@@ -370,7 +375,7 @@ func (r *run) reach(ctx context.Context) (*devhost.Process, bool) {
 	} else {
 		dir := filepath.Dir(r.report.Plugin.ManifestPath)
 		output := r.opts.Output
-		if r.m.Contributions.Connector != nil || r.m.Contributions.Ingestion != nil {
+		if r.m.Contributions.Connector != nil || r.m.Contributions.Ingestion != nil || r.m.Contributions.Retrieval != nil {
 			r.logs = &lockedBuffer{}
 			if output == nil {
 				output = r.logs

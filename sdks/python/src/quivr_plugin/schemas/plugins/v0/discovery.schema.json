@@ -45,7 +45,8 @@
           "normalizer",
           "subscription",
           "connector",
-          "ingestion"
+          "ingestion",
+          "retrieval"
         ]
       }
     }

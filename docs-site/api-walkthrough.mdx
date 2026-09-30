@@ -237,9 +237,11 @@ search. See E5 provenance (`third_party/e5/NOTICE.md`).
 `POST /v0/search` needs `content:read` and `search:query`;
 [Your first search](/first-search#5-search) runs one.
 
-- Modes are `lexical`, `semantic` and `hybrid`. Defaults: `hybrid`, `balanced`, 10
-  results; 50 maximum. Other profiles return 422.
-- The resolved profile `balanced.e5-token-windows.v1` accepts non-empty queries of at
+- Modes are `lexical`, `semantic` and `hybrid`. Defaults: `hybrid`, profile `default`
+  (`balanced` is its deprecated name), 10 results; 50 maximum. `GET /v0/search/profiles`
+  lists profiles; others return `422 unsupported_profile`. A pinned
+  [retrieval plugin](/plugins/write-a-retrieval-plugin) ranks under its own profiles.
+- The built-in `default` profile (version `balanced.e5-token-windows.v1`) accepts non-empty queries of at
   most 256 tokens (8,192 code points on the wire), without truncation. CRLF/CR become
   LF and surrounding whitespace is trimmed; case, accents and language are kept.
 - Hybrid uses alpha 0.5, relative score fusion and title/body weights of 2/1.
@@ -264,7 +266,7 @@ quivr search --corpus <corpus_id> --mode lexical --limit 5 "eclipse"
 ```
 
 ```text
-1 hit (profile balanced, version balanced.e5-token-windows.v1)
+1 hit (profile default, version balanced.e5-token-windows.v1)
 
 1. record <record_id>  version <version_id>  part body  [0,18)
    Éclipse 🌞 à Paris.

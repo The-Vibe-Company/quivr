@@ -317,3 +317,56 @@ func TestContractRunnerUsage(t *testing.T) {
 		}
 	}
 }
+
+// TestContractRunnerJudgesRetrieval owns the retrieval rules of the Contract
+// Runner: the well-behaved plugin in retrieval-valid is certified offline,
+// candidates served from fixtures, and each broken mode of the same fake
+// plugin fails exactly the check that owns its rule.
+func TestContractRunnerJudgesRetrieval(t *testing.T) {
+	fakeOnPath(t)
+	t.Setenv("QUIVR_TEST_RERANKER_KEY", "reranker-test-key-0123")
+	code, out, r := runTest(t, "retrieval-valid")
+	if code != cli.ExitOK || !r.Certified {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	passed := map[string]int{}
+	for _, c := range r.Checks {
+		if c.Status == "pass" {
+			passed[c.Contribution+"/"+c.ID]++
+		}
+	}
+	// The normative newsroom and the plugin's own wire fixture, each under two profiles.
+	for want, n := range map[string]int{"retrieval/fixtures": 1, "retrieval/invoke": 4, "retrieval/replay": 2, "retrieval/invalid_request": 5, "retrieval/credentials": 1} {
+		if passed[want] < n {
+			t.Errorf("%d passing %s checks, want %d:\n%s", passed[want], want, n, out)
+		}
+	}
+	for mode, want := range map[string]expectation{
+		"retrieval-unserved":          {Check: "invoke", Code: "unserved_candidate"},
+		"retrieval-endless":           {Check: "invoke", Code: "too_many_rounds"},
+		"retrieval-too-many-requests": {Check: "invoke", Code: "too_many_requests"},
+		"retrieval-over-budget":       {Check: "invoke", Code: "over_budget"},
+		"retrieval-slow":              {Check: "invoke", Code: "deadline_exceeded"},
+		"retrieval-nondeterministic":  {Check: "replay", Code: "nondeterministic_output"},
+		"retrieval-secret-leak":       {Check: "credentials", Code: "credential_leak"},
+		"accept-invalid":              {Check: "invalid_request", Code: "accepted_invalid_request"},
+	} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv(fakeplugin.EnvMode, mode)
+			code, out, r := runTest(t, "retrieval-valid")
+			if code != cli.ExitInvalid || r.Certified {
+				t.Fatalf("want not certified, exit %d:\n%s", code, out)
+			}
+			for _, c := range r.Checks {
+				if c.ID == want.Check && c.Contribution == "retrieval" && c.Status == "fail" {
+					for _, issue := range c.Issues {
+						if issue.Code == want.Code {
+							return
+						}
+					}
+				}
+			}
+			t.Fatalf("no failed retrieval %s check with issue %s:\n%s", want.Check, want.Code, out)
+		})
+	}
+}

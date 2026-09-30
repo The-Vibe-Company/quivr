@@ -76,6 +76,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins`](#get-v0adminplugins) | `listPluginRegistrations` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
+| [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
 
 ### Records {#records}
 
@@ -1149,7 +1150,7 @@ The active Pipeline Plan, an immutable mapping of every role of the deployment t
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -1158,7 +1159,20 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input or source_filter_unavailable, 503 dependency unavailable. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the search outran its profile's max_latency_ms). |
+
+#### `GET /v0/search/profiles` {#get-v0searchprofiles}
+
+Operation `listSearchProfiles`. Requires `search:query`.
+
+The search profiles this deployment answers, default first. Without a retrieval plugin only the built-in default exists; with one, its declared profiles and budgets.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`SearchProfileList`](#searchprofilelist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 unauthorized scope/action. |
 
 ## Webhooks {#webhooks}
 
@@ -5894,7 +5908,7 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 | `query` | string | yes | Minimum length `1`. Maximum length `8192`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
-| `profile` | string |  | One of `fast`, `balanced`, `deep`. Default `balanced`. |
+| `profile` | string |  | A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted for one release. An unknown profile returns 422 unsupported_profile. Default `default`. Pattern `^[a-z][a-z0-9_]{0,31}$`. |
 | `limit` | integer |  | Default `10`. Minimum `1`. Maximum `50`. |
 | `filter` | [`SearchFilter`](#searchfilter) |  |  |
 
@@ -5907,7 +5921,7 @@ Example `text_search`:
     "corpus_news"
   ],
   "mode": "hybrid",
-  "profile": "balanced",
+  "profile": "default",
   "limit": 10
 }
 ```
@@ -5939,11 +5953,9 @@ properties:
     default: hybrid
   profile:
     type: string
-    enum:
-      - fast
-      - balanced
-      - deep
-    default: balanced
+    pattern: ^[a-z][a-z0-9_]{0,31}$
+    default: default
+    description: A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted for one release. An unknown profile returns 422 unsupported_profile.
   limit:
     type: integer
     minimum: 1
@@ -5991,7 +6003,7 @@ description: Candidate filter applied before ranking. Every present condition mu
 
 ### `SearchProfile` {#searchprofile}
 
-Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:&lt;plugin id>@&lt;version>/&lt;profile> for a retrieval plugin.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -6013,7 +6025,147 @@ properties:
 required:
   - name
   - version
-description: Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+description: Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
+```
+
+</Accordion>
+
+### `SearchProfileList` {#searchprofilelist}
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`SearchProfileDescription`](#searchprofiledescription) | yes | At least `1` items. At most `8` items. |
+
+Example `search_profiles`:
+
+```json
+{
+  "items": [
+    {
+      "name": "default",
+      "description": "Keywords and vectors fused by rank.",
+      "max_latency_ms": 500,
+      "max_cost_cents": 0,
+      "provider": {
+        "kind": "plugin",
+        "plugin_id": "example.fusion",
+        "plugin_version": "0.1.0"
+      }
+    }
+  ]
+}
+```
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/SearchProfileDescription'
+    minItems: 1
+    maxItems: 8
+required:
+  - items
+```
+
+</Accordion>
+
+### `SearchProfileDescription` {#searchprofiledescription}
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | yes | Minimum length `1`. |
+| `description` | string |  |  |
+| `max_latency_ms` | integer |  | Deadline of one search under this profile; absent for the built-in default. Minimum `1`. |
+| `max_cost_cents` | number |  | Most a search may spend on paid calls; absent for the built-in default. Minimum `0`. |
+| `provider` | object | yes |  |
+| `provider.kind` | string | yes | One of `engine`, `plugin`. |
+| `provider.plugin_id` | string |  | Minimum length `1`. |
+| `provider.plugin_version` | string |  | Minimum length `1`. |
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  name:
+    type: string
+    minLength: 1
+  description:
+    type: string
+  max_latency_ms:
+    type: integer
+    minimum: 1
+    description: Deadline of one search under this profile; absent for the built-in default.
+  max_cost_cents:
+    type: number
+    minimum: 0
+    description: Most a search may spend on paid calls; absent for the built-in default.
+  provider:
+    type: object
+    additionalProperties: false
+    properties:
+      kind:
+        type: string
+        enum:
+          - engine
+          - plugin
+      plugin_id:
+        type: string
+        minLength: 1
+      plugin_version:
+        type: string
+        minLength: 1
+    required:
+      - kind
+required:
+  - name
+  - provider
+```
+
+</Accordion>
+
+### `SearchUsage` {#searchusage}
+
+What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rounds` | integer | yes | Minimum `1`. Maximum `3`. |
+| `elapsed_ms` | integer | yes | Minimum `0`. |
+| `paid_calls` | integer | yes | Minimum `0`. |
+| `cost_cents` | number | yes | Minimum `0`. |
+
+<Accordion title="Full schema">
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  rounds:
+    type: integer
+    minimum: 1
+    maximum: 3
+  elapsed_ms:
+    type: integer
+    minimum: 0
+  paid_calls:
+    type: integer
+    minimum: 0
+  cost_cents:
+    type: number
+    minimum: 0
+required:
+  - rounds
+  - elapsed_ms
+  - paid_calls
+  - cost_cents
+description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
 ```
 
 </Accordion>
@@ -6075,6 +6227,7 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `rank` | integer | yes | Minimum `1`. |
 | `excerpt` | [`SearchExcerpt`](#searchexcerpt) | yes |  |
 | `availability` | [`Availability`](#availability) | yes |  |
+| `explanation` | string |  | Why the retrieval plugin ranked this hit here, when it says so. Minimum length `1`. Maximum length `1024`. |
 
 Further rules (conditional requirements or combinations) are in the full schema below.
 
@@ -6115,6 +6268,11 @@ properties:
     $ref: '#/components/schemas/SearchExcerpt'
   availability:
     $ref: '#/components/schemas/Availability'
+  explanation:
+    type: string
+    minLength: 1
+    maxLength: 1024
+    description: Why the retrieval plugin ranked this hit here, when it says so.
 required:
   - record_id
   - version_id
@@ -6148,6 +6306,7 @@ Bounded top-k results after canonical rechecks. May contain fewer hits than requ
 | --- | --- | --- | --- |
 | `items` | array of [`SearchHit`](#searchhit) | yes | At most `50` items. |
 | `retrieval_profile` | [`SearchProfile`](#searchprofile) | yes |  |
+| `usage` | [`SearchUsage`](#searchusage) |  |  |
 
 Example `canonical_search_results`:
 
@@ -6178,7 +6337,7 @@ Example `canonical_search_results`:
     }
   ],
   "retrieval_profile": {
-    "name": "balanced",
+    "name": "default",
     "version": "quivr.text.fixture.v1"
   }
 }
@@ -6211,8 +6370,48 @@ Example `lexical_search_without_embedding`:
     }
   ],
   "retrieval_profile": {
-    "name": "balanced",
+    "name": "default",
     "version": "quivr.text.fixture.v1"
+  }
+}
+```
+
+Example `plugin_ranked_search_results`:
+
+```json
+{
+  "items": [
+    {
+      "record_id": "record_1",
+      "version_id": "version_1",
+      "part_key": "body",
+      "segment_id": "segment_1",
+      "segmentation_id": "segmentation_1",
+      "projection_generation_id": "generation_1",
+      "rank": 1,
+      "excerpt": {
+        "text": "énergie 🌞",
+        "start": 3,
+        "end": 12,
+        "coordinate_system": "unicode_codepoint"
+      },
+      "availability": {
+        "state": "retrieval_ready",
+        "is_current": true,
+        "searchable": true
+      },
+      "explanation": "rank 1 by keywords, rank 2 by the served space"
+    }
+  ],
+  "retrieval_profile": {
+    "name": "deep",
+    "version": "plugin:example.fusion@0.1.0/deep"
+  },
+  "usage": {
+    "rounds": 2,
+    "elapsed_ms": 84,
+    "paid_calls": 0,
+    "cost_cents": 0
   }
 }
 ```
@@ -6230,6 +6429,8 @@ properties:
     maxItems: 50
   retrieval_profile:
     $ref: '#/components/schemas/SearchProfile'
+  usage:
+    $ref: '#/components/schemas/SearchUsage'
 required:
   - items
   - retrieval_profile

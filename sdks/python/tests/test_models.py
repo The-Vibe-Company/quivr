@@ -39,6 +39,9 @@ MODELS = {
     "ingestion-embed-query-request.schema.json": models.EmbedQueryRequest,
     "ingestion-embed-query-response.schema.json": models.EmbedQueryResponse,
     "ingestion-fixture.schema.json": models.IngestionFixture,
+    "retrieval-search-request.schema.json": models.SearchRequest,
+    "retrieval-search-response.schema.json": models.SearchResponse,
+    "retrieval-fixture.schema.json": models.RetrievalFixture,
 }
 
 

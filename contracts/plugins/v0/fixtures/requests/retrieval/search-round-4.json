@@ -1,0 +1,47 @@
+{
+  "invocation_id": "inv-search-1",
+  "contribution": "retrieval",
+  "organization_id": "org_example",
+  "configuration": {},
+  "profile": "default",
+  "round": 4,
+  "query": {
+    "text": "harbour strike",
+    "mode": "hybrid"
+  },
+  "limit": 2,
+  "scope": {
+    "corpus_ids": [
+      "corpus_news"
+    ],
+    "source_namespaces": [
+      "wire",
+      "local"
+    ]
+  },
+  "spaces": [
+    {
+      "id": "example.words.small@1",
+      "owner": {
+        "kind": "plugin",
+        "plugin_id": "example.words",
+        "plugin_version": "0.1.0"
+      },
+      "model": "example/words-4",
+      "dimensions": 4,
+      "metric": "cosine",
+      "indexes": [
+        "text"
+      ],
+      "query_modalities": [
+        "text"
+      ],
+      "role": "served",
+      "coverage": {
+        "segments": 3,
+        "total": 3
+      }
+    }
+  ],
+  "served": []
+}

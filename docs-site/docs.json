@@ -87,6 +87,7 @@
                   "plugins/rss/index",
                   "plugins/run-a-connector-plugin",
                   "plugins/write-a-normalizer",
+                  "plugins/write-a-retrieval-plugin",
                   "plugins/write-an-ingestion-plugin",
                   "sdks/go/index",
                   "sdks/python/index"

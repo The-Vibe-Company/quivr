@@ -92,7 +92,12 @@ func (g Generation) Carries(space string) bool {
 	return false
 }
 
-type Candidate struct{ SegmentID, GenerationID string }
+// Candidate is one projected object a search found, with the index's score
+// for that query (higher is better).
+type Candidate struct {
+	SegmentID, GenerationID string
+	Score                   float64
+}
 type Hydrated struct {
 	RecordID, VersionID, SegmentationID string
 	GenerationID                        string

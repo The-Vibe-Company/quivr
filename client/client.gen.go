@@ -522,6 +522,24 @@ func (e SearchExcerptCoordinateSystem) Valid() bool {
 	}
 }
 
+// Defines values for SearchProfileDescriptionProviderKind.
+const (
+	SearchProfileDescriptionProviderKindEngine SearchProfileDescriptionProviderKind = "engine"
+	SearchProfileDescriptionProviderKindPlugin SearchProfileDescriptionProviderKind = "plugin"
+)
+
+// Valid indicates whether the value is a known member of the SearchProfileDescriptionProviderKind enum.
+func (e SearchProfileDescriptionProviderKind) Valid() bool {
+	switch e {
+	case SearchProfileDescriptionProviderKindEngine:
+		return true
+	case SearchProfileDescriptionProviderKindPlugin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SearchRequestMode.
 const (
 	Hybrid   SearchRequestMode = "hybrid"
@@ -537,27 +555,6 @@ func (e SearchRequestMode) Valid() bool {
 	case Lexical:
 		return true
 	case Semantic:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for SearchRequestProfile.
-const (
-	Balanced SearchRequestProfile = "balanced"
-	Deep     SearchRequestProfile = "deep"
-	Fast     SearchRequestProfile = "fast"
-)
-
-// Valid indicates whether the value is a known member of the SearchRequestProfile enum.
-func (e SearchRequestProfile) Valid() bool {
-	switch e {
-	case Balanced:
-		return true
-	case Deep:
-		return true
-	case Fast:
 		return true
 	default:
 		return false
@@ -644,16 +641,16 @@ func (e VectorSpaceMetric) Valid() bool {
 
 // Defines values for VectorSpaceOwnerKind.
 const (
-	Engine VectorSpaceOwnerKind = "engine"
-	Plugin VectorSpaceOwnerKind = "plugin"
+	VectorSpaceOwnerKindEngine VectorSpaceOwnerKind = "engine"
+	VectorSpaceOwnerKindPlugin VectorSpaceOwnerKind = "plugin"
 )
 
 // Valid indicates whether the value is a known member of the VectorSpaceOwnerKind enum.
 func (e VectorSpaceOwnerKind) Valid() bool {
 	switch e {
-	case Engine:
+	case VectorSpaceOwnerKindEngine:
 		return true
-	case Plugin:
+	case VectorSpaceOwnerKindPlugin:
 		return true
 	default:
 		return false
@@ -1505,21 +1502,49 @@ type SearchHit struct {
 	EmbeddingArtifactId *string      `json:"embedding_artifact_id,omitempty"`
 
 	// Excerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
-	Excerpt                SearchExcerpt `json:"excerpt"`
-	PartKey                string        `json:"part_key"`
-	ProjectionGenerationId string        `json:"projection_generation_id"`
-	Rank                   int           `json:"rank"`
-	RecordId               string        `json:"record_id"`
-	SegmentId              string        `json:"segment_id"`
-	SegmentationId         string        `json:"segmentation_id"`
-	VectorSpaceId          *string       `json:"vector_space_id,omitempty"`
-	VersionId              string        `json:"version_id"`
+	Excerpt SearchExcerpt `json:"excerpt"`
+
+	// Explanation Why the retrieval plugin ranked this hit here, when it says so.
+	Explanation            *string `json:"explanation,omitempty"`
+	PartKey                string  `json:"part_key"`
+	ProjectionGenerationId string  `json:"projection_generation_id"`
+	Rank                   int     `json:"rank"`
+	RecordId               string  `json:"record_id"`
+	SegmentId              string  `json:"segment_id"`
+	SegmentationId         string  `json:"segmentation_id"`
+	VectorSpaceId          *string `json:"vector_space_id,omitempty"`
+	VersionId              string  `json:"version_id"`
 }
 
-// SearchProfile Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
 type SearchProfile struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+}
+
+// SearchProfileDescription defines model for SearchProfileDescription.
+type SearchProfileDescription struct {
+	Description *string `json:"description,omitempty"`
+
+	// MaxCostCents Most a search may spend on paid calls; absent for the built-in default.
+	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
+
+	// MaxLatencyMs Deadline of one search under this profile; absent for the built-in default.
+	MaxLatencyMs *int   `json:"max_latency_ms,omitempty"`
+	Name         string `json:"name"`
+	Provider     struct {
+		Kind          SearchProfileDescriptionProviderKind `json:"kind"`
+		PluginId      *string                              `json:"plugin_id,omitempty"`
+		PluginVersion *string                              `json:"plugin_version,omitempty"`
+	} `json:"provider"`
+}
+
+// SearchProfileDescriptionProviderKind defines model for SearchProfileDescription.Provider.Kind.
+type SearchProfileDescriptionProviderKind string
+
+// SearchProfileList defines model for SearchProfileList.
+type SearchProfileList struct {
+	Items []SearchProfileDescription `json:"items"`
 }
 
 // SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
@@ -1527,25 +1552,35 @@ type SearchRequest struct {
 	CorpusIds []string `json:"corpus_ids"`
 
 	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
-	Filter  *SearchFilter         `json:"filter,omitempty"`
-	Limit   *int                  `json:"limit,omitempty"`
-	Mode    *SearchRequestMode    `json:"mode,omitempty"`
-	Profile *SearchRequestProfile `json:"profile,omitempty"`
-	Query   string                `json:"query"`
+	Filter *SearchFilter      `json:"filter,omitempty"`
+	Limit  *int               `json:"limit,omitempty"`
+	Mode   *SearchRequestMode `json:"mode,omitempty"`
+
+	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted for one release. An unknown profile returns 422 unsupported_profile.
+	Profile *string `json:"profile,omitempty"`
+	Query   string  `json:"query"`
 }
 
 // SearchRequestMode defines model for SearchRequest.Mode.
 type SearchRequestMode string
 
-// SearchRequestProfile defines model for SearchRequest.Profile.
-type SearchRequestProfile string
-
 // SearchResponse Bounded top-k results after canonical rechecks. May contain fewer hits than requested; no total count, completeness promise or stable pagination snapshot. Empty results still name the resolved profile.
 type SearchResponse struct {
 	Items []SearchHit `json:"items"`
 
-	// RetrievalProfile Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
+
+	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+	Usage *SearchUsage `json:"usage,omitempty"`
+}
+
+// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+type SearchUsage struct {
+	CostCents float32 `json:"cost_cents"`
+	ElapsedMs int     `json:"elapsed_ms"`
+	PaidCalls int     `json:"paid_calls"`
+	Rounds    int     `json:"rounds"`
 }
 
 // SourceIdentity defines model for SourceIdentity.
@@ -2521,14 +2556,19 @@ type ClientInterface interface {
 	// SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 	SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
+	//
+	// The search profiles this deployment answers, default first. Without a retrieval plugin only the built-in default exists; with one, its declared profiles and budgets.
+	ListSearchProfiles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewSubscriptionWithBody performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
 	// with any type of body and a specified content type.
@@ -3559,7 +3599,7 @@ func (c *Client) GetSavedQueryVersion(ctx context.Context, savedQueryId string, 
 // SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -3575,9 +3615,24 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
+//
+// The search profiles this deployment answers, default first. Without a retrieval plugin only the built-in default exists; with one, its declared profiles and budgets.
+func (c *Client) ListSearchProfiles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSearchProfilesRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -5803,6 +5858,33 @@ func NewSearchRecordsRequestWithBody(server string, contentType string, body io.
 	return req, nil
 }
 
+// NewListSearchProfilesRequest constructs an http.Request for the ListSearchProfiles method
+func NewListSearchProfilesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/search/profiles")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewPreviewSubscriptionRequest calls the generic PreviewSubscription builder with application/json body
 func NewPreviewSubscriptionRequest(server string, body PreviewSubscriptionJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -6828,7 +6910,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
@@ -6836,8 +6918,15 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
+
+	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
+	//
+	// The search profiles this deployment answers, default first. Without a retrieval plugin only the built-in default exists; with one, its declared profiles and budgets.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListSearchProfilesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSearchProfilesResponse, error)
 
 	// PreviewSubscriptionWithBodyWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
 	// with any type of body and a specified content type.
@@ -8975,6 +9064,54 @@ func (r SearchRecordsResponse) ContentType() string {
 	return ""
 }
 
+type ListSearchProfilesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SearchProfileList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListSearchProfilesResponse) GetJSON200() *SearchProfileList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListSearchProfilesResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListSearchProfilesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSearchProfilesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSearchProfilesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSearchProfilesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type PreviewSubscriptionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10356,7 +10493,7 @@ func (c *ClientWithResponses) GetSavedQueryVersionWithResponse(ctx context.Conte
 // SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
@@ -10370,13 +10507,26 @@ func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Cont
 // SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
 func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
 	rsp, err := c.SearchRecords(ctx, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseSearchRecordsResponse(rsp)
+}
+
+// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
+//
+// The search profiles this deployment answers, default first. Without a retrieval plugin only the built-in default exists; with one, its declared profiles and budgets.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListSearchProfilesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSearchProfilesResponse, error) {
+	rsp, err := c.ListSearchProfiles(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSearchProfilesResponse(rsp)
 }
 
 // PreviewSubscriptionWithBodyWithResponse performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
@@ -11993,6 +12143,39 @@ func ParseSearchRecordsResponse(rsp *http.Response) (*SearchRecordsResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SearchResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSearchProfilesResponse parses an HTTP response from a ListSearchProfilesWithResponse call
+func ParseListSearchProfilesResponse(rsp *http.Response) (*ListSearchProfilesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSearchProfilesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SearchProfileList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

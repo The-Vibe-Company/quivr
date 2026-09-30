@@ -117,7 +117,7 @@ Search one or more Corpora of a running Quivr and print ranked hits with their p
 `quivr search --help` prints:
 
 ```text
-usage: quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>
+usage: quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile <name>] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>
 
 Search one or more Corpora of a running Quivr and print ranked hits with their provenance.
 
@@ -135,7 +135,7 @@ Flags:
   -mode string
     	search mode: lexical, semantic or hybrid (server default: hybrid)
   -profile string
-    	retrieval profile: fast, balanced or deep (server default: balanced)
+    	search profile name, as GET /v0/search/profiles lists them (server default: default)
   -source value
     	keep only Records from this Source Namespace, ranked among themselves; repeat or separate with commas
 

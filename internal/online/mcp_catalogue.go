@@ -76,7 +76,7 @@ Returns {"items": [{"corpus_id", "name", "effective_retrieval"}], "next_page_cur
 		Name:  "search",
 		Title: "Search Corpora",
 		Description: `Search one or more Corpora for passages that answer a question. Use it to find evidence before answering or citing.
-Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is a ranked hit: rank, record_id, version_id (the Record Version the passage comes from), part_key (the Part of that Version), and excerpt {text, start, end}, where text is the exact slice [start,end) of that Part's text, counted in Unicode code points. Cite a hit with record_id, version_id, part_key and the offsets. An empty items list means nothing matched; an unauthorized corpus_id is an error, never silently dropped.`,
+Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is a ranked hit: rank, record_id, version_id (the Record Version the passage comes from), part_key (the Part of that Version), and excerpt {text, start, end}, where text is the exact slice [start,end) of that Part's text, counted in Unicode code points. An item may carry an explanation of why it ranks there. Cite a hit with record_id, version_id, part_key and the offsets. An empty items list means nothing matched; an unauthorized corpus_id is an error, never silently dropped.`,
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -85,7 +85,7 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
     "query": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "what to look for, in natural language or keywords"},
     "corpus_ids": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Corpora to search, from list_corpora"},
     "mode": {"type": "string", "enum": ["lexical", "semantic", "hybrid"], "description": "lexical matches words, semantic matches meaning, hybrid combines both; the server default is hybrid"},
-    "profile": {"type": "string", "enum": ["fast", "balanced", "deep"], "description": "retrieval profile; the server default is balanced"},
+    "profile": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$", "description": "search profile name (for example deep, when the deployment's retrieval plugin declares it; GET /v0/search/profiles lists them); the server default is default"},
     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "maximum number of hits; the server default is 10"},
     "filter": {"type": "object", "additionalProperties": false, "minProperties": 1, "description": "narrow the search before ranking", "properties": {
       "source_namespaces": {"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}, "description": "keep only Records from these Source Namespaces (a Record's source.namespace); the best matches of these sources are returned even when others rank higher"}

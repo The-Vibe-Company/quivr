@@ -28,6 +28,8 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &SearchRequest{}
 			case "SearchResponse":
 				target = &SearchResponse{}
+			case "SearchProfileList":
+				target = &SearchProfileList{}
 			case "IngestCommand":
 				target = &IngestCommand{}
 			case "Receipt":

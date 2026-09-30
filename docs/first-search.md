@@ -214,7 +214,7 @@ EOF
 {"items": [{"record_id": "{{RECORD_ID}}", "version_id": "{{VERSION_ID}}", "part_key": "body", "rank": 1,
   "excerpt": {"text": "A total solar eclipse crossed the Pacific on Tuesday.",
               "start": 0, "end": 53, "coordinate_system": "unicode_codepoint"}}],
- "retrieval_profile": {"name": "balanced", "version": "..."}}
+ "retrieval_profile": {"name": "default", "version": "..."}}
 ```
 
 Each hit names the Record, the Version and the Part it comes from, and its excerpt

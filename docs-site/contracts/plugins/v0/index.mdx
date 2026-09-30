@@ -4,12 +4,12 @@ description: "The plugin manifest, routes, schemas and fixtures"
 ---
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.6.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.7.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
 connector attachments, `0.5.0` the connector push mode (`receive`), and
-`0.6.0` the `ingestion` Contribution. JSON Schemas in this
+`0.6.0` the `ingestion` Contribution and `0.7.0` the `retrieval` Contribution. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: ADR 0001 (`docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md`),
 ADR 0002 (`docs/adr/0002-record-version-identity-from-submitted-input.md`)
@@ -34,6 +34,8 @@ and the glossary in [CONTEXT.md](/context).
 | `subscription-fixture.schema.json` | Subscription fixture: a local test input that tools turn into subscription requests (since 0.2) |
 | `connector-fixture.schema.json` | Connector fixture: a local test input that tools turn into connector requests (since 0.3) |
 | `ingestion-fixture.schema.json` | Ingestion fixture: a local test input that tools turn into ingestion requests (since 0.6) |
+| `retrieval-search-request.schema.json`, `retrieval-search-response.schema.json` | `POST /v0/contributions/retrieval/search` request and 200 response (since 0.7) |
+| `retrieval-fixture.schema.json` | Retrieval fixture: a query and a candidate catalogue the Contract Runner drives a search with (since 0.7) |
 | `reports/contract-report.schema.json` | JSON report of `quivr plugin test --report` (tooling, not protocol) |
 
 The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
@@ -49,7 +51,7 @@ equivalent copies under other names out of both contracts.
 
 ## Contributions {#contributions}
 
-Plugin API 0.6 accepts four Contributions, and a manifest declares at least one:
+Plugin API 0.7 accepts five Contributions, and a manifest declares at least one:
 
 | Contribution | Since | Purpose |
 | --- | --- | --- |
@@ -57,17 +59,18 @@ Plugin API 0.6 accepts four Contributions, and a manifest declares at least one:
 | **`subscription`** | 0.2 | An alert rule: decide whether one Record Version matches each Saved Query expression of a batch ([below](#subscription-contribution)) |
 | **`connector`** | 0.3 | A source collector: fetch pages of new or changed items after an opaque checkpoint ([below](#connector-contribution)) |
 | **`ingestion`** | 0.6 | Cut a Record Version into segments, embed them in the vector spaces the plugin owns, and encode queries into those spaces ([below](#ingestion-contribution)) |
+| **`retrieval`** | 0.7 | Answer a search in rounds: ask the core for candidates, then rank the ones it served ([below](#retrieval-contribution)) |
 
 The names `enricher`, `validator`, `projector` and `retriever`
-are **reserved**. A manifest that declares them is rejected
+are **reserved** (declare `retrieval` for search). A manifest that declares them is rejected
 (`reserved_contribution`).
 
 ### Plugin API versions {#plugin-api-versions}
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.6.0` and still serves every `0.1` to `0.5` plugin unchanged: a
+implements `0.7.0` and still serves every `0.1` to `0.6` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0` or `0.6.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0` or `0.7.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
@@ -100,6 +103,7 @@ version.
 | `POST /v0/contributions/connector/receive` | 200 verdict and answer | Verify one relayed delivery and return its items (since 0.5, for a push kind) |
 | `POST /v0/contributions/ingestion/segment_and_embed` | 200 segments with their vectors | Segment and embed one Record Version (since 0.6) |
 | `POST /v0/contributions/ingestion/embed_query` | 200 `{"vector"}` | Encode one query into one space (since 0.6) |
+| `POST /v0/contributions/retrieval/search` | 200 candidate requests or a ranking | Answer one round of a search (since 0.7) |
 
 - **Errors.** Every non-2xx response carries the error envelope
   `{code, message, retryable}`. `retryable: true` asks the engine to retry
@@ -601,6 +605,83 @@ Organization `dev-organization` and idempotency key `dev:<sha256>`.
 `fixtures/ingestion/article.json` is the normative fixture every ingestion
 plugin is certified with.
 
+## Retrieval Contribution {#retrieval-contribution}
+
+Search (since Plugin API 0.7). The plugin answers a search in rounds; each
+round it either asks the core for candidates or returns the final ranking. It
+never queries the index itself and never sees a model: it names a vector space
+and the core encodes the query with that space's owner. The core keeps the
+index, authorization, withdrawal fences and generation routing, and applies
+them before any candidate reaches the plugin. Write one with the
+[Go SDK](/sdks/go) and pin it as described in
+[Write a retrieval plugin](/plugins/write-a-retrieval-plugin).
+
+**Profiles.** `contributions.retrieval.profiles` declares the search profiles
+the plugin answers, by name (`^[a-z][a-z0-9_]{0,31}$`), `default` required.
+Each has a `max_latency_ms` (50 to 10000), the deadline of a whole search
+under it, and a `max_cost_cents`, the most one search may report spending in
+`usage`. `limits` bound a search: `max_rounds` (1 to 3, default 3),
+`max_requests` per round (1 to 8, default 4), `max_candidates`, the largest
+`k` (1 to 100, default 50), and `max_response_bytes` (default 1 MiB, cap
+4 MiB).
+
+**`search`** (`retrieval-search-request.schema.json`) carries the envelope,
+the `profile`, the `round` (1 first), the `query` (`text` and the client's
+`mode`, a hint), the `limit`, the `scope` (`corpus_ids` and, when the client
+filters, `source_namespaces`), the `spaces` every requested Corpus's routed
+generation carries (id, owner, model, dimensions, metric, modalities, role,
+`coverage`), and `served`: every request of earlier rounds with the
+candidates the core served for it. A candidate is an authorized, current
+segment: `segment_id`, `record_id`, `version_id`, `part_key`, its `text`,
+`start` and `end` in code points, and the index `score` (higher is better).
+The answer (`retrieval-search-response.schema.json`) is exactly one of:
+
+- `requests`: candidate requests, each `bm25` (`field` `source` or `lexical`,
+  `query_text`), `near_vector` (`space`, and `query_text` or a `vector`) or
+  `hybrid` (`space`, `query_text`, `field`, `alpha`, `fusion`
+  `relative_score` or `ranked`), with `k`, an optional `filter`
+  (`source_namespaces`, inside the scope) and `group_by: record`;
+- `ranking`: `hits`, best first, each a served `segment_id` with the plugin's
+  `score` and an optional `explanation` the API returns with the hit.
+
+Either may carry `usage` (`paid_calls`, `cost_cents`). The same request must
+yield the same answer.
+
+**Errors.** A terminal envelope refuses the search (422
+`unsupported_search`); unavailability or a retryable envelope makes it
+unavailable (503); an answer the checks below refuse fails it with 502
+`retrieval_plugin_invalid`; a search that outruns the profile's
+`max_latency_ms` fails with 504 `search_deadline_exceeded`.
+
+`CheckSearchOutput` and `RetrievalSession` in `internal/plugins` judge every
+answer for the engine and the Contract Runner:
+
+| Rule | Code |
+| --- | --- |
+| Response within `max_response_bytes` | `response_too_large` |
+| No requests in the last round | `too_many_rounds` |
+| At most `max_requests` requests, each `k` at most `max_candidates` | `too_many_requests`, `candidate_limit` |
+| A space the request offers; a vector of its dimensions | `unknown_space`, `dimension_mismatch`, `invalid_vector` |
+| A filter inside the search's scope | `filter_outside_scope` |
+| Hits served earlier in this search, each once, at most `limit` | `unserved_candidate`, `duplicate_hit`, `too_many_hits` |
+| Reported cost within the profile's `max_cost_cents` (Runner; the engine logs it) | `over_budget` |
+
+**Deployment.** A pin needs no routes; a deployment pins one retrieval
+plugin (`retrieval_conflict`), which then answers every search.
+`GET /v0/search/profiles` lists its profiles. Without one, the built-in path
+answers the `default` profile.
+
+**Retrieval fixtures** (`retrieval-fixture.schema.json`, a file with a
+top-level `retrieval` property) hold a `query`, `mode`, `limit`,
+`configuration`, the `profiles` to certify (default: all), the `spaces`
+offered (default: `fixture.served@1`, 8 dimensions) and a catalogue of
+`candidates`. The runner serves each request from the catalogue: the
+fixture's `order` for the primitive, or else the segments sharing words with
+the query text (every segment for `near_vector`), most shared words first,
+then filters, `group_by` and `k`. `expect.top` names the ranking's first hits.
+`fixtures/retrieval/newsroom.json` is the normative fixture every retrieval
+plugin is certified with.
+
 ## Normative fixtures {#normative-fixtures}
 
 `fixtures/index.json` lists every fixture with its schema and two outcomes.
@@ -775,6 +856,17 @@ When the manifest declares `ingestion`, it adds checks with
 | `invalid_request` | A non-JSON body, an unknown field, an undeclared space and the normative invalid requests in `fixtures/requests/ingestion/` are refused on both routes with a terminal error envelope. |
 | `credentials` | No value of a declared secret set in the runner's environment (8 characters or more) appears in an answer or the plugin's output (`credential_leak`). |
 
+When the manifest declares `retrieval`, it adds checks with
+`"contribution": "retrieval"`:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | The normative `fixtures/retrieval/*.json` whose configuration the plugin accepts, plus the plugin's own retrieval fixtures, build valid searches. |
+| `invoke` (per fixture and profile) | The whole search ends within the profile's `max_latency_ms` (`deadline_exceeded`), every round passes `CheckSearchOutput`, the reported cost stays within budget (`over_budget`) and the ranking starts with `expect.top` (`unexpected_ranking`). |
+| `replay` (per fixture) | The same search twice returns the same ranking (`nondeterministic_output`). |
+| `invalid_request` | A non-JSON body, an unknown field, an undeclared profile and the normative invalid requests in `fixtures/requests/retrieval/` are refused with a terminal error envelope. |
+| `credentials` | As for ingestion. |
+
 The human report goes to stdout; the plugin's own output goes to stderr.
 `--report <file>` writes the JSON report described by
 `reports/contract-report.schema.json`. Exit codes: `0` certified, `1` not
@@ -786,5 +878,6 @@ broken mode each. CI certifies both `quivr plugin init` templates and the Go
 SDK's sample connector, and publishes their reports as the
 `plugin-contract-report`, `subscription-plugin-contract-report`,
 `go-connector-contract-report` and, for the Go SDK's sample ingestion plugin,
-`go-ingestion-contract-report` workflow artifacts. Write a connector with the
+`go-ingestion-contract-report` and, for its sample retrieval plugin,
+`go-retrieval-contract-report` workflow artifacts. Write a connector with the
 [Go SDK](/sdks/go).

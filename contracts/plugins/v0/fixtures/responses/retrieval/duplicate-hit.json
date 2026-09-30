@@ -1,0 +1,14 @@
+{
+  "ranking": {
+    "hits": [
+      {
+        "segment_id": "seg_harbour",
+        "score": 1
+      },
+      {
+        "segment_id": "seg_harbour",
+        "score": 0.5
+      }
+    ]
+  }
+}

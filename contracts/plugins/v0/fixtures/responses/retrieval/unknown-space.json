@@ -1,0 +1,10 @@
+{
+  "requests": [
+    {
+      "primitive": "near_vector",
+      "space": "example.words.large@2",
+      "query_text": "harbour strike",
+      "k": 2
+    }
+  ]
+}

@@ -94,7 +94,7 @@ func TestCLISearch(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	for _, want := range []string{
-		"1 hit (profile balanced, version ",
+		"1 hit (profile default, version ",
 		"1. record " + r["record_id"].(string) + "  version " + r["version_id"].(string) + fmt.Sprintf("  part body  [0,%d)", len([]rune(text))),
 		"   " + text,
 	} {

@@ -170,7 +170,8 @@
             "normalizer",
             "subscription",
             "connector",
-            "ingestion"
+            "ingestion",
+            "retrieval"
           ],
           "description": "Contribution the check exercises; absent for checks of the whole plugin."
         },

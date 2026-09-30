@@ -11,7 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/client"
 )
 
-const searchUsage = "quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>"
+const searchUsage = "quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile <name>] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>"
 
 const searchSummary = "Search one or more Corpora of a running Quivr and print ranked hits with their provenance."
 
@@ -38,7 +38,7 @@ func search(ctx context.Context, env Env, args []string) int {
 		corpora corpusList
 		sources corpusList
 		mode    = fs.String("mode", "", "search mode: lexical, semantic or hybrid (server default: hybrid)")
-		profile = fs.String("profile", "", "retrieval profile: fast, balanced or deep (server default: balanced)")
+		profile = fs.String("profile", "", "search profile name, as GET /v0/search/profiles lists them (server default: default)")
 		limit   = fs.Int("limit", 0, "maximum number of hits, 1 to 50 (server default: 10)")
 		asJSON  = fs.Bool("json", false, "print the public API response unchanged")
 	)
@@ -74,7 +74,7 @@ func search(ctx context.Context, env Env, args []string) int {
 		body.Mode = &m
 	}
 	if *profile != "" {
-		p := client.SearchRequestProfile(*profile)
+		p := *profile
 		body.Profile = &p
 	}
 	if len(sources) > 0 {

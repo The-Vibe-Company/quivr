@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
 // detailed returns err as a domain would report it with an explanation, in
@@ -152,5 +153,26 @@ func TestRetrievalFailureCodesIgnoreDetail(t *testing.T) {
 func TestUncodedErrorsUseTheExplicitFallback(t *testing.T) {
 	if code := publicCode(fmt.Errorf("invalid_input: raw text"), "invalid_mapping"); code != "invalid_mapping" {
 		t.Fatalf("code %q, want the fallback", code)
+	}
+}
+
+// A retrieval plugin's broken answer and a search over its profile's deadline
+// keep their public codes, whatever detail the engine adds.
+func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
+	for sentinel, want := range map[error]struct {
+		status int
+		code   string
+	}{
+		retrieval.ErrUnsupportedProfile: {422, "unsupported_profile"},
+		retrieval.ErrUnsupported:        {422, "unsupported_search"},
+		retrieval.ErrPluginInvalid:      {502, "retrieval_plugin_invalid"},
+		retrieval.ErrDeadline:           {504, "search_deadline_exceeded"},
+		retrieval.ErrUnavailable:        {503, "search_unavailable"},
+	} {
+		for style, err := range detailed(sentinel) {
+			if status, code := searchFailure(err); status != want.status || code != want.code {
+				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			}
+		}
 	}
 }

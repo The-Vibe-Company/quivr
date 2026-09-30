@@ -1,0 +1,13 @@
+{
+  "requests": [
+    {
+      "primitive": "bm25",
+      "field": "source",
+      "query_text": "harbour strike",
+      "k": 2
+    }
+  ],
+  "ranking": {
+    "hits": []
+  }
+}

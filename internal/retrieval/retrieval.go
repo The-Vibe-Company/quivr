@@ -9,9 +9,18 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
 const ProfileVersion = "balanced.e5-token-windows.v1"
+
+// DefaultProfile answers a search that names no profile. The built-in path
+// has no other; a pinned retrieval plugin declares it beside its own.
+const DefaultProfile = plugins.DefaultProfile
+
+// LegacyProfile is the former name of the default profile, accepted as an
+// alias of DefaultProfile for one release.
+const LegacyProfile = "balanced"
 
 // MaxLimit is the largest page a search may request.
 const MaxLimit = 50
@@ -24,6 +33,10 @@ const MaxLimit = 50
 const CandidateLimit = 3 * MaxLimit
 
 var ErrUnsupported = errors.New("unsupported_search")
+
+// ErrUnsupportedProfile reports a profile neither the built-in path nor the
+// pinned retrieval plugin declares.
+var ErrUnsupportedProfile = errors.New("unsupported_profile")
 var ErrUnavailable = errors.New("search_unavailable")
 
 // ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
@@ -62,11 +75,45 @@ type Request struct {
 	// must carry as a named space; empty searches the generations' served
 	// space. The projection receives the resolved space.
 	Space string
+	// K bounds the projection's candidates; 0 means CandidateLimit.
+	K int
+	// Field is the keyword field: FieldSource (title and body, the default)
+	// or FieldLexical (an ingestion plugin's lexical text).
+	Field string
+	// Hybrid overrides the hybrid weight and fusion; nil keeps alpha 0.5 and
+	// relative score fusion.
+	Hybrid *HybridOptions
 }
+
+// Keyword fields and hybrid fusions a projection query may use.
+const (
+	FieldSource         = plugins.FieldSource
+	FieldLexical        = plugins.FieldLexical
+	FusionRelativeScore = plugins.FusionRelativeScore
+	FusionRanked        = plugins.FusionRanked
+)
+
+// HybridOptions weight and fuse the two sides of a hybrid query.
+type HybridOptions struct {
+	Alpha  float64
+	Fusion string
+}
+
+// Hit is one ranked, hydrated segment and the ranking plugin's explanation.
+type Hit struct {
+	content.Hydrated
+	Explanation string
+}
+
 type Result struct {
-	Hits []content.Hydrated
-	// ProfileVersion is the immutable profile shared by every routed generation.
+	Hits []Hit
+	// Profile is the resolved profile name.
+	Profile string
+	// ProfileVersion identifies what ranked: the immutable profile shared by
+	// every routed generation, or the retrieval plugin and its profile.
 	ProfileVersion string
+	// Usage is reported when a retrieval plugin ranked.
+	Usage *Usage
 }
 
 // Route pairs a Corpus with the logical generation PostgreSQL currently routes it to.
@@ -109,7 +156,12 @@ type Service struct {
 	QueryNormalizer QueryNormalizer
 	// Spaces encodes queries into plugin-owned spaces; nil when no ingestion
 	// plugin is pinned.
-	Spaces     QueryEncoder
+	Spaces QueryEncoder
+	// Ranker answers searches when a retrieval plugin is pinned; nil keeps
+	// the built-in path.
+	Ranker Ranker
+	// Registry describes the vector spaces a ranker may request.
+	Registry   SpaceRegistry
 	Routing    Routing
 	Projection Projection
 	Content    content.Service
@@ -130,20 +182,24 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 	return s.Content.Promote(ctx, org, seg, g)
 }
 func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Result, error) {
-	out := Result{Hits: []content.Hydrated{}}
+	out := Result{Hits: []Hit{}}
 	if !scope.Allows("content:read") || !scope.Allows("search:query") {
 		return out, corpus.ErrForbidden
 	}
 	if q.Mode == "" {
 		q.Mode = "hybrid"
 	}
-	if q.Profile == "" {
-		q.Profile = "balanced"
+	if q.Profile == "" || q.Profile == LegacyProfile {
+		q.Profile = DefaultProfile
 	}
 	if q.Limit == 0 {
 		q.Limit = 10
 	}
-	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Profile != "balanced" || q.Limit < 1 || q.Limit > MaxLimit || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
+	if !s.declares(q.Profile) {
+		return out, ErrUnsupportedProfile
+	}
+	out.Profile = q.Profile
+	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Limit < 1 || q.Limit > MaxLimit || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
 	seen := map[string]bool{}
@@ -196,6 +252,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		routes = append(routes, Route{CorpusID: id, Generation: g})
 		routed[g.ID] = id
+	}
+	if s.Ranker != nil {
+		return s.rank(ctx, scope, q, routes, out)
 	}
 	builtin := q.Space == s.Embedder.Space().ID
 	plugin := !builtin && s.Spaces != nil && s.Spaces.Owns(q.Space)
@@ -254,7 +313,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 			continue
 		}
 		segments[c.SegmentID] = true
-		out.Hits = append(out.Hits, h)
+		out.Hits = append(out.Hits, Hit{Hydrated: h})
 		if len(out.Hits) == q.Limit {
 			break
 		}

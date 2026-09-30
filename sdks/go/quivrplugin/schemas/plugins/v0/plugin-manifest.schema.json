@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.6",
+  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.7",
   "description": "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md.",
   "type": "object",
   "additionalProperties": false,
@@ -42,7 +42,7 @@
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
-      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3) and ingestion (since 0.6). The other names are reserved and rejected.",
+      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3), ingestion (since 0.6) and retrieval (since 0.7). The other names are reserved and rejected.",
       "properties": {
         "normalizer": {
           "$ref": "#/$defs/Normalizer"
@@ -55,6 +55,9 @@
         },
         "ingestion": {
           "$ref": "#/$defs/Ingestion"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/Retrieval"
         },
         "enricher": false,
         "validator": false,
@@ -530,6 +533,97 @@
               "default": 16777216
             }
           }
+        }
+      }
+    },
+    "ProfileName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "A search profile name, as clients pass it in POST /v0/search."
+    },
+    "Retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profiles"
+      ],
+      "description": "Search, since Plugin API 0.7: answer one search in rounds. Each round the plugin either asks the core for candidates (keyword, vector on a named space, hybrid) or returns the final ranking, chosen only among candidates the core served in this search. The core keeps the index, encodes queries with each space's owner, and applies authorization, withdrawal and generation routing before serving any candidate.",
+      "properties": {
+        "profiles": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "required": [
+            "default"
+          ],
+          "propertyNames": {
+            "$ref": "#/$defs/ProfileName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/RetrievalProfile"
+          },
+          "description": "The search profiles this plugin answers, by name; default is required and answers a search that names no profile."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 3,
+              "description": "Most rounds of one search; the last round must return a ranking."
+            },
+            "max_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 4,
+              "description": "Most candidate requests of one round."
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "description": "Largest k of one candidate request."
+            },
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 4194304,
+              "default": 1048576
+            }
+          }
+        }
+      }
+    },
+    "RetrievalProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_latency_ms",
+        "max_cost_cents"
+      ],
+      "description": "One search profile and its budgets.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "max_latency_ms": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 10000,
+          "description": "Deadline of one whole search under this profile, every round and every candidate request included. The core stops a search that runs longer and answers search_deadline_exceeded."
+        },
+        "max_cost_cents": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Most paid spend one search may report in usage.cost_cents (for example a re-ranking or rewriting API); 0 for a profile without paid calls."
         }
       }
     }

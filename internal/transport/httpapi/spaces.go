@@ -58,9 +58,9 @@ func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope cor
 	for _, s := range spaces {
 		item := transport.VectorSpace{VectorSpaceId: s.ID, Name: s.Name, Version: s.Version, Model: s.Model, Dimensions: s.VectorSpace.Dimensions,
 			Metric: transport.VectorSpaceMetric(s.Metric), Indexes: orEmpty(s.Indexes), QueryModalities: orEmpty(s.QueryModalities), Role: transport.VectorSpaceRole(s.GenerationRole)}
-		item.Owner.Kind = transport.Engine
+		item.Owner.Kind = transport.VectorSpaceOwnerKindEngine
 		if s.OwnerPluginID != "" {
-			item.Owner.Kind = transport.Plugin
+			item.Owner.Kind = transport.VectorSpaceOwnerKindPlugin
 			item.Owner.PluginId, item.Owner.PluginVersion = optionalString(s.OwnerPluginID), optionalString(s.OwnerPluginVersion)
 		}
 		if item.Name == "" {

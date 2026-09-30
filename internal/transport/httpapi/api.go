@@ -191,6 +191,12 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		a.streamChanges(w, r, scope)
 		return
 	}
+	// A search answered by a retrieval plugin runs under its profile's
+	// max_latency_ms instead of the API's request deadline.
+	if r.Method == "POST" && r.URL.Path == "/v0/search" && a.Retrieval.Ranker != nil {
+		a.search(w, r, scope)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
@@ -200,6 +206,10 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == "POST" && r.URL.Path == "/v0/search" {
 		a.search(w, r, scope)
+		return
+	}
+	if r.Method == "GET" && r.URL.Path == "/v0/search/profiles" {
+		a.searchProfiles(w, scope)
 		return
 	}
 	if a.contentRoutes(w, r, scope) {

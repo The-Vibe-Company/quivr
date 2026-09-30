@@ -279,6 +279,12 @@ func Run(command string) error {
 		processor.Plugin = deriver
 		rebuilder.Plugin = deriver
 	}
+	// A pinned retrieval plugin answers every search: it requests candidates,
+	// which search serves after authorization and hydration, and ranks them.
+	// Without one the built-in path answers the default profile.
+	if pin := pins.Retrieval(); pin != nil {
+		search.Ranker, search.Registry = pluginhttp.Retriever{Pin: pin}, store
+	}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()

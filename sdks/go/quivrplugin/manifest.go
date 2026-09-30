@@ -16,14 +16,14 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.6.0"
+const PluginAPIVersion = "0.7.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
-// Plugin API range and the connector and ingestion Contributions. The engine validates the
+// Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
 // whole manifest with `quivr plugin inspect`.
 type Manifest struct {
 	ID            string `json:"id"`
@@ -42,6 +42,27 @@ type Manifest struct {
 	// Ingestion is the decoded ingestion Contribution (Plugin API 0.6), with
 	// defaults; nil when the manifest declares none.
 	Ingestion *IngestionContribution `json:"-"`
+	// Retrieval is the decoded retrieval Contribution (Plugin API 0.7), with
+	// defaults; nil when the manifest declares none.
+	Retrieval *RetrievalContribution `json:"-"`
+}
+
+// RetrievalContribution is the retrieval Contribution of a manifest.
+type RetrievalContribution struct {
+	Profiles map[string]RetrievalProfile `json:"profiles"`
+	Limits   struct {
+		MaxRounds        int `json:"max_rounds"`
+		MaxRequests      int `json:"max_requests"`
+		MaxCandidates    int `json:"max_candidates"`
+		MaxResponseBytes int `json:"max_response_bytes"`
+	} `json:"limits"`
+}
+
+// RetrievalProfile is one declared search profile and its budgets.
+type RetrievalProfile struct {
+	Description  string  `json:"description,omitempty"`
+	MaxLatencyMS int     `json:"max_latency_ms"`
+	MaxCostCents float64 `json:"max_cost_cents"`
 }
 
 // IngestionContribution is the ingestion Contribution of a manifest.
@@ -154,8 +175,8 @@ func loadManifest(path string) (*loadedManifest, error) {
 		return nil, err
 	}
 	for name := range m.Contributions {
-		if name != "connector" && name != "ingestion" {
-			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK serves connector and ingestion Contributions only", path, name)
+		if name != "connector" && name != "ingestion" && name != "retrieval" {
+			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK serves connector, ingestion and retrieval Contributions only", path, name)
 		}
 	}
 	api, ok, err := negotiate(m.Compatibility.PluginAPI)
@@ -188,10 +209,32 @@ func loadManifest(path string) (*loadedManifest, error) {
 		}
 		m.Ingestion = in
 	}
+	if raw, ok := m.Contributions["retrieval"]; ok {
+		if compareVersions(api, "0.7.0") < 0 {
+			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.7.0, which introduced retrieval", path, m.Compatibility.PluginAPI)
+		}
+		rc := &RetrievalContribution{}
+		if err := json.Unmarshal(raw, rc); err != nil {
+			return nil, err
+		}
+		if rc.Limits.MaxRounds == 0 {
+			rc.Limits.MaxRounds = 3
+		}
+		if rc.Limits.MaxRequests == 0 {
+			rc.Limits.MaxRequests = 4
+		}
+		if rc.Limits.MaxCandidates == 0 {
+			rc.Limits.MaxCandidates = 50
+		}
+		if rc.Limits.MaxResponseBytes == 0 {
+			rc.Limits.MaxResponseBytes = 1 << 20
+		}
+		m.Retrieval = rc
+	}
 	raw0, ok := m.Contributions["connector"]
 	if !ok {
-		if m.Ingestion == nil {
-			return nil, fmt.Errorf("%s declares no connector or ingestion Contribution", path)
+		if m.Ingestion == nil && m.Retrieval == nil {
+			return nil, fmt.Errorf("%s declares no connector, ingestion or retrieval Contribution", path)
 		}
 		return m, nil
 	}

@@ -193,7 +193,10 @@ var hints = map[string]string{
 	"invalid_api_key":           "the server rejected the API key; check " + EnvAPIKey + " or --api-key",
 	"forbidden":                 "the API key lacks a permission or Corpus scope this request needs",
 	"invalid_schema":            "the request does not match the API contract; check the arguments",
-	"unsupported_search":        "the server does not support this search mode or profile",
+	"unsupported_search":        "the server does not support this search mode or query",
+	"unsupported_profile":       "the deployment does not answer this profile; GET /v0/search/profiles lists the ones it does",
+	"retrieval_plugin_invalid":  "the deployment's retrieval plugin answered something the engine refuses; an operator checks the plugin",
+	"search_deadline_exceeded":  "the search outran its profile's latency budget; retry, or use a faster profile",
 	"search_unavailable":        "the search backend is unavailable; retry later",
 	"source_filter_unavailable": "a requested Corpus predates source filtering; an operator rebuilds it once (POST /v0/corpora/{id}/rebuilds)",
 }

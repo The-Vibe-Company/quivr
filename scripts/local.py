@@ -10,6 +10,7 @@ import ports
 import subscription_plugin
 import connector_plugin
 import ingestion_plugin
+import retrieval_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -518,6 +519,9 @@ def parts():
             # The Go SDK sample ingestion plugin pinned beside them: a Corpus rebuilt onto its named spaces is
             # segmented, embedded and searched through it, served and evaluation spaces both covered.
             step('ingestion_plugin',ingestion_plugin.verify),
+            # The Go SDK sample retrieval plugin pinned beside them: it ranks every search from keyword and vector
+            # candidates the engine served, under the profiles it declares.
+            step('retrieval_plugin',retrieval_plugin.verify),
             # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
             step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
             acceptance('pdf_normalizer','TestPDF'),

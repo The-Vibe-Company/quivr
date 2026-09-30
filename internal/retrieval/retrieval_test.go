@@ -70,7 +70,12 @@ func (fakeBaseline) Hydrate(_ context.Context, _ corpus.Scope, c content.Candida
 	if strings.HasPrefix(c.SegmentID, "stale-") {
 		return content.Hydrated{}, content.Blob{}, corpus.ErrNotFound
 	}
-	return content.Hydrated{GenerationID: c.GenerationID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, End: len([]rune(segmentText))}}, content.Blob{}, nil
+	h := content.Hydrated{GenerationID: c.GenerationID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, End: len([]rune(segmentText))}}
+	// A vec- segment holds a vector in the served space.
+	if strings.HasPrefix(c.SegmentID, "vec-") {
+		h.EmbeddingID, h.SpaceID = "embedding-"+c.SegmentID, "space"
+	}
+	return h, content.Blob{}, nil
 }
 
 type fakeBlobs struct{ content.Blobs }

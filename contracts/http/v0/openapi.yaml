@@ -1754,7 +1754,9 @@ paths:
       description: Resolve the requested profile, compile mandatory Corpus/Organization prefilters and
         any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records
         remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection
-        does not change access/currentness rules.
+        does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks
+        the engine for candidates in up to three rounds and returns its ranking, which may hold only
+        candidates the engine served in this search, each already authorized and hydrated.
       requestBody:
         required: true
         content:
@@ -1770,14 +1772,36 @@ paths:
                 $ref: '#/components/schemas/SearchResponse'
         default:
           description: Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action,
-            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input or
-            source_filter_unavailable, 503 dependency unavailable.
+            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, unsupported_search
+            or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its
+            contract, for example ranked a segment the engine never served it), 503 dependency unavailable,
+            504 search_deadline_exceeded (the search outran its profile's max_latency_ms).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
       x-required-permissions:
       - content:read
+      - search:query
+  /v0/search/profiles:
+    get:
+      operationId: listSearchProfiles
+      description: The search profiles this deployment answers, default first. Without a retrieval
+        plugin only the built-in default exists; with one, its declared profiles and budgets.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProfileList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 unauthorized scope/action.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-required-permissions:
       - search:query
   /v0/corpora/{corpus_id}/vector-spaces:
     get:
@@ -3901,11 +3925,12 @@ components:
           default: hybrid
         profile:
           type: string
-          enum:
-          - fast
-          - balanced
-          - deep
-          default: balanced
+          pattern: ^[a-z][a-z0-9_]{0,31}$
+          default: default
+          description: A search profile this deployment answers (listSearchProfiles). The built-in
+            path answers default only; a pinned retrieval plugin answers the profiles it declares,
+            default among them. balanced is a deprecated alias of default, accepted for one release.
+            An unknown profile returns 422 unsupported_profile.
         limit:
           type: integer
           minimum: 1
@@ -3956,8 +3981,82 @@ components:
       required:
       - name
       - version
-      description: Resolved immutable retrieval profile identity. Version describes query normalization,
-        ranking seed and model/segmentation configuration; no user-facing engine parameters.
+      description: Resolved retrieval profile identity. Name is the profile that answered (default when
+        the request named none or the deprecated balanced). Version identifies what ranked; the built-in
+        path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
+    SearchProfileList:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchProfileDescription'
+          minItems: 1
+          maxItems: 8
+      required:
+      - items
+    SearchProfileDescription:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        max_latency_ms:
+          type: integer
+          minimum: 1
+          description: Deadline of one search under this profile; absent for the built-in default.
+        max_cost_cents:
+          type: number
+          minimum: 0
+          description: Most a search may spend on paid calls; absent for the built-in default.
+        provider:
+          type: object
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum:
+              - engine
+              - plugin
+            plugin_id:
+              type: string
+              minLength: 1
+            plugin_version:
+              type: string
+              minLength: 1
+          required:
+          - kind
+      required:
+      - name
+      - provider
+    SearchUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        rounds:
+          type: integer
+          minimum: 1
+          maximum: 3
+        elapsed_ms:
+          type: integer
+          minimum: 0
+        paid_calls:
+          type: integer
+          minimum: 0
+        cost_cents:
+          type: number
+          minimum: 0
+      required:
+      - rounds
+      - elapsed_ms
+      - paid_calls
+      - cost_cents
+      description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed
+        time, and the paid calls and cost the plugin reported.
     SearchExcerpt:
       type: object
       additionalProperties: false
@@ -4019,6 +4118,11 @@ components:
           $ref: '#/components/schemas/SearchExcerpt'
         availability:
           $ref: '#/components/schemas/Availability'
+        explanation:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Why the retrieval plugin ranked this hit here, when it says so.
       required:
       - record_id
       - version_id
@@ -4057,6 +4161,8 @@ components:
           maxItems: 50
         retrieval_profile:
           $ref: '#/components/schemas/SearchProfile'
+        usage:
+          $ref: '#/components/schemas/SearchUsage'
       required:
       - items
       - retrieval_profile

@@ -522,6 +522,24 @@ func (e SearchExcerptCoordinateSystem) Valid() bool {
 	}
 }
 
+// Defines values for SearchProfileDescriptionProviderKind.
+const (
+	SearchProfileDescriptionProviderKindEngine SearchProfileDescriptionProviderKind = "engine"
+	SearchProfileDescriptionProviderKindPlugin SearchProfileDescriptionProviderKind = "plugin"
+)
+
+// Valid indicates whether the value is a known member of the SearchProfileDescriptionProviderKind enum.
+func (e SearchProfileDescriptionProviderKind) Valid() bool {
+	switch e {
+	case SearchProfileDescriptionProviderKindEngine:
+		return true
+	case SearchProfileDescriptionProviderKindPlugin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SearchRequestMode.
 const (
 	Hybrid   SearchRequestMode = "hybrid"
@@ -537,27 +555,6 @@ func (e SearchRequestMode) Valid() bool {
 	case Lexical:
 		return true
 	case Semantic:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for SearchRequestProfile.
-const (
-	Balanced SearchRequestProfile = "balanced"
-	Deep     SearchRequestProfile = "deep"
-	Fast     SearchRequestProfile = "fast"
-)
-
-// Valid indicates whether the value is a known member of the SearchRequestProfile enum.
-func (e SearchRequestProfile) Valid() bool {
-	switch e {
-	case Balanced:
-		return true
-	case Deep:
-		return true
-	case Fast:
 		return true
 	default:
 		return false
@@ -644,16 +641,16 @@ func (e VectorSpaceMetric) Valid() bool {
 
 // Defines values for VectorSpaceOwnerKind.
 const (
-	Engine VectorSpaceOwnerKind = "engine"
-	Plugin VectorSpaceOwnerKind = "plugin"
+	VectorSpaceOwnerKindEngine VectorSpaceOwnerKind = "engine"
+	VectorSpaceOwnerKindPlugin VectorSpaceOwnerKind = "plugin"
 )
 
 // Valid indicates whether the value is a known member of the VectorSpaceOwnerKind enum.
 func (e VectorSpaceOwnerKind) Valid() bool {
 	switch e {
-	case Engine:
+	case VectorSpaceOwnerKindEngine:
 		return true
-	case Plugin:
+	case VectorSpaceOwnerKindPlugin:
 		return true
 	default:
 		return false
@@ -1505,21 +1502,49 @@ type SearchHit struct {
 	EmbeddingArtifactId *string      `json:"embedding_artifact_id,omitempty"`
 
 	// Excerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.
-	Excerpt                SearchExcerpt `json:"excerpt"`
-	PartKey                string        `json:"part_key"`
-	ProjectionGenerationId string        `json:"projection_generation_id"`
-	Rank                   int           `json:"rank"`
-	RecordId               string        `json:"record_id"`
-	SegmentId              string        `json:"segment_id"`
-	SegmentationId         string        `json:"segmentation_id"`
-	VectorSpaceId          *string       `json:"vector_space_id,omitempty"`
-	VersionId              string        `json:"version_id"`
+	Excerpt SearchExcerpt `json:"excerpt"`
+
+	// Explanation Why the retrieval plugin ranked this hit here, when it says so.
+	Explanation            *string `json:"explanation,omitempty"`
+	PartKey                string  `json:"part_key"`
+	ProjectionGenerationId string  `json:"projection_generation_id"`
+	Rank                   int     `json:"rank"`
+	RecordId               string  `json:"record_id"`
+	SegmentId              string  `json:"segment_id"`
+	SegmentationId         string  `json:"segmentation_id"`
+	VectorSpaceId          *string `json:"vector_space_id,omitempty"`
+	VersionId              string  `json:"version_id"`
 }
 
-// SearchProfile Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
 type SearchProfile struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+}
+
+// SearchProfileDescription defines model for SearchProfileDescription.
+type SearchProfileDescription struct {
+	Description *string `json:"description,omitempty"`
+
+	// MaxCostCents Most a search may spend on paid calls; absent for the built-in default.
+	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
+
+	// MaxLatencyMs Deadline of one search under this profile; absent for the built-in default.
+	MaxLatencyMs *int   `json:"max_latency_ms,omitempty"`
+	Name         string `json:"name"`
+	Provider     struct {
+		Kind          SearchProfileDescriptionProviderKind `json:"kind"`
+		PluginId      *string                              `json:"plugin_id,omitempty"`
+		PluginVersion *string                              `json:"plugin_version,omitempty"`
+	} `json:"provider"`
+}
+
+// SearchProfileDescriptionProviderKind defines model for SearchProfileDescription.Provider.Kind.
+type SearchProfileDescriptionProviderKind string
+
+// SearchProfileList defines model for SearchProfileList.
+type SearchProfileList struct {
+	Items []SearchProfileDescription `json:"items"`
 }
 
 // SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
@@ -1527,25 +1552,35 @@ type SearchRequest struct {
 	CorpusIds []string `json:"corpus_ids"`
 
 	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
-	Filter  *SearchFilter         `json:"filter,omitempty"`
-	Limit   *int                  `json:"limit,omitempty"`
-	Mode    *SearchRequestMode    `json:"mode,omitempty"`
-	Profile *SearchRequestProfile `json:"profile,omitempty"`
-	Query   string                `json:"query"`
+	Filter *SearchFilter      `json:"filter,omitempty"`
+	Limit  *int               `json:"limit,omitempty"`
+	Mode   *SearchRequestMode `json:"mode,omitempty"`
+
+	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted for one release. An unknown profile returns 422 unsupported_profile.
+	Profile *string `json:"profile,omitempty"`
+	Query   string  `json:"query"`
 }
 
 // SearchRequestMode defines model for SearchRequest.Mode.
 type SearchRequestMode string
 
-// SearchRequestProfile defines model for SearchRequest.Profile.
-type SearchRequestProfile string
-
 // SearchResponse Bounded top-k results after canonical rechecks. May contain fewer hits than requested; no total count, completeness promise or stable pagination snapshot. Empty results still name the resolved profile.
 type SearchResponse struct {
 	Items []SearchHit `json:"items"`
 
-	// RetrievalProfile Resolved immutable retrieval profile identity. Version describes query normalization, ranking seed and model/segmentation configuration; no user-facing engine parameters.
+	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
+
+	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+	Usage *SearchUsage `json:"usage,omitempty"`
+}
+
+// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+type SearchUsage struct {
+	CostCents float32 `json:"cost_cents"`
+	ElapsedMs int     `json:"elapsed_ms"`
+	PaidCalls int     `json:"paid_calls"`
+	Rounds    int     `json:"rounds"`
 }
 
 // SourceIdentity defines model for SourceIdentity.
@@ -2248,6 +2283,9 @@ type ServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/search/profiles)
+	ListSearchProfiles(w http.ResponseWriter, r *http.Request)
 
 	// (POST /v0/subscription-previews)
 	PreviewSubscription(w http.ResponseWriter, r *http.Request)
@@ -3510,6 +3548,20 @@ func (siw *ServerInterfaceWrapper) SearchRecords(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListSearchProfiles operation middleware
+func (siw *ServerInterfaceWrapper) ListSearchProfiles(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSearchProfiles(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PreviewSubscription operation middleware
 func (siw *ServerInterfaceWrapper) PreviewSubscription(w http.ResponseWriter, r *http.Request) {
 
@@ -4027,6 +4079,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/search/profiles", wrapper.ListSearchProfiles)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/vector-spaces", wrapper.ListVectorSpaces)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
@@ -5727,6 +5780,44 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 	return err
 }
 
+type ListSearchProfilesRequestObject struct {
+}
+
+type ListSearchProfilesResponseObject interface {
+	VisitListSearchProfilesResponse(w http.ResponseWriter) error
+}
+
+type ListSearchProfiles200JSONResponse SearchProfileList
+
+func (response ListSearchProfiles200JSONResponse) VisitListSearchProfilesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSearchProfilesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListSearchProfilesdefaultJSONResponse) VisitListSearchProfilesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PreviewSubscriptionRequestObject struct {
 	Body *PreviewSubscriptionJSONRequestBody
 }
@@ -6368,6 +6459,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/search)
 	SearchRecords(ctx context.Context, request SearchRecordsRequestObject) (SearchRecordsResponseObject, error)
+
+	// (GET /v0/search/profiles)
+	ListSearchProfiles(ctx context.Context, request ListSearchProfilesRequestObject) (ListSearchProfilesResponseObject, error)
 
 	// (POST /v0/subscription-previews)
 	PreviewSubscription(ctx context.Context, request PreviewSubscriptionRequestObject) (PreviewSubscriptionResponseObject, error)
@@ -7642,6 +7736,30 @@ func (sh *strictHandler) SearchRecords(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SearchRecordsResponseObject); ok {
 		if err := validResponse.VisitSearchRecordsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSearchProfiles operation middleware
+func (sh *strictHandler) ListSearchProfiles(w http.ResponseWriter, r *http.Request) {
+	var request ListSearchProfilesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSearchProfiles(ctx, request.(ListSearchProfilesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSearchProfiles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSearchProfilesResponseObject); ok {
+		if err := validResponse.VisitListSearchProfilesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

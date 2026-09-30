@@ -1,0 +1,13 @@
+{
+  "description": "Three segments about a ferry; the one sharing both query words ranks first.",
+  "retrieval": {
+    "query": "ferry delayed",
+    "limit": 2,
+    "candidates": [
+      {"segment_id": "seg_ferry", "record_id": "rec_ferry", "text": "The morning ferry was delayed by fog."},
+      {"segment_id": "seg_bridge", "record_id": "rec_bridge", "text": "The bridge reopened after repairs."},
+      {"segment_id": "seg_port", "record_id": "rec_port", "text": "Every ferry left the port on time."}
+    ],
+    "expect": {"top": ["seg_ferry"]}
+  }
+}

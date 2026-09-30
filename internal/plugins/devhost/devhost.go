@@ -516,3 +516,9 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 	result.Error = &envelope
 	return result, nil
 }
+
+// InvokeSearch posts one retrieval search round; check is normally a closure
+// over a plugins.RetrievalSession.
+func InvokeSearch(ctx context.Context, baseURL string, request []byte, maxResponseBytes int, check func(body []byte) []plugins.Issue) (*Result, error) {
+	return invoke(ctx, baseURL, plugins.SearchRoute, request, maxResponseBytes, check)
+}

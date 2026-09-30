@@ -10,19 +10,20 @@ import (
 
 // TestSeedMirrorsWhatThePinsResolve owns the mapping from startup pins to the
 // seeded registry: one active registration per pinned plugin, and a plan whose
-// roles are the routed media types, the alert rules and the connector kinds
-// the engine resolves from the same pins.
+// roles are the routed media types, the alert rules, the connector kinds and
+// the retrieval role the engine resolves from the same pins.
 func TestSeedMirrorsWhatThePinsResolve(t *testing.T) {
 	pins, err := plugins.LoadPins([]plugins.PinConfig{
 		{Manifest: "../../../plugins/pdf-text/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9900", Routes: []plugins.RouteConfig{{MediaType: "application/pdf"}}},
 		{Manifest: "../../../plugins/alerts/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9910/"},
 		{Manifest: "../../../plugins/rss/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9920"},
+		{Manifest: "../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9930"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed := registry.FromPins(pins)
-	if len(seed.Registrations) != 3 {
+	if len(seed.Registrations) != 4 {
 		t.Fatalf("registrations %+v, want one per pin", seed.Registrations)
 	}
 	ids := map[string]string{}
@@ -43,7 +44,7 @@ func TestSeedMirrorsWhatThePinsResolve(t *testing.T) {
 			t.Fatalf("role %s served by %s, want the registration of %s (%s)", a.Role, a.RegistrationID, a.PluginID, want)
 		}
 	}
-	if want := []string{"connector:rss", "normalizer:application/pdf", "subscription:alerts"}; !reflect.DeepEqual(roles, want) {
+	if want := []string{"connector:rss", "normalizer:application/pdf", "retrieval", "subscription:alerts"}; !reflect.DeepEqual(roles, want) {
 		t.Fatalf("plan roles %v, want %v", roles, want)
 	}
 	if empty := registry.FromPins(nil); len(empty.Registrations) != 0 || len(empty.Roles) != 0 {

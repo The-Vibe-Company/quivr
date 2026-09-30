@@ -52,6 +52,9 @@ FILES = {
     "ingestion-embed-query-request.schema.json": "EmbedQueryRequest",
     "ingestion-embed-query-response.schema.json": "EmbedQueryResponse",
     "ingestion-fixture.schema.json": "IngestionFixture",
+    "retrieval-search-request.schema.json": "SearchRequest",
+    "retrieval-search-response.schema.json": "SearchResponse",
+    "retrieval-fixture.schema.json": "RetrievalFixture",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".

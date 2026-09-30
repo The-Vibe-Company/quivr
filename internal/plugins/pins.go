@@ -19,6 +19,10 @@ const CodeKindConflict = "kind_conflict"
 // deployments segment and embed through one plugin.
 const CodeIngestionConflict = "ingestion_conflict"
 
+// CodeRetrievalConflict is a second pinned retrieval plugin: one plugin
+// answers every search of a deployment.
+const CodeRetrievalConflict = "retrieval_conflict"
+
 // ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
 // deterministic test evaluator); no plugin may be pinned under them.
 var ReservedEvaluatorIDs = []string{"quivr.fixture"}
@@ -32,6 +36,7 @@ type PinSet struct {
 	evaluators  map[string]*Pin
 	connectors  map[string]*Pin
 	ingestion   *Pin
+	retrieval   *Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
@@ -88,6 +93,13 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 				issues = append(issues, Issue{Code: CodeIngestionConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("%s@%s already segments and embeds for this deployment; pin one ingestion plugin and enable several of its spaces instead", set.ingestion.Manifest.ID, set.ingestion.Manifest.Version)})
 			} else {
 				set.ingestion = pin
+			}
+		}
+		if pin.Manifest.Contributions.Retrieval != nil {
+			if set.retrieval != nil {
+				issues = append(issues, Issue{Code: CodeRetrievalConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("%s@%s already answers searches for this deployment; pin one retrieval plugin and declare several profiles in it instead", set.retrieval.Manifest.ID, set.retrieval.Manifest.Version)})
+			} else {
+				set.retrieval = pin
 			}
 		}
 		if c := pin.Manifest.Contributions.Connector; c != nil {
@@ -174,6 +186,14 @@ func (s *PinSet) Ingestion() *Pin {
 		return nil
 	}
 	return s.ingestion
+}
+
+// Retrieval returns the pinned retrieval plugin, or nil.
+func (s *PinSet) Retrieval() *Pin {
+	if s == nil {
+		return nil
+	}
+	return s.retrieval
 }
 
 // PinnedKind is one connector kind a pinned plugin provides.

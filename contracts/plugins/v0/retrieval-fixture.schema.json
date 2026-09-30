@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retrieval fixture, v0",
+  "description": "A local test input for a retrieval plugin (since Plugin API 0.7): a query, the spaces available and a catalogue of candidates. quivr plugin test drives the rounds and serves candidates from the catalogue, offline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "retrieval"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query",
+        "candidates"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "mode": {
+          "enum": [
+            "lexical",
+            "semantic",
+            "hybrid"
+          ],
+          "default": "hybrid"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10
+        },
+        "configuration": {
+          "type": "object",
+          "description": "Plugin configuration; default {}."
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/ProfileName"
+          },
+          "description": "Profiles to certify; default every declared profile."
+        },
+        "spaces": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "retrieval-search-request.schema.json#/$defs/CandidateRequest/properties/space"
+          },
+          "description": "Ids of the spaces offered (served first); default one served space, fixture.served@1."
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "segment_id",
+              "record_id",
+              "text"
+            ],
+            "properties": {
+              "segment_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "record_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "source_namespace": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "description": "The segments the runner may serve. Unless order says otherwise, every primitive serves them ranked by how many query words they contain, ties in catalogue order."
+        },
+        "order": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bm25": {
+              "$ref": "#/$defs/Order"
+            },
+            "near_vector": {
+              "$ref": "#/$defs/Order"
+            },
+            "hybrid": {
+              "$ref": "#/$defs/Order"
+            }
+          },
+          "description": "The exact segment order a primitive serves, whatever its query."
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "top": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": "The first hits of the ranking, in order."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Order": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    }
+  }
+}

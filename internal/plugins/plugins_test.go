@@ -112,6 +112,8 @@ func TestNormativeFixtures(t *testing.T) {
 				issues = plugins.CheckUploadAnswer(raw)
 			case "ingestion-segment-and-embed-response.schema.json", "ingestion-embed-query-response.schema.json":
 				issues = checkIngestionFixture(t, c, raw)
+			case "retrieval-search-response.schema.json":
+				issues = checkRetrievalFixture(t, c, raw)
 			default:
 				issues = plugins.ValidateDocument(c.Schema, raw)
 			}
@@ -176,7 +178,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.6.0" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.7.0" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer
@@ -328,6 +330,25 @@ func checkIngestionFixture(t *testing.T, c fixtureCase, raw []byte) []plugins.Is
 		t.Fatal(err)
 	}
 	return plugins.CheckSegmentAndEmbedOutput(raw, view, report.Manifest)
+}
+
+// checkRetrievalFixture judges a search answer against the round and the
+// manifest it names.
+func checkRetrievalFixture(t *testing.T, c fixtureCase, raw []byte) []plugins.Issue {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(fixtures, c.Request))
+	if err != nil {
+		t.Fatalf("search answers name their request: %v", err)
+	}
+	var request plugins.SearchRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		t.Fatal(err)
+	}
+	report := plugins.Inspect(filepath.Join(fixtures, c.Manifest))
+	if report.Manifest == nil {
+		t.Fatalf("search answers name a valid manifest: %+v", report.Errors)
+	}
+	return plugins.CheckSearchOutput(raw, request, report.Manifest)
 }
 
 // checkConnectorFixture judges a connector fetch response fixture against the

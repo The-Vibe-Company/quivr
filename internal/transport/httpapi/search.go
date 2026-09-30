@@ -25,12 +25,12 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 		failure(w, 422, "invalid_schema")
 		return
 	}
-	q := retrieval.Request{Query: wire.Query, CorpusIDs: wire.CorpusIds, Mode: "hybrid", Profile: "balanced", Limit: 10}
+	q := retrieval.Request{Query: wire.Query, CorpusIDs: wire.CorpusIds, Mode: "hybrid", Limit: 10}
 	if wire.Mode != nil {
 		q.Mode = string(*wire.Mode)
 	}
 	if wire.Profile != nil {
-		q.Profile = string(*wire.Profile)
+		q.Profile = *wire.Profile
 	}
 	if wire.Limit != nil {
 		q.Limit = *wire.Limit
@@ -40,21 +40,56 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
 	if err != nil {
-		switch {
-		case errors.Is(err, corpus.ErrForbidden):
-			failure(w, 403, "forbidden")
-		case errors.Is(err, retrieval.ErrUnsupported):
-			failure(w, 422, "unsupported_search")
-		case errors.Is(err, retrieval.ErrSourceFilterUnavailable):
-			failure(w, 422, "source_filter_unavailable")
-		default:
-			failure(w, 503, "search_unavailable")
-		}
+		status, code := searchFailure(err)
+		failure(w, status, code)
 		return
 	}
-	response := transport.SearchResponse{Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: "balanced", Version: result.ProfileVersion}}
+	response := transport.SearchResponse{Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
 	for i, h := range result.Hits {
-		response.Items = append(response.Items, transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability)})
+		response.Items = append(response.Items, transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)})
+	}
+	if u := result.Usage; u != nil {
+		response.Usage = &transport.SearchUsage{Rounds: u.Rounds, ElapsedMs: int(u.Elapsed.Milliseconds()), PaidCalls: u.PaidCalls, CostCents: float32(u.CostCents)}
 	}
 	send(w, 200, response)
+}
+
+// searchProfiles lists the search profiles this deployment answers.
+func (a *API) searchProfiles(w http.ResponseWriter, scope corpus.Scope) {
+	if !scope.Allows("search:query") {
+		failure(w, 403, "forbidden")
+		return
+	}
+	out := transport.SearchProfileList{Items: []transport.SearchProfileDescription{}}
+	for _, p := range a.Retrieval.Profiles() {
+		item := transport.SearchProfileDescription{Name: p.Name, Description: optionalString(p.Description)}
+		item.Provider.Kind = transport.SearchProfileDescriptionProviderKindEngine
+		if p.PluginID != "" {
+			item.Provider.Kind = transport.SearchProfileDescriptionProviderKindPlugin
+			item.Provider.PluginId, item.Provider.PluginVersion = optionalString(p.PluginID), optionalString(p.PluginVersion)
+			latency, cost := p.MaxLatencyMS, float32(p.MaxCostCents)
+			item.MaxLatencyMs, item.MaxCostCents = &latency, &cost
+		}
+		out.Items = append(out.Items, item)
+	}
+	send(w, 200, out)
+}
+
+// searchFailure maps a search error to its status and public code.
+func searchFailure(err error) (int, string) {
+	switch {
+	case errors.Is(err, corpus.ErrForbidden):
+		return 403, "forbidden"
+	case errors.Is(err, retrieval.ErrUnsupportedProfile):
+		return 422, "unsupported_profile"
+	case errors.Is(err, retrieval.ErrUnsupported):
+		return 422, "unsupported_search"
+	case errors.Is(err, retrieval.ErrSourceFilterUnavailable):
+		return 422, "source_filter_unavailable"
+	case errors.Is(err, retrieval.ErrPluginInvalid):
+		return 502, "retrieval_plugin_invalid"
+	case errors.Is(err, retrieval.ErrDeadline):
+		return 504, "search_deadline_exceeded"
+	}
+	return 503, "search_unavailable"
 }

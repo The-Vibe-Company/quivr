@@ -19,18 +19,22 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.6.0"
+const PluginAPIVersion = "0.7.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
 // admits that version or a later supported one.
-var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0", "ingestion": "0.6.0"}
+var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0", "ingestion": "0.6.0", "retrieval": RetrievalSince}
+
+// RetrievalSince is the Plugin API version that introduced the retrieval
+// Contribution.
+const RetrievalSince = "0.7.0"
 
 // FieldSince is the Plugin API version that introduced a manifest field
 // inside a Contribution (a JSON Pointer). A manifest that declares it needs a
@@ -133,6 +137,7 @@ type Contributions struct {
 	Subscription *Subscription `json:"subscription,omitempty"`
 	Connector    *Connector    `json:"connector,omitempty"`
 	Ingestion    *Ingestion    `json:"ingestion,omitempty"`
+	Retrieval    *Retrieval    `json:"retrieval,omitempty"`
 }
 
 // Names lists the declared Contributions in protocol order, as discovery
@@ -150,6 +155,9 @@ func (c Contributions) Names() []string {
 	}
 	if c.Ingestion != nil {
 		names = append(names, "ingestion")
+	}
+	if c.Retrieval != nil {
+		names = append(names, "retrieval")
 	}
 	return names
 }
@@ -443,6 +451,20 @@ func applyDefaults(m *Manifest) {
 			in.Limits.MaxResponseBytes = EngineMaxResponseBytes
 		}
 	}
+	if r := m.Contributions.Retrieval; r != nil {
+		if r.Limits.MaxRounds == 0 {
+			r.Limits.MaxRounds = MaxRetrievalRounds
+		}
+		if r.Limits.MaxRequests == 0 {
+			r.Limits.MaxRequests = DefaultMaxRetrievalRequests
+		}
+		if r.Limits.MaxCandidates == 0 {
+			r.Limits.MaxCandidates = DefaultMaxRetrievalCandidates
+		}
+		if r.Limits.MaxResponseBytes == 0 {
+			r.Limits.MaxResponseBytes = DefaultRetrievalMaxResponseBytes
+		}
+	}
 	for i := range m.Secrets {
 		if m.Secrets[i].Required == nil {
 			required := true
@@ -480,7 +502,7 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 		for _, name := range ReservedContributions {
 			if _, declared := contributions[name]; declared {
 				issues = append(issues, Issue{Code: CodeReservedContribution, Path: "/contributions/" + name,
-					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer, subscription, connector or ingestion", name, PluginAPIVersion)})
+					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer, subscription, connector, ingestion or retrieval", name, PluginAPIVersion)})
 			}
 		}
 		if sub, ok := contributions["subscription"].(map[string]any); ok {

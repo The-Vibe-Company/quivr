@@ -1,0 +1,4 @@
+{
+  "description": "A well-behaved retrieval plugin: requests within limits, a ranking of served candidates, deterministic, within budget, no secret echoed.",
+  "certified": true
+}

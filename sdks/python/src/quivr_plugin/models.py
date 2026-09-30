@@ -167,7 +167,7 @@ class Discovery(Model):
     plugin_api: str
     plugin: PluginIdentity
     manifest_digest: str
-    contributions: list[Literal["normalizer", "subscription", "connector", "ingestion"]]
+    contributions: list[Literal["normalizer", "subscription", "connector", "ingestion", "retrieval"]]
 
 
 @dataclass(kw_only=True)
@@ -297,13 +297,39 @@ class Ingestion(Model):
 
 
 @dataclass(kw_only=True)
+class RetrievalProfile(Model):
+    "One search profile and its budgets."
+
+    description: str | None = None
+    max_latency_ms: int
+    max_cost_cents: float
+
+
+@dataclass(kw_only=True)
+class RetrievalLimits(Model):
+    max_rounds: int | None = None
+    max_requests: int | None = None
+    max_candidates: int | None = None
+    max_response_bytes: int | None = None
+
+
+@dataclass(kw_only=True)
+class Retrieval(Model):
+    "Search, since Plugin API 0.7: answer one search in rounds. Each round the plugin either asks the core for candidates (keyword, vector on a named space, hybrid) or returns the final ranking, chosen only among candidates the core served in this search. The core keeps the index, encodes queries with each space's owner, and applies authorization, withdrawal and generation routing before serving any candidate."
+
+    profiles: dict[str, RetrievalProfile]
+    limits: RetrievalLimits | None = None
+
+
+@dataclass(kw_only=True)
 class ManifestContributions(Model):
-    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3) and ingestion (since 0.6). The other names are reserved and rejected."
+    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3), ingestion (since 0.6) and retrieval (since 0.7). The other names are reserved and rejected."
 
     normalizer: NormalizerContribution | None = None
     subscription: SubscriptionContribution | None = None
     connector: ConnectorContribution | None = None
     ingestion: Ingestion | None = None
+    retrieval: Retrieval | None = None
 
 
 @dataclass(kw_only=True)
@@ -922,12 +948,187 @@ class IngestionFixture(Model):
     ingestion: IngestionFixtureIngestion
 
 
+@dataclass(kw_only=True)
+class SearchRequestQuery(Model):
+    text: str
+    mode: Literal["lexical", "semantic", "hybrid"]
+
+
+@dataclass(kw_only=True)
+class SearchRequestScope(Model):
+    corpus_ids: list[str]
+    source_namespaces: list[str] | None = None
+
+
+@dataclass(kw_only=True)
+class SearchRequestSpacesItemOwner(Model):
+    kind: Literal["engine", "plugin"]
+    plugin_id: str | None = None
+    plugin_version: str | None = None
+
+
+@dataclass(kw_only=True)
+class SearchRequestSpacesItemCoverage(Model):
+    segments: int
+    total: int
+
+
+@dataclass(kw_only=True)
+class SearchRequestSpacesItem(Model):
+    "A vector space every requested Corpus's routed generation carries."
+
+    id: str
+    owner: SearchRequestSpacesItemOwner
+    model: str
+    dimensions: int
+    metric: Literal["cosine", "dot", "l2"]
+    indexes: list[str]
+    query_modalities: list[str]
+    role: Literal["served", "evaluation"]
+    coverage: SearchRequestSpacesItemCoverage
+
+
+@dataclass(kw_only=True)
+class CandidateRequestFilter(Model):
+    "Narrows the search's scope for this request; it never widens it."
+
+    source_namespaces: list[str] | None = None
+
+
+@dataclass(kw_only=True)
+class CandidateRequest(Model):
+    "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment."
+
+    primitive: Literal["bm25", "near_vector", "hybrid"]
+    query_text: str | None = None
+    vector: list[float] | None = None
+    space: str | None = None
+    field: Literal["source", "lexical"] | None = None
+    alpha: float | None = None
+    fusion: Literal["relative_score", "ranked"] | None = None
+    k: int
+    filter: CandidateRequestFilter | None = None
+    group_by: Literal["record"] | None = None
+
+
+@dataclass(kw_only=True)
+class Candidate(Model):
+    "One served candidate: an authorized, current segment of a Record."
+
+    segment_id: str
+    record_id: str
+    version_id: str
+    part_key: str
+    text: str
+    start: int
+    end: int
+    score: float
+
+
+@dataclass(kw_only=True)
+class SearchRequestServedItem(Model):
+    round: int
+    request_index: int
+    request: CandidateRequest
+    candidates: list[Candidate]
+
+
+@dataclass(kw_only=True)
+class SearchRequest(Model):
+    "POST /v0/contributions/retrieval/search, since Plugin API 0.7. One round of one search: the query, the scope, the profile, the spaces available, and every candidate the core served in earlier rounds. The plugin answers candidate requests or the final ranking."
+
+    invocation_id: str
+    contribution: Literal["retrieval"] = "retrieval"
+    organization_id: str
+    configuration: dict[str, Any]
+    profile: str
+    round: int
+    query: SearchRequestQuery
+    limit: int
+    scope: SearchRequestScope
+    spaces: list[SearchRequestSpacesItem]
+    served: list[SearchRequestServedItem]
+
+
+@dataclass(kw_only=True)
+class SearchResponseRankingHitsItem(Model):
+    segment_id: str
+    score: float
+    explanation: str | None = None
+
+
+@dataclass(kw_only=True)
+class SearchResponseRanking(Model):
+    hits: list[SearchResponseRankingHitsItem]
+
+
+@dataclass(kw_only=True)
+class SearchResponseUsage(Model):
+    paid_calls: int | None = None
+    cost_cents: float | None = None
+
+
+@dataclass(kw_only=True)
+class SearchResponse(Model):
+    "The answer to one round: either candidate requests (the core serves them and calls the next round) or the final ranking, never both."
+
+    requests: list[CandidateRequest] | None = None
+    ranking: SearchResponseRanking | None = None
+    usage: SearchResponseUsage | None = None
+
+
+@dataclass(kw_only=True)
+class RetrievalFixtureRetrievalCandidatesItem(Model):
+    segment_id: str
+    record_id: str
+    source_namespace: str | None = None
+    text: str
+
+
+@dataclass(kw_only=True)
+class RetrievalFixtureRetrievalOrder(Model):
+    "The exact segment order a primitive serves, whatever its query."
+
+    bm25: list[str] | None = None
+    near_vector: list[str] | None = None
+    hybrid: list[str] | None = None
+
+
+@dataclass(kw_only=True)
+class RetrievalFixtureRetrievalExpect(Model):
+    top: list[str] | None = None
+
+
+@dataclass(kw_only=True)
+class RetrievalFixtureRetrieval(Model):
+    query: str
+    mode: Literal["lexical", "semantic", "hybrid"] | None = None
+    limit: int | None = None
+    configuration: dict[str, Any] | None = None
+    profiles: list[str] | None = None
+    spaces: list[str] | None = None
+    candidates: list[RetrievalFixtureRetrievalCandidatesItem]
+    order: RetrievalFixtureRetrievalOrder | None = None
+    expect: RetrievalFixtureRetrievalExpect | None = None
+
+
+@dataclass(kw_only=True)
+class RetrievalFixture(Model):
+    "A local test input for a retrieval plugin (since Plugin API 0.7): a query, the spaces available and a catalogue of candidates. quivr plugin test drives the rounds and serves candidates from the catalogue, offline."
+
+    description: str | None = None
+    retrieval: RetrievalFixtureRetrieval
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
     "AttachmentItem",
     "BlobContent",
+    "Candidate",
+    "CandidateRequest",
+    "CandidateRequestFilter",
     "ConnectorAttachment",
     "ConnectorContribution",
     "ConnectorContributionAttachments",
@@ -1004,8 +1205,27 @@ __all__ = [
     "RelationInput",
     "RelayedRequest",
     "ResponseWarning",
+    "Retrieval",
+    "RetrievalFixture",
+    "RetrievalFixtureRetrieval",
+    "RetrievalFixtureRetrievalCandidatesItem",
+    "RetrievalFixtureRetrievalExpect",
+    "RetrievalFixtureRetrievalOrder",
+    "RetrievalLimits",
+    "RetrievalProfile",
     "RetryIntent",
     "RunCommand",
+    "SearchRequest",
+    "SearchRequestQuery",
+    "SearchRequestScope",
+    "SearchRequestServedItem",
+    "SearchRequestSpacesItem",
+    "SearchRequestSpacesItemCoverage",
+    "SearchRequestSpacesItemOwner",
+    "SearchResponse",
+    "SearchResponseRanking",
+    "SearchResponseRankingHitsItem",
+    "SearchResponseUsage",
     "Secret",
     "SegmentAndEmbedRequest",
     "SegmentAndEmbedRequestPartsItem",

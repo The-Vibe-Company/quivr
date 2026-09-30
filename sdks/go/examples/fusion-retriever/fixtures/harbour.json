@@ -1,0 +1,13 @@
+{
+  "description": "The segment matching both query words leads the keyword candidates and the vector candidates, so it ranks first.",
+  "retrieval": {
+    "query": "harbour closed",
+    "limit": 3,
+    "candidates": [
+      {"segment_id": "seg_harbour", "record_id": "rec_harbour", "text": "The harbour stayed closed all day."},
+      {"segment_id": "seg_dockers", "record_id": "rec_dockers", "text": "Dockers stopped work at dawn."},
+      {"segment_id": "seg_market", "record_id": "rec_market", "text": "The market closed early."}
+    ],
+    "expect": {"top": ["seg_harbour"]}
+  }
+}

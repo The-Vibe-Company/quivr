@@ -124,7 +124,7 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	switch {
 	case m.Contributions.Normalizer == nil && len(c.Routes) > 0:
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "the manifest declares no normalizer Contribution to route to; remove the routes of this pin"})
-	case m.Contributions.Normalizer != nil && m.Contributions.Subscription == nil && m.Contributions.Ingestion == nil && len(c.Routes) == 0:
+	case m.Contributions.Normalizer != nil && m.Contributions.Subscription == nil && m.Contributions.Ingestion == nil && m.Contributions.Retrieval == nil && len(c.Routes) == 0:
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "a pin needs at least one media type route"})
 	}
 	for _, namespace := range namespacesOf(m) {

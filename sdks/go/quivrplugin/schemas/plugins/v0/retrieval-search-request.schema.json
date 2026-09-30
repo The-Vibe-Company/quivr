@@ -1,0 +1,523 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "retrieval search request, v0",
+  "description": "POST /v0/contributions/retrieval/search, since Plugin API 0.7. One round of one search: the query, the scope, the profile, the spaces available, and every candidate the core served in earlier rounds. The plugin answers candidate requests or the final ranking.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "profile",
+    "round",
+    "query",
+    "limit",
+    "scope",
+    "spaces",
+    "served"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per round; correlate logs with it."
+    },
+    "contribution": {
+      "const": "retrieval"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The validated plugin (installer) configuration."
+    },
+    "profile": {
+      "$ref": "plugin-manifest.schema.json#/$defs/ProfileName",
+      "description": "One of the manifest's profiles."
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "description": "1 for the first call of a search; the last round the manifest allows must answer a ranking."
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "mode"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "mode": {
+          "enum": [
+            "lexical",
+            "semantic",
+            "hybrid"
+          ],
+          "description": "The mode the client asked for; a hint the plugin may follow."
+        }
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "Most hits the ranking may hold."
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "corpus_ids"
+      ],
+      "properties": {
+        "corpus_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source_namespaces": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "When present, every candidate comes from one of these Source Namespaces."
+        }
+      }
+    },
+    "spaces": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "owner",
+          "model",
+          "dimensions",
+          "metric",
+          "indexes",
+          "query_modalities",
+          "role",
+          "coverage"
+        ],
+        "description": "A vector space every requested Corpus's routed generation carries.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The space id near_vector and hybrid name (vector_space_id in the HTTP API)."
+          },
+          "owner": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "engine",
+                  "plugin"
+                ]
+              },
+              "plugin_id": {
+                "$ref": "plugin-manifest.schema.json#/$defs/PluginId"
+              },
+              "plugin_version": {
+                "$ref": "plugin-manifest.schema.json#/$defs/Version"
+              }
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "metric": {
+            "enum": [
+              "cosine",
+              "dot",
+              "l2"
+            ]
+          },
+          "indexes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query_modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "role": {
+            "enum": [
+              "served",
+              "evaluation"
+            ],
+            "description": "served answers search by default; evaluation is indexed and compared."
+          },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "segments",
+              "total"
+            ],
+            "properties": {
+              "segments": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Current segments holding a vector in this space, over every requested Corpus."
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Current segments of the requested Corpora."
+              }
+            }
+          }
+        }
+      },
+      "description": "The vector spaces near_vector and hybrid may name, the served one first."
+    },
+    "served": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "round",
+          "request_index",
+          "request",
+          "candidates"
+        ],
+        "properties": {
+          "round": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "request_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "request": {
+            "$ref": "#/$defs/CandidateRequest"
+          },
+          "candidates": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/$defs/Candidate"
+            }
+          }
+        }
+      },
+      "description": "Every candidate request of earlier rounds with the candidates the core served for it, in order. Empty in round 1."
+    }
+  },
+  "$defs": {
+    "CandidateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primitive",
+        "k"
+      ],
+      "description": "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment.",
+      "properties": {
+        "primitive": {
+          "enum": [
+            "bm25",
+            "near_vector",
+            "hybrid"
+          ]
+        },
+        "query_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "description": "The text to rank by: the search query or one the plugin rewrote."
+        },
+        "vector": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": {
+            "type": "number"
+          },
+          "description": "near_vector only: a query vector with the space's dimensions, instead of query_text."
+        },
+        "space": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "near_vector and hybrid: one id of the request's spaces."
+        },
+        "field": {
+          "enum": [
+            "source",
+            "lexical"
+          ],
+          "default": "source",
+          "description": "bm25 and hybrid: source ranks the title and body as written; lexical ranks the lexical text an ingestion plugin produced."
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "hybrid: weight of the vector side (1 is vector only, 0 is keywords only)."
+        },
+        "fusion": {
+          "enum": [
+            "relative_score",
+            "ranked"
+          ],
+          "default": "relative_score",
+          "description": "hybrid: how the index fuses the two sides."
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Most candidates to serve; at most limits.max_candidates."
+        },
+        "filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Narrows the search's scope for this request; it never widens it.",
+          "properties": {
+            "source_namespaces": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": "Keep only Records from these Source Namespaces, each one the search's scope admits."
+            }
+          }
+        },
+        "group_by": {
+          "enum": [
+            "record"
+          ],
+          "description": "record keeps the best candidate of each Record."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "primitive": {
+                "const": "bm25"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "query_text"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "space"
+                  ]
+                },
+                {
+                  "required": [
+                    "vector"
+                  ]
+                },
+                {
+                  "required": [
+                    "alpha"
+                  ]
+                },
+                {
+                  "required": [
+                    "fusion"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "primitive": {
+                "const": "near_vector"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "space"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "query_text"
+                ]
+              },
+              {
+                "required": [
+                  "vector"
+                ]
+              }
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "field"
+                  ]
+                },
+                {
+                  "required": [
+                    "alpha"
+                  ]
+                },
+                {
+                  "required": [
+                    "fusion"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "primitive": {
+                "const": "hybrid"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "space",
+              "query_text"
+            ],
+            "not": {
+              "required": [
+                "vector"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "record_id",
+        "version_id",
+        "part_key",
+        "text",
+        "start",
+        "end",
+        "score"
+      ],
+      "description": "One served candidate: an authorized, current segment of a Record.",
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "version_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "part_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "description": "The segment's text, exactly as the engine stores it."
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Offsets of the text in its Part, in Unicode code points."
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "score": {
+          "type": "number",
+          "description": "The index score for this request; higher is better. bm25: BM25F; hybrid: the fused score; near_vector: 1 minus the distance."
+        }
+      }
+    },
+    "Filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Narrows the search's scope for this request; it never widens it.",
+      "properties": {
+        "source_namespaces": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": "Keep only Records from these Source Namespaces, each one the search's scope admits."
+        }
+      }
+    }
+  }
+}

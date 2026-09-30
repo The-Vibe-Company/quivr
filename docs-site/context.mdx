@@ -92,12 +92,16 @@ A vector space in which queries and parts of different modalities can be compare
 _Avoid_: Modality-specific embedding
 
 **Retrieval Candidate**:
-A permitted record or part proposed by a search projection before optional fusion, diversification, or reranking.
-_Avoid_: Final search result
+A current segment the caller may read, which the core found in the index for one candidate request and served to the retrieval plugin with its text and score. A ranking may hold only candidates served in the same search.
+_Avoid_: Final search result, raw index hit
+
+**Retrieval Round**:
+One exchange of a search with the retrieval plugin: the plugin either asks for candidates, which the core serves before the next round, or returns the final ranking. A search has at most three.
+_Avoid_: Retry, iteration
 
 **Retrieval Profile**:
-A named, versioned latency and quality policy that selects the allowed retrieval and ranking stages for a query.
-_Avoid_: Search engine configuration
+A named latency and cost budget under which a search runs, such as `default` or `deep`; the retrieval plugin declares its profiles and the strategy behind each.
+_Avoid_: Search engine configuration, mode
 
 ## Continuous retrieval {#continuous-retrieval}
 
