@@ -1,0 +1,30 @@
+quivr-search/README.md
+  s_54b80c92daa9cb::t_1dd9f37b1d5604 73
+  s_54b80c92daa9cb::t_a1abac50cf8471 74
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_f58cc44770d92c 1978-2002,2154-2157,3639-3673
+  s_54b80c92daa9cb::t_9eab854cdfa0db 3674
+docs-site/quivr-search/index.mdx
+  s_54b80c92daa9cb::t_f58cc44770d92c 76-77
+docs/inventory.toml
+  s_54b80c92daa9cb::t_f58cc44770d92c 143
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_f58cc44770d92c 82,1230-1242,1324,4199-4255,4257,4259
+  s_54b80c92daa9cb::t_9e26dc3d4145e2 4256,4258,4260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e659cc0fa4e3feebf8874378d62aabb338c3ef15",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
