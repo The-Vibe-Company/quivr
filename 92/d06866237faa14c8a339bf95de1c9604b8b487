@@ -1,0 +1,92 @@
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_560b2254b78eaf 85-86,1324-1364,1735-1737,1796-1798,3527,3541,3639-3640,3647,4644-4871,4873,4875
+  s_54b80c92daa9cb::t_9bf48be38d22ed 4872,4874,4876
+internal/adapters/postgres/searchable.go
+  s_54b80c92daa9cb::t_738875f591446e 236,239,244-254
+  s_54b80c92daa9cb::t_18bfef9bbc508e 255
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_f98dfba6ccf8ac 2779-2781
+  s_54b80c92daa9cb::t_bece0433413b7b 3368-3369,3382-3384
+  s_54b80c92daa9cb::t_000aa02afcfd84 3960-4104
+  s_54b80c92daa9cb::t_529d339f0889d1 2141
+  s_54b80c92daa9cb::t_aafe4258aebfe2 2062-2140,2142-2188
+internal/content/content.go
+  s_54b80c92daa9cb::t_85ce1ad341f157 803,805,808-822,825,829,831,838,842-874
+internal/operations/operations.go
+  s_54b80c92daa9cb::t_e34e3541b8719c 29-33
+  s_54b80c92daa9cb::t_4aa13ea687001e 79,82-83,87
+  s_54b80c92daa9cb::t_8e03364db5c8ef 110-139
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_4865bd3a14ea3d 501
+migrations/20260930T1815Z_quarantine_reprocess.sql
+  s_54b80c92daa9cb::t_a36a745a0927d7 1-65
+internal/quarantine/quarantine.go
+  s_54b80c92daa9cb::t_d8b8c181d5b28b 1-150,153-162,167-202
+  s_54b80c92daa9cb::t_d44ea0a29df5bc 151-152
+  s_54b80c92daa9cb::t_2b5267e9144b32 163-166
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_24934fffe46f8d 44-46,305
+  s_54b80c92daa9cb::t_704e31052c1940 306-310
+  s_54b80c92daa9cb::t_44e6fdfe86d41a 27-28,32-33
+  s_54b80c92daa9cb::t_456956493f6d2c 223
+  s_54b80c92daa9cb::t_fdfdd9fb4ed1e2 302-304
+client/client.gen.go
+  s_54b80c92daa9cb::t_6456d0eadca456 627-644,1629-1631,1819,1833-1835,1859-1870,2081-2182,2852-2862,2977-2979,3421-3437,4188-4234,6130-6295,9363-9383,10626-10735,13927-13965,15591-15672,15674-15675
+  s_54b80c92daa9cb::t_1f982153a3da65 15673,15676
+internal/orchestration/temporal/reprocess.go
+  s_54b80c92daa9cb::t_f8163070eab803 1-63,65-72
+  s_54b80c92daa9cb::t_526960b51e26d7 64
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_6456d0eadca456 627-644,1629-1631,1819,1833-1835,1859-1870,2081-2182,2852-2862,2977-2979,3305-3310,3777-3901,5926-5927,6444-6543,9106-9111,9662-9717
+  s_54b80c92daa9cb::t_aeaf20f04a8667 9718
+internal/transport/httpapi/operations.go
+  s_54b80c92daa9cb::t_d1e7b7d377c319 37
+internal/app/run.go
+  s_54b80c92daa9cb::t_3f81c3433c8359 615
+  s_54b80c92daa9cb::t_a8411507109ae9 534-535
+  s_54b80c92daa9cb::t_cb28077bfd97ca 26
+  s_54b80c92daa9cb::t_ffa199b59fba23 463-469
+internal/orchestration/temporal/rebuild.go
+  s_54b80c92daa9cb::t_5cd40126df173e 102-103,105-106
+internal/quarantine/run.go
+  s_54b80c92daa9cb::t_e2ea46f9db6787 1-239
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_22e700bd470fa9 399-400
+  s_54b80c92daa9cb::t_46961108cac985 164-168
+  s_54b80c92daa9cb::t_68256acebaf3f7 34
+  s_54b80c92daa9cb::t_39a3f418386030 272-274
+  s_54b80c92daa9cb::t_caf4221854e97c 89-92
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_d9bcc1a95c8ec2 212,214-219
+  s_54b80c92daa9cb::t_e095a0ce01a234 15
+  s_54b80c92daa9cb::t_3b39c3764bdef5 143-148
+internal/transport/httpapi/quarantine.go
+  s_54b80c92daa9cb::t_d4ac7f038bed69 1-13,15-172,174-237
+  s_54b80c92daa9cb::t_19fac98b11464a 173
+  s_54b80c92daa9cb::t_7aa8d29da4f533 14
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_e8dae7855ba62d 160-170,172
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_446d1195b7ac44 110-118
+internal/adapters/postgres/quarantine.go
+  s_54b80c92daa9cb::t_a2e88a24408f18 431
+  s_54b80c92daa9cb::t_3f3d700b7c0b65 1-71,73-74,83-108,110-430,432-594
+  s_54b80c92daa9cb::t_efe3e31caa8429 72,75-82
+  s_54b80c92daa9cb::t_bbbbaa749b0e98 109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92d06866237faa14c8a339bf95de1c9604b8b487",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
