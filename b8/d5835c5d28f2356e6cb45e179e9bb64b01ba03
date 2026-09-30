@@ -4,6 +4,8 @@ quivr-search/tests/usage-stack.spec.ts
   s_54b80c92daa9cb::t_75d640c05fd171 1-21,29-38,42-45,56-57
 quivr-search/README.md
   s_54b80c92daa9cb::t_23c0b6f3d33b7b 75-76
+docs/inventory.toml
+  s_54b80c92daa9cb::t_311266f27de39a 113
 ---
 {
   "schema_version": "authorship/3.0.0",
