@@ -1,0 +1,279 @@
+internal/operations/operations.go
+  s_54b80c92daa9cb::t_379067abe92f63 10,24-28,39-41,74-81,102-145,149,169-174,266-298
+  s_54b80c92daa9cb::t_d50a3d6efe6679 299
+internal/app/metrics_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 61,64-65
+internal/app/backfill.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-146
+internal/plugins/runner/retrieval.go
+  s_54b80c92daa9cb::t_379067abe92f63 100-102,111
+internal/app/warm.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-63
+quivr-search/admin.mjs
+  s_54b80c92daa9cb::t_379067abe92f63 35-44,571
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_379067abe92f63 38
+internal/monitoring/engine_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 139-142,155-157
+  s_54b80c92daa9cb::t_b270cee17d2971 158
+quivr-search/src/components/admin/AdminView.tsx
+  s_54b80c92daa9cb::t_379067abe92f63 33,37
+scripts/measure_backfill.py
+  s_54b80c92daa9cb::t_379067abe92f63 1-183
+internal/adapters/postgres/backfill_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-357
+internal/backfill/backfill_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-181
+quivr-search/src/lib/usage.ts
+  s_54b80c92daa9cb::t_379067abe92f63 1-289
+internal/adapters/postgres/backfill.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-563
+internal/monitoring/batch.go
+  s_54b80c92daa9cb::t_379067abe92f63 36-38,377-378
+  s_54b80c92daa9cb::t_35269b8da83f82 379
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_379067abe92f63 4,10-11,70,72,76,138,569-575,579-581,642-643,674-687
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_379067abe92f63 10,131-133,142-146,209-220,226-228,232,267-269
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_379067abe92f63 645-646,677-748,1965-2061,2319-2394,2399-2400,2466,3210,3238-3239,3248-3252,3259,3691-3864,4181-4300,4318-4322,4326,4333-4336,4347,5679
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_379067abe92f63 37-38,83-84,93-94,349,366-407,1285-1321,1459-1497,1502,1533,3482,3488,3495,3563,3591-3592,3599,3606,4405-4661,5237-5506,5530,5546-5550,5554,5564,5573,5578-5588,5592-5598,5613-5616,5627,8350,8372
+internal/adapters/postgres/enrichment_reason_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-92
+.github/workflows/measure-backfill.yml
+  s_54b80c92daa9cb::t_379067abe92f63 1-44
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_379067abe92f63 174-176
+internal/processing/fill_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-101
+plugins/core-ingest/parity_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 251-253,255
+tests/acceptance/embedding_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 57-81
+contracts/http/v0/checks/roundtrip.cjs
+  s_54b80c92daa9cb::t_379067abe92f63 27-29
+CONTEXT.md
+  s_54b80c92daa9cb::t_379067abe92f63 68,71-74,169-171
+  s_54b80c92daa9cb::t_4ad32bd6a2dc40 172
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_379067abe92f63 287,297-306,354,360-363,365-373,395-413
+internal/adapters/postgres/observability.go
+  s_54b80c92daa9cb::t_379067abe92f63 56-61,63-64,87-91,95,98,101-102,104
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_379067abe92f63 481-496,636
+internal/online/online.go
+  s_54b80c92daa9cb::t_379067abe92f63 200
+README.md
+  s_54b80c92daa9cb::t_379067abe92f63 201-214
+quivr-search/src/usage.css
+  s_54b80c92daa9cb::t_379067abe92f63 1-549
+docs-site/guides/add-content.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 261
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_379067abe92f63 104-109,125,137-141,165,170,193-198,203,207,253,258,276-309
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 66,125-126
+sdks/go/quivrplugin/retrieval.go
+  s_54b80c92daa9cb::t_379067abe92f63 189,196-198
+docs-site/plugins/catalog.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 45
+internal/backfill/run_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-204
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_379067abe92f63 75-95,383,398-399,987-1007,1029-1049,1174-1225,1495-1500,1739-1763,1800,1802-1809,1822-1836,2068-2093,2248,2520-2524,2533-2537,2606-2627,2716-2723,2732-2740,2821-2823,2830-2832,2860-2862,2866-2868,3122-3124,3155-3160,3164-3166,3254-3256,3260-3262,3368-3381,3621-3679,3713-3758,4700-4725,4752-4777,5605-5606,5643-5644,5653-5654,5702-5762,6161-6239,6279-6317,7501-7540,7581-7620,8690-8692,8723-8728,8732-8734,8822-8824,8828-8830,8976-9006,9273-9331,9358-9383,10196-10228,10262-10293
+  s_54b80c92daa9cb::t_d6f83480a47a63 10294
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_379067abe92f63 19,23,87-94
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_379067abe92f63 20-21,105-109,112,118,120,122,131,133,135,144,157-160,169,177-178,180,187-191,193,198-219,290,334,336,361,363,454-455
+internal/adapters/postgres/embeddings.go
+  s_54b80c92daa9cb::t_379067abe92f63 58-69,133
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 181
+internal/transport/httpapi/operations_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 12,53-62,78,87,194,201-207,232-236
+tests/acceptance/backfill_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-184
+plugins/core-ingest/tokenizer_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 6,154-155
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 18
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_379067abe92f63 8,214-217,241,267
+docs/inventory.toml
+  s_54b80c92daa9cb::t_379067abe92f63 100,115
+internal/adapters/postgres/promote_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-161
+migrations/20260930T1657Z_enrichment_reason.sql
+  s_54b80c92daa9cb::t_379067abe92f63 1-6
+quivr-search/README.md
+  s_54b80c92daa9cb::t_379067abe92f63 75-76
+internal/transport/httpapi/stats.go
+  s_54b80c92daa9cb::t_379067abe92f63 24-26,32-33,35,50-54,57,59,70-71,74,80,113-158
+  s_54b80c92daa9cb::t_fcca238a673298 159
+docs-site/reference/plugin-manifest.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 83-84,98
+tests/acceptance/observability_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 43-44,89-97,101
+quivr-search/tests/usage.spec.ts
+  s_54b80c92daa9cb::t_379067abe92f63 1-423
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_379067abe92f63 13,82-87,151-159,227-229,261,263
+  s_54b80c92daa9cb::t_bd5303825914a0 262
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_379067abe92f63 1386-1394
+  s_54b80c92daa9cb::t_ff6e65bf556a68 1385
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_379067abe92f63 222
+internal/transport/httpapi/backfills_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-131
+docs-site/docs.json
+  s_54b80c92daa9cb::t_379067abe92f63 57
+plugins/core-ingest/tokenizer.go
+  s_54b80c92daa9cb::t_379067abe92f63 221,228,235
+Makefile
+  s_54b80c92daa9cb::t_379067abe92f63 2,35-37
+sdks/go/examples/hash-embedder/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_379067abe92f63 10,28-30
+quivr-search/src/lib/adminStats.ts
+  s_54b80c92daa9cb::t_379067abe92f63 35,59-64,67-68,70-83,90-91
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 95-98
+internal/observability/read.go
+  s_54b80c92daa9cb::t_379067abe92f63 78-136,138-140,142,144
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_379067abe92f63 22,28,53-56,209-215,722-732
+  s_54b80c92daa9cb::t_320e86179f4810 733
+plugins/core-ingest/main.go
+  s_54b80c92daa9cb::t_379067abe92f63 79,81-83
+internal/adapters/postgres/spaces.go
+  s_54b80c92daa9cb::t_379067abe92f63 41-44,82
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_379067abe92f63 434-435,448
+client/client.gen.go
+  s_54b80c92daa9cb::t_379067abe92f63 75-95,383,398-399,987-1007,1029-1049,1174-1225,1495-1500,1739-1763,1800,1802-1809,1822-1836,2068-2093,2248,2520-2524,2533-2537,2606-2627,2716-2723,2732-2740,2821-2823,2830-2832,2860-2862,2866-2868,3195-3206,3271-3287,3293-3297,3310,3506-3517,3521,3527,3530-3541,3805-3836,4021-4067,4083-4097,4130,4686-4717,4721,4737,4750-4781,5486-5530,5916-6016,6071-6136,7529-7575,7623-7669,8885-8898,8983-9003,9011-9017,9034,9284-9297,9301,9309,9312-9325,9669-9731,10225-10320,10369-10416,11781-11828,11877-11924,13234-13259,13374-13413,13416-13417,13419,13422-13423,13427,13430-13431,13433-13435,13439,13442,13444,13447-13448,13452,13468-13480,13509,13975-14000,14004,14018,14027-14052,14645-14697,15041-15106,15140-15172,16102-16134,16157-16179,16181-16187,16189
+  s_54b80c92daa9cb::t_6e53b1cafef1f5 16180,16188
+docs-site/plugins/backfill-a-vector-space.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 1-118
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_379067abe92f63 679-682,714-790,2063-2159,2433-2513,2518-2520,2585-2586,3501,3529-3530,3538-3541,3548,3973-4142,4456-4575,4593-4597,4601,4608-4611,4622,5937-5938
+internal/backfill/backfill.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-367
+internal/content/embeddings.go
+  s_54b80c92daa9cb::t_379067abe92f63 69-71,231-238
+  s_54b80c92daa9cb::t_5cff73aeea3061 239-240
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_379067abe92f63 271-276,288,1255
+  s_54b80c92daa9cb::t_63e0962d377435 270
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_379067abe92f63 481-496,636
+plugins/core-ingest/README.md
+  s_54b80c92daa9cb::t_379067abe92f63 12-15,20-25
+internal/adapters/postgres/promote.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-122
+migrations/20260930T1723Z_backfills.sql
+  s_54b80c92daa9cb::t_379067abe92f63 1-50
+internal/app/run.go
+  s_54b80c92daa9cb::t_379067abe92f63 13,116-121,239-242,321-325,327-328,370-373,375-377,421-425,483-486,507-510,552-553,586,633
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_379067abe92f63 24-29,133-139
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_379067abe92f63 26-27,31-32,40-42,209-210,219-224,291-301,325-326
+docs-site/plugins/types.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 87
+internal/backfill/promote.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-63
+internal/observability/observability_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 6-7,9,63,66,79-100,125-127,141-146,175-209,258-295
+  s_54b80c92daa9cb::t_07a52fd7a608ee 296
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-price-plugin-api-0.8.yaml
+  s_54b80c92daa9cb::t_379067abe92f63 1-31
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 33-34,71-72,131-139
+  s_54b80c92daa9cb::t_711da778d84abe 140
+internal/app/warm_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-132
+sdks/go/quivrplugin/retrieval_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-52
+scripts/first_search.py
+  s_54b80c92daa9cb::t_379067abe92f63 1-51
+internal/transport/httpapi/operations.go
+  s_54b80c92daa9cb::t_379067abe92f63 8,36,42,109-111,128-129,131-135,149-154
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_379067abe92f63 1443-1507,1513,1518-1528,1532-1538
+quivr-search/src/components/admin/AdminSection.tsx
+  s_54b80c92daa9cb::t_379067abe92f63 76,81,87,91
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_379067abe92f63 65,121
+internal/content/content_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 14-17,21,74-92
+  s_54b80c92daa9cb::t_0ef00d83b6f62f 93
+quivr-search/src/components/admin/UsageChart.tsx
+  s_54b80c92daa9cb::t_379067abe92f63 1-268
+internal/transport/httpapi/backfills.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-163
+internal/observability/rollup.go
+  s_54b80c92daa9cb::t_379067abe92f63 28-33
+internal/content/spaces.go
+  s_54b80c92daa9cb::t_379067abe92f63 21-42
+internal/orchestration/temporal/rebuild.go
+  s_54b80c92daa9cb::t_379067abe92f63 101-105
+internal/retrieval/plugin_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 9,130-131,140-142,159,162,166-172,180-200,238-239,241,245-247
+plugins/core-ingest/windows.go
+  s_54b80c92daa9cb::t_379067abe92f63 10,52-78,159,166,171,178-179,183-189,201,219,242-243,259,263-277,279,293,302,308,372-374,399,409-410,414,425
+quivr-search/src/components/admin/Usage.tsx
+  s_54b80c92daa9cb::t_379067abe92f63 1-529
+internal/backfill/run.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-305
+internal/observability/recorder.go
+  s_54b80c92daa9cb::t_379067abe92f63 23-25,27-28,37-44,70-71,73-74,77-81,113-116,130,157-175,194-209,217,234
+tests/acceptance/manifest_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 8,46-77
+  s_54b80c92daa9cb::t_ee44bcd4061723 78-79
+internal/adapters/postgres/observability_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 72-110
+internal/transport/httpapi/stats_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 6,28,32,38-46,62-63,71,78,85-93,107-120
+internal/content/content.go
+  s_54b80c92daa9cb::t_379067abe92f63 289-292,366-368
+scripts/local.py
+  s_54b80c92daa9cb::t_379067abe92f63 78,105-106,125-126,291,497,511-512
+internal/operations/operations_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 15,39-46,172-212
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_379067abe92f63 481-496,636
+internal/processing/plugin.go
+  s_54b80c92daa9cb::t_379067abe92f63 172,183-234,245,249
+internal/orchestration/temporal/backfill.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-75
+internal/plugins/retrieval_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 7,38-47
+  s_54b80c92daa9cb::t_fa824b44001b2f 48
+internal/plugins/retrieval.go
+  s_54b80c92daa9cb::t_379067abe92f63 9,69-86
+  s_54b80c92daa9cb::t_879babe9cbc8fb 87
+quivr-search/tests/usage-stack.spec.ts
+  s_54b80c92daa9cb::t_379067abe92f63 1-66
+plugins/core-ingest/windows_test.go
+  s_54b80c92daa9cb::t_379067abe92f63 1-108
+internal/observability/metrics.go
+  s_54b80c92daa9cb::t_379067abe92f63 100,109,132-135,141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c268598dd4518c2ce2f76fa5d3bf0b6eacc7f7fb",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
