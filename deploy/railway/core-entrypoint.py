@@ -100,6 +100,9 @@ def build_config(env):
     # Opt-in: the Alertes tab creates Saved Queries and Subscriptions and reads their Matches.
     if plugins_enabled(env):
         actions += ['monitoring:read', 'monitoring:write']
+    # Opt-in: the read-only Admin tab follows documents through their steps.
+    if env.get('QUIVR_DEMO_ADMIN') == '1':
+        actions += ['observability:read']
     config = {
         'database_url': env['DATABASE_URL'],
         'cursor_key': env['QUIVR_CURSOR_KEY'],
@@ -116,13 +119,13 @@ def build_config(env):
                        'corpora': ['*']}},
     }
     # Optional operator key, never given to the web app: rebuilds a Corpus projection
-    # (for example after a migration adds a projected field) and reads the plugin
-    # registry (plugins:admin) from inside the deployment.
+    # (for example after a migration adds a projected field), reads the plugin
+    # registry (plugins:admin) and the admin views (observability:read) from inside the deployment.
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
     if operator:
         config['keys'][operator] = {'organization': 'quivr-demo', 'corpora': ['*'],
                                     'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
-                                                'plugins:admin']}
+                                                'plugins:admin', 'observability:read']}
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
     if plugins_enabled(env):

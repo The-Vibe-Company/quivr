@@ -190,6 +190,8 @@ type Version struct {
 	// AcceptedAt is when the revision this Version publishes was accepted;
 	// nil when no receipt records it.
 	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	// Steps are when each processing step finished; public reads only.
+	Steps Steps `json:"-"`
 }
 
 // ResolvedRelation is a separate live view of one source Relation. Unavailable
@@ -229,6 +231,7 @@ type Publication struct {
 type StoredVersion struct {
 	RecordID, ID, CorpusID string
 	AcceptedAt             *time.Time
+	Steps                  Steps
 	ManifestBlob, TextBlob Blob
 	Provenance             map[string]any
 	Extensions             Extensions
@@ -638,7 +641,7 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
-	return Version{RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
+	return Version{RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Steps: stored.Steps, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
 }
 
 // resolveRelations expands source Relations independently of the immutable

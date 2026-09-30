@@ -21,6 +21,8 @@ for (const c of cases) {
     // '*' stands for every index of an array.
     PluginRegistrationList: [['items', '*', 'created_at'], ['items', '*', 'updated_at']],
     PluginRegistration: [['created_at'], ['updated_at'], ['check', 'checked_at']],
+    DocumentTimeline: [['steps', '*', 'at'], ...['accepted_at', 'materialized_at', 'segmented_at', 'retrieval_ready_at', 'enriched_at']
+      .map((step) => ['document', 'steps', step])],
   };
   const expand = (parts) => {
     const star = parts.indexOf('*');

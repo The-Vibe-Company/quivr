@@ -102,7 +102,7 @@ class Stack:
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
@@ -113,8 +113,9 @@ class Stack:
             # Change-journal prune acceptance owns org_r, the only Organization the harness prunes.
             s['retention']:scope('org_r',['corpora:read','corpora:write','content:read','content:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
-            # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets.
-            s['operator']:scope('org_ops',['plugins:admin'],['*']),
+            # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets,
+            # and the admin views (observability:read).
+            s['operator']:scope('org_ops',['plugins:admin','observability:read'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*']),

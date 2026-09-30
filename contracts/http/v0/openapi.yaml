@@ -1879,6 +1879,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v0/admin/documents:
+    get:
+      operationId: listAdminDocuments
+      description: The Organization's most recently accepted Record Versions across all its Corpora,
+        newest first, with their Source, title, current state and step times, read in one query. Requires
+        observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions
+        accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot;
+        the cursor is bound to the key's scope.
+      x-required-permissions:
+      - observability:read
+      parameters:
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDocumentPage'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read or all Corpora, 409 cursor_scope_changed,
+            422 invalid query, limit or cursor, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v0/admin/documents/{version_id}/timeline:
+    get:
+      operationId: getDocumentTimeline
+      description: One Record Version's finished steps in time order, each with how long it took since
+        the step that caused it and, when known, the plugin that ran it. 404 for an unknown Version or one
+        outside the key's Corpora. Requires observability:read.
+      x-required-permissions:
+      - observability:read
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentTimeline'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read, 404 not found,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v0/search:
     post:
       operationId: searchRecords
@@ -2354,6 +2422,8 @@ components:
             $ref: '#/components/schemas/ResolvedRelation'
         processing:
           $ref: '#/components/schemas/ProcessingSummary'
+        steps:
+          $ref: '#/components/schemas/VersionSteps'
         diagnostics:
           type: array
           items:
@@ -2370,6 +2440,156 @@ components:
       - availability
       - relations
       - processing
+    VersionSteps:
+      type: object
+      additionalProperties: false
+      description: When each processing step of the Version finished, written once by the transaction that
+        commits the step. A step not finished yet is omitted. Versions materialized before step times were
+        recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+      properties:
+        accepted_at:
+          type: string
+          format: date-time
+          description: Quivr accepted the revision.
+        materialized_at:
+          type: string
+          format: date-time
+          description: The Version was published from normalized content.
+        segmented_at:
+          type: string
+          format: date-time
+          description: The Version was first cut into segments.
+        retrieval_ready_at:
+          type: string
+          format: date-time
+          description: The Version first became searchable.
+        enriched_at:
+          type: string
+          format: date-time
+          description: Vectors were first attached to the Version.
+        evaluated_at:
+          type: string
+          format: date-time
+          description: Every Subscription asked to evaluate the Version had decided; one that waits for
+            vectors decides on their round. Omitted when no Subscription evaluated it, or when one waiting
+            for vectors was disabled before they arrived. With more than 100
+            Subscriptions on one Corpus it can be set once the first 100 have decided.
+        quarantined_at:
+          type: string
+          format: date-time
+          description: The Version was quarantined.
+        withdrawn_at:
+          type: string
+          format: date-time
+          description: The Version's Record was withdrawn.
+    AdminDocument:
+      type: object
+      additionalProperties: false
+      properties:
+        version_id:
+          type: string
+          minLength: 1
+        record_id:
+          type: string
+          minLength: 1
+        corpus_id:
+          type: string
+          minLength: 1
+        source_namespace:
+          type: string
+        record_key:
+          type: string
+        title:
+          type: string
+          description: The inline title Part of the accepted command, truncated to 200 characters; omitted
+            when there is none.
+        state:
+          type: string
+          enum:
+          - received
+          - materialized
+          - building_baseline
+          - retrieval_ready
+          - quarantined
+          - withdrawn
+          description: received until the Version is materialized, then its Version Availability state, and
+            withdrawn once its Record is.
+        is_current:
+          type: boolean
+        steps:
+          $ref: '#/components/schemas/VersionSteps'
+      required:
+      - version_id
+      - record_id
+      - corpus_id
+      - source_namespace
+      - record_key
+      - state
+      - is_current
+      - steps
+    AdminDocumentPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDocument'
+        next_page_cursor:
+          type: string
+          minLength: 1
+      required:
+      - items
+    TimelineStep:
+      type: object
+      additionalProperties: false
+      properties:
+        step:
+          type: string
+          enum:
+          - accepted
+          - materialized
+          - segmented
+          - retrieval_ready
+          - enriched
+          - evaluated
+          - quarantined
+          - withdrawn
+        at:
+          type: string
+          format: date-time
+        since:
+          type: string
+          description: The step the duration is measured from. Each step is timed from the step that causes
+            it; enriched and evaluated both follow retrieval_ready, and quarantined follows the latest step
+            finished before it. Omitted for accepted and withdrawn, and when that step has no time or a later
+            one.
+        duration_ms:
+          type: integer
+          minimum: 0
+        plugin_id:
+          type: string
+          description: The plugin that ran the step, when known. materialized names the normalizer whose
+            output was published; segmented, retrieval_ready and enriched name the ingestion plugin whose
+            segments the Corpus serves.
+        plugin_version:
+          type: string
+      required:
+      - step
+      - at
+    DocumentTimeline:
+      type: object
+      additionalProperties: false
+      properties:
+        document:
+          $ref: '#/components/schemas/AdminDocument'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineStep'
+      required:
+      - document
+      - steps
     UploadRequest:
       type: object
       additionalProperties: false

@@ -1335,5 +1335,64 @@
       "created_at": "2026-09-30T13:00:00Z",
       "updated_at": "2026-09-30T13:00:01Z"
     }
+  },
+  {
+    "name": "document_timeline",
+    "schema": "DocumentTimeline",
+    "value": {
+      "document": {
+        "version_id": "version_7c2e",
+        "record_id": "record_41ab",
+        "corpus_id": "corpus_9f10",
+        "source_namespace": "news",
+        "record_key": "article-1042",
+        "title": "Harbour reopens after the storm",
+        "state": "retrieval_ready",
+        "is_current": true,
+        "steps": {
+          "accepted_at": "2026-09-30T10:00:00Z",
+          "materialized_at": "2026-09-30T10:00:01Z",
+          "segmented_at": "2026-09-30T10:00:03Z",
+          "retrieval_ready_at": "2026-09-30T10:00:04Z",
+          "enriched_at": "2026-09-30T10:00:09Z"
+        }
+      },
+      "steps": [
+        {
+          "step": "accepted",
+          "at": "2026-09-30T10:00:00Z"
+        },
+        {
+          "step": "materialized",
+          "at": "2026-09-30T10:00:01Z",
+          "since": "accepted",
+          "duration_ms": 1000
+        },
+        {
+          "step": "segmented",
+          "at": "2026-09-30T10:00:03Z",
+          "since": "materialized",
+          "duration_ms": 2000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        },
+        {
+          "step": "retrieval_ready",
+          "at": "2026-09-30T10:00:04Z",
+          "since": "segmented",
+          "duration_ms": 1000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        },
+        {
+          "step": "enriched",
+          "at": "2026-09-30T10:00:09Z",
+          "since": "retrieval_ready",
+          "duration_ms": 5000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        }
+      ]
+    }
   }
 ]

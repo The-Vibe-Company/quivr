@@ -303,9 +303,33 @@ WHERE v.organization=$1 AND v.id=$2`, in.Organization, in.SubscriptionVersionID,
 }
 
 func (s EvaluationStore) Complete(ctx context.Context, in monitoring.Intent, outcome string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE evaluation_intents SET state='done',outcome=$4,error_code='',lease_until='-infinity' WHERE organization=$1 AND subscription_version_id=$2 AND sequence=$3 AND state='pending'`, in.Organization, in.SubscriptionVersionID, in.Sequence, outcome)
+	_, err := s.Pool.Exec(ctx, completeIntentSQL, in.Organization, in.SubscriptionVersionID, in.Sequence, outcome)
 	return err
 }
+
+// completeIntentSQL completes a pending intent. When it leaves every
+// Subscription asked about its Record Version decided, the same statement
+// records the Version's evaluated step, once: no evaluation of the Version is
+// pending, and every not_ready answer, which waits for vectors, has a later
+// decision by the same Subscription, under whichever of its Versions was in
+// effect then. A Subscription disabled between the two rounds never decides,
+// and the step stays unrecorded. The subqueries read the snapshot before the
+// update, so they skip the intent being completed. Versions materialized
+// before step times were recorded get none.
+const completeIntentSQL = `WITH done AS (
+  UPDATE evaluation_intents SET state='done',outcome=$4,error_code='',lease_until='-infinity'
+  WHERE organization=$1 AND subscription_version_id=$2 AND sequence=$3 AND state='pending'
+  RETURNING organization,record_version_id,kind)
+UPDATE record_versions v SET evaluated_at=clock_timestamp() FROM done
+WHERE done.kind='evaluation' AND $4<>'not_ready' AND v.organization=done.organization AND v.id=done.record_version_id
+  AND v.evaluated_at IS NULL AND v.materialized_at IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM evaluation_intents p WHERE p.organization=done.organization AND p.record_version_id=done.record_version_id
+    AND p.kind='evaluation' AND p.state='pending' AND NOT (p.subscription_version_id=$2 AND p.sequence=$3))
+  AND NOT EXISTS(SELECT 1 FROM evaluation_intents n WHERE n.organization=done.organization AND n.record_version_id=done.record_version_id
+    AND n.outcome='not_ready' AND n.subscription_version_id<>$2
+    AND NOT EXISTS(SELECT 1 FROM subscription_versions e JOIN evaluation_intents d ON d.organization=e.organization AND d.subscription_version_id=e.id
+      WHERE e.organization=n.organization AND e.subscription_id=n.subscription_id
+      AND d.record_version_id=n.record_version_id AND d.kind='evaluation' AND d.state='done' AND d.outcome<>'not_ready'))`
 
 func (s EvaluationStore) Retry(ctx context.Context, in monitoring.Intent, code string, delay time.Duration) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE evaluation_intents SET attempts=attempts+1,error_code=$4,available_at=now()+make_interval(secs => $5::double precision),lease_until='-infinity' WHERE organization=$1 AND subscription_version_id=$2 AND sequence=$3 AND state='pending'`, in.Organization, in.SubscriptionVersionID, in.Sequence, code, delay.Seconds())
@@ -371,7 +395,7 @@ func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decid
 	if err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE evaluation_intents SET state='done',outcome=$4,error_code='',lease_until='-infinity' WHERE organization=$1 AND subscription_version_id=$2 AND sequence=$3 AND state='pending'`, in.Organization, in.SubscriptionVersionID, in.Sequence, outcome); err != nil {
+	if _, err = tx.Exec(ctx, completeIntentSQL, in.Organization, in.SubscriptionVersionID, in.Sequence, outcome); err != nil {
 		return "", err
 	}
 	return outcome, tx.Commit(ctx)

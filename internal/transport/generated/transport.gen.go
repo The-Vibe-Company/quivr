@@ -18,24 +18,54 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdminDocumentState.
+const (
+	AdminDocumentStateBuildingBaseline AdminDocumentState = "building_baseline"
+	AdminDocumentStateMaterialized     AdminDocumentState = "materialized"
+	AdminDocumentStateQuarantined      AdminDocumentState = "quarantined"
+	AdminDocumentStateReceived         AdminDocumentState = "received"
+	AdminDocumentStateRetrievalReady   AdminDocumentState = "retrieval_ready"
+	AdminDocumentStateWithdrawn        AdminDocumentState = "withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentState enum.
+func (e AdminDocumentState) Valid() bool {
+	switch e {
+	case AdminDocumentStateBuildingBaseline:
+		return true
+	case AdminDocumentStateMaterialized:
+		return true
+	case AdminDocumentStateQuarantined:
+		return true
+	case AdminDocumentStateReceived:
+		return true
+	case AdminDocumentStateRetrievalReady:
+		return true
+	case AdminDocumentStateWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AvailabilityState.
 const (
-	BuildingBaseline AvailabilityState = "building_baseline"
-	Materialized     AvailabilityState = "materialized"
-	Quarantined      AvailabilityState = "quarantined"
-	RetrievalReady   AvailabilityState = "retrieval_ready"
+	AvailabilityStateBuildingBaseline AvailabilityState = "building_baseline"
+	AvailabilityStateMaterialized     AvailabilityState = "materialized"
+	AvailabilityStateQuarantined      AvailabilityState = "quarantined"
+	AvailabilityStateRetrievalReady   AvailabilityState = "retrieval_ready"
 )
 
 // Valid indicates whether the value is a known member of the AvailabilityState enum.
 func (e AvailabilityState) Valid() bool {
 	switch e {
-	case BuildingBaseline:
+	case AvailabilityStateBuildingBaseline:
 		return true
-	case Materialized:
+	case AvailabilityStateMaterialized:
 		return true
-	case Quarantined:
+	case AvailabilityStateQuarantined:
 		return true
-	case RetrievalReady:
+	case AvailabilityStateRetrievalReady:
 		return true
 	default:
 		return false
@@ -651,6 +681,42 @@ func (e TextContentKind) Valid() bool {
 	}
 }
 
+// Defines values for TimelineStepStep.
+const (
+	TimelineStepStepAccepted       TimelineStepStep = "accepted"
+	TimelineStepStepEnriched       TimelineStepStep = "enriched"
+	TimelineStepStepEvaluated      TimelineStepStep = "evaluated"
+	TimelineStepStepMaterialized   TimelineStepStep = "materialized"
+	TimelineStepStepQuarantined    TimelineStepStep = "quarantined"
+	TimelineStepStepRetrievalReady TimelineStepStep = "retrieval_ready"
+	TimelineStepStepSegmented      TimelineStepStep = "segmented"
+	TimelineStepStepWithdrawn      TimelineStepStep = "withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the TimelineStepStep enum.
+func (e TimelineStepStep) Valid() bool {
+	switch e {
+	case TimelineStepStepAccepted:
+		return true
+	case TimelineStepStepEnriched:
+		return true
+	case TimelineStepStepEvaluated:
+		return true
+	case TimelineStepStepMaterialized:
+		return true
+	case TimelineStepStepQuarantined:
+		return true
+	case TimelineStepStepRetrievalReady:
+		return true
+	case TimelineStepStepSegmented:
+		return true
+	case TimelineStepStepWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UploadState.
 const (
 	UploadStateAwaitingUpload UploadState = "awaiting_upload"
@@ -792,6 +858,34 @@ func (e WebhookEventType) Valid() bool {
 // ActionRequest defines model for ActionRequest.
 type ActionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// AdminDocument defines model for AdminDocument.
+type AdminDocument struct {
+	CorpusId        string `json:"corpus_id"`
+	IsCurrent       bool   `json:"is_current"`
+	RecordId        string `json:"record_id"`
+	RecordKey       string `json:"record_key"`
+	SourceNamespace string `json:"source_namespace"`
+
+	// State received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
+	State AdminDocumentState `json:"state"`
+
+	// Steps When each processing step of the Version finished, written once by the transaction that commits the step. A step not finished yet is omitted. Versions materialized before step times were recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+	Steps VersionSteps `json:"steps"`
+
+	// Title The inline title Part of the accepted command, truncated to 200 characters; omitted when there is none.
+	Title     *string `json:"title,omitempty"`
+	VersionId string  `json:"version_id"`
+}
+
+// AdminDocumentState received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
+type AdminDocumentState string
+
+// AdminDocumentPage defines model for AdminDocumentPage.
+type AdminDocumentPage struct {
+	Items          []AdminDocument `json:"items"`
+	NextPageCursor *string         `json:"next_page_cursor,omitempty"`
 }
 
 // Availability defines model for Availability.
@@ -1183,6 +1277,12 @@ type Diagnostic struct {
 
 	// Retryable Whether the same input may succeed if processed again.
 	Retryable bool `json:"retryable"`
+}
+
+// DocumentTimeline defines model for DocumentTimeline.
+type DocumentTimeline struct {
+	Document AdminDocument  `json:"document"`
+	Steps    []TimelineStep `json:"steps"`
 }
 
 // Error defines model for Error.
@@ -1860,6 +1960,23 @@ type TextContent struct {
 // TextContentKind defines model for TextContent.Kind.
 type TextContentKind string
 
+// TimelineStep defines model for TimelineStep.
+type TimelineStep struct {
+	At         time.Time `json:"at"`
+	DurationMs *int      `json:"duration_ms,omitempty"`
+
+	// PluginId The plugin that ran the step, when known. materialized names the normalizer whose output was published; segmented, retrieval_ready and enriched name the ingestion plugin whose segments the Corpus serves.
+	PluginId      *string `json:"plugin_id,omitempty"`
+	PluginVersion *string `json:"plugin_version,omitempty"`
+
+	// Since The step the duration is measured from. Each step is timed from the step that causes it; enriched and evaluated both follow retrieval_ready, and quarantined follows the latest step finished before it. Omitted for accepted and withdrawn, and when that step has no time or a later one.
+	Since *string          `json:"since,omitempty"`
+	Step  TimelineStepStep `json:"step"`
+}
+
+// TimelineStepStep defines model for TimelineStep.Step.
+type TimelineStepStep string
+
 // Upload Upload URL and headers are transfer capabilities. Only verified uploads expose a usable Blob ID. Repeated confirmation of the same session observes the same verification, never a second upload.
 type Upload struct {
 	BlobId        *string             `json:"blob_id,omitempty"`
@@ -1946,7 +2063,37 @@ type Version struct {
 	Provenance *Provenance        `json:"provenance,omitempty"`
 	RecordId   string             `json:"record_id"`
 	Relations  []ResolvedRelation `json:"relations"`
-	VersionId  string             `json:"version_id"`
+
+	// Steps When each processing step of the Version finished, written once by the transaction that commits the step. A step not finished yet is omitted. Versions materialized before step times were recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+	Steps     *VersionSteps `json:"steps,omitempty"`
+	VersionId string        `json:"version_id"`
+}
+
+// VersionSteps When each processing step of the Version finished, written once by the transaction that commits the step. A step not finished yet is omitted. Versions materialized before step times were recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+type VersionSteps struct {
+	// AcceptedAt Quivr accepted the revision.
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+
+	// EnrichedAt Vectors were first attached to the Version.
+	EnrichedAt *time.Time `json:"enriched_at,omitempty"`
+
+	// EvaluatedAt Every Subscription asked to evaluate the Version had decided; one that waits for vectors decides on their round. Omitted when no Subscription evaluated it, or when one waiting for vectors was disabled before they arrived. With more than 100 Subscriptions on one Corpus it can be set once the first 100 have decided.
+	EvaluatedAt *time.Time `json:"evaluated_at,omitempty"`
+
+	// MaterializedAt The Version was published from normalized content.
+	MaterializedAt *time.Time `json:"materialized_at,omitempty"`
+
+	// QuarantinedAt The Version was quarantined.
+	QuarantinedAt *time.Time `json:"quarantined_at,omitempty"`
+
+	// RetrievalReadyAt The Version first became searchable.
+	RetrievalReadyAt *time.Time `json:"retrieval_ready_at,omitempty"`
+
+	// SegmentedAt The Version was first cut into segments.
+	SegmentedAt *time.Time `json:"segmented_at,omitempty"`
+
+	// WithdrawnAt The Version's Record was withdrawn.
+	WithdrawnAt *time.Time `json:"withdrawn_at,omitempty"`
 }
 
 // WebhookEvent Immutable reference-only notification. Retries preserve event_id and the exact stored body bytes; signing timestamp changes per attempt. No document content, excerpt, explanation, cursor or secret is embedded.
@@ -1971,6 +2118,12 @@ type WithdrawalCommand struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 	Reason         *string        `json:"reason,omitempty"`
 	Source         SourceIdentity `json:"source"`
+}
+
+// ListAdminDocumentsParams defines parameters for ListAdminDocuments.
+type ListAdminDocumentsParams struct {
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // PollChangesParams defines parameters for PollChanges.
@@ -2311,6 +2464,12 @@ func (t *Part_Content) UnmarshalJSON(b []byte) error {
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
+	// (GET /v0/admin/documents)
+	ListAdminDocuments(w http.ResponseWriter, r *http.Request, params ListAdminDocumentsParams)
+
+	// (GET /v0/admin/documents/{version_id}/timeline)
+	GetDocumentTimeline(w http.ResponseWriter, r *http.Request, versionId string)
+
 	// (GET /v0/admin/plugins)
 	ListPluginRegistrations(w http.ResponseWriter, r *http.Request)
 
@@ -2500,6 +2659,78 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAdminDocuments operation middleware
+func (siw *ServerInterfaceWrapper) ListAdminDocuments(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAdminDocumentsParams
+
+	// ------------- Optional query parameter "page_cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAdminDocuments(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDocumentTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetDocumentTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "version_id" -------------
+	var versionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version_id", r.PathValue("version_id"), &versionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDocumentTimeline(w, r, versionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListPluginRegistrations operation middleware
 func (siw *ServerInterfaceWrapper) ListPluginRegistrations(w http.ResponseWriter, r *http.Request) {
@@ -4339,12 +4570,92 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}/activate", wrapper.ActivatePlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans/{plan_id}", wrapper.GetPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents", wrapper.ListAdminDocuments)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents/{version_id}/timeline", wrapper.GetDocumentTimeline)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/search/profiles", wrapper.ListSearchProfiles)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/vector-spaces", wrapper.ListVectorSpaces)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
 	return m
+}
+
+type ListAdminDocumentsRequestObject struct {
+	Params ListAdminDocumentsParams
+}
+
+type ListAdminDocumentsResponseObject interface {
+	VisitListAdminDocumentsResponse(w http.ResponseWriter) error
+}
+
+type ListAdminDocuments200JSONResponse AdminDocumentPage
+
+func (response ListAdminDocuments200JSONResponse) VisitListAdminDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdminDocumentsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListAdminDocumentsdefaultJSONResponse) VisitListAdminDocumentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDocumentTimelineRequestObject struct {
+	VersionId string `json:"version_id"`
+}
+
+type GetDocumentTimelineResponseObject interface {
+	VisitGetDocumentTimelineResponse(w http.ResponseWriter) error
+}
+
+type GetDocumentTimeline200JSONResponse DocumentTimeline
+
+func (response GetDocumentTimeline200JSONResponse) VisitGetDocumentTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDocumentTimelinedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetDocumentTimelinedefaultJSONResponse) VisitGetDocumentTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListPluginRegistrationsRequestObject struct {
@@ -6761,6 +7072,12 @@ func (response ConfirmUploaddefaultJSONResponse) VisitConfirmUploadResponse(w ht
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /v0/admin/documents)
+	ListAdminDocuments(ctx context.Context, request ListAdminDocumentsRequestObject) (ListAdminDocumentsResponseObject, error)
+
+	// (GET /v0/admin/documents/{version_id}/timeline)
+	GetDocumentTimeline(ctx context.Context, request GetDocumentTimelineRequestObject) (GetDocumentTimelineResponseObject, error)
+
 	// (GET /v0/admin/plugins)
 	ListPluginRegistrations(ctx context.Context, request ListPluginRegistrationsRequestObject) (ListPluginRegistrationsResponseObject, error)
 
@@ -6979,6 +7296,58 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListAdminDocuments operation middleware
+func (sh *strictHandler) ListAdminDocuments(w http.ResponseWriter, r *http.Request, params ListAdminDocumentsParams) {
+	var request ListAdminDocumentsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAdminDocuments(ctx, request.(ListAdminDocumentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAdminDocuments")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAdminDocumentsResponseObject); ok {
+		if err := validResponse.VisitListAdminDocumentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDocumentTimeline operation middleware
+func (sh *strictHandler) GetDocumentTimeline(w http.ResponseWriter, r *http.Request, versionId string) {
+	var request GetDocumentTimelineRequestObject
+
+	request.VersionId = versionId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDocumentTimeline(ctx, request.(GetDocumentTimelineRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDocumentTimeline")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDocumentTimelineResponseObject); ok {
+		if err := validResponse.VisitGetDocumentTimelineResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListPluginRegistrations operation middleware

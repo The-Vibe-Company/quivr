@@ -113,7 +113,7 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='' WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
 		return err
 	}
 	mutation := content.StableID("enrichment", seg.ID, g.ID)

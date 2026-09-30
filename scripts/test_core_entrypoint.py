@@ -51,6 +51,16 @@ class CoreEntrypointTest(unittest.TestCase):
         enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_CONNECTORS': '1'})['keys']['placeholder-api-key']['actions']
         self.assertEqual(set(enabled) - set(base), {'connectors:read', 'connectors:write'})
 
+    def test_admin_read_is_opt_in(self):
+        base = core_entrypoint.build_config(ENV)['keys']['placeholder-api-key']['actions']
+        for value in ('', '0', 'true'):
+            actions = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_ADMIN': value})['keys']['placeholder-api-key']['actions']
+            self.assertEqual(actions, base, value)
+        enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_ADMIN': '1'})['keys']['placeholder-api-key']['actions']
+        self.assertEqual(set(enabled) - set(base), {'observability:read'})
+        operator = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']['placeholder-operator-key']
+        self.assertIn('observability:read', operator['actions'])
+
     def test_required_variables_still_fail_fast(self):
         env = dict(ENV)
         del env['QUIVR_CURSOR_KEY']

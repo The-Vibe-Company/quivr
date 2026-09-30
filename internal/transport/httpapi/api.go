@@ -69,6 +69,8 @@ type API struct {
 	// Plugins serves the operator routes of the plugin registry.
 	Plugins      registry.Service
 	pluginSchema *jsonschema.Schema
+	// Activity serves the operator reads of document activity.
+	Activity content.Activities
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -229,6 +231,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	if a.pluginRoutes(w, r, scope) {
 		return
 	}
+	if a.adminDocumentRoutes(w, r, scope) {
+		return
+	}
 	if a.operationRoutes(w, r, scope) {
 		return
 	}
@@ -342,6 +347,8 @@ const (
 	attemptPageDomain   = "attempt-page"
 	// subscriptionPageDomain signs the Subscription listing by owner.
 	subscriptionPageDomain = "subscription-page"
+	// documentPageDomain signs the admin list of latest documents.
+	documentPageDomain = "document-page"
 )
 
 // signCursor is the only signer for CursorKey tokens; the domain is required.

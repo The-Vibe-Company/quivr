@@ -86,6 +86,8 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &PluginRegistration{}
 			case "PluginRegistrationRequest":
 				target = &PluginRegistrationRequest{}
+			case "DocumentTimeline":
+				target = &DocumentTimeline{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

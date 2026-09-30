@@ -140,7 +140,7 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return content.Receipt{}, err
 	}
-	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, canonical)
+	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,'')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, canonical, content.Title(c))
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -220,7 +220,7 @@ func (s ContentStore) Withdraw(ctx context.Context, scope corpus.Scope, w conten
 		return content.Receipt{}, err
 	}
 	var order int64
-	if err = tx.QueryRow(ctx, "UPDATE records SET acceptance_order=acceptance_order+1,withdrawn=true WHERE organization=$1 AND id=$2 RETURNING acceptance_order", scope.Organization, recordID).Scan(&order); err != nil {
+	if err = tx.QueryRow(ctx, "UPDATE records SET acceptance_order=acceptance_order+1,withdrawn=true,withdrawn_at=CASE WHEN withdrawn THEN withdrawn_at ELSE clock_timestamp() END WHERE organization=$1 AND id=$2 RETURNING acceptance_order", scope.Organization, recordID).Scan(&order); err != nil {
 		return content.Receipt{}, err
 	}
 	if _, err = tx.Exec(ctx, "INSERT INTO tombstones(organization,record_id) VALUES($1,$2) ON CONFLICT DO NOTHING", scope.Organization, recordID); err != nil {
@@ -326,11 +326,10 @@ func (s ContentStore) Records(ctx context.Context, org, corpusID, after string, 
 func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (content.StoredVersion, error) {
 	v := content.StoredVersion{}
 	var provenance, extensions []byte
-	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance,v.extensions,rc.accepted_at FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance, &extensions, &v.AcceptedAt)
-	if v.AcceptedAt != nil {
-		at := v.AcceptedAt.UTC()
-		v.AcceptedAt = &at
-	}
+	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance,v.extensions,rc.accepted_at,v.materialized_at,v.segmented_at,v.retrieval_ready_at,v.enriched_at,v.evaluated_at,v.quarantined_at,r.withdrawn_at FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance, &extensions, &v.AcceptedAt, &v.Steps.Materialized, &v.Steps.Segmented, &v.Steps.RetrievalReady, &v.Steps.Enriched, &v.Steps.Evaluated, &v.Steps.Quarantined, &v.Steps.Withdrawn)
+	v.Steps.Accepted = v.AcceptedAt
+	v.Steps = utcSteps(v.Steps)
+	v.AcceptedAt = v.Steps.Accepted
 	if err == nil {
 		err = json.Unmarshal(provenance, &v.Provenance)
 	}
@@ -460,7 +459,7 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 				}
 				processing, code = "blocked", q.Code
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
+			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine,materialized_at,quarantined_at) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16,clock_timestamp(),CASE WHEN $13 THEN clock_timestamp() END)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
 			if err != nil {
 				return err
 			}

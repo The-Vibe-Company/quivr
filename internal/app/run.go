@@ -443,6 +443,8 @@ func Run(command string) error {
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
+			// Operators follow documents through their steps (observability:read).
+			httpapi.WithActivity(content.Activities{Store: store}),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))
 		if err != nil {

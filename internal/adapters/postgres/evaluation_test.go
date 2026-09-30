@@ -310,11 +310,27 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		later = append(later, in)
 	}
 	rows.Close()
+	// The Version's evaluated step is recorded once every Subscription asked
+	// has decided: a not_ready answer waits for the vectors' round.
+	evaluated := func() *time.Time {
+		t.Helper()
+		activity, err := store.VersionActivity(ctx, org, laterVersion)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return activity.Steps.Evaluated
+	}
 	if err = evaluation.Complete(ctx, later[0], monitoring.OutcomeNoMatch); err != nil {
 		t.Fatal(err)
 	}
+	if at := evaluated(); at != nil {
+		t.Fatalf("evaluated at %v while a Subscription has not decided", at)
+	}
 	if err = evaluation.Complete(ctx, later[1], monitoring.OutcomeNotReady); err != nil {
 		t.Fatal(err)
+	}
+	if at := evaluated(); at != nil {
+		t.Fatalf("evaluated at %v while a Subscription waits for vectors", at)
 	}
 	trigger("record.enrichment_available", a.ID, laterRecord, laterVersion)
 	drain()
@@ -330,6 +346,17 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		if err != nil || target.Decided != want {
 			t.Fatalf("intent %d: decided %v, want %v (%v)", i, target.Decided, want, err)
 		}
+	}
+	var retry monitoring.Intent
+	if err = pool.QueryRow(ctx, `SELECT subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, laterVersion).Scan(&retry.SubscriptionVersionID, &retry.Sequence); err != nil {
+		t.Fatal(err)
+	}
+	retry.Organization = org
+	if err = evaluation.Complete(ctx, retry, monitoring.OutcomeNoMatch); err != nil {
+		t.Fatal(err)
+	}
+	if evaluated() == nil {
+		t.Fatal("evaluated step missing once every Subscription decided")
 	}
 }
 

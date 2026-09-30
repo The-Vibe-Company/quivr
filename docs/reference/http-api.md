@@ -78,6 +78,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/admin/plugins/{registration_id}/activate`](#post-v0adminpluginsregistration_idactivate) | `activatePlugin` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plans/{plan_id}`](#get-v0adminpluginsplansplan_id) | `getPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
+| [`GET /v0/admin/documents`](#get-v0admindocuments) | `listAdminDocuments` | `observability:read` |
+| [`GET /v0/admin/documents/{version_id}/timeline`](#get-v0admindocumentsversion_idtimeline) | `getDocumentTimeline` | `observability:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
 
@@ -1218,6 +1220,45 @@ The active Pipeline Plan, an immutable mapping of every role of the deployment t
 | --- | --- | --- |
 | `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 no active plan, 503 storage unavailable. |
+
+#### `GET /v0/admin/documents`
+
+Operation `listAdminDocuments`. Requires `observability:read`.
+
+The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `page_cursor` | query | string |  | Minimum length `1`. |
+| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`AdminDocumentPage`](#admindocumentpage) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read or all Corpora, 409 cursor_scope_changed, 422 invalid query, limit or cursor, 503 storage unavailable. |
+
+#### `GET /v0/admin/documents/{version_id}/timeline`
+
+Operation `getDocumentTimeline`. Requires `observability:read`.
+
+One Record Version's finished steps in time order, each with how long it took since the step that caused it and, when known, the plugin that ran it. 404 for an unknown Version or one outside the key's Corpora. Requires observability:read.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `version_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`DocumentTimeline`](#documenttimeline) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read, 404 not found, 503 storage unavailable. |
 
 ### Search
 
@@ -2429,6 +2470,7 @@ required:
 | `availability` | [`Availability`](#availability) | yes |  |
 | `relations` | array of [`ResolvedRelation`](#resolvedrelation) | yes |  |
 | `processing` | [`ProcessingSummary`](#processingsummary) | yes |  |
+| `steps` | [`VersionSteps`](#versionsteps) |  |  |
 | `diagnostics` | array of [`Diagnostic`](#diagnostic) |  | Why the Version needs attention. A quarantined Version lists its reason first. A Version published through an optional route's fallback lists the normalizer failure it fell back from, and a recorded normalizer_conflict is listed on the Version whose output was kept. Omitted when there is nothing to report. At most `20` items. |
 
 Example `version_relations`:
@@ -2684,6 +2726,8 @@ properties:
       $ref: '#/components/schemas/ResolvedRelation'
   processing:
     $ref: '#/components/schemas/ProcessingSummary'
+  steps:
+    $ref: '#/components/schemas/VersionSteps'
   diagnostics:
     type: array
     items:
@@ -2697,6 +2741,293 @@ required:
   - availability
   - relations
   - processing
+```
+
+</details>
+
+### `VersionSteps`
+
+When each processing step of the Version finished, written once by the transaction that commits the step. A step not finished yet is omitted. Versions materialized before step times were recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `accepted_at` | string (date-time) |  | Quivr accepted the revision. |
+| `materialized_at` | string (date-time) |  | The Version was published from normalized content. |
+| `segmented_at` | string (date-time) |  | The Version was first cut into segments. |
+| `retrieval_ready_at` | string (date-time) |  | The Version first became searchable. |
+| `enriched_at` | string (date-time) |  | Vectors were first attached to the Version. |
+| `evaluated_at` | string (date-time) |  | Every Subscription asked to evaluate the Version had decided; one that waits for vectors decides on their round. Omitted when no Subscription evaluated it, or when one waiting for vectors was disabled before they arrived. With more than 100 Subscriptions on one Corpus it can be set once the first 100 have decided. |
+| `quarantined_at` | string (date-time) |  | The Version was quarantined. |
+| `withdrawn_at` | string (date-time) |  | The Version's Record was withdrawn. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: When each processing step of the Version finished, written once by the transaction that commits the step. A step not finished yet is omitted. Versions materialized before step times were recorded carry only accepted_at, and withdrawn_at for a withdrawal after; history is not reconstructed.
+properties:
+  accepted_at:
+    type: string
+    format: date-time
+    description: Quivr accepted the revision.
+  materialized_at:
+    type: string
+    format: date-time
+    description: The Version was published from normalized content.
+  segmented_at:
+    type: string
+    format: date-time
+    description: The Version was first cut into segments.
+  retrieval_ready_at:
+    type: string
+    format: date-time
+    description: The Version first became searchable.
+  enriched_at:
+    type: string
+    format: date-time
+    description: Vectors were first attached to the Version.
+  evaluated_at:
+    type: string
+    format: date-time
+    description: Every Subscription asked to evaluate the Version had decided; one that waits for vectors decides on their round. Omitted when no Subscription evaluated it, or when one waiting for vectors was disabled before they arrived. With more than 100 Subscriptions on one Corpus it can be set once the first 100 have decided.
+  quarantined_at:
+    type: string
+    format: date-time
+    description: The Version was quarantined.
+  withdrawn_at:
+    type: string
+    format: date-time
+    description: The Version's Record was withdrawn.
+```
+
+</details>
+
+### `AdminDocument`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `version_id` | string | yes | Minimum length `1`. |
+| `record_id` | string | yes | Minimum length `1`. |
+| `corpus_id` | string | yes | Minimum length `1`. |
+| `source_namespace` | string | yes |  |
+| `record_key` | string | yes |  |
+| `title` | string |  | The inline title Part of the accepted command, truncated to 200 characters; omitted when there is none. |
+| `state` | string | yes | received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is. One of `received`, `materialized`, `building_baseline`, `retrieval_ready`, `quarantined`, `withdrawn`. |
+| `is_current` | boolean | yes |  |
+| `steps` | [`VersionSteps`](#versionsteps) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  version_id:
+    type: string
+    minLength: 1
+  record_id:
+    type: string
+    minLength: 1
+  corpus_id:
+    type: string
+    minLength: 1
+  source_namespace:
+    type: string
+  record_key:
+    type: string
+  title:
+    type: string
+    description: The inline title Part of the accepted command, truncated to 200 characters; omitted when there is none.
+  state:
+    type: string
+    enum:
+      - received
+      - materialized
+      - building_baseline
+      - retrieval_ready
+      - quarantined
+      - withdrawn
+    description: received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
+  is_current:
+    type: boolean
+  steps:
+    $ref: '#/components/schemas/VersionSteps'
+required:
+  - version_id
+  - record_id
+  - corpus_id
+  - source_namespace
+  - record_key
+  - state
+  - is_current
+  - steps
+```
+
+</details>
+
+### `AdminDocumentPage`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`AdminDocument`](#admindocument) | yes |  |
+| `next_page_cursor` | string |  | Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/AdminDocument'
+  next_page_cursor:
+    type: string
+    minLength: 1
+required:
+  - items
+```
+
+</details>
+
+### `TimelineStep`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `step` | string | yes | One of `accepted`, `materialized`, `segmented`, `retrieval_ready`, `enriched`, `evaluated`, `quarantined`, `withdrawn`. |
+| `at` | string (date-time) | yes |  |
+| `since` | string |  | The step the duration is measured from. Each step is timed from the step that causes it; enriched and evaluated both follow retrieval_ready, and quarantined follows the latest step finished before it. Omitted for accepted and withdrawn, and when that step has no time or a later one. |
+| `duration_ms` | integer |  | Minimum `0`. |
+| `plugin_id` | string |  | The plugin that ran the step, when known. materialized names the normalizer whose output was published; segmented, retrieval_ready and enriched name the ingestion plugin whose segments the Corpus serves. |
+| `plugin_version` | string |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  step:
+    type: string
+    enum:
+      - accepted
+      - materialized
+      - segmented
+      - retrieval_ready
+      - enriched
+      - evaluated
+      - quarantined
+      - withdrawn
+  at:
+    type: string
+    format: date-time
+  since:
+    type: string
+    description: The step the duration is measured from. Each step is timed from the step that causes it; enriched and evaluated both follow retrieval_ready, and quarantined follows the latest step finished before it. Omitted for accepted and withdrawn, and when that step has no time or a later one.
+  duration_ms:
+    type: integer
+    minimum: 0
+  plugin_id:
+    type: string
+    description: The plugin that ran the step, when known. materialized names the normalizer whose output was published; segmented, retrieval_ready and enriched name the ingestion plugin whose segments the Corpus serves.
+  plugin_version:
+    type: string
+required:
+  - step
+  - at
+```
+
+</details>
+
+### `DocumentTimeline`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `document` | [`AdminDocument`](#admindocument) | yes |  |
+| `steps` | array of [`TimelineStep`](#timelinestep) | yes |  |
+
+Example `document_timeline`:
+
+```json
+{
+  "document": {
+    "version_id": "version_7c2e",
+    "record_id": "record_41ab",
+    "corpus_id": "corpus_9f10",
+    "source_namespace": "news",
+    "record_key": "article-1042",
+    "title": "Harbour reopens after the storm",
+    "state": "retrieval_ready",
+    "is_current": true,
+    "steps": {
+      "accepted_at": "2026-09-30T10:00:00Z",
+      "materialized_at": "2026-09-30T10:00:01Z",
+      "segmented_at": "2026-09-30T10:00:03Z",
+      "retrieval_ready_at": "2026-09-30T10:00:04Z",
+      "enriched_at": "2026-09-30T10:00:09Z"
+    }
+  },
+  "steps": [
+    {
+      "step": "accepted",
+      "at": "2026-09-30T10:00:00Z"
+    },
+    {
+      "step": "materialized",
+      "at": "2026-09-30T10:00:01Z",
+      "since": "accepted",
+      "duration_ms": 1000
+    },
+    {
+      "step": "segmented",
+      "at": "2026-09-30T10:00:03Z",
+      "since": "materialized",
+      "duration_ms": 2000,
+      "plugin_id": "core.ingest",
+      "plugin_version": "1.0.0"
+    },
+    {
+      "step": "retrieval_ready",
+      "at": "2026-09-30T10:00:04Z",
+      "since": "segmented",
+      "duration_ms": 1000,
+      "plugin_id": "core.ingest",
+      "plugin_version": "1.0.0"
+    },
+    {
+      "step": "enriched",
+      "at": "2026-09-30T10:00:09Z",
+      "since": "retrieval_ready",
+      "duration_ms": 5000,
+      "plugin_id": "core.ingest",
+      "plugin_version": "1.0.0"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  document:
+    $ref: '#/components/schemas/AdminDocument'
+  steps:
+    type: array
+    items:
+      $ref: '#/components/schemas/TimelineStep'
+required:
+  - document
+  - steps
 ```
 
 </details>

@@ -144,6 +144,10 @@ func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result c
 	if _, err = tx.Exec(ctx, `INSERT INTO segmentations VALUES($1,$2,$3,$4,$5,$6)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance); err != nil {
 		return err
 	}
+	// The first segmentation of a Version finishes its segmented step.
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET segmented_at=clock_timestamp() WHERE organization=$1 AND id=$2 AND segmented_at IS NULL AND materialized_at IS NOT NULL`, org, result.VersionID); err != nil {
+		return err
+	}
 	for _, p := range result.Segments {
 		metadata, err := json.Marshal(p.Derivation)
 		if err != nil {
@@ -210,7 +214,7 @@ func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code
 	if ready || held {
 		return tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true WHERE organization=$1 AND id=$2`, org, id, state, code); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true,quarantined_at=`+firstStep("quarantined_at")+` WHERE organization=$1 AND id=$2`, org, id, state, code); err != nil {
 		return err
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: content.StableID("quarantine", id, code)}); err != nil {
@@ -252,7 +256,7 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='' WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
 		return err
 	}
 	if desired == seg.VersionID {

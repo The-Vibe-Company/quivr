@@ -2,6 +2,7 @@ package acceptance
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +37,7 @@ func TestSemanticEnrichmentPreservesVersion(t *testing.T) {
 	if before["manifest"].(map[string]any)["parts"].([]any)[0].(map[string]any)["content"].(map[string]any)["text"] != after["manifest"].(map[string]any)["parts"].([]any)[0].(map[string]any)["content"].(map[string]any)["text"] {
 		t.Fatal("enrichment changed source")
 	}
+	assertStepTimeline(t, admin, after)
 	delete(q, "mode")
 	hybrid := request(t, "POST", "/v0/search", admin, q, 200)["items"].([]any)
 	if len(hybrid) != 1 || hybrid[0].(map[string]any)["embedding_artifact_id"] != hit["embedding_artifact_id"] {
@@ -49,5 +51,39 @@ func TestSemanticEnrichmentPreservesVersion(t *testing.T) {
 	again := request(t, "POST", "/v0/search", admin, q, 200)["items"].([]any)
 	if len(again) != 1 || again[0].(map[string]any)["embedding_artifact_id"] != hit["embedding_artifact_id"] {
 		t.Fatal("unstable artifact", again)
+	}
+}
+
+// assertStepTimeline checks that an enriched Version reports when each step
+// finished, and that its admin timeline lists them in order, each timed from
+// the step that caused it.
+func assertStepTimeline(t *testing.T, token string, version map[string]any) {
+	t.Helper()
+	steps, _ := version["steps"].(map[string]any)
+	for _, step := range []string{"accepted_at", "materialized_at", "segmented_at", "retrieval_ready_at", "enriched_at"} {
+		if _, ok := steps[step].(string); !ok {
+			t.Fatalf("version %s has no %s: %v", version["version_id"], step, steps)
+		}
+	}
+	timeline := request(t, "GET", "/v0/admin/documents/"+version["version_id"].(string)+"/timeline", token, nil, 200)
+	var order []string
+	var previous time.Time
+	for _, raw := range timeline["steps"].([]any) {
+		step := raw.(map[string]any)
+		at, err := time.Parse(time.RFC3339Nano, step["at"].(string))
+		if err != nil || at.Before(previous) {
+			t.Fatalf("timeline out of order at %v: %v", step, timeline)
+		}
+		previous = at
+		if step["step"] != "accepted" && step["duration_ms"] == nil {
+			t.Fatalf("step without a duration: %v", step)
+		}
+		order = append(order, step["step"].(string))
+	}
+	if got := strings.Join(order, ","); got != "accepted,materialized,segmented,retrieval_ready,enriched" {
+		t.Fatalf("timeline steps %s: %v", got, timeline)
+	}
+	if doc := timeline["document"].(map[string]any); doc["state"] != "retrieval_ready" || doc["is_current"] != true {
+		t.Fatalf("timeline document: %v", doc)
 	}
 }
