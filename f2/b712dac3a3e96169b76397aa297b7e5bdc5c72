@@ -1,0 +1,26 @@
+internal/app/warm_test.go
+  s_54b80c92daa9cb::t_fb8ed4a02641e5 10-11,79-80,83-88,95,99-118
+  s_54b80c92daa9cb::t_2dd19a49a473c3 119-120
+scripts/first_search.py
+  s_54b80c92daa9cb::t_5b037805e24acc 38-39,42-43
+  s_54b80c92daa9cb::t_859d3457bb6656 4-6
+  s_54b80c92daa9cb::t_faa79b1c4e7345 50
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_163dc651c28d04 569-572
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f2b712dac3a3e96169b76397aa297b7e5bdc5c72",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
