@@ -1,0 +1,21 @@
+internal/retrieval/coverage.go
+  s_2302a91ef131db::t_61955151a7f4b0 5,21-23,52,63-65
+internal/retrieval/coverage_test.go
+  s_2302a91ef131db::t_66e69f49213230 13-14,19,22-23,27-28,50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55cf69a56fe338695585cc33441e2a731d2569a3",
+  "prompts": {},
+  "sessions": {
+    "s_2302a91ef131db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a5f9fffe4576114ca",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
