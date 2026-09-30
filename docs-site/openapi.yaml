@@ -1,11 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Quivr V2 public text foundation contract
+  title: Quivr HTTP API
   version: 0.0.0-draft
-  description: THE-543 and THE-547 evaluation contracts; endpoint implementations are separate work. Matching criterion is
-    plugin-owned and deferred. One configured webhook destination, immutable Matches, independent at-least-once Delivery and
-    reference-only notifications. OpenAPI is authoritative for transport shapes. THE-640 adds text search and asynchronous
-    Corpus projection rebuild initiation.
+  description: Every endpoint of the Quivr v0 HTTP API. Send an API key as a bearer token; the key decides the Organization,
+    the actions and the Corpora a request may reach.
 security:
 - ApiKey: []
 paths:

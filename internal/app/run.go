@@ -169,7 +169,7 @@ func Run(command string) error {
 		return errors.New("invalid configuration JSON")
 	}
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
-		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (docs/connectors/microsoft-365.md)")
+		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
 	}
 	// Validate the pins before logs move to files, so a refusal is reported on stderr.
 	pins, err := cfg.loadPins(command)

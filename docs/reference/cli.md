@@ -4,7 +4,7 @@
 
 > Generated from `cmd/quivr-reference/sources.go` by `make generate`. Do not edit this page: change the source and regenerate.
 
-Every command of the `quivr` binary, from the tables the binary itself dispatches on, in `internal/app/run.go` (engine), `internal/plugins/cli/cli.go` (offline) and `internal/online/online.go` (online). The **Needs** column says whether a command runs the engine, works offline, or needs a running server. For a walk through the online commands, see [From the command line](../api-walkthrough.md#from-the-command-line); for AI agents, see [Connect an AI agent](../connect-an-ai-agent.md) and the [MCP reference](mcp.md).
+Every command of the `quivr` binary, from the tables the binary itself dispatches on, in `internal/app/run.go` (engine), `internal/plugins/cli/cli.go` (offline) and `internal/online/online.go` (online). The **Needs** column says whether a command runs the engine, works offline, or needs a running server. For the online commands in use, see [Search from the command line](https://docs.quivr.thevibecompany.co/guides/search#search-from-the-command-line); for AI agents, see [Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents) and the [MCP reference](mcp.md).
 
 ## Commands
 

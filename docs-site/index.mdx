@@ -1,338 +1,62 @@
 ---
-title: "Quivr V2"
-description: "The project overview: why Quivr, architecture, quickstart and what works today"
+title: "Introduction"
+description: "What Quivr is, who it is for, and what it does today."
+keywords: ["overview", "what is quivr", "search engine", "monitoring"]
 ---
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+Quivr is an open-source engine for content that keeps arriving: news, feeds, mailboxes, posts. It stores each article safely, makes it searchable within seconds, and tells you when a new article matches a topic you follow. Your application talks to it over an HTTP API.
 
-**An open-source engine that turns continuous content streams into search and monitoring.**
-
-Quivr V2 ingests content durably, makes it searchable within seconds, enriches it in
-the background and lets you follow a topic over time. The core stays generic: formats,
-AI models and business rules belong in plugins, so you can adapt Quivr to your domain
-without forking the platform.
-
-> **Status: evaluation stage.** The API is `v0` and may change without notice. Do not
-> run it in production yet.
-
-## Why Quivr V2 {#why-quivr-v2}
-
-- **Durable before fast.** A write is acknowledged only once it is committed; outages
-  delay processing, they never lose or silently fail content.
-- **Idempotent everywhere.** Every write carries an idempotency key. Replays return the
-  same result, changed replays are conflicts, and corrections create new immutable
-  Versions instead of overwriting history.
-- **Useful early, richer later.** Text is lexically searchable as soon as it is
-  segmented; embeddings and other enrichments arrive afterwards without blocking it.
-- **Rebuildable indexes.** PostgreSQL and S3 hold the canonical data; the search index
-  is a projection that can be rebuilt from durable artifacts.
-- **Honest search.** Every hit is rehydrated from canonical storage and re-authorized.
-  A dependency outage returns an error, never an empty "success".
-- **Generic core, extensible edges.** Connectors, normalizers, enrichers, retrievers and
-  delivery channels are plugin capabilities, not core code.
-
-## Architecture at a glance {#architecture-at-a-glance}
+Quivr has no user interface of its own beyond a small demo. You build the product, and Quivr handles ingestion, search and alerts underneath.
 
 ```mermaid
 flowchart LR
-    client[Client / connector] -->|REST v0| api[Go API]
-    api -->|commit receipt + intent| pg[(PostgreSQL<br/>catalog, receipts, changes)]
-    api --> temporal[Temporal]
-    temporal --> worker[Go worker]
-    worker -->|canonical bytes, artifacts| s3[(S3-compatible storage)]
-    worker -->|segments| weaviate[(Weaviate<br/>lexical + vector)]
-    worker -->|text parts| ingest[core.ingest plugin]
-    ingest -->|passages| tei[TEI · E5 embeddings]
-    api -->|search, rehydrate, recheck| weaviate
-    api -->|changes: polling / SSE| client
+    sources["Feeds, mailboxes,<br/>your application"] -->|articles| quivr["Quivr"]
+    quivr -->|search results| app["Your application"]
+    quivr -->|alerts| app
+    plugins["Plugins"] <-->|JSON over HTTP| quivr
 ```
 
-A single `quivr` binary provides the `api`, `worker` and `migrate` commands.
+## Who it is for
 
-| Concern | Choice |
-| --- | --- |
-| Core | Go modular monolith (`cmd/quivr`, `internal/…`) |
-| Transactional catalog | PostgreSQL 17 |
-| Canonical bytes and artifacts | S3-compatible storage (SeaweedFS locally) |
-| Durable orchestration | Temporal |
-| Lexical and vector search | Weaviate |
-| Embeddings | Local TEI serving pinned `multilingual-e5-small` (384 dimensions) |
-| Contract | OpenAPI 3.1 in [`contracts/http/v0`](/openapi.yaml) |
-| Local runtime | Docker Compose |
+Developers use Quivr to build products on a stream of content, such as a newsroom tool, a media monitoring service or a research assistant. Ingestion, search and alerts come from one API.
 
-## Quickstart {#quickstart}
+Plugin authors adapt Quivr to their content: a file format, a data source, a ranking strategy or an alert rule. A plugin is a small HTTP service, so Quivr's core never changes.
 
-Requirements (Linux; the local harness targets Linux hosts): Go 1.27.1, Docker with Compose v2, Python 3 with `venv`,
-Node.js 22+ and `jq`. The first run downloads pinned images and the E5 model (~1 GB).
+AI agents can search Quivr and cite their sources through MCP.
 
-```bash
-make dev      # start dependencies, run migrations, launch API + worker
-make check    # docs, contracts, vet and unit tests without Docker (about 2 min); run before pushing
-make verify   # make check, then end-to-end journeys on an isolated stack
-make down     # stop everything, keep data (make reset also deletes volumes)
-```
+## What you can do today
 
-`make verify` runs every feature's acceptance suite and one assembled monitoring
-journey on an isolated stack. It removes only its own project, even after a
-failure or Ctrl+C. It then prints the path of a `report.md` that names any failed
-step, the pinned versions and the dependency inventory. Linux x86_64 is the only
-supported platform; see the [remaining limits](/quivr-v2-remaining-limits).
+<CardGroup cols={2}>
+<Card title="Collect content" icon="inbox">
+Send articles one by one or in batches, as text or files such as PDFs. Or let Quivr pull them from RSS and Atom feeds, Microsoft 365 mailboxes and X lists.
+</Card>
+<Card title="Search it" icon="search">
+Search by keywords, by meaning, or both. Each result names the article, the version and the exact passage it comes from.
+</Card>
+<Card title="Follow a topic" icon="bell">
+Save a keyword query or a plain-language description as an alert. Each new article that matches triggers a signed webhook that says why.
+</Card>
+<Card title="Extend it with plugins" icon="puzzle">
+Add a file format, a source, a way to embed or rank text, or an alert rule, in any language that serves HTTP.
+</Card>
+</CardGroup>
 
-`make dev` prints the API address and the path of a generated `config.json` holding
-throwaway local keys. Then follow [Your first search](/first-search): create a
-Corpus, add a text Record and search it, with commands that `make verify` replays
-against a real stack.
+Whatever the source, Quivr confirms an article only once it is stored, so an outage delays processing and never drops content. Every write carries an idempotency key: sending the same request twice never creates a duplicate. A correction creates a new version of the article, earlier versions stay readable, and alerts say when an article they caught was corrected or withdrawn.
 
-For a browser UI over the same API, run `make demo` and open http://127.0.0.1:5183
-(see [`quivr-search/`](/quivr-search)).
+## What it does not do yet
 
-## What works today {#what-works-today}
+Quivr is at the evaluation stage: the API is `v0` and may change, so do not run it in production. The local stack runs on Linux x86_64 only. Scanned documents are not read (there is no OCR), and alerts that match by meaning rely on an external classifier.
 
-- **Corpora** with scoped API keys per Organization, action and Corpus.
-- **Durable, idempotent ingestion**: inline text, bounded batches with per-entry
-  outcomes, verified uploads (presigned PUT + checksum confirm), structured Manifests,
-  extensions and relations.
-- **Corrections and withdrawals** with immutable Versions and fenced withdrawn Records.
-- **Search**: lexical, semantic and hybrid, with canonical rehydration and access
-  rechecks on every hit, optionally within chosen Source Namespaces (filtered before
-  ranking).
-- **Change feed** through polling and resumable SSE, plus **catalog resync** after
-  cursor expiry.
-- **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
-  newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
-  Delivery. Matching is decided by a pinned alert-rule plugin (the
-  `subscription` Contribution), batched per article. Both can be renamed without a
-  new Version.
-- **Keyword alerts** through the first-party plugin [`plugins/alerts`](/plugins/alerts),
-  pinned by default in the local stack:
-  - queries such as `"Airbus" AND (grève OR strike) NOT sport`, with exact phrases,
-    "any of", "none of" and grouping;
-  - case, accents and punctuation are ignored, and words match whole;
-  - metadata filters such as `source:wire` or `author:"Jane Doe"` (names mapped in the
-    plugin configuration), and a filter alone is a valid alert;
-  - each Match's evidence names the matched terms and the Parts where they matched
-    ([guide](/keyword-alerts)).
-  - the browser demo's **Alertes** tab writes these alerts and shows what each one
-    caught, live ([`quivr-search/`](/quivr-search#alertes)).
-- **Described alerts** through the same plugin: a plain-language description such as
-  "Labour strikes at ports and harbours", judged by TypeSafe's Jev classifier, so
-  rephrased and translated articles alert too:
-  - one classifier call per article covers all described alerts;
-  - an alert can be limited to chosen sources, whose other articles are never sent;
-  - the Match evidence carries the classifier's score;
-  - they are off without a TypeSafe key, because article text is sent to TypeSafe
-    ([guide](/described-alerts));
-  - the browser demo's **Alertes** tab offers them next to keyword alerts when the
-    deployment has a classifier, and shows each caught article's score
-    ([`quivr-search/`](/quivr-search#alertes)).
-- **Subscription previews** (`POST /v0/subscription-previews`): before saving an alert,
-  see which of the most recent articles it would have caught, judged by the same plugin
-  with the same rules. A preview saves nothing and sends nothing, and it judges at most
-  50 articles; the demo's alert form shows it as you type.
-- **Subscription owners**: an application can create a Subscription for one of its
-  end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
-  the Subscription, its Matches, webhooks and change feed to route each alert, and list
-  a user's active Subscriptions with `GET /v0/subscriptions?owner=…`.
-- **Correction and withdrawal notices** for alerted Records: a correction that still
-  matches gets a linked successor Match (`match.corrected`), one that no longer matches
-  gets `match.no_longer_matches` without a new Match, and a withdrawal gets
-  `match.withdrawn`. Earlier Matches stay readable.
-- **Signed webhook delivery** (Standard Webhooks) to deployment-configured destinations,
-  with append-only attempt history, jittered exponential retries within a bounded
-  delivery window, exhaustion, and no new attempt once a Subscription is disabled.
-  The worker exposes delivery metrics on its probe listener (`/metrics`).
-- **Projection rebuilds** from durable artifacts as recoverable Operations, with cancel
-  and rerun.
-- **Document step times**: each Version reports when it was accepted, materialized, cut
-  into segments, made searchable, given vectors, evaluated by alerts, quarantined or
-  withdrawn (`steps`). A key with `observability:read` lists the latest documents with
-  their steps (`GET /v0/admin/documents`) and reads one document's timeline with each
-  step's duration and plugin.
-- **Typed retrieval mappings** per Corpus (`PUT /v0/corpora/{id}/retrieval`): logical
-  fields pointing into source data take effect only when their rebuilt generation is
-  validated and activated.
-- **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
-  deposited credentials and health, through the same ingestion path as pushed content.
-  Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
-  and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become
-  corrections, deleted or protected posts are withdrawn, and health shows daily reads
-  ([guide](/connectors/x)). In webhook mode, X posts arrive in near real time
-  through Filtered Stream webhooks relayed by the core to the plugin, with polling as the
-  fallback ([guide](/connectors/x-webhooks)).
-  The deployment `credential_key` is optional. Without it, credential deposits are
-  refused with `503 credentials_unavailable`, and everything else works.
-  `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
-  Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval,
-  `POST /v0/connectors/{id}/runs` checks a source again now, and validation errors name the offending field as a JSON Pointer.
-- **Sources page in the web app** (`quivr-search`, **Sources** tab): paste a site
-  or feed address and the web app finds its RSS or Atom feed (refusing private
-  addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.
-  Each source shows its health and last article, and can be paused, resumed or
-  removed; a failing one can be checked again at once (**Réessayer**). Other kinds keep forms generated from their schemas, so new kinds need
-  no UI change ([guide](/connectors#from-the-web-interface)).
-- **Live feed page in the web app** (**Veille** tab): everything entering the demo
-  Corpus, newest first, with source, time, title and excerpt. New items arrive over
-  SSE, which the app's server relays from the change feed, and can be filtered by
-  source ([guide](/quivr-search#fil)).
-- **Operational metrics and correlated logs** on each process's private probe
-  listener (`/metrics`, Prometheus text, bounded labels):
-  - API: accepted commands and the pending-ingestion backlog;
-  - worker: processing outcomes, time from acceptance to searchable, and delivery
-    attempts and durations.
+## Next steps
 
-  JSON logs link request, Receipt, Record and Version IDs
-  ([harness](/quivr-v2-local-harness)).
-- **Retrieval measurement** with a frozen workload (`make measure`), and **search
-  quality** on public French and English evaluation sets or a private set, nightly
-  (`make eval`, [guide](/agents/evaluation)).
-- **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
-  which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
-  schemas, secrets and limits.
-- **Plugin registry and activation without restart**: the plugins pinned at startup are
-  recorded in the database, with the active Pipeline Plan saying which plugin serves each role
-  (a media type, an alert rule, a connector kind, ingestion, retrieval). An operator key with
-  `plugins:admin`, which no Organization key gets, registers a plugin version running at an
-  address; Quivr checks it with the Contract Runner, and one call activates it as a new plan
-  that api and worker follow without restarting
-  ([Switch plugins without restarting](/plugins/switch-plugins-without-restarting)).
-  Work already started (a receipt's processing, a connector run, a rebuild) finishes on the
-  plan it started on, even across a worker restart. The replaced version shows `draining`
-  with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
-  disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
-  the new version. Quivr never starts a plugin process.
-- **Plugin and search counters**: each process counts every plugin call, search and
-  processing step with its errors and latency, and writes the counts to PostgreSQL every
-  few seconds (`observability.flush_interval`, default 5 s, the most a crash can lose).
-  A key with `observability:read` reads its Organization's last hour, day or week, with
-  p50 and p95, from `GET /v0/admin/stats/plugins`, `searches`, `steps` and `top-queries`;
-  nothing is kept beyond 7 days. Top queries need `observability.record_query_text`, off
-  by default because it stores query text. The same counters are on `/metrics`.
-- **External normalizer**: the startup configuration pins one plugin and routes Blob
-  media types to its normalizer. A Blob of a routed type, ingested by reference,
-  becomes searchable through the plugin's Parts, and its Version shows
-  `provenance.normalization`. An unavailable plugin is retried and never blocks the
-  API or other ingestion. A plugin error, invalid output or exhausted retries quarantine
-  the Version with a structured diagnostic, and an `optional` text route falls back to
-  the built-in text path ([walkthrough](/api-walkthrough#external-normalizers)).
-- **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
-  registered at startup beside the built-in ones. Its normalizer's extensions are
-  validated against their schemas and published on the Version, clients cannot write
-  them (`422 extension_namespace_owned`), and retrieval mappings can map them into search.
-- **Python Plugin SDK** (`sdks/python/`) with `quivr plugin init`, which scaffolds a
-  Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
-  discovery digest and replays a fixture through the engine's Manifest validation,
-  without a Quivr stack ([SDK guide](/sdks/python)).
-- **Plugin Contract Runner** (`quivr plugin test`), which certifies a normalizer over
-  the public protocol, launched from its manifest or at `--endpoint <url>`. It runs
-  health, discovery, normative and plugin fixtures, deterministic replay, the declared
-  deadline, terminal errors for invalid requests, and compatibility ranges. It judges
-  output with the engine's own validation: Manifest rules, response size, input-Blob-only
-  Blob Parts and declared namespaces. It writes a JSON report with `--report`, and CI
-  publishes one for the `quivr plugin init` template.
-- **Searchable PDFs** through the reference plugin [`plugins/pdf-text`](/plugins/pdf-text)
-  (pypdf, BSD-3-Clause). An `application/pdf` Blob becomes one `body` Part per page with
-  text, and a phrase is found on its page's Part. Blank or scanned pages give warnings;
-  encrypted or damaged PDFs are quarantined with a diagnostic naming the plugin.
-  `make dev` pins it by default; there is no OCR
-  ([walkthrough](/api-walkthrough#pdf-documents)).
-- **`quivr search` from the command line**: set `QUIVR_API_URL` and `QUIVR_API_KEY`,
-  then `quivr search --corpus <corpus_id> "query"` prints ranked hits with their
-  excerpt and Record / Version / Part provenance, or the unchanged API response with
-  `--json`. Failures exit with one code per class (rejected key or scope, invalid
-  request, unreachable server). It uses a Go client generated from the contract
-  (package `client`) and never touches the stack's storage
-  ([walkthrough](/api-walkthrough#from-the-command-line)).
-- **AI agents search and cite Quivr over MCP**: `quivr mcp --profile read` serves an
-  agent on stdio with three read-only tools. The agent can list the Corpora its key
-  reaches, search them, and read a hit's Record Version and Manifest, keeping Record,
-  Version, Part and exact excerpt offsets to cite. `--profile ingest` adds text to a
-  Corpus and follows its Ingestion Receipt until it is searchable; retries never
-  duplicate, and no tool deletes. The API key alone decides access
-  ([Connect an AI agent](/connect-an-ai-agent)).
-- **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
-  your own plugin ([Write a normalizer](/plugins/write-a-normalizer)).
-- **Source collectors as plugins, in Go** (Plugin API 0.3): the connector contract
-  (`fetch` a page after an opaque checkpoint, `check_credential`, classified errors),
-  a Go Plugin SDK ([`sdks/go`](/sdks/go)) that redacts credentials, and
-  `quivr plugin test` checks that pages resume from their checkpoint and that no
-  credential leaks. The core does not call connector plugins yet.
-- **Segmentation and embedding as a plugin** (Plugin API 0.6, the `ingestion`
-  Contribution): a pinned plugin declares the vector spaces it owns, one served and
-  others for evaluation, cuts each article into segments with a vector per space and an
-  optional keyword text, and encodes queries for its spaces. A Corpus moves onto it
-  with a rebuild; `GET /v0/corpora/{id}/vector-spaces` shows each space's owner, role
-  and coverage ([Write an ingestion plugin](/plugins/write-an-ingestion-plugin)).
-  The first-party [core.ingest](/plugins/core-ingest) plugin (token windows,
-  E5) is pinned by default; the engine segments and embeds nothing itself.
-- **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
-  pinned plugin answers each search in up to three rounds, asking the engine for
-  keyword, vector or hybrid candidates it has already authorized, then ranking them
-  with an explanation per hit, under named profiles with a latency and cost budget
-  (`GET /v0/search/profiles`) ([Write a retrieval plugin](/plugins/write-a-retrieval-plugin)).
-  Without one, the built-in search answers the `default` profile.
-
-## What comes next {#what-comes-next}
-
-- Alerts that catch rephrased or translated articles with Quivr's own vectors, without an external classifier.
-- Filtering on typed field mappings (filter roles are validated and stored today).
-- Reprocessing quarantined Versions.
-
-The contract already describes some of these routes; the ones not implemented yet are
-listed here, not in "What works today".
-
-## Documentation {#documentation}
-
-New to Quivr? [What Quivr can do](/what-quivr-can-do) explains it in plain words.
-Then start from the page for what you want to do:
-
-- [Using Quivr](/start/functional): run Quivr, send it content, search it and set
-  up alerts.
-- [Writing plugins](/start/plugin-author): extend Quivr with your own plugins.
-- [Contributing to Quivr](/start/contributor): change this repository, as a person
-  or a coding agent.
-
-These start pages are generated from `docs/inventory.toml`, so
-every living page appears on the one for its reader. The authoritative request and
-response shapes are in the [OpenAPI contract](/openapi.yaml).
-
-## Repository layout {#repository-layout}
-
-```text
-cmd/quivr/          single binary: API, worker, migrations
-internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
-contracts/http/v0/  OpenAPI contract, examples and checks
-contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
-sdks/go/            Go Plugin SDK for source collectors, ingestion and retrieval plugins
-sdks/python/        Python Plugin SDK
-plugins/pdf-text/   reference normalizer: PDF text, one Part per page
-migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
-scripts/            local stack, verification and measurement tooling
-quivr-search/       demo web UI
-deploy/             Docker Compose and Railway deployment
-docs/               living documentation, ADRs (docs/adr/) and dated documents (docs/dated/)
-multimodal-rag/     earlier exploration (submodule), not the target architecture
-```
-
-## Contributing {#contributing}
-
-- Read [`AGENTS.md`](/agents) and [`CONTEXT.md`](/context) first; use the domain
-  vocabulary in code and docs.
-- Change the contract in `contracts/http/v0/openapi.yaml`, then run `make generate`.
-- Run `make check` before pushing and keep `make verify` green; add tests with
-  every behaviour change.
-- Declare every new living doc page in `docs/inventory.toml`
-  with one line giving its audience and kind (the file's header explains both),
-  then run `make start-pages`; `make docs` fails on an undeclared page, a stale start
-  page, a broken relative link or a missing repository path, and names the fix.
-- Show API requests in guides as [runnable blocks](/runnable-guides), which
-  `make verify` replays.
-- Never edit an accepted ADR or a dated document under `docs/dated/`: supersede it
-  with a new one (ADR 0004 (`docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md`));
-  `make docs` compares them with where your branch forked from `origin/main`.
-- Pull request titles follow Commitizen conventions, for example
-  `feat(ingestion): accept record versions`.
-- Keep customer-specific formats and rules out of the core; they belong in plugins.
-
-## License {#license}
-
-MIT — see `LICENSE`.
+<CardGroup cols={3}>
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+Run Quivr locally and search your first article.
+</Card>
+<Card title="Core concepts" icon="book-open" href="/concepts">
+The few ideas you need to use the API.
+</Card>
+<Card title="How plugins work" icon="puzzle" href="/plugins/overview">
+How Quivr calls the plugins that adapt it to your content.
+</Card>
+</CardGroup>

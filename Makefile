@@ -1,8 +1,11 @@
 GO ?= go
-.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
+# Prints the export lines of the make dev stack's API address, key and webhook destination: eval "$$(make -s env)".
+env:
+	@python3 scripts/local.py env
 demo:
 	GO=$(GO) python3 scripts/demo.py dev
 demo-reset:

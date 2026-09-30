@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Quivr",
-  "description": "An open-source engine that turns continuous content streams into search and monitoring.",
+  "description": "An open-source engine that turns continuous content streams into search and alerts.",
   "colors": {
     "primary": "#5b3fd6",
     "light": "#b29aff",
@@ -30,114 +30,231 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Using Quivr",
+            "group": "Get started",
             "pages": [
               "index",
-              "start/functional",
-              {
-                "group": "Understand how it works",
-                "pages": [
-                  "contracts/http/v0/index",
-                  "quivr-v2-remaining-limits",
-                  "what-quivr-can-do"
-                ]
-              },
-              {
-                "group": "Guides",
-                "pages": [
-                  "api-walkthrough",
-                  "connect-an-ai-agent",
-                  "connectors/index",
-                  "connectors/microsoft-365",
-                  "connectors/rss",
-                  "connectors/x",
-                  "connectors/x-webhooks",
-                  "deploy/railway/index",
-                  "described-alerts",
-                  "first-search",
-                  "keyword-alerts",
-                  "quivr-search/index"
-                ]
-              },
-              {
-                "group": "Reference",
-                "pages": [
-                  "reference/cli",
-                  "reference/mcp"
-                ]
-              }
+              "quickstart",
+              "concepts"
             ]
           },
           {
-            "group": "Writing plugins",
+            "group": "Plugins",
             "pages": [
-              "start/plugin-author",
+              "plugins/overview",
+              "plugins/types",
+              "plugins/first-plugin",
               {
-                "group": "Understand how it works",
+                "group": "Write a plugin",
                 "pages": [
-                  "contracts/plugins/v0/index",
-                  "plugins/alerts/index",
-                  "plugins/core-ingest/index",
-                  "plugins/switch-plugins-without-restarting",
-                  "plugins/x-list/index"
-                ]
-              },
-              {
-                "group": "Guides",
-                "pages": [
-                  "plugins/pdf-text/index",
-                  "plugins/rss/index",
-                  "plugins/run-a-connector-plugin",
-                  "plugins/write-a-normalizer",
-                  "plugins/write-a-retrieval-plugin",
+                  "plugins/write-a-connector",
                   "plugins/write-an-ingestion-plugin",
-                  "sdks/go/index",
-                  "sdks/python/index"
+                  "plugins/write-a-retrieval-plugin",
+                  "plugins/write-an-alert-rule"
                 ]
-              }
+              },
+              "plugins/pin",
+              "plugins/switch-plugins-without-restarting",
+              "plugins/catalog"
             ]
           },
           {
-            "group": "Contributing to Quivr",
+            "group": "Guides",
             "pages": [
-              "start/contributor",
+              "guides/add-content",
+              "guides/search",
+              "guides/keyword-alerts",
+              "guides/described-alerts",
               {
-                "group": "Understand how it works",
+                "group": "Collect from sources",
                 "pages": [
-                  "context",
-                  "quivr-v2-local-harness"
+                  "guides/connectors",
+                  "guides/rss",
+                  "guides/microsoft-365",
+                  "guides/x"
                 ]
               },
-              {
-                "group": "Guides",
-                "pages": [
-                  "agents",
-                  "agents/documentation",
-                  "agents/domain",
-                  "agents/evaluation",
-                  "agents/fleet-workflow",
-                  "agents/issue-tracker",
-                  "agents/testing",
-                  "agents/triage-labels",
-                  "runnable-guides",
-                  "tests/acceptance/index"
-                ]
-              },
-              {
-                "group": "More lists",
-                "pages": [
-                  "dated/index",
-                  "third_party/index"
-                ]
-              }
+              "guides/ai-agents"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
-        "openapi": "openapi.yaml"
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "HTTP API",
+            "pages": [
+              "api-reference/overview"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": "openapi.yaml"
+          },
+          {
+            "group": "Command line",
+            "pages": [
+              "reference/cli",
+              "reference/mcp"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "reference/plugin-manifest",
+              "reference/plugin-protocol"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "reference/configuration"
+            ]
+          }
+        ]
       }
     ]
-  }
+  },
+  "redirects": [
+    {
+      "source": "/first-search",
+      "destination": "/quickstart"
+    },
+    {
+      "source": "/what-quivr-can-do",
+      "destination": "/"
+    },
+    {
+      "source": "/api-walkthrough",
+      "destination": "/guides/add-content"
+    },
+    {
+      "source": "/connect-an-ai-agent",
+      "destination": "/guides/ai-agents"
+    },
+    {
+      "source": "/keyword-alerts",
+      "destination": "/guides/keyword-alerts"
+    },
+    {
+      "source": "/described-alerts",
+      "destination": "/guides/described-alerts"
+    },
+    {
+      "source": "/connectors",
+      "destination": "/guides/connectors"
+    },
+    {
+      "source": "/connectors/rss",
+      "destination": "/guides/rss"
+    },
+    {
+      "source": "/connectors/microsoft-365",
+      "destination": "/guides/microsoft-365"
+    },
+    {
+      "source": "/connectors/x",
+      "destination": "/guides/x"
+    },
+    {
+      "source": "/connectors/x-webhooks",
+      "destination": "/guides/x"
+    },
+    {
+      "source": "/plugins/write-a-normalizer",
+      "destination": "/plugins/first-plugin"
+    },
+    {
+      "source": "/plugins/run-a-connector-plugin",
+      "destination": "/plugins/pin"
+    },
+    {
+      "source": "/plugins/alerts",
+      "destination": "/plugins/catalog"
+    },
+    {
+      "source": "/plugins/core-ingest",
+      "destination": "/plugins/catalog"
+    },
+    {
+      "source": "/plugins/pdf-text",
+      "destination": "/plugins/catalog"
+    },
+    {
+      "source": "/plugins/rss",
+      "destination": "/plugins/catalog"
+    },
+    {
+      "source": "/plugins/x-list",
+      "destination": "/plugins/catalog"
+    },
+    {
+      "source": "/sdks/go",
+      "destination": "/plugins/write-a-connector"
+    },
+    {
+      "source": "/sdks/python",
+      "destination": "/plugins/first-plugin"
+    },
+    {
+      "source": "/contracts/plugins/v0",
+      "destination": "/reference/plugin-protocol"
+    },
+    {
+      "source": "/contracts/http/v0",
+      "destination": "/api-reference/overview"
+    },
+    {
+      "source": "/reference/http-api",
+      "destination": "/api-reference/overview"
+    },
+    {
+      "source": "/start/:slug*",
+      "destination": "/"
+    },
+    {
+      "source": "/agents/:slug*",
+      "destination": "/"
+    },
+    {
+      "source": "/agents",
+      "destination": "/"
+    },
+    {
+      "source": "/context",
+      "destination": "/concepts"
+    },
+    {
+      "source": "/dated",
+      "destination": "/"
+    },
+    {
+      "source": "/deploy/railway",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-search",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-v2-local-harness",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-v2-remaining-limits",
+      "destination": "/"
+    },
+    {
+      "source": "/runnable-guides",
+      "destination": "/"
+    },
+    {
+      "source": "/tests/acceptance",
+      "destination": "/"
+    },
+    {
+      "source": "/third_party",
+      "destination": "/"
+    }
+  ]
 }

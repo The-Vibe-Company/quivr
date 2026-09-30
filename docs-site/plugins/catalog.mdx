@@ -1,0 +1,63 @@
+---
+title: "First-party plugins"
+description: "The plugins that ship with Quivr: what each provides, its configuration, and where it runs."
+keywords: ["pdf-text", "alerts", "core-ingest", "rss", "m365-mail", "x-list", "catalog"]
+---
+
+These plugins live in the `plugins/` folder of the repository. They use the same public protocol as your own plugins, and none is compiled into the engine. `make dev` runs and pins all of them.
+
+| Plugin | Id | Type | Provides |
+| --- | --- | --- | --- |
+| `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
+| `alerts` | `alerts` 0.2.0 | Alert rule | keyword alerts and described alerts |
+| `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
+| `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
+| `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
+| `x-list` | `connector.x_list` 1.0.0 | Connector | kind `x_list`: the posts of an X list |
+
+A first-party retrieval plugin is in progress. Until it ships, Quivr's built-in search answers the `default` profile.
+
+## pdf-text
+
+Turns a PDF into one `body` Part per page with text, keyed `page-1`, `page-2`…, plus a `source` Part that references the PDF. The Version's `pdf-text.document` extension holds `page_count` and `text_pages`. Pages without text, such as scans, are skipped with an `empty_pages` warning: there is no OCR. An encrypted or damaged PDF is quarantined with the code `encrypted_pdf` or `corrupt_pdf`.
+
+| Configuration | Default | Meaning |
+| --- | --- | --- |
+| `max_page_parts` | `64` | Page Parts kept, 1 to 64; later pages join the last one |
+| `max_text_bytes` | `131072` | UTF-8 bytes of page text kept in total, up to 262144 |
+| `include_source` | `true` | Add the `source` Part that references the PDF |
+
+Pin it with a route for `application/pdf`. See [Add content](/guides/add-content#upload-a-file) to upload a PDF.
+
+## alerts
+
+Two kinds of alert. `keywords` is a boolean query over an article's title and body, with metadata filters. `described` is a plain-language description that TypeSafe's Jev classifier judges each article against; it sends article text to TypeSafe and is off without a `TYPESAFE_API_KEY` in the plugin's environment.
+
+| Configuration | Default | Meaning |
+| --- | --- | --- |
+| `fields` | `{}` | Filter names mapped to JSON Pointers into article metadata, such as `{"author": "/extensions/example.news/data/author"}` |
+| `text_roles` | `["title", "body"]` | Part roles that keyword terms search and described alerts send |
+| `described.threshold` | `0.5` | Default score at or above which a described alert matches, 0.2 to 0.95 |
+
+The pin's `kinds` lists the alert kinds the deployment accepts; pin `["keywords"]` when there is no TypeSafe key. See [Keyword alerts](/guides/keyword-alerts) and [Described alerts](/guides/described-alerts).
+
+## core-ingest
+
+The default ingestion plugin. It cuts the `title` and `body` Parts of each Version into windows of at most 384 tokens that overlap by 48 and prefer paragraph and sentence ends, then embeds each window in the space `core.ingest.e5-small@1` (384 dimensions, cosine) through a Text Embeddings Inference server. It refuses a Version with more than 256 KiB of text, 64 Parts or 256 windows, which is then blocked with `ingestion_refused`, and a query longer than 256 tokens.
+
+| Configuration | Meaning |
+| --- | --- |
+| `tei_url` | The Text Embeddings Inference server that serves the pinned E5 model |
+| `tokenizer` | `python` and `model`: the pinned tokenizer helper and its `tokenizer.json` |
+
+## rss
+
+Polls one feed per Connector Instance, with conditional requests and the feed's `ttl`. Each item becomes a Record keyed by its `guid` or `id`; an edited item becomes a new Version. It refuses private and loopback addresses unless `allow_private_addresses` is `true`, which only a local test deployment should set. See [RSS and Atom feeds](/guides/rss).
+
+## m365-mail
+
+Collects one folder of one Microsoft 365 mailbox through Microsoft Graph: subject and body as text, attachments up to 25 MB as stored files. `login_endpoint` and `graph_endpoint` override Microsoft's global endpoints, for a national cloud. See [Microsoft 365 mail](/guides/microsoft-365).
+
+## x-list
+
+Polls the posts of one X list, turns edits into corrections, and withdraws posts deleted or made protected on X within a recheck window. It can also receive posts in real time through X webhooks. `api_endpoint` overrides the X API origin, for a test fake only. See [X lists](/guides/x).

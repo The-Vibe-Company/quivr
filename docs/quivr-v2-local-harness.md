@@ -494,7 +494,7 @@ SDK. `QUIVR_NORMALIZER` chooses it for `make dev`:
 | `pdf-text` (default) | The reference plugin [`plugins/pdf-text`](../plugins/pdf-text/README.md), installed into `.scratch/plugin-sdk/venv` | `application/pdf` |
 | `template` | The `quivr plugin init` template, scaffolded once per stack | `text/markdown` |
 | `none` | No external normalizer; only `text/*` Blobs are accepted | none |
-| a plugin directory | Your own plugin, pinned at `http://127.0.0.1:$QUIVR_NORMALIZER_PORT` (default 9900) with the JSON configuration in `QUIVR_NORMALIZER_CONFIG` (default `{}`). The harness does not run it; start it with `quivr plugin dev --port 9900 <dir>` ([guide](plugins/write-a-normalizer.md)) | every media type its normalizer declares |
+| a plugin directory | Your own plugin, pinned at `http://127.0.0.1:$QUIVR_NORMALIZER_PORT` (default 9900) with the JSON configuration in `QUIVR_NORMALIZER_CONFIG` (default `{}`). The harness does not run it; start it with `quivr plugin dev --port 9900 <dir>` ([guide](https://docs.quivr.thevibecompany.co/plugins/first-plugin)) | every media type its normalizer declares |
 
 For example, `QUIVR_NORMALIZER=none make dev` disables it. The choice is applied
 on every `make dev` and printed with the API address. The plugin's log is
@@ -552,7 +552,7 @@ Every stack also pins two alert-rule plugins through the configuration's
 
 | Plugin | Subscriptions pin | Log |
 | --- | --- | --- |
-| The alerts plugin [`plugins/alerts`](../plugins/alerts/README.md) (keyword and described alerts), installed into `.scratch/plugin-sdk/venv` ([keyword](keyword-alerts.md) and [described](described-alerts.md) guides) | `{"plugin_id": "alerts", "version": "0.2.0"}` | `.scratch/<project>/alerts-plugin.log` |
+| The alerts plugin [`plugins/alerts`](../plugins/alerts/README.md) (keyword and described alerts), installed into `.scratch/plugin-sdk/venv` ([keyword](https://docs.quivr.thevibecompany.co/guides/keyword-alerts) and [described](https://docs.quivr.thevibecompany.co/guides/described-alerts) guides) | `{"plugin_id": "alerts", "version": "0.2.0"}` | `.scratch/<project>/alerts-plugin.log` |
 | The `quivr plugin init --kind subscription` template, scaffolded once as `alert-rules` in `.scratch/<project>/subscription-plugin` | `{"plugin_id": "alert-rules", "version": "0.1.0"}` | `.scratch/<project>/subscription-plugin.log` |
 
 `QUIVR_ALERTS=off make dev` leaves the keyword alerts plugin unpinned, and

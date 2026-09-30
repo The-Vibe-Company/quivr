@@ -4,7 +4,7 @@
 
 > Generated from `internal/online/mcp_catalogue.go` by `make generate`. Do not edit this page: change the source and regenerate.
 
-`quivr mcp --profile <profile>` serves the tools of one profile to an AI agent over MCP (Model Context Protocol) on stdin and stdout. It needs a running server and an API key, like every online command. How to start it, cite a source and who can see what: [Connect an AI agent](../connect-an-ai-agent.md). The command itself: [`quivr mcp`](cli.md#quivr-mcp).
+`quivr mcp --profile <profile>` serves the tools of one profile to an AI agent over MCP (Model Context Protocol) on stdin and stdout. It needs a running server and an API key, like every online command. How to start it, cite a source and who can see what: [Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents). The command itself: [`quivr mcp`](cli.md#quivr-mcp).
 
 ## Profiles
 

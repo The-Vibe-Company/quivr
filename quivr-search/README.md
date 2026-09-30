@@ -23,7 +23,7 @@ Search is lexical, or hybrid with **Idées proches**, which marks articles found
 ### Sources
 
 The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (see
-[From the web interface](../docs/connectors/README.md#from-the-web-interface)):
+[From the web interface](#sources)):
 
 1. Paste a site address or a feed address. Once you pause typing (or press Entrée), the
    server fetches it, recognises a feed or finds the feeds the page advertises
@@ -52,11 +52,11 @@ feeds get the same error as in production.
 ### Alertes
 
 The **Alertes** tab (`?view=alerts`) sets alerts on new articles, from RSS or added by hand.
-A [keyword alert](../docs/keyword-alerts.md) is written as words to watch (any or all of
+A [keyword alert](https://docs.quivr.thevibecompany.co/guides/keyword-alerts) is written as words to watch (any or all of
 them), words to ignore (`NOT`) and the sources to watch (`source:` filters); any other query,
 such as `(port OR quai) AND grève`, goes in **Écrire une requête avancée**, and the form shows
 how Quivr reads it (`src/lib/alertForm.ts`; `src/lib/notation.ts` ports the plugin's parser).
-With `DEMO_DESCRIBED_ALERTS`, **Un sujet décrit** offers [described alerts](../docs/described-alerts.md):
+With `DEMO_DESCRIBED_ALERTS`, **Un sujet décrit** offers [described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts):
 a sentence judged by Jev, whose note says article text goes to TypeSafe and a catch can take a
 minute; they can watch chosen sources too. Without it, a line says why the choice is missing.
 The form previews what the alert would have caught among the newest articles (saving nothing):

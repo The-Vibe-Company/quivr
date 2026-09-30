@@ -16,16 +16,19 @@ check fails when:
                     was removed, unless the base version's status is proposed
     dated-header    a new dated document has no Date: or Status: line
     stale-start-page a start page differs from what the inventory generates
-    stale-docs-site docs-site/ (the documentation site) differs from what
-                    scripts/mintlify_site.py generates from the living pages
-    missing-title   a living page has no `# ` title for the site
-    site-route      two living pages would be published at the same route
+    stale-docs-site a generated file of docs-site/ (the documentation site)
+                    differs from what scripts/mintlify_site.py writes
+    site-navigation a site page is missing from docs-site/docs.json, or the
+                    navigation names a page that does not exist
+    site-link       a root-relative link of a site page does not resolve
+    site-configuration  an engine configuration key is missing from the
+                    site's configuration reference
 
     python3 scripts/docs.py               # check the repository (make docs)
     python3 scripts/docs.py --root DIR    # check another checkout
     python3 scripts/docs.py --base REF    # compare dated documents with REF
     python3 scripts/docs.py --write-start-pages   # regenerate the start pages
-    python3 scripts/mintlify_site.py              # regenerate docs-site/ (make docs-site)
+    python3 scripts/mintlify_site.py              # regenerate the generated site pages (make docs-site)
 
 Dated documents are compared with the commit where the checkout forked from
 the base (default origin/main, or the DOCS_BASE variable): the merge base, so a
@@ -610,31 +613,13 @@ def write_start_pages(root):
     return written
 
 
-SITE_COMMAND = 'make docs-site'
 
 
-def check_docs_site(root, pages):
-    """docs-site/ is exactly what scripts/mintlify_site.py generates, in a checkout that has one."""
+def check_docs_site(root):
+    """The documentation site (docs-site/): generated files, navigation, links and the configuration reference."""
     import mintlify_site
 
-    if not (pathlib.Path(root) / mintlify_site.SITE).is_dir():  # the docs-site CI job requires it
-        return []
-    fix = f'run `{SITE_COMMAND}` and commit the result; never edit {mintlify_site.SITE}/ by hand'
-    try:
-        files, problems = mintlify_site.render(root, pages)
-    except ModuleNotFoundError as error:
-        return [Finding(mintlify_site.SITE, 1, 'stale-docs-site', f'cannot generate the site to compare it ({error})',
-                        'install the pinned tools with `pip install -r contracts/http/v0/checks/requirements.txt`')]
-    findings = [Finding(page, 1, rule, message, fix) for page, rule, message, fix in problems]
-    committed = set(mintlify_site.committed(root))
-    stale = sorted(name for name in committed | set(files) if name not in files or name not in committed
-                   or (pathlib.Path(root) / mintlify_site.SITE / name).read_bytes()
-                   != (files[name].encode('utf-8') if isinstance(files[name], str) else files[name]))
-    if stale:
-        findings.append(Finding(f'{mintlify_site.SITE}/{stale[0]}', 1, 'stale-docs-site',
-                                f'the documentation site is out of date: {len(stale)} generated file(s) differ, '
-                                f'missing or left over, starting with this one', fix))
-    return findings
+    return [Finding(path, 1, rule, message, fix) for path, rule, message, fix in mintlify_site.check(root)]
 
 
 def check(root, base=None):
@@ -666,7 +651,7 @@ def check(root, base=None):
     if GLOSSARY in pages and GLOSSARY in tree.files:
         findings.extend(check_glossary(tree))
     findings.extend(check_start_pages(tree, pages, lines))
-    findings.extend(check_docs_site(root, pages))
+    findings.extend(check_docs_site(root))
     if base is not None:
         findings.extend(check_frozen(tree, dated, base))
     return sorted(findings)

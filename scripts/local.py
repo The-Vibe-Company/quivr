@@ -137,7 +137,9 @@ class Stack:
                           # The keyless restart creates alerts in org_k (TestKeylessRefusesDescribedAlerts); nothing is delivered there.
                           'local-receiver-org-k':dict(organization='org_k',url='http://127.0.0.1:9/local-receiver-org-k',secret='whsec_'+base64.b64encode(b'local-test-signing-secret-org-k!').decode()),
                           # Signed-delivery acceptance runs its own receiver on this port while it executes.
-                          CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET)},
+                          CAPTURE_DESTINATION:dict(organization='org_a',url=f"http://127.0.0.1:{s['receiver_port']}/capture",secret=CAPTURE_SECRET),
+                          # One per doc page with runnable blocks, in that page's Organization ($QUIVR_DESTINATION).
+                          **guides.destinations(self)},
             delivery=DELIVERY_OVERRIDES,
             # The pinned external normalizer: pdf-text for application/pdf (make dev default), the
             # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
@@ -643,7 +645,7 @@ def run_stack(command,part=None):
             connector_plugin.select_first_party(stack,[r['id'] for r in connector_plugin.FIRST_PARTY] if verification else connector_plugin.from_environment())
             steps.run('start_stack',stack.up)
             if verification:verify(stack,steps,part)
-            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
+            else:print(f"API http://127.0.0.1:{stack.state['api_port']} — credentials in {stack.directory}/config.json\nUse it from this shell: eval \"$(make -s env)\"\n{normalizer_plugin.describe(stack)}\n{subscription_plugin.describe(stack)}\n{connector_plugin.describe(stack)}")
         elif command=='migrate':stack.migrate();print(f'Migrations applied to {stack.name}; restart api and worker (make dev) if the release notes require it')
         else:stack.down(command=='reset')
         status='passed'
@@ -652,11 +654,23 @@ def run_stack(command,part=None):
     finally:
         if verification:finish(stack,steps,status,start)
 
+def environment():
+    """`make env`: the export lines that point this shell at the make dev stack, as the Quickstart uses them:
+    the API address, the key of Organization org_b (every Organization action, connectors included, on every
+    Corpus), its webhook destination and the deployment operator's key (plugins:admin)."""
+    name='quivr-dev-'+__import__('hashlib').sha256(str(ROOT).encode()).hexdigest()[:10]
+    statefile=ROOT/'.scratch'/name/'state.json'
+    if not statefile.exists():
+        sys.exit('No make dev stack in this checkout yet: run `make dev` first.')
+    s=json.loads(statefile.read_text())
+    print(f"export QUIVR_API_URL=http://127.0.0.1:{s['api_port']}\nexport QUIVR_API_KEY={s['other']}\nexport QUIVR_DESTINATION=local-receiver-org-b\nexport QUIVR_OPERATOR_KEY={s['operator']}")
+
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('command',choices=['dev','verify','down','reset','migrate'])
+    parser.add_argument('command',choices=['dev','verify','down','reset','migrate','env'])
     parser.add_argument('--part',default='',help='verify only these parts, comma-separated (default: every part, then the demo)')
     args=parser.parse_args()
+    if args.command=='env':return environment()
     if args.command!='verify':return run_stack(args.command)
     known=list(parts())+[DEMO]
     chosen=[p for p in args.part.replace(' ',',').split(',') if p] or known

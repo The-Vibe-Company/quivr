@@ -6,17 +6,12 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 ## Understand how it works
 
 - [Plugin Protocol v0](../../contracts/plugins/v0/README.md): the plugin manifest, routes, schemas and fixtures
-- [Switch plugins without restarting](../plugins/switch-plugins-without-restarting.md): register, check and activate a plugin version while api and worker keep running
 - [alerts](../../plugins/alerts/README.md): the first-party keyword alert plugin
 - [core.ingest](../../plugins/core-ingest/README.md): the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine
 - [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests
 
 ## Guides
 
-- [Run a connector plugin](../plugins/run-a-connector-plugin.md): pin a connector plugin and read the health it reports
-- [Write a normalizer](../plugins/write-a-normalizer.md): from `quivr plugin init` to a searchable, observable Record
-- [Write a retrieval plugin](../plugins/write-a-retrieval-plugin.md): decide how search results are found and ranked, under named profiles
-- [Write an ingestion plugin](../plugins/write-an-ingestion-plugin.md): decide how articles are cut and embedded, and move a Corpus onto it
 - [pdf-text](../../plugins/pdf-text/README.md): the reference PDF normalizer, one Part per page
 - [RSS and Atom connector plugin](../../plugins/rss/README.md): the first-party RSS and Atom connector plugin
 - [Quivr Plugin SDK for Go](../../sdks/go/README.md): write, test and certify a source collector or an ingestion plugin in Go

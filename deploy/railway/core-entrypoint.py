@@ -19,7 +19,7 @@ PLUGIN_PYTHON = '/opt/quivr-plugins/bin/python'
 PLUGINS = [
     {'id': 'pdf-text', 'module': 'pdf_text', 'port': 9900,
      'routes': [{'media_type': 'application/pdf', 'mode': 'required'}]},
-    # TYPESAFE_API_KEY lets alerts decide described alerts (docs/described-alerts.md).
+    # TYPESAFE_API_KEY lets alerts decide described alerts (https://docs.quivr.thevibecompany.co/guides/described-alerts).
     # Only this plugin receives it, and its pin offers "described" only when it is set.
     {'id': 'alerts', 'module': 'alerts', 'port': 9910, 'secrets': ['TYPESAFE_API_KEY'], 'preview': True},
 ]

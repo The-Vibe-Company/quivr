@@ -65,7 +65,7 @@ func cliSource() (commands.Source, error) {
 
 	return commands.Source{
 		From:   "cmd/quivr-reference/sources.go",
-		Intro:  "Every command of the `quivr` binary, from the tables the binary itself dispatches on, in `internal/app/run.go` (engine), `internal/plugins/cli/cli.go` (offline) and `internal/online/online.go` (online). The **Needs** column says whether a command runs the engine, works offline, or needs a running server. For a walk through the online commands, see [From the command line](../api-walkthrough.md#from-the-command-line); for AI agents, see [Connect an AI agent](../connect-an-ai-agent.md) and the [MCP reference](mcp.md).",
+		Intro:  "Every command of the `quivr` binary, from the tables the binary itself dispatches on, in `internal/app/run.go` (engine), `internal/plugins/cli/cli.go` (offline) and `internal/online/online.go` (online). The **Needs** column says whether a command runs the engine, works offline, or needs a running server. For the online commands in use, see [Search from the command line](https://docs.quivr.thevibecompany.co/guides/search#search-from-the-command-line); for AI agents, see [Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents) and the [MCP reference](mcp.md).",
 		Groups: []commands.Group{engine, offline, onlineGroup},
 	}, nil
 }
@@ -83,7 +83,7 @@ func onlineHelp(name string) (string, error) {
 func mcpSource() mcp.Source {
 	return mcp.Source{
 		From:     "internal/online/mcp_catalogue.go",
-		Intro:    "`quivr mcp --profile <profile>` serves the tools of one profile to an AI agent over MCP (Model Context Protocol) on stdin and stdout. It needs a running server and an API key, like every online command. How to start it, cite a source and who can see what: [Connect an AI agent](../connect-an-ai-agent.md). The command itself: [`quivr mcp`](cli.md#quivr-mcp).",
+		Intro:    "`quivr mcp --profile <profile>` serves the tools of one profile to an AI agent over MCP (Model Context Protocol) on stdin and stdout. It needs a running server and an API key, like every online command. How to start it, cite a source and who can see what: [Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents). The command itself: [`quivr mcp`](cli.md#quivr-mcp).",
 		Profiles: online.MCPProfiles,
 		Tools:    online.MCPTools,
 	}

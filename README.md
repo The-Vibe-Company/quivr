@@ -76,9 +76,10 @@ step, the pinned versions and the dependency inventory. Linux x86_64 is the only
 supported platform; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
 
 `make dev` prints the API address and the path of a generated `config.json` holding
-throwaway local keys. Then follow [Your first search](docs/first-search.md): create a
-Corpus, add a text Record and search it, with commands that `make verify` replays
-against a real stack.
+throwaway local keys; `eval "$(make -s env)"` exports the address, a key and a webhook
+destination. Then follow the [Quickstart](https://docs.quivr.thevibecompany.co/quickstart):
+create a Corpus, add an article, search it and get an alert, with commands that
+`make verify` replays against a real stack.
 
 For a browser UI over the same API, run `make demo` and open http://127.0.0.1:5183
 (see [`quivr-search/`](quivr-search/README.md)).
@@ -108,7 +109,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - metadata filters such as `source:wire` or `author:"Jane Doe"` (names mapped in the
     plugin configuration), and a filter alone is a valid alert;
   - each Match's evidence names the matched terms and the Parts where they matched
-    ([guide](docs/keyword-alerts.md)).
+    ([guide](https://docs.quivr.thevibecompany.co/guides/keyword-alerts)).
   - the browser demo's **Alertes** tab writes these alerts and shows what each one
     caught, live ([`quivr-search/`](quivr-search/README.md#alertes)).
 - **Described alerts** through the same plugin: a plain-language description such as
@@ -118,7 +119,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - an alert can be limited to chosen sources, whose other articles are never sent;
   - the Match evidence carries the classifier's score;
   - they are off without a TypeSafe key, because article text is sent to TypeSafe
-    ([guide](docs/described-alerts.md));
+    ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts));
   - the browser demo's **Alertes** tab offers them next to keyword alerts when the
     deployment has a classifier, and shows each caught article's score
     ([`quivr-search/`](quivr-search/README.md#alertes)).
@@ -153,9 +154,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
   and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become
   corrections, deleted or protected posts are withdrawn, and health shows daily reads
-  ([guide](docs/connectors/x.md)). In webhook mode, X posts arrive in near real time
+  ([guide](https://docs.quivr.thevibecompany.co/guides/x)). In webhook mode, X posts arrive in near real time
   through Filtered Stream webhooks relayed by the core to the plugin, with polling as the
-  fallback ([guide](docs/connectors/x-webhooks.md)).
+  fallback ([guide](https://docs.quivr.thevibecompany.co/guides/x#real-time-mode)).
   The deployment `credential_key` is optional. Without it, credential deposits are
   refused with `503 credentials_unavailable`, and everything else works.
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
@@ -166,7 +167,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.
   Each source shows its health and last article, and can be paused, resumed or
   removed; a failing one can be checked again at once (**Réessayer**). Other kinds keep forms generated from their schemas, so new kinds need
-  no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
+  no UI change ([guide](quivr-search/README.md#sources)).
 - **Live feed page in the web app** (**Veille** tab): everything entering the demo
   Corpus, newest first, with source, time, title and excerpt. New items arrive over
   SSE, which the app's server relays from the change feed, and can be filtered by
@@ -191,7 +192,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   `plugins:admin`, which no Organization key gets, registers a plugin version running at an
   address; Quivr checks it with the Contract Runner, and one call activates it as a new plan
   that api and worker follow without restarting
-  ([Switch plugins without restarting](docs/plugins/switch-plugins-without-restarting.md)).
+  ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)).
   Work already started (a receipt's processing, a connector run, a rebuild) finishes on the
   plan it started on, even across a worker restart. The replaced version shows `draining`
   with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
@@ -210,7 +211,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   `provenance.normalization`. An unavailable plugin is retried and never blocks the
   API or other ingestion. A plugin error, invalid output or exhausted retries quarantine
   the Version with a structured diagnostic, and an `optional` text route falls back to
-  the built-in text path ([walkthrough](docs/api-walkthrough.md#external-normalizers)).
+  the built-in text path ([guide](https://docs.quivr.thevibecompany.co/plugins/pin)).
 - **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
   registered at startup beside the built-in ones. Its normalizer's extensions are
   validated against their schemas and published on the Version, clients cannot write
@@ -231,23 +232,23 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   text, and a phrase is found on its page's Part. Blank or scanned pages give warnings;
   encrypted or damaged PDFs are quarantined with a diagnostic naming the plugin.
   `make dev` pins it by default; there is no OCR
-  ([walkthrough](docs/api-walkthrough.md#pdf-documents)).
+  ([guide](https://docs.quivr.thevibecompany.co/plugins/catalog#pdf-text)).
 - **`quivr search` from the command line**: set `QUIVR_API_URL` and `QUIVR_API_KEY`,
   then `quivr search --corpus <corpus_id> "query"` prints ranked hits with their
   excerpt and Record / Version / Part provenance, or the unchanged API response with
   `--json`. Failures exit with one code per class (rejected key or scope, invalid
   request, unreachable server). It uses a Go client generated from the contract
   (package [`client`](client/)) and never touches the stack's storage
-  ([walkthrough](docs/api-walkthrough.md#from-the-command-line)).
+  ([guide](https://docs.quivr.thevibecompany.co/guides/search#search-from-the-command-line)).
 - **AI agents search and cite Quivr over MCP**: `quivr mcp --profile read` serves an
   agent on stdio with three read-only tools. The agent can list the Corpora its key
   reaches, search them, and read a hit's Record Version and Manifest, keeping Record,
   Version, Part and exact excerpt offsets to cite. `--profile ingest` adds text to a
   Corpus and follows its Ingestion Receipt until it is searchable; retries never
   duplicate, and no tool deletes. The API key alone decides access
-  ([Connect an AI agent](docs/connect-an-ai-agent.md)).
+  ([Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents)).
 - **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
-  your own plugin ([Write a normalizer](docs/plugins/write-a-normalizer.md)).
+  your own plugin ([Write a normalizer](https://docs.quivr.thevibecompany.co/plugins/first-plugin)).
 - **Source collectors as plugins, in Go** (Plugin API 0.3): the connector contract
   (`fetch` a page after an opaque checkpoint, `check_credential`, classified errors),
   a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
@@ -258,14 +259,14 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   others for evaluation, cuts each article into segments with a vector per space and an
   optional keyword text, and encodes queries for its spaces. A Corpus moves onto it
   with a rebuild; `GET /v0/corpora/{id}/vector-spaces` shows each space's owner, role
-  and coverage ([Write an ingestion plugin](docs/plugins/write-an-ingestion-plugin.md)).
+  and coverage ([Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)).
   The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
   E5) is pinned by default; the engine segments and embeds nothing itself.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
   pinned plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them
   with an explanation per hit, under named profiles with a latency and cost budget
-  (`GET /v0/search/profiles`) ([Write a retrieval plugin](docs/plugins/write-a-retrieval-plugin.md)).
+  (`GET /v0/search/profiles`) ([Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)).
   Without one, the built-in search answers the `default` profile.
 
 ## What comes next
@@ -279,18 +280,21 @@ listed here, not in "What works today".
 
 ## Documentation
 
-New to Quivr? [What Quivr can do](docs/what-quivr-can-do.md) explains it in plain words.
-Then start from the page for what you want to do:
+The documentation site, [docs.quivr.thevibecompany.co](https://docs.quivr.thevibecompany.co),
+is written for people who use Quivr and write plugins: an introduction, the Quickstart,
+core concepts, plugin guides, task guides and the reference. Its source is
+[`docs-site/`](docs-site/); the HTTP, CLI, MCP and plugin references there are generated
+from the contracts.
 
-- [Using Quivr](docs/start/functional.md): run Quivr, send it content, search it and set
-  up alerts.
-- [Writing plugins](docs/start/plugin-author.md): extend Quivr with your own plugins.
+This repository keeps the documentation for contributors, listed per reader on the
+start pages generated from [`docs/inventory.toml`](docs/inventory.toml):
+
+- [Using Quivr](docs/start/functional.md): the READMEs of the contracts, the demo and the
+  deployment, and the generated references.
+- [Writing plugins](docs/start/plugin-author.md): the READMEs of the SDKs, the plugin
+  contract and the first-party plugins.
 - [Contributing to Quivr](docs/start/contributor.md): change this repository, as a person
   or a coding agent.
-
-These start pages are generated from [`docs/inventory.toml`](docs/inventory.toml), so
-every living page appears on the one for its reader. The authoritative request and
-response shapes are in the [OpenAPI contract](contracts/http/v0/openapi.yaml).
 
 ## Repository layout
 
@@ -306,7 +310,8 @@ migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ firs
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI
 deploy/             Docker Compose and Railway deployment
-docs/               living documentation, ADRs (docs/adr/) and dated documents (docs/dated/)
+docs-site/          the public documentation site (Mintlify): authored MDX pages and generated references
+docs/               contributor documentation, ADRs (docs/adr/) and dated documents (docs/dated/)
 multimodal-rag/     earlier exploration (submodule), not the target architecture
 ```
 
@@ -321,8 +326,9 @@ multimodal-rag/     earlier exploration (submodule), not the target architecture
   with one line giving its audience and kind (the file's header explains both),
   then run `make start-pages`; `make docs` fails on an undeclared page, a stale start
   page, a broken relative link or a missing repository path, and names the fix.
-- Show API requests in guides as [runnable blocks](docs/runnable-guides.md), which
-  `make verify` replays.
+- Document user-facing behaviour on the site, in `docs-site/`, in the same pull request;
+  run `make docs-site` after a contract change. Show API requests there as
+  [runnable blocks](docs/runnable-guides.md), which `make verify` replays.
 - Never edit an accepted ADR or a dated document under `docs/dated/`: supersede it
   with a new one ([ADR 0004](docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md));
   `make docs` compares them with where your branch forked from `origin/main`.

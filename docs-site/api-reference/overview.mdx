@@ -1,0 +1,68 @@
+---
+title: "API overview"
+description: "Conventions every endpoint of the Quivr HTTP API follows: authentication, idempotency, asynchronous writes, pagination and errors."
+keywords: ["api", "authentication", "idempotency", "errors", "pagination", "http"]
+---
+
+The Quivr API is JSON over HTTP, versioned under `/v0`. The endpoint pages of this reference are generated from the OpenAPI contract. `v0` is an evaluation version and may change without notice.
+
+## Authentication
+
+Send an API key as a bearer token on every request:
+
+```bash
+curl -s "$QUIVR_API_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_API_KEY"
+```
+
+The key decides the Organization, the actions and the Corpora a request may reach; the operator defines keys in [Quivr's configuration](/reference/configuration#api-keys). A missing or unknown key is `401 invalid_api_key`; an action or Corpus outside the key's scope is `403 forbidden`. A resource of another Organization is `404`, never `403`: holding an id is not access.
+
+## Idempotency
+
+Every request that creates or changes something carries an `idempotency_key` in its body. Sending the same request again under the same key returns the first result, even after a timeout or a lost response, and never creates a second resource. Sending a different request under a key already used is `409 idempotency_conflict`.
+
+## Asynchronous writes
+
+Content is accepted before it is processed. `POST /v0/records`, batches and withdrawals answer `202 Accepted` with an Ingestion Receipt once the command is stored durably; its `Location` header points at the Receipt. Read the Receipt to follow processing. Rebuilds work the same way with an Operation.
+
+## Pagination
+
+List endpoints return `items` and, when more remain, a `next_page_cursor`. Pass it as `page_cursor` to get the next page, and `limit` to size pages. A change-feed cursor that expired is `410 cursor_expired`, with a `resync_url` to rebuild your copy from the catalog.
+
+## Errors
+
+Every error has the same body:
+
+```json
+{"code": "invalid_config", "message": "…", "retryable": false, "field": "/config/url"}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `code` | A stable, machine-readable reason. Branch on it, never on `message`. |
+| `message` | A human explanation, which may change |
+| `retryable` | `true` when sending the same request later can succeed |
+| `field` | For a `422`, when known: a JSON Pointer to the request member at fault |
+| `resync_url` | For an expired change cursor: where to resynchronize |
+
+| Status | Meaning | Common codes |
+| --- | --- | --- |
+| `400` | The body is not valid JSON or not the expected shape | `malformed_json` |
+| `401` | No valid API key | `invalid_api_key` |
+| `403` | The key may not perform this action on this resource | `forbidden` |
+| `404` | Not found, or not in the key's Organization | `not_found` |
+| `409` | Conflicts with the current state | `idempotency_conflict`, `connector_disabled`, `saved_query_in_use` |
+| `410` | The change cursor expired | `cursor_expired` |
+| `413` | The request is too large | `request_too_large` |
+| `422` | Well-formed but refused | `invalid_schema`, `invalid_input`, `unverified_blob`, `invalid_expression`, `unsupported_profile`, `query_too_long`, `invalid_config` |
+| `503` | A dependency is unavailable; retry later | `storage_unavailable`, `search_unavailable`, `credentials_unavailable` |
+
+A dependency outage is always an error, never an empty success: a search that cannot reach its index fails with `503` rather than returning no results.
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| One command | 1 MiB |
+| One batch | 100 commands, 10 MiB |
+| One uploaded file | 1 GiB |
+| One search | 16 Corpora, 50 results, a query of 8,192 characters |

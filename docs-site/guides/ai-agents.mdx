@@ -1,0 +1,63 @@
+---
+title: "Connect an AI agent"
+description: "Let an AI agent search Quivr, cite exact sources and add text, through MCP."
+keywords: ["mcp", "model context protocol", "ai agent", "claude", "cursor", "citations", "quivr mcp"]
+---
+
+`quivr mcp` serves a running Quivr to an AI agent over MCP (Model Context Protocol), the standard way agents use tools. The agent can list the Corpora its key reaches, search them, and open a Record to cite exactly where a passage comes from.
+
+## Prerequisites
+
+- The `quivr` command on the machine that runs the agent ([Build your first plugin](/plugins/first-plugin) shows how to install it).
+- A running Quivr and an API key with `corpora:read`, `content:read` and `search:query`; add `content:write` to let the agent add text.
+
+## Add Quivr to your agent
+
+The agent's MCP client starts `quivr mcp` itself. Most clients, such as Claude Desktop, Claude Code and Cursor, accept a configuration like this one:
+
+```json
+{
+  "mcpServers": {
+    "quivr": {
+      "command": "quivr",
+      "args": ["mcp", "--profile", "read"],
+      "env": {"QUIVR_API_URL": "http://127.0.0.1:41863", "QUIVR_API_KEY": "<api key>"}
+    }
+  }
+}
+```
+
+`--profile` is required and picks the tools the agent sees:
+
+| Profile | Tools |
+| --- | --- |
+| `read` | `list_corpora`, `search`, `read_record`. No tool changes data. |
+| `ingest` | the `read` tools, plus `ingest_text` and `read_receipt` to add text and follow it until it is searchable |
+
+No profile can withdraw, delete or rebuild anything. To check the server before you configure a client, list its tools with the environment variables set as above:
+
+```bash
+(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' \
+   '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'; sleep 1) \
+  | quivr mcp --profile read | jq -r 'select(.id == 2) | .result.tools[].name'
+```
+
+```text
+list_corpora
+read_record
+search
+```
+
+## Cite a source
+
+A `search` hit carries everything a citation needs: the `record_id` and `version_id`, the `part_key` of the Part, and an `excerpt` whose `text` is the exact slice `[start, end)` of that Part, counted in Unicode code points. `read_record` with the hit's `record_id` and `version_id` returns that Version in full, so the agent can read the passage in context. If `record.current_version_id` differs from the hit's Version, the Record has been corrected since.
+
+## Add text
+
+With the `ingest` profile, `ingest_text` takes a `corpus_id`, a `record_key` (the agent's stable name for the Record; another text under the same key corrects it) and the `text`, plus an optional `namespace` (default `mcp`). The agent then calls `read_receipt` until `state` is `resolved` and `availability.searchable` is `true`. Retries never create duplicates: without an explicit `idempotency_key`, the tool derives one from the arguments.
+
+## Who sees what
+
+The API key decides everything, on the server. The profile only narrows which tools the agent sees, so it can never widen access: `ingest_text` with a key that lacks `content:write` fails with `forbidden`. A Corpus outside the key's scope never appears in `list_corpora`, and searching it returns an error, never an empty result. Failed calls reach the agent as tool errors carrying the public error code and a hint.
+
+The [MCP reference](/reference/mcp) lists every tool with its arguments.

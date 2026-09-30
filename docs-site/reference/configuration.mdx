@@ -1,0 +1,136 @@
+---
+title: "Configuration"
+description: "Every field of the JSON file that configures Quivr's api, worker and migrate processes."
+keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "deployment"]
+---
+
+`quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen`. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
+
+## Top-level fields
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=require` |
+| `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
+| `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
+| `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
+| `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
+| `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
+| `listen` | no | Address of the public HTTP API. Default `127.0.0.1:8080`. |
+| `probe_listen` | no | Private address of `/healthz`, `/readyz` and `/metrics`. Default `127.0.0.1:8081`; give each process its own. |
+| `log_directory` | no | Write JSON logs to rotating files in this folder instead of stderr |
+| `plugins` | no | The plugins this deployment calls. See [Plugin pins](#plugin-pins). |
+| `plugin` | no | One pin, shorthand for a one-item `plugins` list; both may be combined |
+| `destinations` | no | Webhook destinations for alerts. See [Webhook destinations](#webhook-destinations). |
+| `delivery` | no | Webhook retry policy, worker only. See [Delivery](#delivery). |
+| `credential_key` | no | A secret of at least 32 bytes that encrypts connector credentials at rest. Without it, credentials are refused with `503 credentials_unavailable`. Keep it identical on api and worker, and stable. |
+| `public_url` | no | The address where sources reach this API, such as `https://quivr.example.com`. Connector kinds that receive webhooks need it. |
+| `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
+| `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
+| `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
+| `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
+| `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
+| `observability` | no | Counters of plugin calls, searches and document steps, read with an `observability:read` key. See [Observability](#observability). |
+| `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
+| `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
+| `connector_fixtures` | no | `true` enables the deterministic `fixture` connector kind. Local and CI stacks only. |
+| `monitoring_fixture_evaluator` | no | `true` installs the deterministic test alert rule `quivr.fixture@1`. Local and CI stacks only. |
+| `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
+
+Durations are Go durations: `30s`, `10m`, `168h`.
+
+## API keys
+
+`keys` maps each bearer token to what it may do. Every request's key decides its Organization, its actions and its Corpora:
+
+```json
+"keys": {
+  "<random token>": {"organization": "acme", "actions": ["corpora:read", "content:write", "search:query"], "corpora": ["*"]}
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `organization` | The Organization the key acts for. Nothing crosses Organizations. |
+| `actions` | What the key may do, from the list below |
+| `corpora` | The Corpus ids it may reach, or `["*"]` for all of its Organization's Corpora. Creating a Corpus needs `*`. |
+
+| Action | Allows |
+| --- | --- |
+| `corpora:read`, `corpora:write` | reading and creating Corpora |
+| `content:read`, `content:write` | reading Records, Versions and Receipts; submitting and withdrawing content |
+| `blobs:read`, `blobs:write` | reading upload sessions and Blobs; uploading files |
+| `search:query` | searching |
+| `changes:read` | reading the change feed |
+| `monitoring:read`, `monitoring:write` | reading and managing Saved Queries, Subscriptions, Matches and Deliveries |
+| `connectors:read`, `connectors:write` | reading and managing Connector Instances |
+| `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
+| `projections:rebuild` | starting a Corpus rebuild |
+| `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`); give it only to an operator key |
+| `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches and steps (`/v0/admin/stats/*`) |
+
+## Object storage
+
+`s3` points at any S3-compatible store:
+
+| Field | Meaning |
+| --- | --- |
+| `endpoint` | The store's URL, such as `https://s3.example.com` |
+| `access_key`, `secret_key` | Its credentials |
+| `bucket` | The bucket Quivr writes to; `quivr migrate` creates it when missing |
+
+## Plugin pins
+
+Each item of `plugins` pins one plugin. [Pin a plugin](/plugins/pin) explains how to use them.
+
+| Field | Meaning |
+| --- | --- |
+| `manifest` | Path of the plugin's `quivr-plugin.yaml`, the exact file it was built from |
+| `endpoint` | The plugin's base URL. A connector plugin needs `https://` unless it is on loopback. |
+| `configuration` | The plugin's configuration, validated against the schema its manifest declares |
+| `routes` | Normalizers only: the media types sent to it. Each route has a `media_type` and a `mode`, `required` (the default) or `optional`, which lets a `text/*` file fall back to plain text when the plugin fails. |
+| `kinds` | Alert rules only: the alert kinds this deployment accepts, such as `["keywords"]`. Default: every kind the plugin declares. |
+| `spaces` | Ingestion plugins only: the vector spaces to enable, each `served` or `evaluation`; exactly one is served. Default: the only declared space, served. |
+
+## Webhook destinations
+
+`destinations` maps a destination id, which Subscriptions name in `destination_id`, to where alerts are sent:
+
+| Field | Meaning |
+| --- | --- |
+| `organization` | The Organization whose Subscriptions may use it |
+| `url` | The receiver's URL. Private and loopback addresses are refused unless `delivery.allow_private_destinations` is set. |
+| `secret` | The Standard Webhooks signing secret, `whsec_` followed by base64 |
+| `secret_env` | The name of an environment variable holding the secret instead; prefer it in real deployments |
+
+## Delivery
+
+`delivery` tunes webhook retries. Every field is optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `retry_initial` | `1s` | First retry delay; each retry doubles it, with jitter |
+| `retry_max` | `5m` | Longest delay between two attempts |
+| `window` | `24h` | How long a delivery is retried before it is `exhausted` |
+| `timeout` | `10s` | Deadline of one attempt |
+| `allow_private_destinations` | `false` | Allow loopback and private receiver addresses. Local and CI stacks only. |
+
+## Change feed pruning
+
+`change_prune` tunes when the worker deletes change-feed events older than `change_retention`. Every field is optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `interval` | `1m` | How often the worker prunes |
+| `retention` | `change_retention` | How long events are kept; it may only be longer than `change_retention` |
+| `organizations` | every Organization | Prune only these Organizations |
+| `allow_short_retention` | `false` | Allow a `retention` shorter than `change_retention` for the listed `organizations`. Test stacks only. |
+
+## Observability
+
+`observability` tunes the counters behind `/v0/admin/stats/*`. Every field is optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `flush_interval` | `5s` | How often each process writes its counts; a process that crashes loses at most this much |
+| `record_query_text` | `false` | Also count searches by their normalized query text, so the most frequent queries can be listed. The text is kept in PostgreSQL for 7 days and may hold personal or confidential information. |

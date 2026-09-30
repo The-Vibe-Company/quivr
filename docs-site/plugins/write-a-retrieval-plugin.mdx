@@ -1,106 +1,126 @@
 ---
 title: "Write a retrieval plugin"
-description: "Decide how search results are found and ranked, under named profiles"
+description: "Decide how Quivr finds and ranks search results: which candidates to fetch, how to fuse and re-rank them."
+keywords: ["retrieval", "ranking", "rerank", "profiles", "hybrid", "go sdk"]
 ---
 
-A retrieval plugin decides how Quivr finds and ranks search results: which
-candidates to fetch, how to fuse them, whether to re-rank or rewrite the
-query. The core keeps what must stay safe: the index, the query encoders,
-authorization, withdrawal and projection routing. The plugin only ever sees
-candidates the caller may read. The contract is the
-[retrieval Contribution](/contracts/plugins/v0#retrieval-contribution);
-this page takes a plugin from its manifest to ranked search results.
+A retrieval plugin decides how a search is answered: which candidates to ask for, how to fuse them, whether to re-rank. It never queries the index itself and never sees a passage the caller may not read. This page starts from the SDK's sample, which fuses keyword and vector candidates by reciprocal rank.
 
-## How a search runs {#how-a-search-runs}
+## Prerequisites
+
+- Go 1.24 or later, a `quivr-v2` checkout in `$QUIVR_REPO`, and the `quivr` command on your `PATH` ([Build your first plugin](/plugins/first-plugin) shows how).
+
+## How a search runs
 
 A search runs in rounds, three at most:
 
-1. The core sends the query, the scope, the profile and the vector spaces the
-   requested Corpora carry.
+1. Quivr sends the query, the Corpora in scope, the profile and the vector spaces those Corpora carry.
 2. The plugin answers either candidate requests or the final ranking.
-3. For each request, the core queries the index, drops what the caller may
-   not read or what was withdrawn, and serves the rest. It then calls the
-   plugin again with everything served so far.
+3. For each request, Quivr queries the index, drops what the caller may not read or what was withdrawn, and serves the rest. It then calls the plugin again with everything served so far.
 
-A candidate request is `bm25` (keywords on the source text, or on the lexical
-text an ingestion plugin produced), `near_vector` (one space's vectors; the
-core encodes `query_text` with the space's owner), or `hybrid` (both in one
-index query). The ranking may hold only served candidates. Each hit can carry
-an explanation, which the API returns with it.
+A candidate request is `bm25` (keywords), `near_vector` (one space's vectors; Quivr encodes `query_text` with the space's owner) or `hybrid` (both in one query). A ranking may hold only candidates Quivr served, and each hit can carry an explanation that the API returns with it.
 
-## Declare its profiles {#declare-its-profiles}
+## Steps
 
-A profile is a named strategy with its budgets. Clients pick one with
-`profile` in `POST /v0/search`, and `default` answers when they name none:
+<Steps>
+<Step title="Start from the sample">
 
-```yaml
-id: acme.ranker
+```bash
+cp -r "$QUIVR_REPO/sdks/go/examples/fusion-retriever" my-ranker && cd my-ranker
+go mod init example.com/my-ranker
+go mod edit -replace github.com/The-Vibe-Company/quivr-v2/sdks/go="$QUIVR_REPO/sdks/go"
+go mod tidy
+```
+
+</Step>
+<Step title="Declare your profiles">
+
+A profile is a named strategy with its budgets. Clients choose one with `profile` in `POST /v0/search`; `default` answers when they name none and is required. The sample declares two:
+
+```yaml quivr-plugin.yaml
+id: example.fusion_retriever
 version: 0.1.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.7.0 <0.8.0"}
+description: Keyword and vector candidates fused by reciprocal rank.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.7.0 <0.8.0"
 contributions:
   retrieval:
     profiles:
-      default: {description: Keywords and vectors fused by rank., max_latency_ms: 500, max_cost_cents: 0}
-      deep: {description: The same candidates re-ranked by a model., max_latency_ms: 3000, max_cost_cents: 1}
-    limits: {max_rounds: 2, max_requests: 2, max_candidates: 50}
+      default:
+        description: Keywords and the served vector space, fused by reciprocal rank.
+        max_latency_ms: 5000
+        max_cost_cents: 0
+      deep:
+        description: The default candidates plus passages close to the best keyword hit, fused by reciprocal rank.
+        max_latency_ms: 8000
+        max_cost_cents: 0
+    limits:
+      max_rounds: 3
+      max_requests: 2
+      max_candidates: 30
+run:
+  command: [go, run, .]
 ```
 
-`max_latency_ms` is a hard deadline: the core stops a search that runs longer
-and answers 504 `search_deadline_exceeded`. `max_cost_cents` is what one
-search may report spending on paid calls (`usage.cost_cents`).
+`max_latency_ms` is a hard deadline for the whole search: Quivr stops one that runs longer and answers `504 search_deadline_exceeded`. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
 
-## Implement it {#implement-it}
+</Step>
+<Step title="Rank">
 
-With the [Go SDK](/sdks/go), one `Retriever` answers each round:
-`quivrplugin.Ask(requests...)` for candidates, `quivrplugin.Rank(hits...)`
-for the ranking. `req.Served` holds every earlier request with its
-candidates, text included, and `req.ServedSpace()` names the space that
-answers search by default. The answer must be deterministic, so the same
-search ranks the same way from one run to the next. Return
-`TerminalSearchError` for a query you can never answer.
-`sdks/go/examples/fusion-retriever` is a complete example: keyword and vector
-candidates fused by reciprocal rank, and a `deep` profile with one more round.
+`main.go` implements one method, `Search`, called once per round. In round 1 it asks for candidates:
 
-## Certify it {#certify-it}
-
-```sh
-quivr plugin test --report report.json .
+```go main.go (excerpt)
+case req.Round == 1:
+	return quivrplugin.Ask(f.first(req)...), nil
 ```
 
-The Contract Runner runs offline. It serves candidates from the normative
-fixture and your own retrieval fixtures (`fixtures/*.json` with a top-level
-`retrieval`: a query and a catalogue of candidates). It drives each search
-under every profile and judges every round as the engine does. It also checks
-each profile's deadline and budget, replays the search, and checks that
-invalid requests are refused and that no declared secret leaks. Set
-`expect.top` to pin the first hits of your ranking.
+In the last round it ranks what Quivr served, from `req.Served`, which holds every earlier request with its candidates and their text:
 
-## Pin it {#pin-it}
+```go main.go (excerpt)
+return quivrplugin.Rank(fuse(req)...), nil
+```
 
-Add it to `plugins` in the `QUIVR_CONFIG` file of the `api` process:
+`req.ServedSpace()` names the vector space that answers search by default. The answer must be deterministic: the same search ranks the same way every time. Return `quivrplugin.TerminalSearchError` for a query you can never answer.
 
-```json
+</Step>
+<Step title="Certify it">
+
+```bash
+quivr plugin test --startup-timeout 120s .
+```
+
+The Contract Runner runs offline. It serves candidates from a normative fixture and from your fixtures in `fixtures/` (a query and a catalogue of candidates), drives each search under every profile, and judges every round as the engine does. It also checks deadlines and budgets, replays each search, and sends invalid requests. Set a fixture's `expect.top` to pin the first hits of your ranking.
+
+</Step>
+<Step title="Pin it">
+
+A deployment pins one retrieval plugin, and it answers every search. Add it to the configuration of every `api` process:
+
+```json QUIVR_CONFIG
 {"plugins": [
   {"manifest": "/etc/quivr/plugins/acme-ranker/quivr-plugin.yaml",
-   "endpoint": "http://127.0.0.1:9920"}
+   "endpoint": "http://127.0.0.1:9960"}
 ]}
 ```
 
-A deployment pins one retrieval plugin (`retrieval_conflict`), and it answers
-every search. `GET /v0/search/profiles` lists its profiles; see the
-[HTTP API reference](/reference/http-api). The response names the
-profile that answered and reports `usage`: the rounds, the elapsed time and
-the plugin's reported spend. Without a retrieval plugin, the built-in search
-answers the `default` profile. `balanced` stays accepted as a deprecated name
-of `default` through engine 0.1.x; engine 0.2.0 removes it. A Saved Query may
-name any profile the deployment lists.
+</Step>
+</Steps>
 
-## When something fails {#when-something-fails}
+## Check it worked
 
-| What happens | Effect |
+```bash
+curl -s "$QUIVR_API_URL/v0/search/profiles" -H "Authorization: Bearer $QUIVR_API_KEY"
+```
+
+The response lists your profiles. A search response names the profile that answered in `retrieval_profile`, reports the rounds, the elapsed time and the reported spend in `usage`, and carries your explanation on each hit.
+
+## Troubleshooting
+
+| Symptom | Cause |
 | --- | --- |
-| The plugin is down or answers a retryable error | 503 `search_unavailable` |
-| The plugin answers a terminal error | 422 `unsupported_search` |
-| The plugin ranks a candidate it was never served, asks for too much, or answers something the checks refuse | 502 `retrieval_plugin_invalid` |
-| The search outruns the profile's `max_latency_ms` | 504 `search_deadline_exceeded` |
-| A client names a profile the plugin does not declare | 422 `unsupported_profile` |
+| `503 search_unavailable` | The plugin is down or answered a retryable error. |
+| `422 unsupported_search` | The plugin answered a terminal error. |
+| `502 retrieval_plugin_invalid` | The plugin ranked a candidate it was never served, asked for too much, or sent an answer the checks refuse. |
+| `504 search_deadline_exceeded` | The search outran the profile's `max_latency_ms`. |
+| `422 unsupported_profile` | The client named a profile the plugin does not declare. |

@@ -1,0 +1,272 @@
+---
+title: "Add content"
+description: "Send articles to Quivr: text with a title, corrections, batches, files and withdrawals."
+keywords: ["ingest", "records", "batch", "upload", "correction", "withdraw", "idempotency"]
+---
+
+Every way of adding content goes through the same path: you submit a command, Quivr stores it and answers with an Ingestion Receipt, then processes it in the background. This page shows each kind of command. The requests are replayed against a running Quivr by the repository's CI.
+
+## Prerequisites
+
+- A running Quivr and, in your shell, `QUIVR_API_URL` and a `QUIVR_API_KEY` with `corpora:write`, `content:write`, `content:read`, `blobs:write` and `search:query`. With the local stack, `eval "$(make -s env)"` sets them ([Quickstart](/quickstart)).
+- A Corpus to write to:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "Press", "idempotency_key": "guide-press"}' | jq '{corpus_id}'
+```
+
+{/* output */}
+```json
+{"corpus_id": "{{CORPUS_ID}}"}
+```
+
+```bash
+export CORPUS_ID=<the corpus_id above>
+```
+
+## Send an article with a title
+
+Plain text becomes one `body` Part. To give an article a title, which search weighs more than the body, send a Manifest with a `title` Part and a `body` Part:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "ferry-timetable-v1",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "ferry-timetable"},
+  "source_revision": "1",
+  "content": {"kind": "manifest", "parts": [
+    {"key": "title", "role": "title", "content": {"kind": "text", "text": "New ferry timetable"}},
+    {"key": "body", "role": "body", "content": {"kind": "text", "text": "Ferries to the island leave every 40 minutes from Monday."}}
+  ]}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "{{RECEIPT_ID}}"}
+```
+
+```bash
+export RECEIPT_ID=<the receipt_id above>
+```
+
+The Record is identified by its Corpus, its Source Namespace (`namespace`) and its Record Key. `source_revision` is optional: the source's own version label. When you send it, Quivr uses it to tell corrections from duplicates; without it, the content itself decides.
+
+Read the Receipt to know when the article is searchable:
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{state, outcome, record_id, version_id, searchable: .availability.searchable}'
+```
+
+{/* output */}
+```json
+{"state": "resolved", "outcome": "created", "record_id": "{{RECORD_ID}}", "version_id": "{{VERSION_ID}}", "searchable": true}
+```
+
+```bash
+export RECORD_ID=<the record_id above> VERSION_ID=<the version_id above>
+```
+
+| `outcome` | Meaning |
+| --- | --- |
+| `created` | A new Version was created. |
+| `duplicate` | This content is already a Version of the Record; nothing new was created. |
+| `withdrawal_applied` | The command was a withdrawal and the Record is withdrawn. |
+| `conflict` | The command contradicts what Quivr has, for example a known `source_revision` with other content, or a submission for a withdrawn Record. |
+
+## Correct an article
+
+Send new content for the same Record Key. It becomes a new Version of the same Record:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "ferry-timetable-v2",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "ferry-timetable"},
+  "source_revision": "2",
+  "content": {"kind": "manifest", "parts": [
+    {"key": "title", "role": "title", "content": {"kind": "text", "text": "New ferry timetable"}},
+    {"key": "body", "role": "body", "content": {"kind": "text", "text": "Ferries to the island leave every 30 minutes from Monday."}}
+  ]}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "{{CORRECTION_RECEIPT_ID}}"}
+```
+
+```bash
+export CORRECTION_RECEIPT_ID=<the receipt_id above>
+```
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$CORRECTION_RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{outcome, record_id, searchable: .availability.searchable}'
+```
+
+{/* output */}
+```json
+{"outcome": "created", "record_id": "{{RECORD_ID}}", "searchable": true}
+```
+
+Search now returns the corrected text only. The first Version stays readable, marked as no longer current:
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/records/$RECORD_ID/versions/$VERSION_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{version_id, is_current: .availability.is_current}'
+```
+
+{/* output */}
+```json
+{"version_id": "{{VERSION_ID}}", "is_current": false}
+```
+
+If a correction may arrive out of order, send `source_position`, a number that grows with each revision at the source, such as a sequence number or a timestamp in digits. An older position never replaces a newer Version.
+
+## Send many articles at once
+
+`POST /v0/records/batch` takes up to 100 commands, 10 MiB in total and 1 MiB each. Each entry gets its own Receipt or its own error, in order, so one invalid entry does not block the others:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records/batch" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{items: [.items[] | {index, receipt: (.receipt != null), error: .error.code}]}'
+{"items": [
+  {"idempotency_key": "batch-market", "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "market"},
+   "content": {"kind": "text", "text": "The weekly market moves to the harbour square."}},
+  {"idempotency_key": "batch-roadworks", "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "roadworks"},
+   "content": {"kind": "text", "text": "The coast road closes at night for repairs."}},
+  {"idempotency_key": "batch-invalid", "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "empty"},
+   "content": {"kind": "text", "text": ""}}
+]}
+EOF
+```
+
+{/* output */}
+```json
+{"items": [
+  {"index": 0, "receipt": true, "error": null},
+  {"index": 1, "receipt": true, "error": null},
+  {"index": 2, "receipt": false, "error": "invalid_schema"}
+]}
+```
+
+After a timeout, send the same batch again: every entry keeps its idempotency key, so you get the same Receipts and no duplicate.
+
+## Upload a file
+
+Files go through an upload session. You declare the size, SHA-256 and media type, send the bytes to the URL Quivr returns, and confirm; Quivr reads the bytes back and checks them before they become a Blob. The same request again returns the same session, so the bytes are sent only while it is `awaiting_upload`.
+
+{/* runnable retry */}
+```bash
+printf 'Minutes of the harbour council.\nThe council approved the new ferry timetable.\n' > minutes.txt
+curl -s -X POST "$QUIVR_API_URL/v0/uploads" -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"size_bytes": '"$(wc -c < minutes.txt)"', "sha256": "'"$(sha256sum minutes.txt | cut -d' ' -f1)"'", "media_type": "text/plain"}' > upload.json
+if [ "$(jq -r .state upload.json)" = awaiting_upload ]; then
+  curl -sf -X PUT "$(jq -r .upload_url upload.json)" --data-binary @minutes.txt \
+    $(jq -r '.upload_headers | to_entries[] | "-H \(.key):\(.value)"' upload.json)
+fi
+curl -s -X POST "$QUIVR_API_URL/v0/uploads/$(jq -r .upload_id upload.json)/confirm" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{state, blob_id}'
+```
+
+{/* output */}
+```json
+{"state": "verified", "blob_id": "{{BLOB_ID}}"}
+```
+
+```bash
+export BLOB_ID=<the blob_id above>
+```
+
+Then ingest the Blob by reference:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "council-minutes",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "council", "record_key": "minutes-2026-10-03"},
+  "content": {"kind": "blob", "blob_id": "$BLOB_ID", "media_type": "text/plain"}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "..."}
+```
+
+Quivr reads `text/*` files itself. Other media types need a normalizer plugin routed for them: the local stack routes `application/pdf` to the first-party `pdf-text` plugin, which makes one Part per page. Upload a PDF the same way with `"media_type": "application/pdf"`. A media type with no route is refused with `422 unverified_blob`. An upload URL expires after 15 minutes, and a file is at most 1 GiB.
+
+## Withdraw an article
+
+A withdrawal removes a Record from search and alerts at once, and permanently: a later submission for the same Record Key is a `conflict`. Its history stays readable.
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records/withdrawals" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "withdraw-roadworks",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "press", "record_key": "roadworks"},
+  "reason": "published by mistake"
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "{{WITHDRAWAL_RECEIPT_ID}}"}
+```
+
+```bash
+export WITHDRAWAL_RECEIPT_ID=<the receipt_id above>
+```
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$WITHDRAWAL_RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{state, outcome}'
+```
+
+{/* output */}
+```json
+{"state": "resolved", "outcome": "withdrawal_applied"}
+```
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| One command | 1 MiB |
+| One batch | 100 commands, 10 MiB |
+| One uploaded file | 1 GiB |
+| Text indexed per Version (first-party ingestion) | 256 KiB, 64 `title` and `body` Parts |
+
+A Version over the indexing limits is stored and readable, but not searchable: its Receipt shows `ingestion_refused`.
+
+## Next
+
+<CardGroup cols={2}>
+<Card title="Search" icon="search" href="/guides/search">
+Find what you added, by keyword or by meaning.
+</Card>
+<Card title="Collect from a source" icon="rss" href="/guides/connectors">
+Let Quivr pull articles from feeds and mailboxes on a schedule.
+</Card>
+</CardGroup>

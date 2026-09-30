@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Replay the runnable blocks of the living docs against a running Quivr.
+"""Replay the runnable blocks of the docs against a running Quivr.
 
-A page declared in docs/inventory.toml may mark shell blocks as runnable and
-follow each one with the output it expects; docs/runnable-guides.md is the
-authors' guide to the convention. `make verify` replays every such page in its
-own Organization after the timed scenarios (scripts/local.py), and a failure
-names the page, the block and what differed.
+A page of the documentation site (docs-site/*.mdx) or of docs/inventory.toml
+may mark shell blocks as runnable and follow each one with the output it
+expects; docs/runnable-guides.md is the authors' guide to the convention.
+`make verify` replays every such page in its own Organization after the timed
+scenarios (scripts/local.py), and a failure names the page, the block and what
+differed.
 
     python3 scripts/guides.py --list      # the runnable blocks of every page
-    QUIVR_URL=http://127.0.0.1:<port> QUIVR_KEY=<key> python3 scripts/guides.py [page ...]
-                                          # replay against a running stack
+    QUIVR_API_URL=http://127.0.0.1:<port> QUIVR_API_KEY=<key> [QUIVR_DESTINATION=<id>] \
+      python3 scripts/guides.py [page ...]   # replay against a running stack
 """
 import argparse
+import base64
 import dataclasses
 import hashlib
 import json
@@ -27,6 +29,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INVENTORY = 'docs/inventory.toml'
+SITE = 'docs-site'
 SHELLS = ('sh', 'bash', 'shell')
 ANY = '...'
 RETRY_SECONDS = 60
@@ -43,7 +46,11 @@ _USED = re.compile(r'\$\{?([A-Z][A-Z0-9_]*)')
 _EXPORTED = re.compile(r'\b([A-Z][A-Z0-9_]*)=')
 # The only environment a block sees besides the values it keeps; a kept value may not replace it.
 ENVIRONMENT = ('PATH', 'HOME', 'LANG', 'TMPDIR')
-RESERVED = ENVIRONMENT + ('QUIVR_URL', 'QUIVR_KEY')
+# What a page's blocks get from the stack: the API address, a key and the page's webhook destination.
+STACK = ('QUIVR_API_URL', 'QUIVR_API_KEY', 'QUIVR_DESTINATION')
+RESERVED = ENVIRONMENT + STACK
+# In MDX, a comment on the line before a fence marks it, since fence words would show as its title.
+_MARK = re.compile(r'^\s*\{/\*\s*(runnable(?: retry)?|output)\s*\*/\}\s*$')
 
 
 class GuideError(ValueError):
@@ -114,17 +121,35 @@ def blocks(guide, text):
     return found
 
 
+def markdown(text):
+    """An MDX page with its `{/* runnable */}` and `{/* output */}` marks moved onto the fences they
+    precede, as a Markdown page writes them; line numbers are kept."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        mark = _MARK.match(line)
+        if not mark or index + 1 >= len(lines) or not (fence := _FENCE.match(lines[index + 1])):
+            continue
+        words = fence.group(2).split()
+        lines[index] = ''
+        lines[index + 1] = lines[index + 1][:fence.start(2)] + ' '.join(words[:1] + [mark.group(1)])
+    return '\n'.join(lines) + '\n'
+
+
 def pages(root=ROOT):
-    """Every declared page with runnable blocks, in inventory order."""
+    """Every page with runnable blocks: the declared Markdown pages in inventory order, then the site's pages."""
     root = pathlib.Path(root)
     try:
-        declared = tomllib.loads((root / INVENTORY).read_text()).get('pages', {})
+        declared = list(tomllib.loads((root / INVENTORY).read_text()).get('pages', {}))
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise GuideError(f'{INVENTORY}: {error}') from error
+    site = sorted(path.relative_to(root).as_posix() for path in (root / SITE).rglob('*.mdx')) if (root / SITE).is_dir() else []
     runnable = {}
-    for path in declared:
+    for path in declared + site:
         file = root / path
-        if file.is_file() and (found := blocks(path, file.read_text())):
+        if not file.is_file():
+            continue
+        text = file.read_text()
+        if (found := blocks(path, markdown(text) if path.endswith('.mdx') else text)):
             runnable[path] = found
     return runnable
 
@@ -222,6 +247,22 @@ def organization(guide):
     return 'org_guide_' + hashlib.sha256(guide.encode()).hexdigest()[:10]
 
 
+def destination(guide):
+    """The webhook destination of a page's Organization, which its blocks read as $QUIVR_DESTINATION."""
+    return organization(guide).replace('_', '-') + '-receiver'
+
+
+def destinations(stack, root=ROOT):
+    """Harness webhook destinations: one per page with runnable blocks, which delivers nowhere."""
+    try:
+        runnable = pages(root)
+    except GuideError:
+        return {}
+    secret = 'whsec_' + base64.b64encode(b'local-test-signing-secret-guides').decode()
+    return {destination(guide): dict(organization=organization(guide), url='http://127.0.0.1:9/' + destination(guide),
+                                     secret=secret) for guide in runnable}
+
+
 def keys(stack, root=ROOT):
     """Harness keys: one per page with runnable blocks, bound to that page's own Organization."""
     granted = {}
@@ -240,7 +281,8 @@ def verify(stack, root=ROOT):
     """The make verify step: replay every runnable page against the stack, each in its own Organization."""
     url, results = f"http://127.0.0.1:{stack.state['api_port']}", []
     for guide, found in pages(root).items():
-        results += replay(found, {**environment(), 'QUIVR_URL': url, 'QUIVR_KEY': stack.state['guide_key ' + guide]})
+        results += replay(found, {**environment(), 'QUIVR_API_URL': url, 'QUIVR_API_KEY': stack.state['guide_key ' + guide],
+                                  'QUIVR_DESTINATION': destination(guide)})
     (stack.directory / 'guides.json').write_text(json.dumps(results, indent=2))
     if not results:
         raise AssertionError(f'no runnable block found in the pages of {INVENTORY}')
@@ -279,10 +321,11 @@ def main(argv=None):
         for block in (b for bs in selected for b in bs):
             print(block.where() + (' (retry)' if block.retry else ''))
         return 0
-    if not os.environ.get('QUIVR_URL') or not os.environ.get('QUIVR_KEY'):
-        print('set QUIVR_URL and QUIVR_KEY to the API address and a key of the stack to replay against', file=sys.stderr)
+    if not os.environ.get('QUIVR_API_URL') or not os.environ.get('QUIVR_API_KEY'):
+        print('set QUIVR_API_URL and QUIVR_API_KEY to the API address and a key of the stack to replay against '
+              '(`eval "$(make env)"` for the make dev stack)', file=sys.stderr)
         return 2
-    stack = {'QUIVR_URL': os.environ['QUIVR_URL'], 'QUIVR_KEY': os.environ['QUIVR_KEY']}
+    stack = {name: os.environ[name] for name in STACK if os.environ.get(name)}
     results = [r for bs in selected for r in replay(bs, {**environment(), **stack})]
     for line in failures(results):
         print(line, file=sys.stderr)

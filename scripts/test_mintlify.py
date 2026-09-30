@@ -1,9 +1,7 @@
-"""Checks for the generated documentation site (docs-site/): its pages, navigation and freshness."""
+"""Checks for the documentation site (docs-site/): generated pages, navigation, links and the configuration reference."""
 import json
 import unittest
 
-import docs as d
-import mintlify_nav as nav
 import mintlify_site as site
 from test_docs import Repo, tmpdir
 
@@ -11,83 +9,119 @@ INVENTORY = '''
 dated = ["docs/adr/*.md"]
 excluded = ["docs-site/*"]
 
-[budgets]
-"docs/guide.md" = 10
-
 [pages]
 "README.md" = { audience = "functional", kind = "index" }
-"docs/guide.md" = { audience = "functional", kind = "guide", summary = "the `first` steps" }
-"docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference" }
-"docs/start/functional.md" = { audience = "functional", kind = "start-page" }
-"plugins/rss/README.md" = { audience = "plugin-author", kind = "concept" }
+"docs/guide.md" = { audience = "contributor", kind = "guide" }
+"docs/reference/cli.md" = { audience = "functional", kind = "generated-reference" }
+"docs/reference/mcp.md" = { audience = "functional", kind = "generated-reference" }
+
+[budgets]
+"docs/guide.md" = 10
 '''
 # Stands in for the shared-schema bundler of the real contract.
 BUNDLE = '''
 def load():
-    return {"openapi": "3.1.0", "paths": {"/v0/saved-queries": {"get": {"operationId": "listSavedQueries"}}}}
+    return {"openapi": "3.1.0", "info": {"title": "internal"}, "paths": {"/v0/saved-queries": {"get": {"operationId": "listSavedQueries"}}}}
+'''
+MANIFEST_SCHEMA = {
+    'description': 'A plugin.', 'type': 'object', 'required': ['id', 'contributions'],
+    'properties': {
+        'id': {'type': 'string', 'maxLength': 64},
+        'contributions': {'type': 'object', 'properties': {'normalizer': {'$ref': '#/$defs/Normalizer'}, 'enricher': False}},
+    },
+    '$defs': {'Normalizer': {'type': 'object', 'required': ['media_types'], 'properties': {
+        'media_types': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'maxItems': 32,
+                        'description': 'Accepted media types'},
+        'timeout_ms': {'type': 'integer', 'minimum': 1000, 'maximum': 300000, 'default': 30000}}}},
+}
+CONFIG_GO = '''package app
+
+type Config struct {
+	DatabaseURL string `json:"database_url"`
+	// Listen is where the API serves.
+	Listen string `json:"listen,omitempty"`
+}
 '''
 
 
 class SiteRepo(Repo):
+    """A checkout with a small site: two authored pages, the generated sources and a configuration struct."""
+
     def __init__(self, tmp):
         super().__init__(tmp, INVENTORY)
-        self.write('docs/reference/http-api.md', '# HTTP API\n')
-        self.write('plugins/rss/README.md', '# RSS plugin\n\n## Setup\n')
-        self.write('docs/adr/0001-choice.md', '# Choice\n\nDate: 2026-01-01\nStatus: accepted\n')
+        self.write('docs/reference/cli.md', '# Command-line reference\n\n> Generated from `x`. Do not edit.\n\nSee [MCP](mcp.md) '
+                   'and [the Quickstart](https://docs.quivr.thevibecompany.co/quickstart), built from [the table](../../scripts/tool.py).\n')
+        self.write('docs/reference/mcp.md', '# MCP reference\n\nTools.\n')
         self.write('contracts/http/v0/openapi.yaml', 'openapi: 3.1.0\n')
         self.write('contracts/http/v0/bundle.py', BUNDLE)
-        d.write_start_pages(self.root)
+        self.write('contracts/plugins/v0/plugin-manifest.schema.json', json.dumps(MANIFEST_SCHEMA))
+        self.write('contracts/plugins/v0/health.schema.json', json.dumps(
+            {'description': 'GET /v0/health returns 200 when ready.', 'type': 'object', 'required': ['status'],
+             'properties': {'status': {'const': 'ok'}}}))
+        self.write('contracts/plugins/v0/error.schema.json', json.dumps(
+            {'description': 'Body of every error.', 'type': 'object', 'properties': {'code': {'type': 'string'}}}))
+        self.write('internal/app/run.go', CONFIG_GO)
+        self.write('docs-site/index.mdx', '---\ntitle: "Home"\n---\n\nStart with the [Quickstart](/quickstart).\n')
+        self.write('docs-site/quickstart.mdx', '---\ntitle: "Quickstart"\n---\n\nBack [home](/).\n')
+        self.write('docs-site/reference/configuration.mdx', '| `database_url` | … |\n| `listen` | … |\n')
+        self.navigation(['index', 'quickstart', 'reference/configuration', 'reference/cli', 'reference/mcp',
+                         'reference/plugin-manifest', 'reference/plugin-protocol'])
 
-    def published(self):
-        out = self.root / site.SITE
-        return sorted(path.relative_to(out).as_posix() for path in out.rglob('*') if path.is_file())
+    def navigation(self, pages):
+        self.write('docs-site/docs.json', json.dumps({'navigation': {'tabs': [
+            {'tab': 'Docs', 'groups': [{'group': 'All', 'pages': pages}]}, {'tab': 'API', 'openapi': 'openapi.yaml'}]}}))
 
-    def convert(self, page, text):
-        pages, *_ = d.load_inventory(self.root)
-        return site.convert(site.Site(self.root, pages), page, text)
+    def rules(self):
+        return sorted((f.rule, f.path) for f in self.findings())
 
 
-class GeneratedSite(unittest.TestCase):
-    def test_make_docs_fails_until_the_site_is_regenerated_and_only_living_pages_are_published(self):
+class Site(unittest.TestCase):
+    def test_make_docs_fails_until_the_generated_pages_are_written_then_passes(self):
         with tmpdir() as tmp:
             repo = SiteRepo(tmp)
-            self.assertEqual(repo.findings(), [], 'a checkout without docs-site/ is not checked')
-            repo.write('docs-site/leftover.mdx', 'old\n')
-            self.assertEqual([(f.rule, f.path) for f in repo.findings()],
-                             [('stale-docs-site', 'docs-site/docs.json')])
-            self.assertEqual(site.write(tmp)[1], [])
-            self.assertEqual(repo.findings(), [])
-            self.assertEqual(repo.published(), ['docs.json', 'guide.mdx', 'index.mdx', 'openapi.yaml',
-                                                'plugins/rss/index.mdx', 'reference/http-api.mdx',
-                                                'start/functional.mdx'])
-            repo.write('docs/guide.md', '# Guide\n\nChanged.\n')
-            self.assertEqual([(f.rule, f.path) for f in repo.findings()],
-                             [('stale-docs-site', 'docs-site/guide.mdx')])
-            config = json.loads((repo.root / site.SITE / 'docs.json').read_text())
-            spec = (repo.root / site.SITE / 'openapi.yaml').read_text()
-        docs_tab, api_tab = config['navigation']['tabs']
-        self.assertEqual(api_tab, {'tab': 'API reference', 'openapi': 'openapi.yaml'})
-        self.assertEqual(docs_tab['groups'], [
-            {'group': 'Using Quivr', 'pages': ['index', 'start/functional', {'group': 'Guides', 'pages': ['guide']}]},
-            {'group': 'Writing plugins', 'pages': [
-                {'group': 'Understand how it works', 'pages': ['plugins/rss/index']}]},
-        ])  # http-api is published but replaced by the API tab in the navigation
+            self.assertEqual(repo.rules(), [('stale-docs-site', f'docs-site/{name}') for name in (
+                'openapi.yaml', 'reference/cli.mdx', 'reference/mcp.mdx', 'reference/plugin-manifest.mdx',
+                'reference/plugin-protocol.mdx')])
+            site.write(tmp)
+            self.assertEqual(repo.rules(), [])
+            repo.write('docs/reference/mcp.md', '# MCP reference\n\nMore tools.\n')
+            self.assertEqual(repo.rules(), [('stale-docs-site', 'docs-site/reference/mcp.mdx')])
+
+    def test_navigation_links_and_configuration_keys_must_agree_with_the_pages(self):
+        with tmpdir() as tmp:
+            repo = SiteRepo(tmp)
+            site.write(tmp)
+            repo.write('docs-site/orphan.mdx', '---\ntitle: "Orphan"\n---\n\nSee [the guide](/guides/missing#step) '
+                       'and\n\n```\n[not a link](/nowhere)\n```\n')
+            repo.navigation(['index', 'quickstart', 'gone', 'reference/configuration', 'reference/cli', 'reference/mcp',
+                             'reference/plugin-manifest', 'reference/plugin-protocol'])
+            repo.write('docs-site/reference/configuration.mdx', '| `database_url` | … |\n')
+            self.assertEqual(repo.rules(), [
+                ('site-configuration', 'docs-site/reference/configuration.mdx'),
+                ('site-link', 'docs-site/orphan.mdx'),
+                ('site-navigation', 'docs-site/docs.json'),
+                ('site-navigation', 'docs-site/orphan.mdx'),
+            ])
+
+    def test_generated_pages_link_to_the_site_and_describe_the_schemas(self):
+        with tmpdir() as tmp:
+            repo = SiteRepo(tmp)
+            site.write(tmp)
+            out = repo.root / site.SITE
+            cli = (out / 'reference/cli.mdx').read_text()
+            manifest = (out / 'reference/plugin-manifest.mdx').read_text()
+            protocol = (out / 'reference/plugin-protocol.mdx').read_text()
+            spec = (out / 'openapi.yaml').read_text()
+        self.assertIn('See [MCP](/reference/mcp) and [the Quickstart](/quickstart), built from the table (`scripts/tool.py`).', cli)
+        self.assertNotIn('Do not edit.', cli.split('*/}', 1)[1])  # the contributor notice stays in the repository
+        self.assertIn('| `contributions.normalizer.media_types` | array of string | yes | Accepted media types. 1 to 32 items. |', manifest)
+        self.assertIn('| `contributions.normalizer.timeout_ms` | integer | no | 1000 to 300000. Default `30000`. |', manifest)
+        self.assertIn('| `contributions.enricher` | reserved | no |', manifest)
+        self.assertIn('### `GET /v0/health`', protocol)
+        self.assertIn('| `status` | `"ok"` | yes | — |', protocol)
+        self.assertIn('title: Quivr HTTP API\n', spec)
         self.assertIn('summary: List saved queries\n', spec)
         self.assertIn('tags:\n      - Saved queries\n', spec)
-
-    def test_a_page_without_title_fails(self):
-        with tmpdir() as tmp:
-            repo = SiteRepo(tmp)
-            repo.write('docs/guide.md', 'No title.\n')
-            site.write(tmp)
-            self.assertEqual([(f.rule, f.path) for f in repo.findings()],
-                             [('missing-title', 'docs/guide.md'), ('stale-start-page', 'docs/start/functional.md')])
-
-    def test_readme_routes_and_urls(self):
-        self.assertEqual([nav.route(p) for p in ('README.md', 'AGENTS.md', 'docs/connectors/README.md')],
-                         ['index', 'agents', 'connectors/index'])
-        self.assertEqual([nav.url(p) for p in ('README.md', 'docs/connectors/README.md', 'docs/first-search.md')],
-                         ['/', '/connectors', '/first-search'])
 
 
 class Conversion(unittest.TestCase):
@@ -97,25 +131,13 @@ class Conversion(unittest.TestCase):
                 '<details>\n<summary>Full schema</summary>\n\nx\n\n</details>\n\n## Setup\n\n## Setup\n'
                 'export FOO=1\n')
         with tmpdir() as tmp:
-            out = SiteRepo(tmp).convert('docs/guide.md', text)
+            out = site.convert(site.Site(SiteRepo(tmp).root), 'docs/reference/cli.md', text)
         self.assertEqual(out, (
             '---\ntitle: "The quivr guide"\n---\n\n'
             'Use &#123;id&#125; when a &lt; b, see [https://example.com](https://example.com).<br />\n'
             'Keep `{id} <b>` and\n\n```json\n{"a": "<b>"}\n```\n\n'
             '<Accordion title="Full schema">\n\nx\n\n</Accordion>\n\n## Setup {#setup}\n\n## Setup {#setup-1}\n'
             '&#101;xport FOO=1\n'))
-
-    def test_links_point_to_site_pages_and_other_repository_files_become_code(self):
-        text = ('# Guide\n\n[RSS](../plugins/rss/#setup), [plugin](../plugins/rss/README.md), '
-                '[contract](../contracts/http/v0/openapi.yaml), [the tool](../scripts/tool.py), '
-                '[ADR](adr/0001-choice.md), [scripts/tool.py](../scripts/tool.py), [web](https://example.com), '
-                '[here](#setup), [`tool`](../scripts/tool.py)\n')
-        with tmpdir() as tmp:
-            out = SiteRepo(tmp).convert('docs/guide.md', text).split('---\n', 2)[2]
-        self.assertEqual(out, (
-            '\n[RSS](/plugins/rss#setup), [plugin](/plugins/rss), [contract](/openapi.yaml), '
-            'the tool (`scripts/tool.py`), ADR (`docs/adr/0001-choice.md`), `scripts/tool.py`, '
-            '[web](https://example.com), [here](#setup), `tool`\n'))
 
 
 if __name__ == '__main__':

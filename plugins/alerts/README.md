@@ -12,8 +12,8 @@ satisfies its Saved Query's expression. It offers two alert kinds:
   sent to TypeSafe, and the kind is off without `TYPESAFE_API_KEY`.
 
 People writing alerts should start with the guides:
-[keyword alerts](../../docs/keyword-alerts.md) and
-[described alerts](../../docs/described-alerts.md). This README is the reference.
+[keyword alerts](https://docs.quivr.thevibecompany.co/guides/keyword-alerts) and
+[described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts). This README is the reference.
 
 ## Expression
 

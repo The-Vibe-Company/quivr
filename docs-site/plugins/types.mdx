@@ -1,0 +1,179 @@
+---
+title: "Plugin types"
+description: "The five kinds of plugin Quivr calls: what each decides, when Quivr calls it, and its smallest manifest."
+keywords: ["normalizer", "connector", "ingestion", "retrieval", "subscription", "alert rule", "contribution"]
+---
+
+A plugin provides one or more Contributions, each of one of five types. Pick the type from the question you want to answer for Quivr.
+
+<CardGroup cols={2}>
+<Card title="Normalizer" icon="file-text" href="#normalizer">
+How do I read this kind of file?
+</Card>
+<Card title="Connector" icon="rss" href="#connector">
+What did this source publish since last time?
+</Card>
+<Card title="Ingestion" icon="scissors" href="#ingestion">
+How do I cut and embed this article?
+</Card>
+<Card title="Retrieval" icon="search" href="#retrieval">
+Which passages answer this search, in what order?
+</Card>
+<Card title="Alert rule" icon="bell" href="#alert-rule">
+Does this article match these alerts?
+</Card>
+</CardGroup>
+
+Every type is served over HTTP under `/v0/contributions/<type>`, and every manifest below passes `quivr plugin inspect`. The [plugin protocol reference](/reference/plugin-protocol) lists every request and response field.
+
+## Normalizer
+
+| | |
+| --- | --- |
+| What it does | Turns one file (a Blob) into the text Parts of a Record Version, with optional structured data. |
+| When Quivr calls it | In the worker, when a file of a media type routed to it is ingested, before the Version is published. |
+| Operation | `POST /v0/contributions/normalizer` |
+| SDK | Python |
+| First-party | `pdf-text`: one Part per PDF page |
+
+```yaml quivr-plugin.yaml
+id: csv-rows
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/csv]
+run:
+  command: [python3, -m, csv_rows]
+```
+
+Quivr never sends the file inline: the request carries a short-lived signed URL, its size and its SHA-256. An answer Quivr rejects, or a `TerminalError`, quarantines the Version with a diagnostic; a plugin that is down only delays it. Walk through one in [Build your first plugin](/plugins/first-plugin).
+
+## Connector
+
+| | |
+| --- | --- |
+| What it does | Adds a kind of Connector Instance: fetches pages of new or changed items from a source after an opaque checkpoint. |
+| When Quivr calls it | In the worker, on each instance's schedule. A push kind is also called when the source sends a webhook. |
+| Operations | `fetch`, `check_credential`; `describe_attachment` and `upload_attachment` for attachments; `receive` for webhooks |
+| SDK | Go |
+| First-party | `rss` (RSS, Atom, JSON Feed), `m365-mail` (Microsoft 365 mailboxes), `x-list` (X lists) |
+
+```yaml quivr-plugin.yaml
+id: acme.feeds
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      acme_feed:
+        config_schema: {type: object, required: [url], properties: {url: {type: string}}}
+        default_interval_seconds: 900
+run:
+  command: [go, run, .]
+```
+
+Quivr keeps the instances, schedules, checkpoints, encrypted credentials and health. The plugin is stateless: it gets its last checkpoint and the decrypted credential in each request, and returns items plus the next checkpoint. Quivr moves the checkpoint only after the items are stored. See [Write a connector](/plugins/write-a-connector).
+
+## Ingestion
+
+| | |
+| --- | --- |
+| What it does | Cuts a Version's text into passages (segments), embeds each one in the vector spaces the plugin owns, and encodes search queries into the same spaces. |
+| When Quivr calls it | In the worker for every new Version, and during rebuilds; in the API for every semantic or hybrid search (`embed_query`). |
+| Operations | `segment_and_embed`, `embed_query` |
+| SDK | Go |
+| First-party | `core-ingest`: token windows embedded with `multilingual-e5-small` |
+
+```yaml quivr-plugin.yaml
+id: acme.embedder
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.8.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      acme.embedder.base:
+        version: "1"
+        model: acme/text-embed-base
+        dimensions: 768
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+run:
+  command: [go, run, .]
+```
+
+A deployment pins exactly one ingestion plugin; Quivr does not segment or embed anything itself. See [Write an ingestion plugin](/plugins/write-an-ingestion-plugin).
+
+## Retrieval
+
+| | |
+| --- | --- |
+| What it does | Decides how a search finds and ranks results: asks Quivr for keyword, vector or hybrid candidates, then ranks the ones Quivr served. |
+| When Quivr calls it | In the API, for every search, in up to three rounds. |
+| Operation | `search` |
+| SDK | Go |
+| First-party | none yet; without a retrieval plugin, Quivr's built-in search answers the `default` profile |
+
+```yaml quivr-plugin.yaml
+id: acme.ranker
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.7.0 <0.8.0"
+contributions:
+  retrieval:
+    profiles:
+      default: {description: Keywords and vectors fused by rank., max_latency_ms: 500, max_cost_cents: 0}
+run:
+  command: [go, run, .]
+```
+
+The plugin never queries the index and never sees a candidate the caller may not read: Quivr applies access control and withdrawals before it serves candidates. See [Write a retrieval plugin](/plugins/write-a-retrieval-plugin).
+
+## Alert rule
+
+| | |
+| --- | --- |
+| What it does | Decides, for one Record Version, whether each alert of a batch is a match, no match, or not ready yet, with evidence for a match. It is the `subscription` Contribution. |
+| When Quivr calls it | In the worker, when a Version becomes searchable and again once it is enriched; in the API, to preview an alert. |
+| Operation | `POST /v0/contributions/subscription` |
+| SDK | Python |
+| First-party | `alerts`: keyword queries and plain-language descriptions |
+
+```yaml quivr-plugin.yaml
+id: acme.phrases
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: {const: phrase}
+        text: {type: string, minLength: 1}
+run:
+  command: [python3, -m, acme_phrases]
+```
+
+`expression_schema` is the shape of the queries your rule understands; Quivr refuses a Saved Query that does not fit it when the alert is created. See [Write an alert rule](/plugins/write-an-alert-rule).
+
+## Next
+
+<CardGroup cols={2}>
+<Card title="Build your first plugin" icon="hammer" href="/plugins/first-plugin">
+A normalizer from an empty folder to a local Quivr.
+</Card>
+<Card title="Pin a plugin" icon="pin" href="/plugins/pin">
+The configuration that makes Quivr call each type.
+</Card>
+</CardGroup>

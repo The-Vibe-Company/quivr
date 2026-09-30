@@ -1,29 +1,28 @@
-"""Generate the public documentation site (Mintlify) into docs-site/.
+"""The generated pages of the documentation site (Mintlify), and the checks of the whole site.
 
-docs-site/ is generated, never edited, and committed: Mintlify builds it from
-the main branch (project subdirectory `/docs-site`). It holds docs.json, one MDX
-page per living page of docs/inventory.toml at its route (scripts/mintlify_nav.py),
-the images those pages show, and the bundled HTTP contract, nothing else, so
-dated documents and source files are never published. The conversion:
+docs-site/ is the public documentation site: Mintlify builds it from the main
+branch (project subdirectory `/docs-site`). Its MDX pages, images and
+`docs.json` (settings and navigation) are written by hand and reviewed like
+code. A few files are generated from contracts so they cannot drift; never edit
+them, run `make docs-site` instead:
 
-- the page's first `# ` heading becomes the `title` front matter and is removed
-  (Mintlify renders the title itself); the inventory summary, or the start
-  page's introduction, becomes the `description`;
-- outside code, `{`, `}` and `<` are written as HTML entities, because MDX reads
-  them as expressions and tags (an expression silently vanishes); HTML comments
-  are dropped, `<br>` is self-closed, `<details>` with a `<summary>` becomes an
-  `<Accordion>`, and `<https://...>` becomes a Markdown link;
-- headings keep their GitHub anchor as a custom ID, so `#anchors` keep working;
-- a link to a living page points to its route; a link to the HTTP contract to
-  the published `openapi.yaml`; a link to any other repository file (code,
-  schemas, dated documents) becomes its path as code text, since public readers
-  cannot open the private repository.
+    openapi.yaml                    the HTTP contract, bundled into one file (the API reference)
+    reference/cli.mdx               docs/reference/cli.md, from `make generate`
+    reference/mcp.mdx               docs/reference/mcp.md, from `make generate`
+    reference/plugin-manifest.mdx   contracts/plugins/v0/plugin-manifest.schema.json
+    reference/plugin-protocol.mdx   the operation, error and fixture schemas of contracts/plugins/v0/
 
-    python3 scripts/mintlify_site.py      # regenerate docs-site/ (make docs-site)
+`make docs` (scripts/docs.py) runs `check`, which fails when:
 
-`make docs` fails with `stale-docs-site` when docs-site/ differs from what this
-generates. The site settings (name, colours, menus) are SETTINGS below. Bundling
-the contract needs PyYAML (contracts/http/v0/checks/requirements.txt).
+    stale-docs-site      a generated file differs from what this script writes
+    site-navigation      a page is missing from docs.json, or docs.json names a missing page
+    site-link            a root-relative link or image of a page does not resolve
+    site-configuration   a configuration key of the engine is missing from reference/configuration.mdx
+
+    python3 scripts/mintlify_site.py      # regenerate the generated files (make docs-site)
+
+A page may also carry runnable blocks, replayed by `make verify` (scripts/guides.py).
+Bundling the contract needs PyYAML (contracts/http/v0/checks/requirements.txt).
 """
 import argparse
 import importlib.util
@@ -34,20 +33,20 @@ import re
 import sys
 
 import docs
-import mintlify_nav
 
 SITE = 'docs-site'
 CONTRACT = 'contracts/http/v0/openapi.yaml'
-# docs.json without its navigation, which comes from the inventory.
-SETTINGS = {
-    '$schema': 'https://mintlify.com/docs.json',
-    'theme': 'mint',
-    'name': 'Quivr',
-    'description': 'An open-source engine that turns continuous content streams into search and monitoring.',
-    'colors': {'primary': '#5b3fd6', 'light': '#b29aff', 'dark': '#4b31be'},
-    'api': {'playground': {'display': 'interactive'}},
-    'contextual': {'options': ['copy', 'view', 'chatgpt', 'claude', 'mcp', 'cursor', 'vscode']},
-}
+SPEC = 'openapi.yaml'  # the bundled contract, in the site
+SITE_URL = 'https://docs.quivr.thevibecompany.co'
+PLUGIN_SCHEMAS = 'contracts/plugins/v0'
+# Repository pages published on the site after conversion, by site path.
+CONVERTED = {'reference/cli.mdx': 'docs/reference/cli.md', 'reference/mcp.mdx': 'docs/reference/mcp.md'}
+CONVERTED_DESCRIPTIONS = {'reference/cli.mdx': 'Every quivr command, what it needs to run, its flags and exit codes.',
+                          'reference/mcp.mdx': 'Every MCP profile and tool an AI agent can use, with its arguments.'}
+# How the site introduces the HTTP contract: its info block is written for contributors.
+API_INFO = {'title': 'Quivr HTTP API',
+            'description': 'Every endpoint of the Quivr v0 HTTP API. Send an API key as a bearer token; '
+                           'the key decides the Organization, the actions and the Corpora a request may reach.'}
 IMAGES = ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp')
 # Inline HTML that MDX accepts once well formed; any other `<` is text.
 TAGS = ('br', 'sup', 'sub', 'kbd', 'details', 'summary')
@@ -58,28 +57,28 @@ _ESM = re.compile(r'^(\s{0,3})(import|export)\b')
 _ATX = re.compile(r'^( {0,3}#{1,6}[ \t]+)(.*?)(?:[ \t]+#+)?[ \t]*$')
 _SLUG = '\x00'  # marks where a heading's anchor goes until the heading is converted
 _DETAILS = re.compile(r"^<details>[ \t]*\n<summary>(.*?)</summary>[ \t]*$", re.M)
+_NOTICE = re.compile(r'^> Generated from .*\n\n?', re.M)  # the contributor notice of a generated page
 
 
 class Site:
-    """What a page may link to: the living pages and the repository files."""
+    """What a converted page may link to: the other converted pages and the site itself."""
 
-    def __init__(self, root, pages):
-        self.pages = pages
+    def __init__(self, root):
         self.tree = docs.Tree(root)
+        self.routes = {source: '/' + path[:-len('.mdx')] for path, source in CONVERTED.items()}
         self.images = {}  # repository path -> site path of an image a page shows
 
     def href(self, page, raw):
         """The site URL for link target `raw` of `page`, or None when it is not on the site."""
+        if raw.startswith(SITE_URL):
+            return raw[len(SITE_URL):] or '/'
         target = docs._target(raw)
         if target is None:  # external, protocol-relative or same-page anchor
             return raw
         fragment = raw.split('#', 1)[1] if '#' in raw else ''
         resolved = docs._resolve(page, target)
-        for candidate in (resolved, posixpath.join(resolved, 'README.md')):
-            if candidate in self.pages:
-                return mintlify_nav.url(candidate) + (f'#{fragment}' if fragment else '')
-        if resolved == CONTRACT:
-            return '/' + mintlify_nav.SPEC
+        if resolved in self.routes:
+            return self.routes[resolved] + (f'#{fragment}' if fragment else '')
         return None
 
     def image(self, page, raw):
@@ -318,8 +317,10 @@ def convert(site, page, text, description=None):
         out.extend(re.sub(_SLUG + r'(\S*)$', r' {#\1}', line) for line in converted.split('\n'))
     body = '\n'.join(out).strip('\n')
     body = re.sub(r'\n{3,}', '\n\n', body)
-    return _front_matter(title or mintlify_nav.route(page), description) + '\n' + body + '\n'
+    return _front_matter(title or page, description) + '\n' + body + '\n'
 
+
+# The HTTP contract ----------------------------------------------------------------
 
 METHODS = ('get', 'put', 'post', 'delete', 'patch', 'head', 'options', 'trace')
 
@@ -354,6 +355,7 @@ def bundle(root):
     module = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(module)
     spec = module.load()
+    spec['info'] = {**spec.get('info', {}), **API_INFO}
     named = [(path, item, resource(path)) for path, item in (spec.get('paths') or {}).items()]
     named += [(name, item, 'Webhooks') for name, item in (spec.get('webhooks') or {}).items()]
     for path, item, group in named:
@@ -365,91 +367,378 @@ def bundle(root):
     return yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=120)
 
 
-def description_of(page, entry):
-    if entry['kind'] == 'start-page' and entry['audience'] in docs.READERS:
-        return docs.READERS[entry['audience']][1]
-    summary = entry.get('summary')
-    if not summary:
-        return None
-    summary = re.sub(r'`', '', summary)
-    return summary[:1].upper() + summary[1:]
+# The plugin contract ---------------------------------------------------------------
+
+_ROUTE = re.compile(r'^(?:200 (?:body|answer) of )?(GET|POST) (/v0/[a-z_/]+)')
+# Headings of the manifest sections, in page order; other keys follow under their own name.
+MANIFEST_SECTIONS = [
+    ('identity', 'Identity and compatibility', ('id', 'version', 'description', 'compatibility')),
+    ('contributions.normalizer', 'Normalizer', ()),
+    ('contributions.subscription', 'Alert rule (`subscription`)', ()),
+    ('contributions.connector', 'Connector', ()),
+    ('contributions.ingestion', 'Ingestion', ()),
+    ('contributions.retrieval', 'Retrieval', ()),
+    ('contributions', 'Reserved contributions', ()),
+    ('configuration', 'Configuration, secrets and extensions', ('configuration', 'secrets', 'extensions')),
+    ('run', 'Local development', ('run',)),
+]
+PROTOCOL_SECTIONS = [('', 'Discovery and health'), ('normalizer', 'Normalizer'),
+                     ('subscription', 'Alert rule (`subscription`)'), ('connector', 'Connector'),
+                     ('ingestion', 'Ingestion'), ('retrieval', 'Retrieval')]
+GENERATED_NOTE = ('{{/* Generated by scripts/mintlify_site.py from {source}. Do not edit: '
+                  'change the source and run `make docs-site`. */}}')
 
 
-def render(root, pages, spec=True):
-    """({site path: text or bytes}, [(page, rule, message, fix)]) of the site for the living `pages`.
+def _load(root, name):
+    return json.loads((pathlib.Path(root) / PLUGIN_SCHEMAS / name).read_text(encoding='utf-8'))
 
-    `spec=False` leaves out the bundled contract (it needs PyYAML).
-    """
+
+def _deref(node, defs):
+    """`node` with a local `$ref` replaced by what it points at (sibling keywords win)."""
+    if isinstance(node, dict) and str(node.get('$ref', '')).startswith('#/$defs/'):
+        target = defs
+        for part in node['$ref'][len('#/$defs/'):].split('/'):
+            target = target.get(part, {}) if isinstance(target, dict) else {}
+        target = _deref(target, defs)
+        return {**target, **{k: v for k, v in node.items() if k != '$ref'}} if isinstance(target, dict) else target
+    return node
+
+
+def _type(node, defs):
+    node = _deref(node, defs)
+    if node is False:
+        return 'reserved'
+    if isinstance(node, dict) and '#/$defs/' in str(node.get('$ref', '')) and not node['$ref'].startswith('#'):
+        return f'`{node["$ref"].rsplit("/", 1)[1]}` (shared Manifest schema)'
+    if not isinstance(node, dict) or node is True:
+        return 'any'
+    if 'const' in node:
+        return f'`{json.dumps(node["const"])}`'
+    if 'enum' in node:
+        return ', '.join(f'`{json.dumps(v) if not isinstance(v, str) else v}`' for v in node['enum'])
+    kind = node.get('type')
+    if isinstance(kind, list):
+        return ' or '.join(kind)
+    if kind == 'array':
+        return f'array of {_type(node.get("items", True), defs)}'
+    if kind == 'object' and isinstance(node.get('additionalProperties'), dict) and not node.get('properties'):
+        return f'map of {_type(node["additionalProperties"], defs)}'
+    for key in ('oneOf', 'anyOf'):
+        if key in node:
+            kinds = []
+            for option in node[key]:
+                name = _type(option, defs)
+                if name not in kinds:
+                    kinds.append(name)
+            return ' or '.join(kinds)
+    return kind or 'any'
+
+
+def _limits(node):
+    """The bounds and default of a field, in words."""
+    words = []
+    pairs = [('minimum', 'maximum', ''), ('minLength', 'maxLength', ' characters'), ('minItems', 'maxItems', ' items'),
+             ('minProperties', 'maxProperties', ' entries')]
+    for low, high, unit in pairs:
+        if low in node and high in node:
+            words.append(f'{node[low]} to {node[high]}{unit}.')
+        elif high in node:
+            words.append(f'At most {node[high]}{unit}.')
+        elif low in node and node[low] not in (0, 1):
+            words.append(f'At least {node[low]}{unit}.')
+    if 'default' in node:
+        words.append(f'Default `{json.dumps(node["default"])}`.')
+    return words
+
+
+def _fields(schema, defs, prefix='', depth=0, max_depth=6):
+    """Rows (path, type, required, description) of every property of `schema`, nested ones included."""
+    schema = _deref(schema, defs)
+    if not isinstance(schema, dict):
+        return
+    required = set(schema.get('required', ()))
+    for name, raw in (schema.get('properties') or {}).items():
+        node = _deref(raw, defs)
+        path = prefix + name
+        if node is False:
+            yield path, 'reserved', False, 'Reserved: a document that sets it is rejected.'
+            continue
+        node = node if isinstance(node, dict) else {}
+        text = (node.get('description') or '').strip()
+        if text and text[-1] not in '.:)':
+            text += '.'
+        about = ' '.join(filter(None, [text] + _limits(node)))
+        yield path, _type(node, defs), name in required, about
+        if depth >= max_depth:
+            continue
+        if node.get('properties'):
+            yield from _fields(node, defs, path + '.', depth + 1, max_depth)
+        elif node.get('type') == 'object' and isinstance(node.get('additionalProperties'), dict):
+            value = _deref(node['additionalProperties'], defs)
+            if isinstance(value, dict) and value.get('properties'):
+                yield from _fields(value, defs, f'{path}.<name>.', depth + 1, max_depth)
+        elif node.get('type') == 'array':
+            item = _deref(node.get('items', {}), defs)
+            if isinstance(item, dict) and item.get('properties'):
+                yield from _fields(item, defs, path + '[].', depth + 1, max_depth)
+
+
+def _cell(text):
+    """Table-cell text: MDX-safe outside code, pipes escaped, on one line."""
+    parts = re.split(r'(`[^`]*`)', ' '.join(str(text).split()))
+    safe = ''.join(part if part.startswith('`') else ''.join(_entity(char) for char in part) for part in parts)
+    return safe.replace('|', '\\|')
+
+
+def _table(rows):
+    out = ['| Field | Type | Required | Description |', '| --- | --- | --- | --- |']
+    for path, kind, required, about in rows:
+        out.append(f'| `{path}` | {_cell(kind)} | {"yes" if required else "no"} | {_cell(about) or "—"} |')
+    return out
+
+
+def _page(title, description, source, body):
+    return '\n'.join([_front_matter(title, description), GENERATED_NOTE.format(source=source), '', *body]).rstrip() + '\n'
+
+
+def plugin_manifest(root):
+    """reference/plugin-manifest.mdx: every field of quivr-plugin.yaml, from its JSON Schema."""
+    schema = _load(root, 'plugin-manifest.schema.json')
+    defs = schema.get('$defs', {})
+    rows = list(_fields(schema, defs))
+    body = ['Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written in YAML and validated '
+            'as the equivalent JSON value against `plugin-manifest.schema.json`; `quivr plugin inspect` checks it '
+            'the way the engine does. Unknown fields are rejected.', '']
+    used = set()
+    for key, heading, tops in MANIFEST_SECTIONS:
+        if tops:
+            section = [row for row in rows if row[0].split('.')[0] in tops]
+        elif key == 'contributions':
+            section = [row for row in rows if row[0].startswith('contributions.') and row[0].count('.') == 1
+                       and row[1] == 'reserved']
+        else:
+            section = [row for row in rows if row[0] == key or row[0].startswith(key + '.')]
+        section = [row for row in section if row[0] not in used]
+        if not section:
+            continue
+        used.update(row[0] for row in section)
+        body += [f'## {heading}', '', *_table(section), '']
+    rest = [row for row in rows if row[0] not in used and row[0] != 'contributions']
+    if rest:
+        body += ['## Other fields', '', *_table(rest), '']
+    return _page('Plugin manifest', 'Every field of quivr-plugin.yaml, generated from its JSON Schema.',
+                 f'{PLUGIN_SCHEMAS}/plugin-manifest.schema.json', body)
+
+
+def plugin_protocol(root):
+    """reference/plugin-protocol.mdx: the routes a plugin serves, their request and response fields,
+    the error envelope and the fixtures, from the schemas."""
+    folder = pathlib.Path(root) / PLUGIN_SCHEMAS
+    names = sorted(path.name for path in folder.glob('*.schema.json'))
+    operations = {}  # contribution -> [(method, route, request schema or None, response schema or None)]
+    for name in names:
+        if name.endswith('-request.schema.json') or name in ('discovery.schema.json', 'health.schema.json'):
+            schema = _load(root, name)
+            match = _ROUTE.match(schema.get('description', ''))
+            if not match:
+                continue
+            method, route = match.groups()
+            route = route.rstrip('/.')
+            response = name.replace('-request.', '-response.') if name.endswith('-request.schema.json') else name
+            request = name if name.endswith('-request.schema.json') else None
+            contribution = route.split('/')[3] if route.startswith('/v0/contributions/') else ''
+            operations.setdefault(contribution, []).append(
+                (method, route, request, response if (folder / response).is_file() else None))
+    body = ['The HTTP routes a plugin serves, with every field of their JSON bodies, the error envelope and the '
+            'fixture files `quivr plugin test` reads. A plugin serves JSON over HTTP; every route is under `/v0`, '
+            'the major version of the Plugin API. The schemas in `contracts/plugins/v0/` are the source of truth; '
+            'the SDKs and `quivr plugin test` implement them.', '']
+    for key, heading in PROTOCOL_SECTIONS:
+        if key not in operations:
+            continue
+        body += [f'## {heading}', '']
+        for method, route, request, response in sorted(operations[key], key=lambda op: op[1]):
+            body += [f'### `{method} {route}`', '']
+            about = _load(root, request or response).get('description', '')
+            about = _ROUTE.sub('', about).lstrip(' .,:')
+            if about and not re.match(r'\w*_', about):
+                about = about[:1].upper() + about[1:]
+            if about:
+                body += [_cell(about), '']
+            for label, name in (('Request body', request), ('Response body (200)', response)):
+                if not name:
+                    continue
+                schema = _load(root, name)
+                rows = list(_fields(schema, schema.get('$defs', {}), max_depth=2))
+                body += [f'**{label}** (`{name}`)', '', *(_table(rows) if rows else ['No fields.']), '']
+    error = _load(root, 'error.schema.json')
+    body += ['## Errors', '', _cell(error.get('description', '')), '',
+             *_table(list(_fields(error, error.get('$defs', {})))), '']
+    fixtures = [name for name in names if name.endswith('fixture.schema.json')]
+    if fixtures:
+        body += ['## Fixtures', '', 'Local test inputs that `quivr plugin dev` and `quivr plugin test` turn into '
+                 'requests. A plugin keeps its own in `fixtures/*.json`.', '']
+        for name in fixtures:
+            schema = _load(root, name)
+            title = name[:-len('.schema.json')].replace('plugin-fixture', 'normalizer-fixture').replace('-', ' ')
+            body += [f'### {title[:1].upper() + title[1:]}', '', _cell(schema.get('description', '')), '',
+                     f'Schema: `{name}`.', '', *_table(list(_fields(schema, schema.get('$defs', {}), max_depth=1))), '']
+    return _page('Plugin protocol', 'The routes a plugin serves, their fields, errors and fixtures, generated from the '
+                 'schemas.', f'{PLUGIN_SCHEMAS}/*.schema.json', body)
+
+
+# The site --------------------------------------------------------------------------
+
+def render(root, spec=True):
+    """{site path: text} of every generated file. `spec=False` leaves out the bundled contract (it needs PyYAML)."""
     root = pathlib.Path(root)
-    files, problems, routes = {}, [], {}
-    for page in sorted(pages):
-        key = mintlify_nav.route(page)
-        if key in routes:
-            problems.append((page, 'site-route', f'{page} and {routes[key]} would both be published at /{key}',
-                             'rename one of them'))
-        routes[key] = page
-    site = Site(root, pages)
-    for page in sorted(pages):
-        path = root / page
-        if not path.is_file():
-            continue  # reported as missing-page
-        text = path.read_text(encoding='utf-8')
-        if title_of(text)[0] is None:
-            problems.append((page, 'missing-title', 'the page has no `# ` title, which the site uses as its title',
-                             'start the page with a `# Title` line'))
-        files[mintlify_nav.route(page) + '.mdx'] = convert(site, page, text, description_of(page, pages[page]))
+    files = {}
+    site = Site(root)
+    for path, source in CONVERTED.items():
+        text = (root / source).read_text(encoding='utf-8') if (root / source).is_file() else None
+        if text is not None:
+            page = convert(site, source, _NOTICE.sub('', text), CONVERTED_DESCRIPTIONS.get(path))
+            head, _, rest = page.partition('---\n\n')
+            files[path] = head + '---\n\n' + GENERATED_NOTE.format(source=source) + '\n\n' + rest
+    if (root / PLUGIN_SCHEMAS / 'plugin-manifest.schema.json').is_file():
+        files['reference/plugin-manifest.mdx'] = plugin_manifest(root)
+        files['reference/plugin-protocol.mdx'] = plugin_protocol(root)
     for source, published in sorted(site.images.items()):
         files[published] = (root / source).read_bytes()
-    config = dict(SETTINGS)
-    config['navigation'] = mintlify_nav.navigation(pages, docs.READERS, docs.SECTIONS, docs.KINDS)
-    files['docs.json'] = json.dumps(config, indent=2, ensure_ascii=False) + '\n'
     if spec:
-        files[mintlify_nav.SPEC] = bundle(root)
-    return files, problems
+        files[SPEC] = bundle(root)
+    return files
 
 
-def committed(root):
-    """The files under docs-site/ of the checkout, as site paths."""
-    tree = docs.Tree(root)
-    return sorted(name[len(SITE) + 1:] for name in tree.files if name.startswith(SITE + '/'))
+def _navigation(value):
+    """Every page named in a docs.json navigation value."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _navigation(item)
+    elif isinstance(value, dict):
+        for key in ('pages', 'groups', 'tabs', 'anchors', 'dropdowns'):
+            if key in value:
+                yield from _navigation(value[key])
+
+
+_LINK = re.compile(r'\]\((/[^)\s]*)\)|\b(?:href|src)="(/[^"]*)"')
+
+
+def _resolves(out, target):
+    path = target.split('#', 1)[0].split('?', 1)[0].strip('/')
+    if path in ('', 'index'):
+        return (out / 'index.mdx').is_file()
+    return any((out / candidate).is_file() for candidate in (path + '.mdx', path + '/index.mdx', path))
+
+
+def site_pages(root):
+    """The site path, without `.mdx`, of every page in docs-site/ (snippets are not pages)."""
+    out = pathlib.Path(root) / SITE
+    return sorted(path.relative_to(out).with_suffix('').as_posix() for path in out.rglob('*.mdx')
+                  if not path.relative_to(out).as_posix().startswith('snippets/'))
+
+
+# Engine configuration structs a reader sets in QUIVR_CONFIG, documented in reference/configuration.mdx.
+CONFIGURATION = [('internal/app/run.go', 'Config'), ('internal/plugins/pin.go', 'PinConfig'),
+                 ('internal/plugins/pin.go', 'RouteConfig'), ('internal/adapters/s3/blobs.go', 'Config'),
+                 ('internal/corpus/corpus.go', 'Scope'), ('internal/monitoring/monitoring.go', 'Destination'),
+                 ('internal/app/monitoring.go', 'DeliveryConfig'), ('internal/app/prune.go', 'ChangePruneConfig'),
+                 ('internal/observability/recorder.go', 'Config')]
+CONFIGURATION_PAGE = 'reference/configuration.mdx'
+_JSON_TAG = re.compile(r'`json:"([a-z0-9_]+)[,"]')
+
+
+def configuration_keys(root):
+    """[(file, struct, key)] of the JSON keys of the configuration structs."""
+    keys = []
+    for file, struct in CONFIGURATION:
+        path = pathlib.Path(root) / file
+        if not path.is_file():
+            continue
+        match = re.search(r'^type ' + struct + r' struct \{\n(.*?)^\}', path.read_text(encoding='utf-8'), re.M | re.S)
+        if match:
+            keys += [(file, struct, key) for key in _JSON_TAG.findall(match.group(1))]
+    return keys
+
+
+def check(root):
+    """[(path, rule, message, fix)] of the site in checkout `root`."""
+    root = pathlib.Path(root)
+    out = root / SITE
+    if not out.is_dir():
+        return []
+    problems = []
+    regenerate = f'run `make docs-site` and commit the result; never edit a generated file by hand'
+    try:
+        files = render(root)
+    except ModuleNotFoundError as error:
+        return [(SITE, 'stale-docs-site', f'cannot generate the site to compare it ({error})',
+                 'install the pinned tools with `pip install -r contracts/http/v0/checks/requirements.txt`')]
+    for name, content in sorted(files.items()):
+        data = content.encode('utf-8') if isinstance(content, str) else content
+        if not (out / name).is_file() or (out / name).read_bytes() != data:
+            problems.append((f'{SITE}/{name}', 'stale-docs-site', 'this generated file is out of date', regenerate))
+    try:
+        config = json.loads((out / 'docs.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError) as error:
+        return problems + [(f'{SITE}/docs.json', 'site-navigation', f'cannot read docs.json ({error})',
+                            'restore a valid docs.json')]
+    listed = set(_navigation(config.get('navigation', {})))
+    pages = site_pages(root)
+    for page in pages:
+        if page not in listed:
+            problems.append((f'{SITE}/{page}.mdx', 'site-navigation', 'this page is not in the navigation',
+                             f'add "{page}" to a group of docs-site/docs.json, or delete the page'))
+    for entry in sorted(listed):
+        if entry.endswith(('.yaml', '.json')) or entry.startswith(('http://', 'https://')):
+            continue
+        if entry not in pages and f'{entry}.mdx' not in files:  # a missing generated page is already stale
+            problems.append((f'{SITE}/docs.json', 'site-navigation', f'the navigation names "{entry}", which has no page',
+                             f'write docs-site/{entry}.mdx, or remove the entry'))
+    for page in pages:
+        text = (out / f'{page}.mdx').read_text(encoding='utf-8')
+        for number, line in docs._lines_outside_fences(text):
+            for match in _LINK.finditer(line):
+                target = match.group(1) or match.group(2)
+                if not _resolves(out, target):
+                    problems.append((f'{SITE}/{page}.mdx', 'site-link', f'line {number}: {target} is not a page or '
+                                     'file of the site', 'link to an existing page, such as /quickstart'))
+    documented = (out / CONFIGURATION_PAGE).read_text(encoding='utf-8') if (out / CONFIGURATION_PAGE).is_file() else None
+    if documented is not None:
+        for file, struct, key in configuration_keys(root):
+            if f'`{key}`' not in documented:
+                problems.append((f'{SITE}/{CONFIGURATION_PAGE}', 'site-configuration',
+                                 f'`{key}` ({struct} in {file}) is not documented',
+                                 f'describe `{key}` in the table of {struct} on that page'))
+    return problems
 
 
 def write(root):
-    """Regenerate docs-site/; return (written or removed site paths, problems)."""
+    """Regenerate the generated files of docs-site/; return the site paths written."""
     root = pathlib.Path(root)
-    pages, _, _, _, findings = docs.load_inventory(root)
-    if pages is None:
-        return [], [(docs.INVENTORY, f.rule, f.message, f.fix) for f in findings]
-    files, problems = render(root, pages)
-    changed = []
-    out = root / SITE
-    for name in committed(root):
-        if name not in files:
-            (out / name).unlink()
-            changed.append(name)
-    for name, content in sorted(files.items()):
-        path = out / name
+    written = []
+    for name, content in sorted(render(root).items()):
+        path = root / SITE / name
         data = content.encode('utf-8') if isinstance(content, str) else content
         if path.is_file() and path.read_bytes() == data:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        changed.append(name)
-    for folder in sorted((p for p in out.rglob('*') if p.is_dir()), reverse=True):
-        if not any(folder.iterdir()):
-            folder.rmdir()
-    return changed, problems
+        written.append(name)
+    return written
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', default=str(docs.ROOT))
     args = parser.parse_args(argv)
-    changed, problems = write(args.root)
-    for name in changed:
+    for name in write(args.root):
         print(f'wrote {SITE}/{name}')
-    for page, rule, message, fix in problems:
-        print(f'{page}: [{rule}] {message}. Fix: {fix}.')
+    problems = check(args.root)
+    for path, rule, message, fix in problems:
+        print(f'{path}: [{rule}] {message}. Fix: {fix}.')
     return 1 if problems else 0
 
 

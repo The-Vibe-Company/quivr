@@ -64,7 +64,7 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 `QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, `plugins:admin` and
 `observability:read`; the web app never gets the first two. Use it from inside the deployment
 (`railway ssh --service api`, port 8080) to rebuild a Corpus projection, to follow documents through
-their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](../../docs/plugins/switch-plugins-without-restarting.md)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
+their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
 `QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read` for the read-only admin views.
 
 ## Ingestion plugin and the rebuild after THE-777
@@ -93,7 +93,7 @@ Optional web variables for the Sources view (see `quivr-search/README.md`):
 volume. Without a volume, removed sources come back as paused after a web restart.
 Set the real feed list in the Railway variables, never in this repository.
 
-X lists in webhook mode (`docs/connectors/x-webhooks.md`) need the API's public
+X lists in webhook mode ([guide](https://docs.quivr.thevibecompany.co/guides/x#real-time-mode)) need the API's public
 address: set `QUIVR_PUBLIC_URL` (for example `https://<api domain>`) on api and
 worker. The API service then runs the x-list plugin beside itself to relay X's
 deliveries; without the variable, X lists only poll.
@@ -109,7 +109,7 @@ on web, then redeploy api, worker and web. `core-entrypoint.py` then:
   alerts on `127.0.0.1:9910`. The worker runs both as sidecar processes. The API also
   runs alerts, which it calls for alert previews. If any sidecar exits, its container
   stops and Railway restarts it;
-- offers [described alerts](../../docs/described-alerts.md) (the pin's `kinds`) only when
+- offers [described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts) (the pin's `kinds`) only when
   `TYPESAFE_API_KEY` is set, with the same value on api and worker; only the alerts
   sidecars receive it. Without it, only keyword alerts can be created. With it, also set
   `DEMO_DESCRIBED_ALERTS=true` on web so the **Alertes** tab offers them;

@@ -11,7 +11,7 @@ import { displayState } from "./HealthBadge";
 import { sourceProblem, sourceState } from "../../lib/format";
 import { sourceSummary } from "./summary";
 
-// Plain words for the failure codes of the rss kind (docs/connectors/rss.md);
+// Plain words for the failure codes of the rss kind (https://docs.quivr.thevibecompany.co/guides/rss);
 // other kinds fall back to their code.
 const FAILURES: Record<string, string> = {
   not_found: "flux introuvable (404)",

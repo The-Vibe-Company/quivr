@@ -12,9 +12,10 @@
 #   "docs/path/to/page.md" = { audience = "functional", kind = "guide", summary = "what a reader finds there" }
 #
 # summary is optional: one line shown after the page title on its audience's
-# start page. Then run `make start-pages` and `make docs-site`: `make docs` fails
-# with `stale-start-page` or `stale-docs-site` until the start pages and the
-# generated documentation site (docs-site/) match this list.
+# start page. Then run `make start-pages`: `make docs` fails with
+# `stale-start-page` until the start pages match this list. The public
+# documentation site is not listed here: its pages are the MDX files of
+# docs-site/ and its navigation is docs-site/docs.json (scripts/mintlify_site.py).
 #
 # audience: who reads it
 #   functional     integrators and non-developers learning what Quivr does
@@ -54,7 +55,7 @@ excluded = [
     "internal/reference/*/testdata/*",                     # reference generator test fixtures
     "third_party/*/NOTICE.md",                             # upstream notices
     "third_party/*/MODEL_CARD.md",                         # upstream model card
-    "docs-site/*",                                         # the generated site (make docs-site)
+    "docs-site/*",                                         # the documentation site (MDX; scripts/mintlify_site.py)
 ]
 
 [pages]
@@ -71,22 +72,7 @@ excluded = [
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
-"docs/api-walkthrough.md" = { audience = "functional", kind = "guide", summary = "endpoint behaviour, limits, processing and search in detail" }
-"docs/connect-an-ai-agent.md" = { audience = "functional", kind = "guide", summary = "let an AI agent search Quivr, cite sources and add text over MCP" }
-"docs/connectors/README.md" = { audience = "functional", kind = "guide", summary = "set up and operate scheduled sources of content" }
-"docs/connectors/microsoft-365.md" = { audience = "functional", kind = "guide", summary = "collect mail from a Microsoft 365 mailbox" }
-"docs/connectors/rss.md" = { audience = "functional", kind = "guide", summary = "collect articles from RSS and Atom feeds" }
-"docs/connectors/x-webhooks.md" = { audience = "functional", kind = "guide", summary = "receive the posts of an X list in real time through webhooks" }
-"docs/connectors/x.md" = { audience = "functional", kind = "guide", summary = "collect posts from an X list" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
-"docs/described-alerts.md" = { audience = "functional", kind = "guide", summary = "write alerts in plain language, and see what is sent to the model provider" }
-"docs/first-search.md" = { audience = "functional", kind = "guide", summary = "create a Corpus, add a Record and search it, step by step" }
-"docs/keyword-alerts.md" = { audience = "functional", kind = "guide", summary = "write alert queries and set up metadata filters" }
-"docs/plugins/run-a-connector-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "pin a connector plugin and read the health it reports" }
-"docs/plugins/switch-plugins-without-restarting.md" = { audience = "plugin-author", kind = "concept", summary = "register, check and activate a plugin version while api and worker keep running" }
-"docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide", summary = "from `quivr plugin init` to a searchable, observable Record" }
-"docs/plugins/write-a-retrieval-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "decide how search results are found and ranked, under named profiles" }
-"docs/plugins/write-an-ingestion-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "decide how articles are cut and embedded, and move a Corpus onto it" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
 "docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
@@ -96,7 +82,6 @@ excluded = [
 "docs/start/contributor.md" = { audience = "contributor", kind = "start-page" }
 "docs/start/functional.md" = { audience = "functional", kind = "start-page" }
 "docs/start/plugin-author.md" = { audience = "plugin-author", kind = "start-page" }
-"docs/what-quivr-can-do.md" = { audience = "functional", kind = "concept", summary = "what Quivr does, in plain words, for non-developers" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
@@ -120,22 +105,7 @@ excluded = [
 "docs/agents/issue-tracker.md" = 110
 "docs/agents/testing.md" = 85
 "docs/agents/triage-labels.md" = 15
-"docs/api-walkthrough.md" = 482
-"docs/connect-an-ai-agent.md" = 94
-"docs/connectors/README.md" = 230
-"docs/connectors/microsoft-365.md" = 230
-"docs/connectors/rss.md" = 190
-"docs/connectors/x-webhooks.md" = 95
-"docs/connectors/x.md" = 190
-"docs/described-alerts.md" = 150
-"docs/first-search.md" = 310
-"docs/keyword-alerts.md" = 155
-"docs/plugins/run-a-connector-plugin.md" = 84
-"docs/plugins/write-a-normalizer.md" = 360
-"docs/plugins/write-a-retrieval-plugin.md" = 107
-"docs/plugins/write-an-ingestion-plugin.md" = 118
 "docs/runnable-guides.md" = 85
-"docs/what-quivr-can-do.md" = 60
 "plugins/core-ingest/README.md" = 60
 "plugins/pdf-text/README.md" = 120
 "plugins/rss/README.md" = 60

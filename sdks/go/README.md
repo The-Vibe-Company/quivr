@@ -86,7 +86,7 @@ text Parts, each with a vector per requested space) and `EmbedQuery`, through
 dimensions and `max_segments` before answering; a `RetryableIngestError` delays
 the Version, a `TerminalIngestError` blocks it.
 [`examples/hash-embedder`](examples/hash-embedder/) is certified in CI, and
-[Write an ingestion plugin](../../docs/plugins/write-an-ingestion-plugin.md)
+[Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)
 covers pinning it.
 
 ## A retrieval plugin
@@ -100,7 +100,7 @@ and checks what the core checks: no requests in the last round, request and `k`
 limits, and a ranking of served candidates only. A `TerminalSearchError`
 refuses the query. [`examples/fusion-retriever`](examples/fusion-retriever/) is
 certified in CI, and
-[Write a retrieval plugin](../../docs/plugins/write-a-retrieval-plugin.md)
+[Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)
 covers pinning it.
 
 ## What the SDK does
@@ -179,7 +179,7 @@ the final checkpoint, checks credentials, error classes and invalid requests,
 and fails when a credential value appears in an answer or in your plugin's
 output. CI certifies the sample and publishes its report as the
 `go-connector-contract-report` artifact. To run it in Quivr, pin it as in
-[Run a connector plugin](../../docs/plugins/run-a-connector-plugin.md).
+[Run a connector plugin](https://docs.quivr.thevibecompany.co/plugins/pin).
 
 ## Rules
 

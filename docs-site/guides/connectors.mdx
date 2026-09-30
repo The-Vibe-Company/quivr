@@ -1,0 +1,101 @@
+---
+title: "Collect from a source"
+description: "Let Quivr pull articles from a feed, a mailbox or a list on a schedule, and watch the source's health."
+keywords: ["connector", "connector instance", "schedule", "health", "credential", "rss"]
+---
+
+A Connector Instance collects from one source into one Corpus and Source Namespace, on a schedule. Collected items take the same path as articles you submit, so corrections, Receipts, search and alerts behave the same. This page covers what every kind has in common, with an RSS feed as the example. Each kind has its own page for its configuration: [RSS and Atom](/guides/rss), [Microsoft 365 mail](/guides/microsoft-365), [X lists](/guides/x).
+
+## Prerequisites
+
+- `QUIVR_API_URL`, `QUIVR_API_KEY` with `connectors:read` and `connectors:write` on the target Corpus, and a Corpus in `CORPUS_ID` ([Add content](/guides/add-content)).
+- The plugin that provides the kind, pinned. The local stack pins `rss`, `m365_mail` and `x_list`.
+- For kinds that need a secret, a `credential_key` in Quivr's configuration. Without it, Quivr refuses any credential with `503 credentials_unavailable`; kinds without a secret, such as public feeds, still work.
+
+## See what you can create
+
+```bash
+curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{credential_deposits, min_interval_seconds, kinds: [.items[] | {kind, credential}]}'
+```
+
+Each kind comes with the JSON Schema of its configuration and credential, so an application can build its form from them. `credential` says whether the kind takes one: `none`, `optional` or `required`.
+
+## Create an instance
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/connectors" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{connector_id, kind, enabled, health: .health.state}'
+{
+  "idempotency_key": "city-news-feed",
+  "corpus_id": "$CORPUS_ID",
+  "source_namespace": "city-news",
+  "kind": "rss",
+  "config": {"url": "https://news.example.org/rss.xml"},
+  "schedule": {"interval_seconds": 300}
+}
+EOF
+```
+
+```bash
+export CONNECTOR_ID=<the connector_id above>
+```
+
+Replace the URL with a feed you may read. Collection starts right away, then follows `interval_seconds`, which must be at least the deployment's floor (30 seconds by default) and at most 24 hours.
+
+The Source Namespace partitions Record Keys: one enabled instance owns a Corpus and Source Namespace pair. To replace an instance, disable it and create the new one on the same namespace, so existing Records keep their identity. A configuration the kind's schema refuses is `422 invalid_config`, with a JSON Pointer to the field at fault in `field`, such as `/config/url`.
+
+## Watch its health
+
+```bash
+curl -s "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '.health | {state, last_success_at, last_item_at, last_error}'
+```
+
+| `state` | Meaning | What to do |
+| --- | --- | --- |
+| `active` | Collecting normally | Nothing |
+| `silent` | No new item for `silent_after_seconds`, 24 hours by default | Check that the source still publishes |
+| `access_error` | The source refuses access, until a later run succeeds | Fix the permission or replace the credential |
+| `credential_expiring` | The credential expires within the warning window, 14 days by default | Replace it before it expires |
+| `disabled` | The instance was disabled | Nothing |
+
+Timeouts and server errors do not change the state: they show in `last_error` and are retried at the next run. Kinds that pay per item read also report `health.usage`, and a kind's own details appear in `health.diagnostics`. Rather than polling instances, follow `connector.health_changed` and the other `connector.*` events on the change feed (`GET /v0/changes`).
+
+## Change the schedule or check now
+
+```bash
+curl -s -X PUT "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/schedule" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"interval_seconds": 600}' | jq .schedule
+curl -s -X POST "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/runs" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"idempotency_key": "check-now-1"}' | jq '{run_at}'
+```
+
+A shorter interval brings the next run forward; a longer one applies after the run already scheduled. A run requested now still respects the deployment's floor and any `Retry-After` from the source.
+
+## Deposit or replace a credential
+
+Send the secret when you create the instance, in `credential`, or replace it later:
+
+```bash
+curl -s -X PUT "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/credential" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"idempotency_key": "rotate-2027-01", "secret": {"token": "…"}, "expires_at": "2027-06-30T00:00:00Z"}'
+```
+
+Secrets are encrypted at rest and never returned or logged: reads show only the credential's version, deposit date and expiry. The new version applies from the next run. Set `expires_at` whenever the provider's secret expires, so health warns you in time.
+
+## Disable an instance
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/disable" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"idempotency_key": "disable-city-news"}' | jq '{enabled}'
+```
+
+Scheduling stops at once, and Records already collected stay searchable. A disabled instance cannot be enabled again: create a new one on the same Source Namespace.
+
+## What to expect
+
+- An item fetched again, for example after a restart, returns its original Receipt; it never creates a duplicate. A changed item becomes a new Version of its Record.
+- An item that disappears from the source is not withdrawn, unless the kind's page says otherwise.
+- Idempotency keys that start with `connector:` are reserved for connectors; your own submissions may not use them.

@@ -363,7 +363,7 @@ A source collector (since Plugin API 0.3). The core keeps everything durable:
 Connector Instances, schedules and leases, Acquisition Checkpoints, Deposited
 Credentials and Connector Health. The plugin only fetches, and is stateless
 between invocations. Pinned connector plugins provide Connector Instance kinds
-([Run a connector plugin](../../../docs/plugins/run-a-connector-plugin.md)).
+([Run a connector plugin](https://docs.quivr.thevibecompany.co/plugins/pin)).
 
 **`fetch`** (`connector-fetch-request.schema.json`) carries `invocation_id`,
 `organization_id`, the installer `configuration`, the Connector Instance
@@ -531,7 +531,7 @@ from the model that made the document vectors. The core keeps everything else:
 the vector space registry, Weaviate and its named vectors, projection
 generations and rebuilds, authorization and withdrawal. Write one with the
 [Go SDK](../../../sdks/go/README.md) and pin it as described in
-[Write an ingestion plugin](../../../docs/plugins/write-an-ingestion-plugin.md).
+[Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin).
 
 **Spaces.** `contributions.ingestion.spaces` declares each space by id: the
 plugin id or an id starting with `<plugin id>.` (`foreign_space` otherwise),
@@ -622,7 +622,7 @@ and the core encodes the query with that space's owner. The core keeps the
 index, authorization, withdrawal fences and generation routing, and applies
 them before any candidate reaches the plugin. Write one with the
 [Go SDK](../../../sdks/go/README.md) and pin it as described in
-[Write a retrieval plugin](../../../docs/plugins/write-a-retrieval-plugin.md).
+[Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin).
 
 **Profiles.** `contributions.retrieval.profiles` declares the search profiles
 the plugin answers, by name (`^[a-z][a-z0-9_]{0,31}$`), `default` required.

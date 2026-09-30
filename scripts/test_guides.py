@@ -53,14 +53,14 @@ class ReplayTest(unittest.TestCase):
     def test_a_passing_guide_carries_kept_values_and_asserts_only_what_it_shows(self):
         repo = Repository(self, {'docs/first.md': page(
             '# First',
-            command('''printf '{"corpus_id": "c-%s", "created_at": "2026", "items": [1, 2, 3], "url": "%s"}' "$RANDOM" "$QUIVR_URL"''',
+            command('''printf '{"corpus_id": "c-%s", "created_at": "2026", "items": [1, 2, 3], "url": "%s"}' "$RANDOM" "$QUIVR_API_URL"''',
                     '{"corpus_id": "{{CORPUS_ID}}", "items": [1, "..."], "url": "http://quivr.test"}'),
             "'''sh\nexport CORPUS_ID=<the corpus_id above>; exit 1\n'''",
             command('printf \'{"corpus": "%s", "same": "%s"}\' "$CORPUS_ID" "$CORPUS_ID"',
                     '{"corpus": "{{CORPUS_ID}}", "same": "{{CORPUS_ID}}"}'),
             command('printf "done\\n"', 'done', kind='text'),
         )})
-        results = repo.replay('docs/first.md', {'QUIVR_URL': 'http://quivr.test'})
+        results = repo.replay('docs/first.md', {'QUIVR_API_URL': 'http://quivr.test'})
         self.assertEqual([(r['block'], r['status']) for r in results], [(1, 'passed'), (2, 'passed'), (3, 'passed')])
 
     def test_a_broken_block_names_the_guide_the_block_and_the_difference_and_stops_the_guide(self):
@@ -137,13 +137,20 @@ class PagesTest(unittest.TestCase):
             guides.pages(repo.root)
 
     def test_a_kept_value_may_not_replace_the_stack_address_or_key(self):
-        repo = Repository(self, {'docs/reserved.md': command('printf \'{"url": "x"}\'', '{"url": "{{QUIVR_URL}}"}')})
-        with self.assertRaisesRegex(guides.GuideError, r'\{\{QUIVR_URL\}\} would replace'):
+        repo = Repository(self, {'docs/reserved.md': command('printf \'{"url": "x"}\'', '{"url": "{{QUIVR_API_URL}}"}')})
+        with self.assertRaisesRegex(guides.GuideError, r'\{\{QUIVR_API_URL\}\} would replace'):
             guides.pages(repo.root)
 
     def test_the_repository_guides_are_readable(self):
         # Authoring errors surface in make test on any platform, before the Linux-only replay.
-        self.assertIn('docs/first-search.md', guides.pages())
+        self.assertIn('docs-site/quickstart.mdx', guides.pages())
+
+    def test_a_site_page_marks_its_blocks_with_mdx_comments(self):
+        mdx = page("{/* runnable retry */}", "'''bash", 'printf \'{"id": "a"}\'', "'''", '',
+                   "{/* output */}", "'''json", '{"id": "{{ID}}"}', "'''", '', "'''bash", 'ls', "'''")
+        repo = Repository(self, {}, undeclared={'docs-site/guide.mdx': mdx})
+        (found,) = guides.pages(repo.root).values()
+        self.assertEqual([(b.line, b.retry, b.expected) for b in found], [(2, True, '{"id": "{{ID}}"}\n')])
 
 
 class VerifyTest(unittest.TestCase):
@@ -154,6 +161,9 @@ class VerifyTest(unittest.TestCase):
         self.assertEqual(guides.keys(stack, repo.root), first)
         self.assertEqual(len({scope['organization'] for scope in first.values()}), 2)
         self.assertTrue(all(len(token) >= 32 for token in first))
+        receivers = guides.destinations(stack, repo.root)
+        self.assertEqual(sorted(d['organization'] for d in receivers.values()),
+                         sorted(scope['organization'] for scope in first.values()))
 
     def test_an_unreadable_page_fails_the_replay_step_not_the_stack_start(self):
         repo = Repository(self, {'docs/orphan.md': "```json output\n{}\n```\n"})
@@ -169,7 +179,8 @@ class VerifyTest(unittest.TestCase):
 
     def test_verify_replays_every_page_against_the_stack_and_writes_the_report(self):
         repo = Repository(self, {
-            'docs/a.md': command('[ -n "$QUIVR_KEY" ] && printf \'{"url": "%s"}\' "$QUIVR_URL"', '{"url": "http://127.0.0.1:1"}'),
+            'docs/a.md': command('[ -n "$QUIVR_API_KEY" ] && [ -n "$QUIVR_DESTINATION" ] && printf \'{"url": "%s"}\' "$QUIVR_API_URL"',
+                                 '{"url": "http://127.0.0.1:1"}'),
             'docs/b.md': command('printf \'{"state": "%s"}\' pending', '{"state": "resolved"}'),
         })
         stack = FakeStack(repo.root)

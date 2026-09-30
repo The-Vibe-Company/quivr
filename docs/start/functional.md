@@ -7,21 +7,10 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 - [Public HTTP transport contract](../../contracts/http/v0/README.md): how the HTTP API contract is organised and checked
 - [Quivr V2 — Remaining limits](../quivr-v2-remaining-limits.md): known limits and what is not claimed
-- [What Quivr can do](../what-quivr-can-do.md): what Quivr does, in plain words, for non-developers
 
 ## Guides
 
 - [Railway evaluation demo](../../deploy/railway/README.md): run a hosted single-node evaluation demo
-- [API walkthrough](../api-walkthrough.md): endpoint behaviour, limits, processing and search in detail
-- [Connect an AI agent](../connect-an-ai-agent.md): let an AI agent search Quivr, cite sources and add text over MCP
-- [Connector Instances: operator guide](../connectors/README.md): set up and operate scheduled sources of content
-- [Microsoft 365 mailbox (`m365_mail`): operator guide](../connectors/microsoft-365.md): collect mail from a Microsoft 365 mailbox
-- [RSS and Atom feeds (`rss`)](../connectors/rss.md): collect articles from RSS and Atom feeds
-- [X lists in real time: webhook mode](../connectors/x-webhooks.md): receive the posts of an X list in real time through webhooks
-- [X lists (`x_list`): operator guide](../connectors/x.md): collect posts from an X list
-- [Described alerts: alerts written in plain language](../described-alerts.md): write alerts in plain language, and see what is sent to the model provider
-- [Your first search](../first-search.md): create a Corpus, add a Record and search it, step by step
-- [Keyword alerts: writing alert queries](../keyword-alerts.md): write alert queries and set up metadata filters
 - [Quivr Search demo (THE-663)](../../quivr-search/README.md): the demo web app: search, sources and live feed
 
 ## Reference

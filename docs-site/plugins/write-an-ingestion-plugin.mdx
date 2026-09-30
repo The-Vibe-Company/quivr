@@ -1,25 +1,39 @@
 ---
 title: "Write an ingestion plugin"
-description: "Decide how articles are cut and embedded, and move a Corpus onto it"
+description: "Decide how Quivr cuts articles into passages and embeds them, with your own model, and move a Corpus onto it."
+keywords: ["ingestion", "embedding", "segmentation", "vector space", "go sdk", "rebuild"]
 ---
 
-An ingestion plugin decides how Quivr cuts each article into segments and turns
-them into vectors, and encodes search queries the same way. The core keeps
-what must stay safe and uniform: the index, the vector space registry,
-rebuilds, authorization and withdrawal. The contract is the
-[ingestion Contribution](/contracts/plugins/v0#ingestion-contribution);
-this page takes a plugin from its manifest to searchable Records.
+An ingestion plugin decides how each Version's text is cut into passages (segments) and turned into vectors, and encodes search queries with the same model. Quivr keeps the index, the registry of vector spaces, rebuilds, access control and withdrawals. This page starts from the SDK's sample, which embeds by hashing words, so you can replace its model with yours.
 
-## Declare its spaces {#declare-its-spaces}
+## Prerequisites
 
-A vector space is one embedding model with its dimensions and distance. The
-plugin owns every space it declares, so each space id is the plugin id or
-starts with it:
+- Go 1.24 or later, a `quivr-v2` checkout in `$QUIVR_REPO`, and the `quivr` command on your `PATH` ([Build your first plugin](/plugins/first-plugin) shows how).
+- To move existing Corpora onto the plugin, an API key with the `projections:rebuild` and `operations:read` actions.
 
-```yaml
+## Steps
+
+<Steps>
+<Step title="Start from the sample">
+
+```bash
+cp -r "$QUIVR_REPO/sdks/go/examples/hash-embedder" my-embedder && cd my-embedder
+go mod init example.com/my-embedder
+go mod edit -replace github.com/The-Vibe-Company/quivr-v2/sdks/go="$QUIVR_REPO/sdks/go"
+go mod tidy
+```
+
+</Step>
+<Step title="Declare your vector spaces">
+
+A vector space is one model with its dimensions and distance. Your plugin owns every space it declares, so each space id is the plugin id or starts with it. Edit `quivr-plugin.yaml`:
+
+```yaml quivr-plugin.yaml
 id: acme.embedder
 version: 0.1.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.8.0 <0.9.0"}
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.8.0 <0.9.0"
 contributions:
   ingestion:
     spaces:
@@ -30,92 +44,78 @@ contributions:
         metric: cosine
         indexes: [text]
         query_modalities: [text]
-      acme.embedder.large:
-        version: "1"
-        model: acme/text-embed-large
-        dimensions: 1024
-        metric: cosine
-        indexes: [text]
-        query_modalities: [text]
+    timeout_ms: 10000
+    query_timeout_ms: 1000
+run:
+  command: [go, run, .]
 ```
 
-Bump a space's `version` whenever its vectors change: a new model, new weights
-or a new input template. Quivr treats `acme.embedder.base@2` as a new space,
-never mixing its vectors with those of version 1.
+Bump a space's `version` whenever its vectors change: a new model, new weights, a new input template. Quivr treats `acme.embedder.base@2` as a new space and never mixes its vectors with those of version 1. Declare several spaces to compare models: a deployment serves search from one and indexes the others for evaluation.
 
-## Implement it {#implement-it}
+</Step>
+<Step title="Implement the two operations">
 
-With the [Go SDK](/sdks/go), one type answers both operations:
+`main.go` registers one type with two methods:
 
-- `SegmentAndEmbed` returns the segments of the Version's text Parts, in
-  reading order, each with Unicode code point offsets into its Part and one
-  vector per requested space. It may add a `LexicalText` (folded or stemmed
-  words, indexed in a separate keyword field while excerpts keep the source
-  text) and a `Provenance` map.
-- `EmbedQuery` returns the vector of one query in one space.
+- `SegmentAndEmbed` receives the Version's text Parts and the spaces to fill. It returns segments in reading order, each with the Part key, `start` and `end` offsets in Unicode code points, and one vector per requested space. It may add a `LexicalText`, indexed for keyword search while excerpts keep the source text, and a `Provenance` map.
+- `EmbedQuery` returns the vector of one search query in one space. A search waits for it, within `query_timeout_ms`.
 
-Both must be deterministic: rebuilds reuse the stored segments and vectors, and
-a different answer for the same Version is refused. With Plugin API 0.8 a
-request may name no space: Quivr asks for the segments alone when a Version
-arrives, so it is searchable by keyword even while your embedding backend is
-down, then for the vectors. Return the same segments both times. Return a retryable error
-when a backend is down, a terminal one for content you can never handle.
-`sdks/go/examples/hash-embedder` is a complete example with two spaces.
+Replace `hashWords` with a call to your model. Both methods must be deterministic: rebuilds reuse stored segments and vectors, and Quivr refuses a different answer for the same Version. When a Version arrives, Quivr first asks for the segments alone, with no spaces, so the article is searchable by keyword even while your model is down; it asks for the vectors afterwards. Return the same segments both times.
 
-## Certify it {#certify-it}
+Return `quivrplugin.RetryableIngestError` when your model is unavailable: the Version waits and is retried. Return `TerminalIngestError` for content you can never handle: the Version is blocked with `ingestion_refused`.
 
-```sh
-quivr plugin test --report report.json .
+</Step>
+<Step title="Certify it">
+
+```bash
+quivr plugin test --startup-timeout 120s .
 ```
 
-The Contract Runner sends the normative article and your own ingestion
-fixtures (`fixtures/*.json` with a top-level `ingestion`), checks every segment
-and vector as the engine will, replays each fixture, encodes the fixture
-queries in every space, and checks that invalid requests are refused and that
-no declared secret appears in an answer or your plugin's output. Set the
-fixture's `expect.segments` to pin your segmentation.
+The Contract Runner sends the normative article and your fixtures in `fixtures/`, checks every segment and vector as the engine will, replays each fixture, compares the segments-only answer with the full one, and encodes the fixture queries in every space. Set a fixture's `expect.segments` to pin your segmentation.
 
-## Pin it {#pin-it}
+</Step>
+<Step title="Pin it">
 
-Add it to `plugins` in the `QUIVR_CONFIG` file of every `api`, `worker` and
-`migrate` process, and say which space answers search:
+A deployment pins exactly one ingestion plugin, which replaces the first-party `core-ingest`. Pin yours in the configuration of every `api`, `worker` and `migrate` process, and say which space serves search:
 
-```json
+```json QUIVR_CONFIG
 {"plugins": [
   {"manifest": "/etc/quivr/plugins/acme-embedder/quivr-plugin.yaml",
-   "endpoint": "http://127.0.0.1:9910",
-   "spaces": {"acme.embedder.base": "served", "acme.embedder.large": "evaluation"}}
+   "endpoint": "http://127.0.0.1:9950",
+   "spaces": {"acme.embedder.base": "served"}}
 ]}
 ```
 
-- **Served and evaluation.** Exactly one space is served. Evaluation spaces are
-  embedded on the same segments and indexed, so you can compare them, but
-  search never uses them. With one declared space, `spaces` may be omitted.
-- **One plugin.** A deployment pins one ingestion plugin
-  (`ingestion_conflict`); compare embedders as several spaces of it.
-- **Startup.** The spaces are registered with their owner. Startup refuses a
-  space another plugin already registered (`space_owner_conflict`) and a
-  registered space whose model, dimensions or metric changed without a new
-  version (`space_changed`). An unreachable plugin does not prevent startup.
+At startup Quivr registers each space with its owner. It refuses a space another plugin already registered (`space_owner_conflict`), and a registered space whose model, dimensions or metric changed without a new version (`space_changed`).
 
-## Move a Corpus onto the plugin {#move-a-corpus-onto-the-plugin}
+</Step>
+<Step title="Move a Corpus onto it">
 
-Each Corpus keeps the spaces it was built with. A Corpus created after the
-pin starts on the plugin's spaces. A Corpus created before the
-pin stays on its current space, searchable as before, until you rebuild it
-(`POST /v0/corpora/{corpus_id}/rebuilds`, see the
-[HTTP API reference](/reference/http-api)). The rebuild asks the plugin for every Version that has no stored vectors in the
-new spaces, then switches search over at once. From then on new Records go
-through the plugin, and search encodes queries with it.
-`GET /v0/corpora/{corpus_id}/vector-spaces` shows the Corpus's spaces, their
-owner and role, and how many segments hold a vector in each.
+New Corpora use the plugin at once. An existing Corpus keeps the spaces it was built with, and stays searchable, until you rebuild it:
 
-## When something fails {#when-something-fails}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/rebuilds" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"idempotency_key": "move-to-acme-embedder"}' | jq '{operation_id, state}'
+```
 
-| What happens | Effect |
+The rebuild asks your plugin for every Version without vectors in the new spaces, then switches search over at once. Follow it with `GET /v0/operations/{operation_id}`.
+
+</Step>
+</Steps>
+
+## Check it worked
+
+```bash
+curl -s "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/vector-spaces" -H "Authorization: Bearer $QUIVR_API_KEY"
+```
+
+The response lists the Corpus's spaces with their owner, their role (`served` or `evaluation`) and how many segments hold a vector in each. Search hits name the space that answered in `vector_space_id`.
+
+## Troubleshooting
+
+| Symptom | Cause |
 | --- | --- |
-| The plugin is down or answers a retryable error | The Version waits and is retried with backoff; search on a plugin space answers 503 |
-| The plugin answers a terminal error, or segments or vectors the checks refuse | The Version is blocked as `ingestion_refused`; a rebuild fails with `ingestion_refused` |
-| The segments with vectors differ from the segments first returned alone | The Version's enrichment is blocked as `derivation_conflict` |
-| `embed_query` answers a terminal error | The search is refused with 422 `unsupported_search` |
-| The plugin is unpinned while Corpora use its spaces | Their new Versions wait, and semantic search on them answers 422, until it is pinned again or they are rebuilt |
+| New Versions wait, semantic search answers 503 | The plugin is down or returns a retryable error. Keyword search keeps working. |
+| A Version is blocked with `ingestion_refused` | The plugin returned a terminal error, or segments and vectors the checks refuse (offsets out of range, wrong dimensions, too many segments). |
+| Enrichment is blocked with `derivation_conflict` | The segments returned with vectors differ from those first returned alone. |
+| Searches fail with `422 query_too_long` | `embed_query` refused the query with the code `query_too_long`; its message, such as `query exceeds 256 tokens`, is returned to the client. |

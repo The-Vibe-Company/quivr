@@ -3,7 +3,7 @@
 `connector.rss` is the first-party connector plugin that provides the `rss`
 kind: it polls one RSS 2.0, RSS 1.0, Atom or JSON Feed document per Connector
 Instance. What it collects, its bounds and its health codes are in
-[the operator guide](../../docs/connectors/rss.md). It is a Go module built
+[the operator guide](https://docs.quivr.thevibecompany.co/guides/rss). It is a Go module built
 only on the [Go plugin SDK](../../sdks/go/README.md).
 
 ## Build and pin

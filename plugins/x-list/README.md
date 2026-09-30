@@ -3,7 +3,7 @@
 The first-party connector plugin behind the `x_list` kind: it polls the posts
 of one X list through the X API v2 and withdraws posts deleted or made
 protected at the source. The operator guide is
-[docs/connectors/x.md](../../docs/connectors/x.md); this page is for people who
+[X lists](https://docs.quivr.thevibecompany.co/guides/x); this page is for people who
 build, test or pin the plugin.
 
 - **Built only on the Go SDK** ([sdks/go](../../sdks/go/README.md)), as its own
@@ -15,7 +15,7 @@ build, test or pin the plugin.
   `source_namespace`, receives webhook deliveries (`modes: [pull, push]`), and
   declares `max_checkpoint_bytes` 512 KiB for the deletion recheck set (up to
   2,000 posts) and the members of a webhook resync.
-- **Webhook mode** ([guide](../../docs/connectors/x-webhooks.md)): pull runs
+- **Webhook mode** ([guide](https://docs.quivr.thevibecompany.co/guides/x#real-time-mode)): pull runs
   keep Filtered Stream rules, the webhook and its link in step with the list
   members (`stream.go`); `Receive` answers the CRC check and maps signed
   deliveries with `MapPost`, like polling (`webhook.go`). The X endpoint shapes
@@ -34,7 +34,7 @@ build, test or pin the plugin.
 start (`QUIVR_X_LIST=off make dev` leaves it out); they point `api_endpoint` at
 the local fake X API and set `allow_short_recheck`. The Railway image runs it beside the worker on
 127.0.0.1:9930, and beside the API for webhook deliveries. Elsewhere, build it (`go build .` here) and pin it as
-[Run a connector plugin](../../docs/plugins/run-a-connector-plugin.md) explains.
+[Run a connector plugin](https://docs.quivr.thevibecompany.co/plugins/pin) explains.
 
 ## Test it
 

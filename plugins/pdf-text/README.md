@@ -3,7 +3,7 @@
 The reference Quivr normalizer. It turns an `application/pdf` Blob into a
 Manifest with one text Part per page, so a PDF is found by the text of its
 pages. It is built with the [Python Plugin SDK](../../sdks/python/README.md),
-and it is also the worked example of [Write a normalizer](../../docs/plugins/write-a-normalizer.md).
+and it is also the worked example of [Write a normalizer](https://docs.quivr.thevibecompany.co/plugins/first-plugin).
 
 ## Output
 

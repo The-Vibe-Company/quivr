@@ -1,0 +1,81 @@
+---
+title: "Described alerts"
+description: "Alert on a subject described in plain language, even when articles use other words or another language."
+keywords: ["described alerts", "classifier", "typesafe", "jev", "semantic alerts"]
+---
+
+A described alert fires when a new article fits a description such as "Labour strikes at ports and harbours", whatever words or language the article uses. An external classifier, TypeSafe's Jev, reads each new article and scores how well it fits. Described alerts are part of the first-party `alerts` plugin, next to [keyword alerts](/guides/keyword-alerts).
+
+<Warning>
+To judge an article, the plugin sends its title, its text (up to about 48 KB), its Source Namespace and any mapped metadata to TypeSafe's API. Without a TypeSafe key, described alerts are off and nothing is sent.
+</Warning>
+
+## Prerequisites
+
+- An operator has turned described alerts on ([below](#turn-them-on)).
+- Everything the [keyword alerts](/guides/keyword-alerts#prerequisites) guide needs: an API key with `monitoring:write` and a webhook destination.
+
+## Write a description
+
+Describe the subject of the articles you want in one or two plain sentences, 3 to 1000 characters.
+
+| Good | Why |
+| --- | --- |
+| `Labour strikes at ports and harbours` | One subject, stated directly |
+| `New rules on electric scooters in cities` | Specific enough to leave out other transport news |
+
+Write one alert per subject, and say what fits rather than what does not: the classifier reads negations literally. English descriptions work best, and they also find articles in other languages.
+
+## Save the alert
+
+The expression holds the description. `sources` is optional: it limits the alert to some Source Namespaces, and articles from other sources are never sent to the classifier.
+
+```json
+{"kind": "described", "description": "Labour strikes at ports and harbours", "sources": ["wire"]}
+```
+
+Create a Saved Query with this expression and a Subscription with the `alerts` evaluator, as for a [keyword alert](/guides/keyword-alerts#save-the-alert). The Subscription's `configuration` can set a `threshold`:
+
+```json
+"evaluator": {"plugin_id": "alerts", "version": "0.2.0", "configuration": {"threshold": 0.6}}
+```
+
+The classifier returns a score from 0 to 1, the probability that the article fits. The article matches when its score reaches the threshold: 0.5 by default, between 0.2 and 0.95. Raise it for fewer, surer alerts.
+
+## Read what matched
+
+The Match's evidence names the classifier, its model, the score and the Parts it read:
+
+```json
+{
+  "explanation": "Jev (jev-1.13.0) judged that the article fits the description: score 0.97, threshold 0.60.",
+  "part_keys": ["title", "body"],
+  "details": {"kind": "described", "classifier": "Jev", "model": "jev-1.13.0", "score": 0.97, "threshold": 0.6, "truncated": false}
+}
+```
+
+`truncated: true` means the article was longer than what is sent, so the classifier saw only its beginning.
+
+## Timing and cost
+
+A described alert waits until the article's vectors are attached, a few seconds after it is searchable. Set `{"wait_for_enrichment": false}` in the Subscription's configuration to decide at once, and on a deployment that never computes vectors.
+
+Each new article costs one TypeSafe request for all described alerts together, whatever their number or owners; Quivr asks each distinct description once. A request is split only when it would exceed TypeSafe's size limit. Every new article is judged against every active described alert that watches its source.
+
+When TypeSafe is down or rate-limited, the alerts wait and are retried; keyword alerts on the same article wait too. When the key is refused, only the described alerts wait, and the plugin log says why. An alert is never dropped.
+
+## Turn them on
+
+These steps are for the operator who runs Quivr.
+
+1. Put the key in the `alerts` plugin's environment: `TYPESAFE_API_KEY=<your key>`. Never put it in Quivr's configuration, in logs or in a repository.
+2. List the kind in the `alerts` pin of Quivr's configuration:
+
+   ```json QUIVR_CONFIG
+   {"plugins": [{"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
+     "kinds": ["keywords", "described"]}]}
+   ```
+
+3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
+
+Without a key, pin `"kinds": ["keywords"]`: a described alert is then refused at creation with `422 invalid_expression`. With the local stack, `make dev` offers described alerts only when `TYPESAFE_API_KEY` is set in its environment.

@@ -23,15 +23,15 @@ Living documentation is written in English, with neutral examples: no customer n
 
 Each audience has one start page in `docs/start/`, generated from the inventory: it lists every other page of that audience, grouped by kind, and never a dated document. After declaring, moving or retitling a page, run `make start-pages`; `make docs` fails with `stale-start-page` until the start pages match. The README links to the start pages instead of listing files.
 
-The inventory also defines the public documentation site. Mintlify builds it from `docs-site/` on main, which `make docs-site` generates: every living page as MDX, the navigation and the bundled HTTP contract, and nothing else, so no dated document (frozen pages cannot be kept renderable) and no source file. Never edit `docs-site/`; after changing a living page or the inventory, run `make docs-site`, or `make docs` fails with `stale-docs-site`. Pages stay Markdown written for GitHub. The repository is private: a link to a living page opens that page on the site, and a link to any other file (code, schemas, dated documents) shows there as its path in code, so the sentence must read without the link. CI runs Mintlify's own checks on `docs-site/` (`make docs-site-check`).
-
 ## Line budgets
 
 `AGENTS.md`, `CONTEXT.md` and every page of kind `guide` have a maximum number of lines under `[budgets]` in the inventory. A new budget is set about 5% above the page's size when it is added; `make docs` prints the line to paste. When a page reaches its budget, shorten it first: link to the authoritative source, remove repetition, split a guide by task. Raise a budget only in a pull request whose signal needs the extra lines, and say so in its description.
 
-## Runnable guide blocks
+## The documentation site
 
-A guide shows API requests and responses only as runnable blocks, which `make verify` replays against the local stack; link to the OpenAPI contract for the rest. See [Runnable guide blocks](../runnable-guides.md).
+The public site (Mintlify, built from `docs-site/` on main) is where users and plugin authors learn Quivr. Its MDX pages and `docs.json` (settings and navigation) are written by hand: each page answers one question and is one of tutorial, how-to, reference or explanation. A change to user-visible behaviour updates its page in the same pull request. Show API requests there only as [runnable blocks](../runnable-guides.md), which `make verify` replays. Contributor process, dated documents and ADRs stay off the site. Site pages are living documents: the signal rule below applies to them.
+
+Generated pages are never edited: `openapi.yaml`, `reference/cli.mdx`, `reference/mcp.mdx` and `reference/plugin-*.mdx`. After changing the HTTP contract, a command or the plugin schemas, run `make generate`, then `make docs-site`. `make docs` fails with `stale-docs-site` until they match, `site-navigation` when a page and `docs.json` disagree, `site-link` on a broken root-relative link, and `site-configuration` when an engine configuration key is missing from `reference/configuration.mdx`. `make docs-preview` serves the site locally; CI runs Mintlify's checks (`make docs-site-check`).
 
 ## Glossary form
 
