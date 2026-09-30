@@ -77,7 +77,7 @@ func rankedService(p *fakeProjection, r *scriptedRanker) retrieval.Service {
 func TestPluginRanksServedCandidates(t *testing.T) {
 	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "stale-1", GenerationID: "gen"}, {SegmentID: "vec-a", GenerationID: "gen", Score: 2}, {SegmentID: "vec-a", GenerationID: "gen", Score: 1}, {SegmentID: "b", GenerationID: "gen", Score: 0.5}, {SegmentID: "vec-c", GenerationID: "gen"}}}
 	r := &scriptedRanker{answer: fusion}
-	result, err := rankedService(p, r).Search(context.Background(), searchScope, retrieval.Request{Query: " lanterne ", CorpusIDs: []string{"corpus"}, Profile: "balanced"})
+	result, err := rankedService(p, r).Search(context.Background(), searchScope, retrieval.Request{Query: " lanterne ", CorpusIDs: []string{"corpus"}, Profile: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}

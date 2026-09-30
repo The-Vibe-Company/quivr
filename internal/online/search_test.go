@@ -18,7 +18,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/online"
 )
 
-const hitJSON = `{"items":[{"record_id":"rec_1","version_id":"ver_1","part_key":"body","segment_id":"seg_1","segmentation_id":"sgm_1","projection_generation_id":"gen_1","rank":1,"excerpt":{"text":"Eclipse over\nthe city","start":4,"end":24,"coordinate_system":"unicode_codepoint"},"availability":{"state":"retrieval_ready","is_current":true,"searchable":true}}],"retrieval_profile":{"name":"balanced","version":"v1"}}`
+const hitJSON = `{"items":[{"record_id":"rec_1","version_id":"ver_1","part_key":"body","segment_id":"seg_1","segmentation_id":"sgm_1","projection_generation_id":"gen_1","rank":1,"excerpt":{"text":"Eclipse over\nthe city","start":4,"end":24,"coordinate_system":"unicode_codepoint"},"availability":{"state":"retrieval_ready","is_current":true,"searchable":true}}],"retrieval_profile":{"name":"default","version":"v1"}}`
 
 type result struct {
 	code           int
@@ -63,7 +63,7 @@ func TestSearchPrintsRankedHitsWithProvenance(t *testing.T) {
 	if r.code != online.ExitOK {
 		t.Fatalf("exit %d: %s", r.code, r.stderr)
 	}
-	for _, want := range []string{"1 hit (profile balanced, version v1)", "1. record rec_1  version ver_1  part body  [4,24)", "   Eclipse over\n   the city\n"} {
+	for _, want := range []string{"1 hit (profile default, version v1)", "1. record rec_1  version ver_1  part body  [4,24)", "   Eclipse over\n   the city\n"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("stdout missing %q:\n%s", want, r.stdout)
 		}

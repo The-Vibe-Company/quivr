@@ -99,7 +99,7 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 		mrr, recall, ndcg := 0.0, 0.0, 0.0
 		details := []any{}
 		for i, r := range rows {
-			q := retrieval.Request{Query: queries[i], Mode: mode, Profile: "balanced", Limit: 10, CorpusIDs: []string{"fixture"}}
+			q := retrieval.Request{Query: queries[i], Mode: mode, Profile: "default", Limit: 10, CorpusIDs: []string{"fixture"}}
 			if mode != "lexical" {
 				q.Vector = vectors[i]
 			}

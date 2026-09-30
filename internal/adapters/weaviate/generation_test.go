@@ -56,7 +56,7 @@ func TestLogicalGenerationsCoexistInSharedCollection(t *testing.T) {
 		}
 	}
 	scope := corpus.Scope{Organization: org, Corpora: []string{"*"}}
-	query := retrieval.Request{Query: "alpha", Mode: "lexical", Profile: "balanced", Limit: 10, CorpusIDs: []string{"corpus-a", "corpus-b"}}
+	query := retrieval.Request{Query: "alpha", Mode: "lexical", Profile: "default", Limit: 10, CorpusIDs: []string{"corpus-a", "corpus-b"}}
 	found := func(routes []retrieval.Route) []string {
 		t.Helper()
 		candidates, err := store.Search(ctx, routes, scope, query)

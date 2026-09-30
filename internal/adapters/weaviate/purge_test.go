@@ -146,7 +146,7 @@ func TestDeadVersionsCrowdCandidatesUntilPurged(t *testing.T) {
 	scope := corpus.Scope{Organization: f.org, Corpora: []string{"*"}}
 	liveCandidates := func() (int, int) {
 		t.Helper()
-		candidates, err := f.store.Search(f.ctx, route, scope, retrieval.Request{Query: "phare", Mode: "lexical", Profile: "balanced", Limit: retrieval.MaxLimit, CorpusIDs: []string{f.corpusID}})
+		candidates, err := f.store.Search(f.ctx, route, scope, retrieval.Request{Query: "phare", Mode: "lexical", Profile: "default", Limit: retrieval.MaxLimit, CorpusIDs: []string{f.corpusID}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -235,7 +235,8 @@ def measure(stack, workload, rows, report):
         stack.migrate()
         stack.start_processes()
 
-    cfg = workload['search']
+    # The frozen v1 workload names the default profile by its former name, balanced.
+    cfg = {**workload['search'], 'profile': {'balanced': 'default'}.get(workload['search']['profile'], workload['search']['profile'])}
     def client():
         return Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'], cfg['request_timeout_seconds'])
 

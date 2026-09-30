@@ -69,8 +69,9 @@ licence on its ticket.
 
 ## Read the report {#read-the-report}
 
-- **Systems** are `mode/profile`. Profiles the API advertises but refuses are listed as not
-  served. `hybrid/balanced`, the API default, is the baseline within a run.
+- **Systems** are `mode/profile`. Profiles `GET /v0/search/profiles` lists but the API
+  refuses are listed as not served. `hybrid/default`, the API default, is the baseline within
+  a run. A baseline run from before `balanced` was renamed is compared as `*/default`.
 - **nDCG@10** uses linear gain (gain = grade) and a log2(rank + 1) discount, as trec_eval's
   `ndcg_cut_10`; the report states it. Hits are deduplicated by Record before scoring.
 - **Δ** is the mean per-query difference with the p-value of a two-sided paired t-test;
@@ -78,8 +79,8 @@ licence on its ticket.
   reliably detect only large differences (about 0.1 nDCG@10); 0.05 needs several hundred.
 - **Against the baseline run**: the same system in an earlier run, only for sets whose
   sample fingerprint is identical.
-- **Failures** are searches the API refused or could not answer; they score 0. Two
-  `mldr-fr` queries are longer than the engine's query token limit and always fail.
+- **Failures** are searches the API refused or could not answer; they score 0. Two `mldr-fr`
+  queries are over the default profile's 256-token limit: they always fail, `query_too_long`.
 - **Latency** is client wall time per search (p50, p95), one search at a time.
   **Paid calls** is 0 on the local stack, which calls no paid service, and unknown (`—`)
   with `--api-url`. **Ingestion to vectors** is the time from the first submission until

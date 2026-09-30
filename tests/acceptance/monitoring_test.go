@@ -22,7 +22,7 @@ func monitoringRun() string { return fmt.Sprint(time.Now().UnixNano()) }
 func savedQueryCommand(key string, corpora ...string) map[string]any {
 	return map[string]any{"idempotency_key": key, "name": "Veille " + key, "definition": map[string]any{
 		"corpus_ids": corpora, "expression": map[string]any{"fixture": map[string]any{"decision": "match", "terms": []any{"élection"}}},
-		"retrieval_profile": "balanced", "temporal_policy": "from_activation",
+		"retrieval_profile": "default", "temporal_policy": "from_activation",
 	}}
 }
 

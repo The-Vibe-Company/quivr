@@ -195,6 +195,7 @@ var hints = map[string]string{
 	"invalid_schema":            "the request does not match the API contract; check the arguments",
 	"unsupported_search":        "the server does not support this search mode or query",
 	"unsupported_profile":       "the deployment does not answer this profile; GET /v0/search/profiles lists the ones it does",
+	"query_too_long":            "the query is longer than the profile accepts; the message names the limit: shorten the query",
 	"retrieval_plugin_invalid":  "the deployment's retrieval plugin answered something the engine refuses; an operator checks the plugin",
 	"search_deadline_exceeded":  "the search outran its profile's latency budget; retry, or use a faster profile",
 	"search_unavailable":        "the search backend is unavailable; retry later",

@@ -38,7 +38,7 @@ func pinnedSubscription(t *testing.T, id, version, key, corpusID string, express
 	t.Helper()
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	query := request(t, "POST", "/v0/saved-queries", admin, map[string]any{"idempotency_key": "alert-query-" + key, "name": "Alert " + key, "definition": map[string]any{
-		"corpus_ids": []string{corpusID}, "expression": expression, "retrieval_profile": "balanced", "temporal_policy": "from_activation"}}, 201)
+		"corpus_ids": []string{corpusID}, "expression": expression, "retrieval_profile": "default", "temporal_policy": "from_activation"}}, 201)
 	if configuration == nil {
 		configuration = map[string]any{}
 	}

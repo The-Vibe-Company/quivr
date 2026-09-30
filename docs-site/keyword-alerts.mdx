@@ -75,7 +75,7 @@ Then create a Saved Query with that expression, and a Subscription pinned to the
 ```bash
 curl -s -X POST "$QUIVR_API/v0/saved-queries" -H "Authorization: Bearer $QUIVR_KEY" -H 'Content-Type: application/json' -d '{
   "idempotency_key": "airbus-strikes", "name": "Airbus strikes",
-  "definition": {"corpus_ids": ["<corpus id>"], "retrieval_profile": "balanced", "temporal_policy": "from_activation",
+  "definition": {"corpus_ids": ["<corpus id>"], "retrieval_profile": "default", "temporal_policy": "from_activation",
     "expression": {"kind": "keywords", "match": {"all": [{"term": "Airbus"}, {"any": [{"term": "grève"}, {"term": "strike"}]}, {"not": {"term": "sport"}}]}}}}'
 
 curl -s -X POST "$QUIVR_API/v0/subscriptions" -H "Authorization: Bearer $QUIVR_KEY" -H 'Content-Type: application/json' -d '{

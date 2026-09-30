@@ -89,7 +89,8 @@ every search. `GET /v0/search/profiles` lists its profiles; see the
 profile that answered and reports `usage`: the rounds, the elapsed time and
 the plugin's reported spend. Without a retrieval plugin, the built-in search
 answers the `default` profile. `balanced` stays accepted as a deprecated name
-of `default` for one release.
+of `default` through engine 0.1.x; engine 0.2.0 removes it. A Saved Query may
+name any profile the deployment lists.
 
 ## When something fails
 

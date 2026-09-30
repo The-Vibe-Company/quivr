@@ -95,7 +95,7 @@ func TestSubscriptionActivationBoundaryAndDisable(t *testing.T) {
 	}
 
 	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
-	definition := monitoring.Definition{CorpusIDs: []string{a.ID, b.ID}, Expression: map[string]any{"fixture": map[string]any{"decision": "match"}}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}
+	definition := monitoring.Definition{CorpusIDs: []string{a.ID, b.ID}, Expression: map[string]any{"fixture": map[string]any{"decision": "match"}}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}
 	query, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: definition})
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestConcurrentMonitoringReplaysConverge(t *testing.T) {
 		}
 		return first.id
 	}
-	definition := monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"fixture": "match"}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}
+	definition := monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"fixture": "match"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}
 	queryID := race(8, func() (string, bool, error) {
 		q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: definition})
 		return q.ID, true, err

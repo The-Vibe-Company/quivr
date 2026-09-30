@@ -216,7 +216,7 @@ func service() (monitoring.Service, *memoryStore) {
 }
 
 func query(key string, corpora ...string) monitoring.SavedQueryInput {
-	return monitoring.SavedQueryInput{Key: key, Name: "Query " + key, Definition: monitoring.Definition{CorpusIDs: corpora, Expression: map[string]any{"fixture": "match"}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}}
+	return monitoring.SavedQueryInput{Key: key, Name: "Query " + key, Definition: monitoring.Definition{CorpusIDs: corpora, Expression: map[string]any{"fixture": "match"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}}
 }
 
 func fixture() monitoring.Evaluator {
@@ -235,11 +235,6 @@ func TestSavedQueryCreationRequiresWriteAndEveryCorpus(t *testing.T) {
 		{"read-only key", reader, query("r", "corpus_a"), monitoring.ErrForbidden},
 		{"ungranted Corpus is never dropped", narrow, query("n", "corpus_a", "corpus_b"), monitoring.ErrForbidden},
 		{"Corpus outside the Organization", writer, query("x", "corpus_a", "corpus_missing"), monitoring.ErrForbidden},
-		{"unimplemented profile", writer, func() monitoring.SavedQueryInput {
-			q := query("p", "corpus_a")
-			q.Definition.RetrievalProfile = "deep"
-			return q
-		}(), monitoring.ErrUnsupportedProfile},
 	}
 	for _, c := range cases {
 		if _, err := s.CreateSavedQuery(ctx, c.scope, c.input); !errors.Is(err, c.want) {
@@ -247,8 +242,40 @@ func TestSavedQueryCreationRequiresWriteAndEveryCorpus(t *testing.T) {
 		}
 	}
 	q, err := s.CreateSavedQuery(ctx, narrow, query("ok", "corpus_a"))
-	if err != nil || q.Current.Definition.RetrievalProfile != "balanced" {
+	if err != nil || q.Current.Definition.RetrievalProfile != "default" {
 		t.Fatalf("authorized creation: %v %+v", err, q)
+	}
+}
+
+// servedProfiles are the profiles a pinned retrieval plugin declares.
+type servedProfiles []string
+
+func (p servedProfiles) Serves(profile string) bool { return slices.Contains(p, profile) }
+
+// A definition names a profile the deployment answers: the built-in default
+// (or its deprecated name) without a retrieval plugin, the plugin's profiles
+// with one. The profile is recorded as sent.
+func TestSavedQueryNamesAServedProfile(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		profile string
+		served  monitoring.SearchProfiles
+		want    error
+	}{
+		{profile: "default"},
+		{profile: "balanced"},
+		{profile: "deep", want: monitoring.ErrUnsupportedProfile},
+		{profile: "deep", served: servedProfiles{"default", "deep"}},
+		{profile: "fast", served: servedProfiles{"default", "deep"}, want: monitoring.ErrUnsupportedProfile},
+	} {
+		s, _ := service()
+		s.Profiles = c.served
+		in := query("q", "corpus_a")
+		in.Definition.RetrievalProfile = c.profile
+		q, err := s.CreateSavedQuery(ctx, writer, in)
+		if !errors.Is(err, c.want) || (err == nil && q.Current.Definition.RetrievalProfile != c.profile) {
+			t.Errorf("profile %q (served %v): %v %+v, want %v", c.profile, c.served, err, q.Current.Definition, c.want)
+		}
 	}
 }
 

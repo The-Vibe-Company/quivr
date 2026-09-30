@@ -58,7 +58,7 @@ func ownedSubscription(t *testing.T, token, key, corpusID string, expression, co
 	t.Helper()
 	id, version := keywordEvaluator(t)
 	query := request(t, "POST", "/v0/saved-queries", token, map[string]any{"idempotency_key": "described-query-" + key, "name": "Described " + key, "definition": map[string]any{
-		"corpus_ids": []string{corpusID}, "expression": expression, "retrieval_profile": "balanced", "temporal_policy": "from_activation"}}, 201)
+		"corpus_ids": []string{corpusID}, "expression": expression, "retrieval_profile": "default", "temporal_policy": "from_activation"}}, 201)
 	if configuration == nil {
 		configuration = map[string]any{}
 	}

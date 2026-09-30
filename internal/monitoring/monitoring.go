@@ -216,10 +216,19 @@ type CorpusAuthorizer interface {
 	Authorize(ctx context.Context, scope corpus.Scope, ids []string) error
 }
 
+// SearchProfiles reports whether the deployment answers a search profile,
+// as GET /v0/search/profiles lists them.
+type SearchProfiles interface {
+	Serves(profile string) bool
+}
+
 type Service struct {
 	Store        Store
 	Corpora      CorpusAuthorizer
 	Destinations map[string]Destination
+	// Profiles are the search profiles a definition may name; nil serves the
+	// built-in default only.
+	Profiles SearchProfiles
 	// MatchStore reads Match history and Deliveries.
 	MatchStore MatchStore
 	// Evaluators are the installed evaluators a Subscription Version may pin.
@@ -251,7 +260,9 @@ func (s Service) validDefinition(ctx context.Context, scope corpus.Scope, d Defi
 	if !covers(scope, d.CorpusIDs) {
 		return ErrForbidden
 	}
-	if d.RetrievalProfile != "balanced" {
+	// Only a new definition must name a served profile: evaluation never reads
+	// it, so a Version recorded under a profile since unpinned keeps running.
+	if !s.serves(d.RetrievalProfile) {
 		return ErrUnsupportedProfile
 	}
 	if tooLarge(d.Expression) {
@@ -264,6 +275,14 @@ func (s Service) validDefinition(ctx context.Context, scope corpus.Scope, d Defi
 		return err
 	}
 	return nil
+}
+
+func (s Service) serves(profile string) bool {
+	if s.Profiles == nil {
+		// balanced is the deprecated name of default until engine 0.2.0.
+		return profile == "default" || profile == "balanced"
+	}
+	return s.Profiles.Serves(profile)
 }
 
 func (s Service) SavedQuery(ctx context.Context, scope corpus.Scope, id string) (SavedQuery, error) {

@@ -157,7 +157,7 @@ func lexicalObject(objects []storedObject) storedObject {
 
 func (f *attachFixture) search(mode string, vector []float32) map[string]int {
 	f.t.Helper()
-	q := retrieval.Request{Query: "lanterne", Mode: mode, Profile: "balanced", Limit: 10, CorpusIDs: []string{f.corpusID}, Vector: vector}
+	q := retrieval.Request{Query: "lanterne", Mode: mode, Profile: "default", Limit: 10, CorpusIDs: []string{f.corpusID}, Vector: vector}
 	candidates, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: f.gen}}, corpus.Scope{Organization: f.org, Corpora: []string{"*"}}, q)
 	if err != nil {
 		f.t.Fatal(err)

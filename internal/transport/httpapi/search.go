@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
@@ -40,8 +41,8 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
 	if err != nil {
-		status, code := searchFailure(err)
-		failure(w, status, code)
+		status, body := searchError(err)
+		send(w, status, body)
 		return
 	}
 	response := transport.SearchResponse{Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
@@ -75,6 +76,17 @@ func (a *API) searchProfiles(w http.ResponseWriter, scope corpus.Scope) {
 	send(w, 200, out)
 }
 
+// searchError is the status and error body of a failed search. A query over
+// its length limit carries a message naming the limit.
+func searchError(err error) (int, transport.Error) {
+	status, code := searchFailure(err)
+	body := apiError(status, code)
+	if detail := publicerr.Detail(err); code == "query_too_long" && detail != "" {
+		body.Message = detail
+	}
+	return status, body
+}
+
 // searchFailure maps a search error to its status and public code.
 func searchFailure(err error) (int, string) {
 	switch {
@@ -82,6 +94,8 @@ func searchFailure(err error) (int, string) {
 		return 403, "forbidden"
 	case errors.Is(err, retrieval.ErrUnsupportedProfile):
 		return 422, "unsupported_profile"
+	case errors.Is(err, retrieval.ErrQueryTooLong):
+		return 422, "query_too_long"
 	case errors.Is(err, retrieval.ErrUnsupported):
 		return 422, "unsupported_search"
 	case errors.Is(err, retrieval.ErrSourceFilterUnavailable):

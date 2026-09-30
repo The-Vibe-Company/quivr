@@ -44,7 +44,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	store := postgres.ContentStore{Pool: pool}
 	contents := content.Service{Repository: store, Baseline: store}
 	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: store}
-	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
+	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}

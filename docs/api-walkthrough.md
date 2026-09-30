@@ -235,11 +235,12 @@ search. See [E5 provenance](../third_party/e5/NOTICE.md).
 [Your first search](first-search.md#5-search) runs one.
 
 - Modes are `lexical`, `semantic` and `hybrid`. Defaults: `hybrid`, profile `default`
-  (`balanced` is its deprecated name), 10 results; 50 maximum. `GET /v0/search/profiles`
+  (`balanced` is its deprecated name until engine 0.2.0), 10 results; 50 maximum. `GET /v0/search/profiles`
   lists profiles; others return `422 unsupported_profile`. A pinned
   [retrieval plugin](plugins/write-a-retrieval-plugin.md) ranks under its own profiles.
 - The built-in `default` profile (version `balanced.e5-token-windows.v1`) accepts non-empty queries of at
-  most 256 tokens (8,192 code points on the wire), without truncation. CRLF/CR become
+  most 256 tokens (8,192 code points on the wire), without truncation; a longer query is
+  `422 query_too_long`, whose message names the limit. CRLF/CR become
   LF and surrounding whitespace is trimmed; case, accents and language are kept.
 - Hybrid uses alpha 0.5, relative score fusion and title/body weights of 2/1.
 - Every requested Corpus must be authorized. PostgreSQL selects the logical

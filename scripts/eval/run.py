@@ -36,7 +36,7 @@ import trec  # noqa: E402
 from measure_metrics import percentile  # noqa: E402
 
 MODES = ['lexical', 'semantic', 'hybrid']
-BASELINE_SYSTEM = 'hybrid/balanced'  # the API's default mode and profile
+BASELINE_SYSTEM = 'hybrid/default'  # the API's default mode and profile
 LIMIT = 50  # the API maximum; hits are deduplicated by Record before scoring
 BATCH_ITEMS, BATCH_BYTES = 100, 8 << 20  # under the batch bounds of 100 entries and 10 MiB
 WARMUP_QUERIES = 3
@@ -66,18 +66,16 @@ class Client:
             time.sleep(min(2 ** attempt, 10))
 
 
-def advertised_profiles():
-    """The profile names SearchRequest accepts in the HTTP contract, in contract order."""
-    text = (ROOT / 'contracts/http/v0/openapi.yaml').read_text()
-    block = text[text.index('\n    SearchRequest:'):]
-    found = re.search(r'\n        profile:\n          type: string\n          enum:\n((?:          - \S+\n)+)', block)
-    return [line.split('- ', 1)[1] for line in found.group(1).splitlines()]
+def advertised_profiles(client):
+    """The profile names the installation lists (GET /v0/search/profiles), default first."""
+    _, listed = client.call('GET', '/v0/search/profiles')
+    return [p['name'] for p in listed['items']]
 
 
-def serving_profiles(client, corpus):
+def serving_profiles(client, corpus, advertised):
     """Which advertised profiles the installation serves; a refused one is recorded, not measured."""
     served, refused = {}, {}
-    for name in advertised_profiles():
+    for name in advertised:
         status, body = client.call('POST', '/v0/search', {'query': 'profile probe', 'corpus_ids': [corpus], 'mode': 'lexical', 'profile': name, 'limit': 1}, expected=(200, 422))
         if status == 200:
             served[name] = body['retrieval_profile']['version']
@@ -182,10 +180,11 @@ def measure_set(client, name, directory, run_id, options):
     corpus = created['corpus_id']
     print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
     records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
-    served, refused = serving_profiles(client, corpus)
+    advertised = advertised_profiles(client)
+    served, refused = serving_profiles(client, corpus, advertised)
     out = {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
            'dropped_queries': len(data['dropped_queries']), 'ingestion': ingestion,
-           'profiles': {'advertised': advertised_profiles(), 'served': served, 'refused': refused}, 'systems': {}}
+           'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}
     queries = sorted(data['queries'])
     for profile in served:
         for mode in MODES:
@@ -220,11 +219,18 @@ def compare_within(result):
                                              for s, v in result['systems'].items() if s != BASELINE_SYSTEM}
 
 
+def legacy_systems(systems):
+    """Systems of a run made before the default profile was renamed from balanced, under today's names."""
+    return {(s[:-len('/balanced')] + '/default' if s.endswith('/balanced') else s): v for s, v in systems.items()}
+
+
 def compare_runs(current, baseline):
     """Each system against the same system of an earlier run, on sets with the same fingerprint."""
     import scoring
     for name, result in current['sets'].items():
         before = baseline.get('sets', {}).get(name)
+        if before:
+            before = {**before, 'systems': legacy_systems(before.get('systems', {}))}
         if not before or before['manifest'].get('fingerprint') != result['manifest'].get('fingerprint'):
             result['against_baseline_run'] = None
             continue

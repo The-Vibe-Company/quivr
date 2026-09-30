@@ -30,7 +30,7 @@ func TestSubscriptionPreviewJudgesRecentRecordsWithoutSaving(t *testing.T) {
 			configuration = map[string]any{}
 		}
 		body := map[string]any{
-			"definition": map[string]any{"corpus_ids": []string{c}, "expression": expression, "retrieval_profile": "balanced", "temporal_policy": "from_activation"},
+			"definition": map[string]any{"corpus_ids": []string{c}, "expression": expression, "retrieval_profile": "default", "temporal_policy": "from_activation"},
 			"evaluator":  map[string]any{"plugin_id": id, "version": version, "configuration": configuration},
 		}
 		if limit > 0 {

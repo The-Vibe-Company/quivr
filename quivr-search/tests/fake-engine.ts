@@ -288,10 +288,10 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
             rank: i + 1,
             excerpt: { text: a!.body.slice(0, 120), start: 0, end: 120, coordinate_system: "unicode_code_point" },
           })),
-          retrieval_profile: { name: "balanced", version: "1" },
+          retrieval_profile: { name: "default", version: "1" },
         });
       }
-      return json(route, { items: hits, retrieval_profile: { name: "balanced", version: "1" } });
+      return json(route, { items: hits, retrieval_profile: { name: "default", version: "1" } });
     }
     const version = path.match(/^\/v0\/records\/([\w-]+)\/versions\/([\w-]+)$/);
     if (version) {

@@ -566,7 +566,10 @@ within `query_timeout_ms`, which a search waits for.
 retried with backoff; a terminal envelope, or an answer the checks below
 refuse, blocks it as `ingestion_refused`. For `embed_query`, a terminal
 envelope refuses the search (422) and anything else makes it unavailable
-(503).
+(503). A query longer than the space accepts is refused with code
+`query_too_long` and a message naming the limit, such as `query exceeds 256
+tokens`: the search fails with `422 query_too_long` and that message (at most
+256 code points). Any other terminal code is `422 unsupported_search`.
 
 `CheckSegmentAndEmbedOutput` and `CheckEmbedQueryOutput` in `internal/plugins`
 judge every answer for the engine and the Contract Runner:

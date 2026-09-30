@@ -98,7 +98,7 @@ func TestSubscriptionEditAppliesFromItsCommit(t *testing.T) {
 	// Published before the edit; dispatch lags and only runs after it.
 	before, beforeV := f.publish("before", "before-1", "Dépêche avant")
 
-	edit := monitoring.SavedQueryVersionInput{Key: "q-edit", Definition: monitoring.Definition{CorpusIDs: []string{f.corpusID}, Expression: map[string]any{"fixture": "edited"}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}}
+	edit := monitoring.SavedQueryVersionInput{Key: "q-edit", Definition: monitoring.Definition{CorpusIDs: []string{f.corpusID}, Expression: map[string]any{"fixture": "edited"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}}
 	q2, err := f.service.CreateSavedQueryVersion(ctx, f.scope, f.query.ID, edit)
 	if err != nil || q2.VersionID == f.query.Current.VersionID || q2.Definition.Expression["fixture"] != "edited" {
 		t.Fatalf("saved query edit %+v %v", q2, err)
@@ -357,7 +357,7 @@ func TestSubscriptionEditChangesScope(t *testing.T) {
 	first := sub.Current
 	_, lagV := f.publish("lag", "lag-1", "Dépêche avant")
 
-	q2, err := f.service.CreateSavedQueryVersion(ctx, f.scope, f.query.ID, monitoring.SavedQueryVersionInput{Key: "to-b", Definition: monitoring.Definition{CorpusIDs: []string{b}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
+	q2, err := f.service.CreateSavedQueryVersion(ctx, f.scope, f.query.ID, monitoring.SavedQueryVersionInput{Key: "to-b", Definition: monitoring.Definition{CorpusIDs: []string{b}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}

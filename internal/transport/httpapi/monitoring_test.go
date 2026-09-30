@@ -241,7 +241,7 @@ func call(t *testing.T, server *httptest.Server, method, path, token, body strin
 	return decoded, string(raw)
 }
 
-const savedQueryBody = `{"idempotency_key":"q1","name":"Wire","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"match","threshold":0.50}},"retrieval_profile":"balanced","temporal_policy":"from_activation"}}`
+const savedQueryBody = `{"idempotency_key":"q1","name":"Wire","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"match","threshold":0.50}},"retrieval_profile":"default","temporal_policy":"from_activation"}}`
 
 func subscriptionBody(key, evaluator, destination string) string {
 	return `{"idempotency_key":"` + key + `","name":"Alerts","saved_query_id":"saved_query_q1","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"` + evaluator + `","version":"1","configuration":{"decisions":{"default":"match"}}},"destination_id":"` + destination + `"}`
@@ -300,7 +300,7 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 	sub, _ := call(t, server, "POST", "/v0/subscriptions", monitor, subscriptionBody("s1", "quivr.fixture", "receiver_a"), 201)
 	first := sub["current_version"].(map[string]any)["version_id"].(string)
 
-	edit := `{"idempotency_key":"q-edit","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"no_match"}},"retrieval_profile":"balanced","temporal_policy":"from_activation"}}`
+	edit := `{"idempotency_key":"q-edit","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"no_match"}},"retrieval_profile":"default","temporal_policy":"from_activation"}}`
 	v2, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/versions", monitor, edit, 201)
 	if v2["version_id"] != "saved_query_version_q-edit" || v2["saved_query_id"] != "saved_query_q1" {
 		t.Fatalf("new Saved Query Version: %v", v2)
@@ -382,7 +382,7 @@ func TestMonitoringRejectsWithPublicErrors(t *testing.T) {
 		{"ungranted Corpus", "POST", "/v0/saved-queries", monitorNarrow, strings.Replace(wide, `"q1"`, `"q2"`, 1), 403, "forbidden"},
 		{"unknown field such as an inline secret", "POST", "/v0/subscriptions", monitor, strings.Replace(subscriptionBody("x", "quivr.fixture", "receiver_a"), `"destination_id"`, `"secret":"whsec_x","destination_id"`, 1), 422, "invalid_schema"},
 		{"unsupported temporal policy", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, "from_activation", "backfill", 1), 422, "invalid_schema"},
-		{"unimplemented profile", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, `"balanced"`, `"deep"`, 1), 422, "unsupported_profile"},
+		{"unimplemented profile", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, `"default"`, `"deep"`, 1), 422, "unsupported_profile"},
 		{"other evaluator", "POST", "/v0/subscriptions", monitor, subscriptionBody("e", "vendor.semantic", "receiver_a"), 422, "unsupported_evaluator"},
 		{"unconfigured destination", "POST", "/v0/subscriptions", monitor, subscriptionBody("d", "quivr.fixture", "receiver_z"), 422, "unknown_destination"},
 		{"unknown query", "POST", "/v0/subscriptions", monitor, strings.Replace(subscriptionBody("u", "quivr.fixture", "receiver_a"), "saved_query_version_q1", "saved_query_version_zz", 1), 422, "unknown_saved_query"},

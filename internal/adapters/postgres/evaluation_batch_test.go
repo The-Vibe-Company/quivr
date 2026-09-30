@@ -74,7 +74,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	evaluators := monitoring.FixtureEvaluators()
 	evaluators["acme.alerts@0.1.0"] = acceptAll{}
 	service := monitoring.Service{Evaluators: evaluators, Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}}
-	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
+	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestConcurrentClaimsTakeOneArticleOnce(t *testing.T) {
 	evaluators := monitoring.FixtureEvaluators()
 	evaluators["acme.alerts@0.1.0"] = acceptAll{}
 	service := monitoring.Service{Evaluators: evaluators, Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}}
-	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
+	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -164,7 +164,7 @@ export function alertRoutes({
   const definition = (corpus, match) => ({
     corpus_ids: [corpus],
     expression: match,
-    retrieval_profile: "balanced",
+    retrieval_profile: "default",
     temporal_policy: "from_activation",
   });
   // A core refusal the browser explains (422 invalid_expression, 409 …).

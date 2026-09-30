@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -79,6 +80,7 @@ func TestSearchEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		{name: "no owner needed for lexical search", request: retrieval.Request{CorpusIDs: []string{"orphaned"}, Mode: "lexical"}, space: "retired.space@2"},
 		{name: "plugin unpinned", request: retrieval.Request{CorpusIDs: []string{"plugin"}, Mode: "hybrid"}, noPlugin: true, wantErr: retrieval.ErrUnsupported},
 		{name: "plugin refuses the query", request: retrieval.Request{CorpusIDs: []string{"plugin"}, Mode: "hybrid"}, encodeErr: content.ErrInvalid, wantErr: retrieval.ErrUnsupported, encoded: "org/example.small@1/lanterne"},
+		{name: "plugin names its query limit", request: retrieval.Request{CorpusIDs: []string{"plugin"}, Mode: "hybrid"}, encodeErr: publicerr.WithDetail(retrieval.ErrQueryTooLong, "query exceeds 128 tokens"), wantErr: retrieval.ErrQueryTooLong, encoded: "org/example.small@1/lanterne"},
 		{name: "plugin unavailable", request: retrieval.Request{CorpusIDs: []string{"plugin"}, Mode: "hybrid"}, encodeErr: errors.New("connection refused"), wantErr: retrieval.ErrUnavailable, encoded: "org/example.small@1/lanterne"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

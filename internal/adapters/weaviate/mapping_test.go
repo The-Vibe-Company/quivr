@@ -64,7 +64,7 @@ func TestPinnedRetrievalFieldsShapeProjectedText(t *testing.T) {
 	routes := []retrieval.Route{{CorpusID: "corpus-" + plain.ID, Generation: plain}, {CorpusID: "corpus-" + mapped.ID, Generation: mapped}}
 	found := func(query string) []string {
 		t.Helper()
-		candidates, err := store.Search(ctx, routes, scope, retrieval.Request{Query: query, Mode: "lexical", Profile: "balanced", Limit: 10, CorpusIDs: []string{"corpus-" + plain.ID, "corpus-" + mapped.ID}})
+		candidates, err := store.Search(ctx, routes, scope, retrieval.Request{Query: query, Mode: "lexical", Profile: "default", Limit: 10, CorpusIDs: []string{"corpus-" + plain.ID, "corpus-" + mapped.ID}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -64,7 +64,7 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 	// Edit the Saved Query: the Subscription keeps its pinned Version.
 	queryEdit := map[string]any{"idempotency_key": "edit-query-" + s.recordKey, "definition": map[string]any{
 		"corpus_ids": []any{s.corpus}, "expression": map[string]any{"fixture": map[string]any{"decision": "match", "terms": []any{"édition"}}},
-		"retrieval_profile": "balanced", "temporal_policy": "from_activation"}}
+		"retrieval_profile": "default", "temporal_policy": "from_activation"}}
 	queryV2 := request(t, "POST", "/v0/saved-queries/"+queryID+"/versions", admin, queryEdit, 201)
 	if replay := request(t, "POST", "/v0/saved-queries/"+queryID+"/versions", admin, queryEdit, 201); replay["version_id"] != queryV2["version_id"] {
 		t.Fatal("saved query edit replay", replay, queryV2)

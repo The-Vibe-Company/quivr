@@ -1449,8 +1449,10 @@ type SavedQueryCreate struct {
 
 // SavedQueryDefinition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
 type SavedQueryDefinition struct {
-	CorpusIds        []string                           `json:"corpus_ids"`
-	Expression       map[string]interface{}             `json:"expression"`
+	CorpusIds  []string               `json:"corpus_ids"`
+	Expression map[string]interface{} `json:"expression"`
+
+	// RetrievalProfile A search profile the deployment answers (listSearchProfiles), recorded as sent; balanced, the deprecated name of default, is accepted through engine 0.1.x. Another profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a Version keeps its profile and keeps evaluating after the profile stops being served.
 	RetrievalProfile string                             `json:"retrieval_profile"`
 	TemporalPolicy   SavedQueryDefinitionTemporalPolicy `json:"temporal_policy"`
 }
@@ -1556,9 +1558,11 @@ type SearchRequest struct {
 	Limit  *int               `json:"limit,omitempty"`
 	Mode   *SearchRequestMode `json:"mode,omitempty"`
 
-	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted for one release. An unknown profile returns 422 unsupported_profile.
+	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
 	Profile *string `json:"profile,omitempty"`
-	Query   string  `json:"query"`
+
+	// Query At most 8192 code points on the wire. The built-in default profile also accepts at most 256 tokens of its model's tokenizer, and the owner of a plugin vector space may set its own limit; a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
+	Query string `json:"query"`
 }
 
 // SearchRequestMode defines model for SearchRequest.Mode.

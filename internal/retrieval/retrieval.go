@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 const ProfileVersion = "balanced.e5-token-windows.v1"
@@ -33,6 +34,11 @@ const MaxLimit = 50
 const CandidateLimit = 3 * MaxLimit
 
 var ErrUnsupported = errors.New("unsupported_search")
+
+// ErrQueryTooLong reports a query over the length the profile or the owner of
+// the searched vector space accepts. It carries a publicerr detail naming the
+// limit, which the API returns as the message.
+var ErrQueryTooLong = errors.New("query_too_long")
 
 // ErrUnsupportedProfile reports a profile neither the built-in path nor the
 // pinned retrieval plugin declares.
@@ -154,6 +160,9 @@ type Service struct {
 	// Embedder encodes queries into the built-in space, after QueryNormalizer.
 	Embedder        QueryEmbedder
 	QueryNormalizer QueryNormalizer
+	// QueryTokens is the built-in profile's query token limit, which
+	// QueryNormalizer enforces; it names the limit in ErrQueryTooLong.
+	QueryTokens int
 	// Spaces encodes queries into plugin-owned spaces; nil when no ingestion
 	// plugin is pinned.
 	Spaces QueryEncoder
@@ -262,18 +271,20 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		// No pinned owner can encode a query into this space.
 		return out, ErrUnsupported
 	}
-	var normalized string
-	var err error
-	if builtin {
-		normalized, err = s.QueryNormalizer.NormalizeQuery(ctx, q.Query)
-	} else {
-		normalized, err = normalizeQuery(q.Query)
-	}
-	if errors.Is(err, content.ErrInvalid) {
+	normalized, err := normalizeQuery(q.Query)
+	if err != nil {
 		return out, ErrUnsupported
 	}
-	if err != nil {
-		return out, ErrUnavailable
+	if builtin {
+		// The text is valid, bounded and not empty, so the built-in
+		// normalizer can refuse it only for its token bound.
+		normalized, err = s.QueryNormalizer.NormalizeQuery(ctx, normalized)
+		if errors.Is(err, content.ErrInvalid) {
+			return out, publicerr.WithDetail(ErrQueryTooLong, "query exceeds %d tokens, the limit of profile %s", s.QueryTokens, q.Profile)
+		}
+		if err != nil {
+			return out, ErrUnavailable
+		}
 	}
 	q.Query = normalized
 	out.ProfileVersion = ProfileVersion
@@ -282,6 +293,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 			q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
 		} else {
 			q.Vector, err = s.Spaces.EncodeQuery(ctx, scope.Organization, q.Space, q.Query)
+			if errors.Is(err, ErrQueryTooLong) {
+				return out, err
+			}
 			if errors.Is(err, content.ErrInvalid) {
 				// The owner refuses this query: it can never be encoded.
 				return out, ErrUnsupported

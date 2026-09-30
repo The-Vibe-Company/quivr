@@ -35,9 +35,11 @@ export async function request<T>(
   if (!response.ok)
     throw new APIError(
       response.status,
-      data.code === "unsupported_search"
-        ? "Cette recherche dépasse les limites disponibles. Essayez une requête plus courte."
-        : data.message || "La demande a échoué.",
+      data.code === "query_too_long"
+        ? "Cette requête est trop longue. Raccourcissez-la."
+        : data.code === "unsupported_search"
+          ? "Cette recherche dépasse les limites disponibles. Essayez une requête plus courte."
+          : data.message || "La demande a échoué.",
       data.retryable === true,
       typeof data.code === "string" ? data.code : "",
       typeof data.field === "string" ? data.field : "",
@@ -60,7 +62,7 @@ export const search = (
     {
       query,
       mode,
-      profile: "balanced",
+      profile: "default",
       limit,
       corpus_ids: [corpus],
       // The engine ranks within these sources, before the limit.

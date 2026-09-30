@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -167,6 +168,22 @@ func judgeIngestion(result *devhost.Result) error {
 	return nil
 }
 
+// QueryTooLongCode is the error envelope code with which a plugin refuses a
+// query over the length its space accepts; its message names the limit.
+const QueryTooLongCode = "query_too_long"
+
+// maxRefusalMessage bounds, in code points, a plugin message a search error
+// passes on to the API client.
+const maxRefusalMessage = 256
+
+// bounded cuts s to at most n code points.
+func bounded(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
 type embedQueryRequest struct {
 	InvocationID   string          `json:"invocation_id"`
 	Contribution   string          `json:"contribution"`
@@ -182,8 +199,10 @@ type embedQuery struct {
 }
 
 // EncodeQuery asks the plugin that owns a space for a query's vector. A
-// terminal refusal (the plugin cannot encode this query) is
-// content.ErrInvalid; anything else is unavailability.
+// terminal refusal with code query_too_long is retrieval.ErrQueryTooLong
+// detailed by the plugin's message, which names its limit; any other terminal
+// refusal (the plugin cannot encode this query) is content.ErrInvalid;
+// anything else is unavailability.
 func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]float32, error) {
 	id, _, ok := i.declared(key)
 	if !ok {
@@ -204,6 +223,9 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 	}
 	if err := judgeIngestion(result); err != nil {
 		if errors.Is(err, content.ErrIngestionRefused) && result.Error != nil {
+			if result.Error.Code == QueryTooLongCode {
+				return nil, publicerr.WithDetail(retrieval.ErrQueryTooLong, "%s", bounded(result.Error.Message, maxRefusalMessage))
+			}
 			return nil, content.ErrInvalid
 		}
 		slog.Warn("embed_query failed", "component", "search", "plugin", i.Pin.Manifest.ID, "space", key, "error", err.Error())

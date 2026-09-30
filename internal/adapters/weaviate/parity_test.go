@@ -43,7 +43,7 @@ func TestAnchoredProjectionRanksLikeSingleObjectProjection(t *testing.T) {
 	}
 	ranked := func(x *attachFixture, mode, query string, vector []float32) []string {
 		t.Helper()
-		q := retrieval.Request{Query: query, Mode: mode, Profile: "balanced", Limit: 10, CorpusIDs: []string{x.corpusID}, Vector: vector}
+		q := retrieval.Request{Query: query, Mode: mode, Profile: "default", Limit: 10, CorpusIDs: []string{x.corpusID}, Vector: vector}
 		candidates, err := x.store.Search(x.ctx, []retrieval.Route{{CorpusID: x.corpusID, Generation: x.gen}}, corpus.Scope{Organization: x.org, Corpora: []string{"*"}}, q)
 		if err != nil {
 			t.Fatal(err)

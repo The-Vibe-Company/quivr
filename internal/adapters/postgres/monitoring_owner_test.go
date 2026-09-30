@@ -89,7 +89,7 @@ func TestSubscriptionOwnerReadsAndListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wide, err := f.service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "wide", Name: "W", Definition: monitoring.Definition{CorpusIDs: []string{f.corpusID, other.ID}, Expression: map[string]any{}, RetrievalProfile: "balanced", TemporalPolicy: "from_activation"}})
+	wide, err := f.service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "wide", Name: "W", Definition: monitoring.Definition{CorpusIDs: []string{f.corpusID, other.ID}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}

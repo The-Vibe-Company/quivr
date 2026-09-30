@@ -9,6 +9,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -104,6 +105,32 @@ func (f *fakeEmbeddings) CommitEnrichment(context.Context, string, content.Segme
 
 func service(p *fakeProjection, e *fakeEmbeddings) retrieval.Service {
 	return retrieval.Service{Embedder: fakeEmbedder{}, QueryNormalizer: fakeNormalizer{}, Routing: fakeRouting{}, Projection: p, Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: e}}
+}
+
+// tokenBound refuses queries over a token bound, as the built-in normalizer.
+type tokenBound struct{}
+
+func (tokenBound) NormalizeQuery(_ context.Context, q string) (string, error) {
+	if len(strings.Fields(q)) > 2 {
+		return "", content.ErrInvalid
+	}
+	return q, nil
+}
+
+// A query over the built-in profile's token bound is refused with the limit
+// named; invalid or empty text stays an unsupported search.
+func TestSearchNamesTheQueryTokenLimit(t *testing.T) {
+	s := service(&fakeProjection{}, &fakeEmbeddings{})
+	s.QueryNormalizer, s.QueryTokens = tokenBound{}, 2
+	for query, want := range map[string]error{"une lanterne": nil, "une lanterne rouge": retrieval.ErrQueryTooLong, " \r\n": retrieval.ErrUnsupported, "\x00": retrieval.ErrUnsupported} {
+		_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: query, CorpusIDs: []string{"corpus"}, Mode: "lexical"})
+		if !errors.Is(err, want) {
+			t.Fatalf("query %q: error %v, want %v", query, err, want)
+		}
+		if detail := publicerr.Detail(err); want == retrieval.ErrQueryTooLong && detail != "query exceeds 2 tokens, the limit of profile default" {
+			t.Fatalf("detail %q", detail)
+		}
+	}
 }
 
 var searchScope = corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}

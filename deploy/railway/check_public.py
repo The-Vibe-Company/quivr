@@ -48,7 +48,7 @@ def main():
     version = call(f"/v0/records/{evidence['record_id']}/versions/{evidence['version_id']}")
     assert version['manifest']['parts'][0]['content']['text'] == evidence['text']
     for mode in ['lexical', 'semantic', 'hybrid']:
-        response = call('/v0/search', {'corpus_ids': [corpus], 'query': evidence['identity'], 'mode': mode, 'profile': 'balanced', 'limit': 10})
+        response = call('/v0/search', {'corpus_ids': [corpus], 'query': evidence['identity'], 'mode': mode, 'profile': 'default', 'limit': 10})
         assert any(item['version_id'] == evidence['version_id'] for item in response['items']), mode + ' lost the version'
     evidence[args.phase] = {'status': 'passed', 'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'source_sha256': hashlib.sha256(evidence['text'].encode()).hexdigest(), 'modes': ['lexical', 'semantic', 'hybrid'], 'secure_session': True}

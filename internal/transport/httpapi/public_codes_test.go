@@ -165,6 +165,7 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 	}{
 		retrieval.ErrUnsupportedProfile: {422, "unsupported_profile"},
 		retrieval.ErrUnsupported:        {422, "unsupported_search"},
+		retrieval.ErrQueryTooLong:       {422, "query_too_long"},
 		retrieval.ErrPluginInvalid:      {502, "retrieval_plugin_invalid"},
 		retrieval.ErrDeadline:           {504, "search_deadline_exceeded"},
 		retrieval.ErrUnavailable:        {503, "search_unavailable"},
@@ -174,5 +175,17 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
 		}
+	}
+}
+
+// A query over its length limit is refused with a message naming the limit;
+// other search errors keep the generic message of their code.
+func TestSearchErrorNamesTheQueryLimit(t *testing.T) {
+	status, body := searchError(publicerr.WithDetail(retrieval.ErrQueryTooLong, "query exceeds 256 tokens, the limit of profile default"))
+	if status != 422 || body.Code != "query_too_long" || body.Message != "query exceeds 256 tokens, the limit of profile default" || body.Retryable {
+		t.Fatalf("%d %+v", status, body)
+	}
+	if _, body = searchError(publicerr.WithDetail(retrieval.ErrUnsupported, "internal detail")); body.Message != "unsupported search" {
+		t.Fatalf("detail leaked: %+v", body)
 	}
 }

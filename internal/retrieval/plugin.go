@@ -77,6 +77,15 @@ func (s Service) Profiles() []Profile {
 	return out
 }
 
+// Serves reports whether the deployment answers profile, by its name or by
+// LegacyProfile for the default: what a Saved Query may record.
+func (s Service) Serves(profile string) bool {
+	if profile == LegacyProfile {
+		profile = DefaultProfile
+	}
+	return s.declares(profile)
+}
+
 func (s Service) declares(profile string) bool {
 	if s.Ranker == nil {
 		return profile == DefaultProfile
@@ -381,6 +390,9 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 		vector, err = sv.s.Embedder.Embed(ctx, "query: "+text)
 	case sv.s.Spaces != nil && sv.s.Spaces.Owns(space):
 		vector, err = sv.s.Spaces.EncodeQuery(ctx, sv.scope.Organization, space, text)
+		if errors.Is(err, ErrQueryTooLong) {
+			return nil, err
+		}
 		if errors.Is(err, content.ErrInvalid) {
 			return nil, ErrUnsupported
 		}

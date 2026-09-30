@@ -546,7 +546,7 @@
         "expression": {
           "fixture": "positive"
         },
-        "retrieval_profile": "balanced",
+        "retrieval_profile": "default",
         "temporal_policy": "from_activation"
       }
     }
@@ -568,7 +568,7 @@
           "expression": {
             "fixture": "positive"
           },
-          "retrieval_profile": "balanced",
+          "retrieval_profile": "default",
           "temporal_policy": "from_activation"
         }
       }
@@ -586,7 +586,7 @@
         "expression": {
           "fixture": "negative"
         },
-        "retrieval_profile": "balanced",
+        "retrieval_profile": "default",
         "temporal_policy": "from_activation"
       }
     }
