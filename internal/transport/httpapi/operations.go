@@ -8,6 +8,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -34,6 +35,7 @@ func operationToTransport(op operations.Operation) transport.Operation {
 		out.Result = &transport.ProjectionRebuildResult{ProjectionGenerationId: op.ResultGenerationID}
 	}
 	out.Backfill = backfillToTransport(op.Backfill)
+	out.QuarantineReprocess = reprocessToTransport(op.Reprocess)
 	return out
 }
 
@@ -149,6 +151,9 @@ func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corp
 	case errors.Is(err, backfill.ErrInProgress):
 		// A backfill rerun while another backfill of its Corpus runs.
 		failure(w, 409, "backfill_in_progress")
+	case errors.Is(err, quarantine.ErrInProgress):
+		// A reprocess rerun while another reprocess of its Corpus runs.
+		failure(w, 409, "reprocess_in_progress")
 	case errors.Is(err, backfill.ErrRegistrationNotActive):
 		// A backfill rerun after its ingestion plugin left the active plan.
 		failure(w, 409, "registration_not_active")

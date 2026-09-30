@@ -273,9 +273,17 @@ contributions:
       max_attempts: 2
 '''
 
+# Its fixed release (THE-785): the same plugin answering every request with a body
+# Part core.ingest indexes (fake mode "body"), which the
+# operator registers and activates before reprocessing what 0.1.0 quarantined. It
+# also declares text/markdown, which the Contract Runner's normative fixture checks.
+FIXED_MANIFEST = FAULTY_MANIFEST.replace('version: 0.1.0', 'version: 0.2.0').replace(
+    'media_types: [text/x-fault, text/x-fault-optional]', 'media_types: [text/x-fault, text/x-fault-optional, text/markdown]')
+
 
 def failures(stack):
-    """Pin the controllable test plugin, observe every failure class publicly, then restore the stack's pin."""
+    """Pin the controllable test plugin, observe every failure class publicly, reprocess a
+    quarantined Version before and after activating its fixed release, then restore the stack's pin."""
     directory = stack.directory / 'faulty-plugin'
     directory.mkdir(exist_ok=True)
     binary = directory / 'quivr-fake-plugin'
@@ -287,13 +295,20 @@ def failures(stack):
            'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_path)}
     with (stack.directory / 'faulty-plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary), '-test.run=^$'], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)
+    fixed_manifest = directory / 'quivr-plugin-0.2.0.yaml'
+    fixed_manifest.write_text(FIXED_MANIFEST)
+    fixed_port = stack_port()
+    with (stack.directory / 'fixed-plugin.log').open('a') as log:
+        fixed = subprocess.Popen([str(binary), '-test.run=^$'], cwd=directory, stdout=log, stderr=log, start_new_session=True,
+                                 env={**env, 'QUIVR_FAKE_PLUGIN_MODE': 'body', 'QUIVR_PLUGIN_PORT': str(fixed_port), 'QUIVR_PLUGIN_MANIFEST': str(fixed_manifest)})
     configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
     try:
         deadline = time.monotonic() + 30
-        while probe(port, '/v0/health') != 200:
-            if plugin.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError('faulty plugin not healthy; inspect ' + str(stack.directory / 'faulty-plugin.log'))
-            time.sleep(.1)
+        for p, name, where in [(plugin, 'faulty', port), (fixed, 'fixed', fixed_port)]:
+            while probe(where, '/v0/health') != 200:
+                if p.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError(f'{name} plugin not healthy; inspect ' + str(stack.directory / f'{name}-plugin.log'))
+                time.sleep(.1)
         for name, text in configs.items():
             cfg = json.loads(text)
             cfg['plugin'] = {'manifest': str(manifest_path), 'endpoint': f'http://127.0.0.1:{port}',
@@ -304,13 +319,16 @@ def failures(stack):
         stack.stop_processes()
         stack.start_processes()
         stack.tests('TestNormalizerFailures', {'QUIVR_TEST_FAULTY_NORMALIZER': '1'})
+        stack.tests('^TestQuarantineReprocessNormalization$', {'QUIVR_TEST_FIXED_NORMALIZER_ENDPOINT': f'http://127.0.0.1:{fixed_port}',
+                                                               'QUIVR_TEST_FIXED_NORMALIZER_MANIFEST': str(fixed_manifest)})
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)
-        try:
-            os.killpg(plugin.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        for p in [plugin, fixed]:
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
         stack.stop_processes()
         stack.start_processes()
         stack.start_short_retention_api()

@@ -157,8 +157,19 @@ type invocation struct {
 // no longer routed: publication decides those. A nil error means an outcome is
 // recorded or none is needed; an error means the activity must retry.
 func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
+	return s.normalize(ctx, org, receiptID, false)
+}
+
+// Renormalize is Normalize for a Version already published quarantined, whose
+// failed outcome a quarantine reprocess moved aside: it records a new outcome
+// for it, with the normalizer the plan of ctx routes its media type to.
+func (s Service) Renormalize(ctx context.Context, org, receiptID string) error {
+	return s.normalize(ctx, org, receiptID, true)
+}
+
+func (s Service) normalize(ctx context.Context, org, receiptID string, published bool) error {
 	work, done, err := s.Content.Repository.Work(ctx, org, receiptID)
-	if err != nil || done {
+	if err != nil || (done && !published) {
 		return err
 	}
 	c := work.Command

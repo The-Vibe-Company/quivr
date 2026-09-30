@@ -23,6 +23,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	pluginregistry "github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
@@ -484,6 +485,13 @@ func Run(command string) error {
 	// below live ingestion on their own task queue.
 	pinnedIngestion := planIngestion{store: planStore, live: live}
 	backfiller := &backfill.Backfiller{Store: store, Content: contents, Plugin: deriver, Projection: projection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
+	// Quarantine reprocesses rerun normalization and processing through the
+	// plan each one is pinned to, paced like backfills on their queue. The
+	// processor is copied before the worker gives it its observer: a
+	// reprocessed Version must not count as days from acceptance to
+	// searchable.
+	reprocessor := &quarantine.Reprocessor{Store: store, Normalizer: normalizer, Publisher: contents, Processor: processor,
+		Settings: quarantine.Settings{Rate: backfillSettings.Rate, Poll: backfillSettings.Poll}}
 	// The retrieval plugin, normally core.retrieve, answers every search: it
 	// requests candidates, which search serves after authorization and
 	// hydration, and ranks them. The api refuses to start without one.
@@ -551,6 +559,8 @@ func Run(command string) error {
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
 			httpapi.WithBackfills(backfill.Service{Store: store, Plans: pinnedIngestion, Throughput: backfillThroughput{reader: observability.Reader{Store: rollups}}, Settings: backfillSettings}, backfill.Promotions{Store: store}),
+			// Operators list the Versions stuck in quarantine and reprocess them (plugins:admin).
+			httpapi.WithQuarantine(quarantine.Service{Store: store}),
 			// Operators follow documents through their steps (observability:read).
 			httpapi.WithActivity(content.Activities{Store: store}),
 			// Searches are counted, and the rollups read back (observability:read).
@@ -630,7 +640,7 @@ func Run(command string) error {
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, backfiller, workPinner)
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, backfiller, reprocessor, workPinner)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

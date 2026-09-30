@@ -24,12 +24,13 @@ func operationEvent(ctx context.Context, tx pgx.Tx, org, corpusID, id, state str
 }
 
 const operationColumns = `id,organization,kind,corpus_id,state,coalesce(previous_operation_id,''),target_generation_id,counters,errors,coalesce(result->>'projection_generation_id',''),
- (SELECT to_jsonb(b) FROM backfills b WHERE b.organization=operations.organization AND b.operation_id=operations.id)`
+ (SELECT to_jsonb(b) FROM backfills b WHERE b.organization=operations.organization AND b.operation_id=operations.id),
+ (SELECT to_jsonb(q) FROM quarantine_reprocesses q WHERE q.organization=operations.organization AND q.operation_id=operations.id)`
 
 func scanOperation(row pgx.Row) (operations.Operation, error) {
 	var op operations.Operation
-	var counters, errs, fill []byte
-	err := row.Scan(&op.ID, &op.Organization, &op.Kind, &op.CorpusID, &op.State, &op.PreviousID, &op.TargetGenerationID, &counters, &errs, &op.ResultGenerationID, &fill)
+	var counters, errs, fill, reprocess []byte
+	err := row.Scan(&op.ID, &op.Organization, &op.Kind, &op.CorpusID, &op.State, &op.PreviousID, &op.TargetGenerationID, &counters, &errs, &op.ResultGenerationID, &fill, &reprocess)
 	if err != nil {
 		return op, notFound(err)
 	}
@@ -39,6 +40,9 @@ func scanOperation(row pgx.Row) (operations.Operation, error) {
 	}
 	if err == nil {
 		op.Backfill, err = backfillOf(fill)
+	}
+	if err == nil {
+		op.Reprocess, err = reprocessOf(reprocess)
 	}
 	return op, err
 }
@@ -216,7 +220,7 @@ func (s ContentStore) CancelOperation(ctx context.Context, org, id string) (oper
 		}
 		op.State = next
 	}
-	if next == operations.StateCanceled && op.Kind == operations.KindBackfill {
+	if next == operations.StateCanceled && (op.Kind == operations.KindBackfill || op.Kind == operations.KindQuarantineReprocess) {
 		// Pinned at acceptance, it never ran a step that would release it.
 		if _, err = tx.Exec(ctx, `DELETE FROM pipeline_plan_work WHERE kind='operation' AND organization=$1 AND work_id=$2`, org, id); err != nil {
 			return operations.Operation{}, err
@@ -294,6 +298,15 @@ func (s ContentStore) AcceptRerun(ctx context.Context, org, sourceID, key string
 		spec := *source.Backfill
 		spec.PlanID, spec.Checkpoint = "", ""
 		op, err := insertBackfill(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.CorpusID, key, canonical, sourceID, spec)
+		if err != nil {
+			return op, err
+		}
+		return op, tx.Commit(ctx)
+	}
+	if source.Kind == operations.KindQuarantineReprocess && source.Reprocess != nil {
+		// A reprocess rerun takes what is still stuck in the same scope,
+		// with the plan active now.
+		op, err := insertReprocess(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), key, canonical, sourceID, reprocessFilter(source), source.Reprocess.Estimate)
 		if err != nil {
 			return op, err
 		}

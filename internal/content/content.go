@@ -800,37 +800,78 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 			return err
 		}
 	}
+	publication, err := s.objects(ctx, org, manifest)
+	if err != nil {
+		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
+		return err
+	}
+	publication.Quarantine = quarantine
+	if err = s.Repository.Publish(ctx, work, publication); err != nil {
+		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
+		return errors.New("canonical transaction unavailable")
+	}
+	return nil
+}
+
+// objects stores the immutable objects a publication of manifest references:
+// its normalized text, the Manifest and each text Part.
+func (s Service) objects(ctx context.Context, org string, manifest Manifest) (Publication, error) {
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
-		return err
+		return Publication{}, err
 	}
 	normalized, err := s.Blobs.Put(ctx, org, []byte(NormalizedText(manifest)))
 	if err != nil {
-		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
-		return errors.New("canonical text publication unavailable")
+		return Publication{}, errors.New("canonical text publication unavailable")
 	}
 	manifestBlob, err := s.Blobs.Put(ctx, org, manifestBytes)
 	if err != nil {
-		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
-		return errors.New("canonical manifest publication unavailable")
+		return Publication{}, errors.New("canonical manifest publication unavailable")
 	}
-	publication := Publication{Normalized: normalized, Manifest: manifestBlob, Quarantine: quarantine}
+	publication := Publication{Normalized: normalized, Manifest: manifestBlob}
 	for _, part := range manifest.Parts {
 		if part.Content.Kind != "text" {
 			continue
 		}
 		blob, err := s.Blobs.Put(ctx, org, []byte(part.Content.Text))
 		if err != nil {
-			_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
-			return errors.New("canonical part publication unavailable")
+			return Publication{}, errors.New("canonical part publication unavailable")
 		}
 		publication.Parts = append(publication.Parts, PartBlob{Key: part.Key, Role: part.Role, Blob: blob})
 	}
-	if err = s.Repository.Publish(ctx, work, publication); err != nil {
-		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
-		return errors.New("canonical transaction unavailable")
+	return publication, nil
+}
+
+// ErrRepublicationWithdrawn reports a Record withdrawn before a quarantined
+// Version could be published again.
+var ErrRepublicationWithdrawn = errors.New("record withdrawn")
+
+// Republication decides again what a Version published quarantined at
+// normalization publishes, from its normalization outcome recorded since:
+// the objects of the normalized (or fallback) Manifest with the Work carrying
+// its provenance and extensions, or, when normalization failed again or the
+// Version can no longer be normalized, the reason it stays quarantined. It
+// never writes the Version; it is ErrNormalizationPending while no outcome is
+// recorded and ErrRepublicationWithdrawn for a withdrawn Record.
+func (s Service) Republication(ctx context.Context, org, receiptID string) (Work, Publication, *Diagnostic, error) {
+	work, _, err := s.Repository.Work(ctx, org, receiptID)
+	if err != nil {
+		return work, Publication{}, nil, err
 	}
-	return nil
+	if work.Command.Content.Kind != "blob" {
+		return work, Publication{}, nil, fmt.Errorf("%w: the Version was not published from a Blob", ErrInvalid)
+	}
+	manifest, quarantine, err := s.routedManifest(ctx, &work)
+	switch {
+	case errors.Is(err, errWithdrawn):
+		return work, Publication{}, nil, ErrRepublicationWithdrawn
+	case err != nil:
+		return work, Publication{}, nil, err
+	case quarantine != nil:
+		return work, Publication{}, quarantine, nil
+	}
+	publication, err := s.objects(ctx, org, manifest)
+	return work, publication, nil, err
 }
 
 // Dispatch names one accepted command that still needs a durable workflow start.

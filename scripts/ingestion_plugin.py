@@ -24,9 +24,10 @@ back to 0.1.0 in one call, stopping the Record pinned to 0.2.0 and ingesting
 the next one through 0.1.0 alone. Then (THE-784) TestBackfillStarts builds a
 Corpus that predates the large space and starts a backfill of a window into
 it, paused halfway; the step restarts the worker, and TestBackfillResumes
-resumes it, checks what it filled and promotes the large space and back. The
-stack's configuration and processes are restored afterwards, even on
-failure.
+resumes it, checks what it filled and promotes the large space and back.
+Finally (THE-785) TestQuarantineReprocessIngestion reprocesses the Record
+TestRollback stopped. The stack's configuration and processes are restored
+afterwards, even on failure.
 """
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -137,6 +138,9 @@ def verify(stack):
         stack.stop_worker()
         stack.start_worker()
         stack.tests('^TestBackfillResumes$', pinned)
+        # Quarantine reprocess (THE-785): the Record TestRollback stopped is
+        # reprocessed through the plan now active and becomes searchable.
+        stack.tests('^TestQuarantineReprocessIngestion$', pinned)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

@@ -99,8 +99,11 @@ func (r *Runtime) dispatchOperation(ctx context.Context) {
 		return
 	}
 	name, queue := rebuildWorkflowName, taskQueue
-	if d.Kind == operations.KindBackfill {
+	switch d.Kind {
+	case operations.KindBackfill:
 		name, queue = backfillWorkflowName, backfillTaskQueue
+	case operations.KindQuarantineReprocess:
+		name, queue = reprocessWorkflowName, backfillTaskQueue
 	}
 	_, err = r.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: content.StableID(name, d.Organization, d.OperationID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, name, RebuildInput{Organization: d.Organization, OperationID: d.OperationID})
 	var already *serviceerror.WorkflowExecutionAlreadyStarted

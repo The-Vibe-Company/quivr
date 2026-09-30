@@ -624,6 +624,24 @@ func (e ProcessingSummaryState) Valid() bool {
 	}
 }
 
+// Defines values for QuarantinedVersionStage.
+const (
+	Ingestion     QuarantinedVersionStage = "ingestion"
+	Normalization QuarantinedVersionStage = "normalization"
+)
+
+// Valid indicates whether the value is a known member of the QuarantinedVersionStage enum.
+func (e QuarantinedVersionStage) Valid() bool {
+	switch e {
+	case Ingestion:
+		return true
+	case Normalization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReceiptOutcome.
 const (
 	Conflict          ReceiptOutcome = "conflict"
@@ -1608,8 +1626,9 @@ type DeliveryAttemptPage struct {
 //     work stopped instead of calling it, with the same outcome and fields as
 //     pinned_plugin_unavailable.
 //
-// Quarantined Versions keep their input reference and reason; reprocessing them is not available
-// yet.
+// Quarantined Versions keep their input reference and reason. An operator lists them and reprocesses
+// them with the active plan (listQuarantinedVersions, reprocessQuarantine); a reprocess that fails
+// again replaces the reason.
 type Diagnostic struct {
 	Code         string  `json:"code"`
 	Contribution *string `json:"contribution,omitempty"`
@@ -1797,7 +1816,7 @@ type NormalizationProvenance struct {
 // NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
 type NormalizationProvenanceContribution string
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
 type Operation struct {
 	// Backfill What a backfill fills and how far it got.
 	Backfill            *OperationBackfill `json:"backfill,omitempty"`
@@ -1810,6 +1829,9 @@ type Operation struct {
 
 	// Progress Approximate fraction, omitted when unknown.
 	Progress *float32 `json:"progress,omitempty"`
+
+	// QuarantineReprocess What a quarantine reprocess covers, the plan it runs with and the dry run it followed.
+	QuarantineReprocess *OperationQuarantineReprocess `json:"quarantine_reprocess,omitempty"`
 
 	// Result Logical generation activated for the requested Corpus. Opaque ID, never a physical search collection name.
 	Result *ProjectionRebuildResult `json:"result,omitempty"`
@@ -1832,6 +1854,18 @@ type OperationBackfill struct {
 	PlanId         *string  `json:"plan_id,omitempty"`
 	RegistrationId string   `json:"registration_id"`
 	Spaces         []string `json:"spaces"`
+}
+
+// OperationQuarantineReprocess What a quarantine reprocess covers, the plan it runs with and the dry run it followed.
+type OperationQuarantineReprocess struct {
+	Code     *string                     `json:"code,omitempty"`
+	Estimate QuarantineReprocessEstimate `json:"estimate"`
+
+	// PlanId The Pipeline Plan it runs with, the one active when it was accepted.
+	PlanId            string     `json:"plan_id"`
+	Plugin            *string    `json:"plugin,omitempty"`
+	QuarantinedAfter  *time.Time `json:"quarantined_after,omitempty"`
+	QuarantinedBefore *time.Time `json:"quarantined_before,omitempty"`
 }
 
 // Part defines model for Part.
@@ -2043,6 +2077,108 @@ type Provenance struct {
 	ProducerVersion *string                  `json:"producer_version,omitempty"`
 	SourceBlobIds   *[]string                `json:"source_blob_ids,omitempty"`
 }
+
+// QuarantinePage defines model for QuarantinePage.
+type QuarantinePage struct {
+	Items []QuarantinedVersion `json:"items"`
+
+	// NextPageCursor Present while more Versions may follow.
+	NextPageCursor *string `json:"next_page_cursor,omitempty"`
+}
+
+// QuarantineReprocessEstimate defines model for QuarantineReprocessEstimate.
+type QuarantineReprocessEstimate struct {
+	// Codes Of them, how many by reason code.
+	Codes map[string]int `json:"codes"`
+
+	// Stages Of them, how many failed at each step.
+	Stages struct {
+		Ingestion     int `json:"ingestion"`
+		Normalization int `json:"normalization"`
+	} `json:"stages"`
+
+	// Versions Stuck Versions in scope.
+	Versions int `json:"versions"`
+}
+
+// QuarantineReprocessRequest defines model for QuarantineReprocessRequest.
+type QuarantineReprocessRequest struct {
+	// Code Only Versions quarantined with this reason code.
+	Code     *string `json:"code,omitempty"`
+	CorpusId string  `json:"corpus_id"`
+
+	// DryRun true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded.
+	DryRun         bool   `json:"dry_run"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// Plugin Only Versions whose quarantine reason names this plugin id.
+	Plugin *string `json:"plugin,omitempty"`
+
+	// QuarantinedAfter Only Versions quarantined at or after this time.
+	QuarantinedAfter *time.Time `json:"quarantined_after,omitempty"`
+
+	// QuarantinedBefore Only Versions quarantined before this time.
+	QuarantinedBefore *time.Time `json:"quarantined_before,omitempty"`
+}
+
+// QuarantinedVersion A Record Version stuck in quarantine.
+type QuarantinedVersion struct {
+	CorpusId      string    `json:"corpus_id"`
+	QuarantinedAt time.Time `json:"quarantined_at"`
+
+	// Reason A structured processing diagnostic. plugin, contribution and invocation_id name the external
+	// invocation a normalization diagnostic concerns. Codes of external normalization:
+	//
+	// - normalizer_failed: the normalizer answered a terminal error. The Version is quarantined.
+	// - normalizer_invalid_output: the output broke the Plugin Protocol or the Manifest rules (schema,
+	//   malformed or duplicate Part, a Blob Part that is not the input Blob or has another checksum,
+	//   an undeclared extension namespace, too many Parts, a response over the size bound). Nothing
+	//   from it is published; the Version is quarantined.
+	// - normalizer_timeout: the invocations kept exceeding the timeout until the retry budget (the
+	//   manifest's retry.max_attempts, capped by the engine at 5) was spent. The Version is quarantined.
+	// - normalizer_retries_exhausted: the normalizer kept answering retryable errors until the retry
+	//   budget was spent. The Version is quarantined.
+	// - input_unverified: the input Blob was no longer the verified accepted input. The Version is
+	//   quarantined.
+	// - normalizer_unrouted: the media type's route was removed after acceptance and the built-in text
+	//   path cannot read it (a text/* Blob takes the built-in text path instead). The Version is
+	//   quarantined.
+	// - normalization_superseded: a newer revision of the Record was accepted before this Version was
+	//   normalized, so the normalizer was not invoked. The Version is quarantined and never current.
+	// - normalizer_conflict: a later invocation with the same idempotency key returned a different
+	//   output. The first recorded output is kept and published; nothing is overwritten.
+	//
+	// On an optional route every quarantining code above that comes from the normalizer is instead
+	// listed on a searchable Version published through the built-in text path. A plugin that is
+	// unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
+	// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
+	// Plan names it; the Receipt shows plugin_unavailable while it retries.
+	//
+	// - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
+	//   normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
+	//   reached, or could no longer serve it, for the deployment's attempt budget. The work is never
+	//   moved to the plugin that
+	//   replaced it: the Version is quarantined, or, when its text was already searchable, its
+	//   enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+	// - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
+	//   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
+	//   work stopped instead of calling it, with the same outcome and fields as
+	//   pinned_plugin_unavailable.
+	//
+	// Quarantined Versions keep their input reference and reason. An operator lists them and reprocesses
+	// them with the active plan (listQuarantinedVersions, reprocessQuarantine); a reprocess that fails
+	// again replaces the reason.
+	Reason    Diagnostic `json:"reason"`
+	ReceiptId string     `json:"receipt_id"`
+	RecordId  string     `json:"record_id"`
+
+	// Stage The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped.
+	Stage     QuarantinedVersionStage `json:"stage"`
+	VersionId string                  `json:"version_id"`
+}
+
+// QuarantinedVersionStage The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped.
+type QuarantinedVersionStage string
 
 // Receipt Durable acceptance outcome, not workflow state. Availability is a separate authorized live read view; omitted before a linked version exists. Infrastructure retry never resolves a Receipt as failed.
 type Receipt struct {
@@ -2713,6 +2849,17 @@ type ListPipelinePlansParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListQuarantinedVersionsParams defines parameters for ListQuarantinedVersions.
+type ListQuarantinedVersionsParams struct {
+	CorpusId          *string    `form:"corpus_id,omitempty" json:"corpus_id,omitempty"`
+	Plugin            *string    `form:"plugin,omitempty" json:"plugin,omitempty"`
+	Code              *string    `form:"code,omitempty" json:"code,omitempty"`
+	QuarantinedAfter  *time.Time `form:"quarantined_after,omitempty" json:"quarantined_after,omitempty"`
+	QuarantinedBefore *time.Time `form:"quarantined_before,omitempty" json:"quarantined_before,omitempty"`
+	PageCursor        *string    `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	Limit             *int       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetMatchStatsParams defines parameters for GetMatchStats.
 type GetMatchStatsParams struct {
 	Window *GetMatchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -2826,6 +2973,9 @@ type RegisterPluginJSONRequestBody = PluginRegistrationRequest
 
 // RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
 type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
+
+// ReprocessQuarantineJSONRequestBody defines body for ReprocessQuarantine for application/json ContentType.
+type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
 
 // PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
 type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
@@ -3268,6 +3418,23 @@ type ClientInterface interface {
 	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListQuarantinedVersions performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
+	//
+	// The Record Versions stuck in quarantine, in Version id order, with the step each failed at (normalization or ingestion), its reason and when it was quarantined. Stuck means the Version can still become current; a Version its Record no longer desires (a newer revision was accepted) or whose Record was withdrawn is not listed. A reason recorded before quarantine reasons were structured has only its code and names no plugin, and its quarantined_at is when its revision was accepted. Every filter narrows the list; plugin matches the plugin id the reason names. Requires plugins:admin; a key limited to some Corpora lists theirs only. The cursor is bound to the key's scope and filters.
+	ListQuarantinedVersions(ctx context.Context, params *ListQuarantinedVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReprocessQuarantineWithBody performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	ReprocessQuarantineWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReprocessQuarantine performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	ReprocessQuarantine(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -3518,13 +3685,13 @@ type ClientInterface interface {
 	// RerunOperationWithBody performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RerunOperation performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperation(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ResumeOperationWithBody performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
@@ -4008,6 +4175,53 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 // Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActivatePluginRequest(c.Server, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListQuarantinedVersions performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
+//
+// The Record Versions stuck in quarantine, in Version id order, with the step each failed at (normalization or ingestion), its reason and when it was quarantined. Stuck means the Version can still become current; a Version its Record no longer desires (a newer revision was accepted) or whose Record was withdrawn is not listed. A reason recorded before quarantine reasons were structured has only its code and names no plugin, and its quarantined_at is when its revision was accepted. Every filter narrows the list; plugin matches the plugin id the reason names. Requires plugins:admin; a key limited to some Corpora lists theirs only. The cursor is bound to the key's scope and filters.
+func (c *Client) ListQuarantinedVersions(ctx context.Context, params *ListQuarantinedVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListQuarantinedVersionsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReprocessQuarantineWithBody performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request,
+// with any type of body and a specified content type.
+//
+// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *Client) ReprocessQuarantineWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReprocessQuarantineRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReprocessQuarantine performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *Client) ReprocessQuarantine(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReprocessQuarantineRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4718,7 +4932,7 @@ func (c *Client) PauseOperation(ctx context.Context, operationId string, body Pa
 // RerunOperationWithBody performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 // with any type of body and a specified content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *Client) RerunOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunOperationRequestWithBody(c.Server, operationId, contentType, body)
 	if err != nil {
@@ -4734,7 +4948,7 @@ func (c *Client) RerunOperationWithBody(ctx context.Context, operationId string,
 // RerunOperation performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *Client) RerunOperation(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunOperationRequest(c.Server, operationId, body)
 	if err != nil {
@@ -5909,6 +6123,172 @@ func NewActivatePluginRequest(server string, registrationId string) (*http.Reque
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListQuarantinedVersionsRequest constructs an http.Request for the ListQuarantinedVersions method
+func NewListQuarantinedVersionsRequest(server string, params *ListQuarantinedVersionsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/quarantine")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.CorpusId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "corpus_id", *params.CorpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Plugin != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "plugin", *params.Plugin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Code != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "code", *params.Code, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.QuarantinedAfter != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "quarantined_after", *params.QuarantinedAfter, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.QuarantinedBefore != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "quarantined_before", *params.QuarantinedBefore, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PageCursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page_cursor", *params.PageCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReprocessQuarantineRequest calls the generic ReprocessQuarantine builder with application/json body
+func NewReprocessQuarantineRequest(server string, body ReprocessQuarantineJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReprocessQuarantineRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewReprocessQuarantineRequestWithBody constructs an http.Request for the ReprocessQuarantine method, with any body, and a specified content type
+func NewReprocessQuarantineRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/quarantine/reprocess")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -8980,6 +9360,27 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
 
+	// ListQuarantinedVersionsWithResponse performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
+	//
+	// The Record Versions stuck in quarantine, in Version id order, with the step each failed at (normalization or ingestion), its reason and when it was quarantined. Stuck means the Version can still become current; a Version its Record no longer desires (a newer revision was accepted) or whose Record was withdrawn is not listed. A reason recorded before quarantine reasons were structured has only its code and names no plugin, and its quarantined_at is when its revision was accepted. Every filter narrows the list; plugin matches the plugin id the reason names. Requires plugins:admin; a key limited to some Corpora lists theirs only. The cursor is bound to the key's scope and filters.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListQuarantinedVersionsWithResponse(ctx context.Context, params *ListQuarantinedVersionsParams, reqEditors ...RequestEditorFn) (*ListQuarantinedVersionsResponse, error)
+
+	// ReprocessQuarantineWithBodyWithResponse performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ReprocessQuarantineWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReprocessQuarantineResponse, error)
+
+	// ReprocessQuarantineWithResponse performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	ReprocessQuarantineWithResponse(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*ReprocessQuarantineResponse, error)
+
 	// PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -9298,7 +9699,7 @@ type ClientWithResponsesInterface interface {
 	// RerunOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	RerunOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error)
@@ -9306,7 +9707,7 @@ type ClientWithResponsesInterface interface {
 	// RerunOperationWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperationWithResponse(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error)
 
 	// ResumeOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
@@ -10216,6 +10617,116 @@ func (r ActivatePluginResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ActivatePluginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListQuarantinedVersionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *QuarantinePage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListQuarantinedVersionsResponse) GetJSON200() *QuarantinePage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListQuarantinedVersionsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListQuarantinedVersionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListQuarantinedVersionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListQuarantinedVersionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListQuarantinedVersionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ReprocessQuarantineResponse202Headers the declared response headers of an HTTP 202 response for ReprocessQuarantine
+type ReprocessQuarantineResponse202Headers struct {
+	Location string
+}
+
+type ReprocessQuarantineResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *QuarantineReprocessEstimate
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *ReprocessQuarantineResponse202Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ReprocessQuarantineResponse) GetJSON200() *QuarantineReprocessEstimate {
+	return r.JSON200
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReprocessQuarantineResponse) GetJSON202() *Operation {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ReprocessQuarantineResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ReprocessQuarantineResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReprocessQuarantineResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReprocessQuarantineResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReprocessQuarantineResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -13413,6 +13924,45 @@ func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, re
 	return ParseActivatePluginResponse(rsp)
 }
 
+// ListQuarantinedVersionsWithResponse performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
+//
+// The Record Versions stuck in quarantine, in Version id order, with the step each failed at (normalization or ingestion), its reason and when it was quarantined. Stuck means the Version can still become current; a Version its Record no longer desires (a newer revision was accepted) or whose Record was withdrawn is not listed. A reason recorded before quarantine reasons were structured has only its code and names no plugin, and its quarantined_at is when its revision was accepted. Every filter narrows the list; plugin matches the plugin id the reason names. Requires plugins:admin; a key limited to some Corpora lists theirs only. The cursor is bound to the key's scope and filters.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListQuarantinedVersionsWithResponse(ctx context.Context, params *ListQuarantinedVersionsParams, reqEditors ...RequestEditorFn) (*ListQuarantinedVersionsResponse, error) {
+	rsp, err := c.ListQuarantinedVersions(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListQuarantinedVersionsResponse(rsp)
+}
+
+// ReprocessQuarantineWithBodyWithResponse performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request,
+// with any type of body and a specified content type.
+//
+// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ReprocessQuarantineWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReprocessQuarantineResponse, error) {
+	rsp, err := c.ReprocessQuarantineWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReprocessQuarantineResponse(rsp)
+}
+
+// ReprocessQuarantineWithResponse performs a POST /v0/admin/quarantine/reprocess (the `ReprocessQuarantine` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *ClientWithResponses) ReprocessQuarantineWithResponse(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*ReprocessQuarantineResponse, error) {
+	rsp, err := c.ReprocessQuarantine(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReprocessQuarantineResponse(rsp)
+}
+
 // PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -14001,7 +14551,7 @@ func (c *ClientWithResponses) PauseOperationWithResponse(ctx context.Context, op
 // RerunOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 // with any type of body and a specified content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) RerunOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error) {
@@ -14015,7 +14565,7 @@ func (c *ClientWithResponses) RerunOperationWithBodyWithResponse(ctx context.Con
 // RerunOperationWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *ClientWithResponses) RerunOperationWithResponse(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error) {
 	rsp, err := c.RerunOperation(ctx, operationId, body, reqEditors...)
 	if err != nil {
@@ -15033,6 +15583,92 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseListQuarantinedVersionsResponse parses an HTTP response from a ListQuarantinedVersionsWithResponse call
+func ParseListQuarantinedVersionsResponse(rsp *http.Response) (*ListQuarantinedVersionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListQuarantinedVersionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest QuarantinePage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReprocessQuarantineResponse parses an HTTP response from a ReprocessQuarantineWithResponse call
+func ParseReprocessQuarantineResponse(rsp *http.Response) (*ReprocessQuarantineResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReprocessQuarantineResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest QuarantineReprocessEstimate
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers ReprocessQuarantineResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = value
+		}
+		response.Headers202 = &headers
 	}
 
 	return response, nil

@@ -233,13 +233,25 @@ func (s ContentStore) quarantine(ctx context.Context, org, id, state, code strin
 	if ready || held {
 		return tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true,quarantine=$5,quarantined_at=`+firstStep("quarantined_at")+` WHERE organization=$1 AND id=$2`, org, id, state, code, raw); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true,quarantine=$5,quarantine_stage='ingestion',quarantined_at=`+firstStep("quarantined_at")+` WHERE organization=$1 AND id=$2`, org, id, state, code, raw); err != nil {
 		return err
 	}
-	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: content.StableID("quarantine", id, code)}); err != nil {
+	if err = quarantinedEvent(ctx, tx, org, corpusID, recordID, id, code); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// quarantinedEvent announces a Version quarantined with code. A Version
+// reprocessed and quarantined again with the same code was announced
+// already: consumers reread its current state.
+func quarantinedEvent(ctx context.Context, tx pgx.Tx, org, corpusID, recordID, versionID, code string) error {
+	event := eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: content.StableID("quarantine", versionID, code)}
+	var emitted bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM change_events WHERE organization=$1 AND event_id=$2)`, org, eventID(event)).Scan(&emitted); err != nil || emitted {
+		return err
+	}
+	return appendEvent(ctx, tx, event)
 }
 func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
 	tx, err := s.Pool.Begin(ctx)

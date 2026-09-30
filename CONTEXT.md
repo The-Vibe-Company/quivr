@@ -279,7 +279,7 @@ The immutable mapping of every role of a deployment (a normalizer per media type
 _Avoid_: Live plugin registry, mutable workflow configuration
 
 **Quarantine**:
-A durable hold that withholds an accepted submission or record version from normal availability because a mandatory contribution could not safely complete.
+A durable hold that withholds an accepted submission or record version from normal availability because a mandatory contribution could not safely complete, until an operator reprocesses it with a Pipeline Plan whose plugins succeed.
 _Avoid_: Retry queue, deletion
 
 **Plugin Worker**:

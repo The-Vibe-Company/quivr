@@ -107,6 +107,15 @@ type Hydrated struct {
 	Availability                        Availability
 }
 
+// Quarantine stages: the step a quarantined Version failed at, which a
+// reprocess reruns. A Version is quarantined at normalization when it is
+// published quarantined (its normalizer failed or its route was removed), and
+// at ingestion when its baseline was refused or stopped.
+const (
+	QuarantineNormalization = "normalization"
+	QuarantineIngestion     = "ingestion"
+)
+
 type BaselineRepository interface {
 	SaveSegmentation(context.Context, string, Segmentation) error
 	BaselineProgress(context.Context, string, string, string, string, bool) error

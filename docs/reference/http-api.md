@@ -82,6 +82,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins/plans`](#get-v0adminpluginsplans) | `listPipelinePlans` | `plugins:admin` |
 | [`POST /v0/admin/backfills`](#post-v0adminbackfills) | `requestBackfill` | `plugins:admin` |
 | [`POST /v0/admin/spaces/{vector_space_id}/promote`](#post-v0adminspacesvector_space_idpromote) | `promoteVectorSpace` | `plugins:admin` |
+| [`GET /v0/admin/quarantine`](#get-v0adminquarantine) | `listQuarantinedVersions` | `plugins:admin` |
+| [`POST /v0/admin/quarantine/reprocess`](#post-v0adminquarantinereprocess) | `reprocessQuarantine` | `plugins:admin` |
 | [`POST /v0/admin/plugins/plan/rollback`](#post-v0adminpluginsplanrollback) | `rollbackPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/active-plugins`](#get-v0adminactive-plugins) | `listActivePlugins` | `observability:read` |
@@ -346,7 +348,7 @@ Idempotent cancellation request; does not undo committed effects. Terminal opera
 
 Operation `rerunOperation`. Requires `operations:write`.
 
-Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A quarantine_reprocess rerun takes the Versions still stuck in its source's scope, with the plan active now and its source's dry run as estimate; while another reprocess of its Corpus has not finished it is 409 reprocess_in_progress. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 
 **Parameters**
 
@@ -1319,6 +1321,47 @@ Make a registered evaluation space the one search uses, in one call, for the who
 | `200` | `application/json` [`VectorSpacePromotion`](#vectorspacepromotion) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown space, 409 coverage_incomplete, 422 invalid_schema or not_evaluation_space (a retired space), 503 storage unavailable. |
 
+#### `GET /v0/admin/quarantine`
+
+Operation `listQuarantinedVersions`. Requires `plugins:admin`.
+
+The Record Versions stuck in quarantine, in Version id order, with the step each failed at (normalization or ingestion), its reason and when it was quarantined. Stuck means the Version can still become current; a Version its Record no longer desires (a newer revision was accepted) or whose Record was withdrawn is not listed. A reason recorded before quarantine reasons were structured has only its code and names no plugin, and its quarantined_at is when its revision was accepted. Every filter narrows the list; plugin matches the plugin id the reason names. Requires plugins:admin; a key limited to some Corpora lists theirs only. The cursor is bound to the key's scope and filters.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | query | string |  | Minimum length `1`. |
+| `plugin` | query | string |  | Minimum length `1`. |
+| `code` | query | string |  | Minimum length `1`. |
+| `quarantined_after` | query | string (date-time) |  |  |
+| `quarantined_before` | query | string (date-time) |  |  |
+| `page_cursor` | query | string |  | Minimum length `1`. |
+| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`QuarantinePage`](#quarantinepage) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 a corpus_id outside the key's Corpora, 409 cursor_scope_changed, 422 invalid query, limit, cursor or window, 503 storage unavailable. |
+
+#### `POST /v0/admin/quarantine/reprocess`
+
+Operation `reprocessQuarantine`. Requires `plugins:admin`.
+
+Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+
+**Request body** (required): `application/json` [`QuarantineReprocessRequest`](#quarantinereprocessrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`QuarantineReprocessEstimate`](#quarantinereprocessestimate) | The dry run's count, recorded under the key. |
+| `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string. | The accepted reprocess Operation; read it at the Location. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown Corpus, 409 dry_run_required, idempotency_conflict or reprocess_in_progress, 422 invalid_schema or invalid_reprocess (an empty window), 503 storage unavailable. |
+
 #### `POST /v0/admin/plugins/plan/rollback`
 
 Operation `rollbackPipelinePlan`. Requires `plugins:admin`.
@@ -1689,8 +1732,9 @@ Plan names it; the Receipt shows plugin_unavailable while it retries.
   work stopped instead of calling it, with the same outcome and fields as
   pinned_plugin_unavailable.
 
-Quarantined Versions keep their input reference and reason; reprocessing them is not available
-yet.
+Quarantined Versions keep their input reference and reason. An operator lists them and reprocesses
+them with the active plan (listQuarantinedVersions, reprocessQuarantine); a reprocess that fails
+again replaces the reason.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1749,8 +1793,9 @@ description: |-
     work stopped instead of calling it, with the same outcome and fields as
     pinned_plugin_unavailable.
 
-  Quarantined Versions keep their input reference and reason; reprocessing them is not available
-  yet.
+  Quarantined Versions keep their input reference and reason. An operator lists them and reprocesses
+  them with the active plan (listQuarantinedVersions, reprocessQuarantine); a reprocess that fails
+  again replaces the reason.
 properties:
   code:
     type: string
@@ -3479,7 +3524,7 @@ required:
 
 ### `Operation`
 
-Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
+Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -3493,6 +3538,7 @@ Administrative execution only. Retries keep identity. Intentional terminal rerun
 | `corpus_id` | string |  | Minimum length `1`. |
 | `result` | [`ProjectionRebuildResult`](#projectionrebuildresult) |  |  |
 | `backfill` | [`OperationBackfill`](#operationbackfill) |  |  |
+| `quarantine_reprocess` | [`OperationQuarantineReprocess`](#operationquarantinereprocess) |  |  |
 
 Further rules (conditional requirements or combinations) are in the full schema below.
 
@@ -3590,13 +3636,15 @@ properties:
     $ref: '#/components/schemas/ProjectionRebuildResult'
   backfill:
     $ref: '#/components/schemas/OperationBackfill'
+  quarantine_reprocess:
+    $ref: '#/components/schemas/OperationQuarantineReprocess'
 required:
   - operation_id
   - kind
   - state
   - counters
   - errors
-description: Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
+description: Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. A quarantine_reprocess carries corpus_id and quarantine_reprocess, and its counters versions_in_scope, versions_recovered, versions_quarantined and versions_skipped (with skipped_<reason>); it has no result. Only a backfill and a quarantine_reprocess can be paused.
 if:
   properties:
     kind:
@@ -4588,6 +4636,239 @@ properties:
 required:
   - registration_id
   - spaces
+  - estimate
+```
+
+</details>
+
+### `QuarantinedVersion`
+
+A Record Version stuck in quarantine.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `version_id` | string | yes | Minimum length `1`. |
+| `record_id` | string | yes | Minimum length `1`. |
+| `corpus_id` | string | yes | Minimum length `1`. |
+| `receipt_id` | string | yes | Minimum length `1`. |
+| `stage` | string | yes | The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped. One of `normalization`, `ingestion`. |
+| `reason` | [`Diagnostic`](#diagnostic) | yes |  |
+| `quarantined_at` | string (date-time) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: A Record Version stuck in quarantine.
+properties:
+  version_id:
+    type: string
+    minLength: 1
+  record_id:
+    type: string
+    minLength: 1
+  corpus_id:
+    type: string
+    minLength: 1
+  receipt_id:
+    type: string
+    minLength: 1
+  stage:
+    type: string
+    enum:
+      - normalization
+      - ingestion
+    description: The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped.
+  reason:
+    $ref: '#/components/schemas/Diagnostic'
+  quarantined_at:
+    type: string
+    format: date-time
+required:
+  - version_id
+  - record_id
+  - corpus_id
+  - receipt_id
+  - stage
+  - reason
+  - quarantined_at
+```
+
+</details>
+
+### `QuarantinePage`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`QuarantinedVersion`](#quarantinedversion) | yes |  |
+| `next_page_cursor` | string |  | Present while more Versions may follow. Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/QuarantinedVersion'
+  next_page_cursor:
+    type: string
+    minLength: 1
+    description: Present while more Versions may follow.
+required:
+  - items
+```
+
+</details>
+
+### `QuarantineReprocessRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idempotency_key` | string | yes | Minimum length `1`. Maximum length `200`. |
+| `corpus_id` | string | yes | Minimum length `1`. |
+| `plugin` | string |  | Only Versions whose quarantine reason names this plugin id. Minimum length `1`. |
+| `code` | string |  | Only Versions quarantined with this reason code. Minimum length `1`. |
+| `quarantined_after` | string (date-time) |  | Only Versions quarantined at or after this time. |
+| `quarantined_before` | string (date-time) |  | Only Versions quarantined before this time. |
+| `dry_run` | boolean | yes | true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+    maxLength: 200
+  corpus_id:
+    type: string
+    minLength: 1
+  plugin:
+    type: string
+    minLength: 1
+    description: Only Versions whose quarantine reason names this plugin id.
+  code:
+    type: string
+    minLength: 1
+    description: Only Versions quarantined with this reason code.
+  quarantined_after:
+    type: string
+    format: date-time
+    description: Only Versions quarantined at or after this time.
+  quarantined_before:
+    type: string
+    format: date-time
+    description: Only Versions quarantined before this time.
+  dry_run:
+    type: boolean
+    description: true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded.
+required:
+  - idempotency_key
+  - corpus_id
+  - dry_run
+```
+
+</details>
+
+### `QuarantineReprocessEstimate`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `versions` | integer | yes | Stuck Versions in scope. Minimum `0`. |
+| `stages` | object | yes | Of them, how many failed at each step. |
+| `stages.normalization` | integer | yes | Minimum `0`. |
+| `stages.ingestion` | integer | yes | Minimum `0`. |
+| `codes` | map of integer | yes | Of them, how many by reason code. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  versions:
+    type: integer
+    minimum: 0
+    description: Stuck Versions in scope.
+  stages:
+    type: object
+    description: Of them, how many failed at each step.
+    properties:
+      normalization:
+        type: integer
+        minimum: 0
+      ingestion:
+        type: integer
+        minimum: 0
+    required:
+      - normalization
+      - ingestion
+    additionalProperties: false
+  codes:
+    type: object
+    description: Of them, how many by reason code.
+    additionalProperties:
+      type: integer
+      minimum: 0
+required:
+  - versions
+  - stages
+  - codes
+```
+
+</details>
+
+### `OperationQuarantineReprocess`
+
+What a quarantine reprocess covers, the plan it runs with and the dry run it followed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin` | string |  | Minimum length `1`. |
+| `code` | string |  | Minimum length `1`. |
+| `quarantined_after` | string (date-time) |  |  |
+| `quarantined_before` | string (date-time) |  |  |
+| `plan_id` | string | yes | The Pipeline Plan it runs with, the one active when it was accepted. Minimum length `1`. |
+| `estimate` | [`QuarantineReprocessEstimate`](#quarantinereprocessestimate) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: What a quarantine reprocess covers, the plan it runs with and the dry run it followed.
+properties:
+  plugin:
+    type: string
+    minLength: 1
+  code:
+    type: string
+    minLength: 1
+  quarantined_after:
+    type: string
+    format: date-time
+  quarantined_before:
+    type: string
+    format: date-time
+  plan_id:
+    type: string
+    minLength: 1
+    description: The Pipeline Plan it runs with, the one active when it was accepted.
+  estimate:
+    $ref: '#/components/schemas/QuarantineReprocessEstimate'
+required:
+  - plan_id
   - estimate
 ```
 

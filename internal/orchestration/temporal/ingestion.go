@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -139,11 +140,12 @@ type Runtime struct {
 }
 
 // Start runs the worker. A non-nil conns also schedules Connector Instance
-// acquisition runs on their own task queue, and a non-nil backfiller serves
-// backfills on theirs. pins pins the processing of each receipt, each
-// Operation and each connector run to the plan it started on; nil leaves
-// them on the active plan.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, pins Pinner) (*Runtime, error) {
+// acquisition runs on their own task queue, and a non-nil backfiller or
+// reprocessor serves backfills or quarantine reprocesses on the background
+// queue. pins pins the processing of each receipt, each Operation and each
+// connector run to the plan it started on; nil leaves them on the active
+// plan.
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner) (*Runtime, error) {
 	if pins == nil {
 		pins = unpinned{}
 	}
@@ -207,9 +209,14 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		}
 	}
 	var bw worker.Worker
-	if backfiller != nil {
+	if backfiller != nil || reprocessor != nil {
 		bw = worker.New(c, backfillTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
-		registerBackfill(bw, *backfiller, pins)
+		if backfiller != nil {
+			registerBackfill(bw, *backfiller, pins)
+		}
+		if reprocessor != nil {
+			registerReprocess(bw, *reprocessor, pins)
+		}
 		if err = bw.Start(); err != nil {
 			if cw != nil {
 				cw.Stop()

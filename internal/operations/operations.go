@@ -26,6 +26,11 @@ const KindRetrievalConfiguration = "retrieval_configuration"
 // ingestion (Spec 5). It never creates a Record Version.
 const KindBackfill = "backfill"
 
+// KindQuarantineReprocess reruns, with the Pipeline Plan active when it is
+// accepted, the step a Corpus's quarantined Versions failed at, and carries
+// the ones that succeed through the normal publication path (Spec 5).
+const KindQuarantineReprocess = "quarantine_reprocess"
+
 // Operation states follow the public contract.
 const (
 	StateQueued    = "queued"
@@ -71,14 +76,15 @@ var (
 // commandPermissions names, per controllable Operation kind, the permission of
 // the command that created it. Rerun revalidates it. Register a kind only once
 // its worker honors cancel_requested and the store can create its rerun target.
-var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write", KindBackfill: BackfillPermission}
+var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write", KindBackfill: BackfillPermission, KindQuarantineReprocess: BackfillPermission}
 
 // BackfillPermission is the operator permission that starts, pauses and
-// resumes backfills: the plugin registry's plugins:admin.
+// resumes backfills and quarantine reprocessing: the plugin registry's
+// plugins:admin.
 const BackfillPermission = "plugins:admin"
 
 // pausable lists the kinds whose worker honors paused.
-var pausable = map[string]bool{KindBackfill: true}
+var pausable = map[string]bool{KindBackfill: true, KindQuarantineReprocess: true}
 
 // Error is a bounded, terminal diagnostic recorded on the Operation.
 type Error struct {
@@ -101,6 +107,36 @@ type Operation struct {
 	ResultGenerationID string
 	// Backfill describes a backfill Operation; nil for other kinds.
 	Backfill *Backfill
+	// Reprocess describes a quarantine reprocess; nil for other kinds.
+	Reprocess *Reprocess
+}
+
+// Reprocess is what a quarantine reprocess covers: the Versions of the
+// Operation's Corpus quarantined when it was accepted, kept by these filters.
+type Reprocess struct {
+	// Plugin and Code, when set, keep the Versions whose quarantine reason
+	// names that plugin id or has that code.
+	Plugin string `json:"plugin,omitempty"`
+	Code   string `json:"code,omitempty"`
+	// QuarantinedAfter and QuarantinedBefore bound, when set, when the
+	// Versions were quarantined: after inclusive, before exclusive.
+	QuarantinedAfter  *time.Time `json:"quarantined_after,omitempty"`
+	QuarantinedBefore *time.Time `json:"quarantined_before,omitempty"`
+	// PlanID is the Pipeline Plan it runs with: the one active when it was
+	// accepted.
+	PlanID string `json:"plan_id,omitempty"`
+	// Estimate is the dry run it was accepted after.
+	Estimate ReprocessEstimate `json:"estimate"`
+}
+
+// ReprocessEstimate is what a quarantine reprocess dry run counts: the
+// Versions in scope, by the step they failed at and by reason code.
+type ReprocessEstimate struct {
+	Versions int64 `json:"versions"`
+	// Stages counts them by the step they failed at: normalization or
+	// ingestion.
+	Stages map[string]int64 `json:"stages"`
+	Codes  map[string]int64 `json:"codes"`
 }
 
 // Backfill is what a backfill Operation fills and how far it got.

@@ -31,6 +31,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
@@ -85,6 +86,10 @@ type API struct {
 	Promotions      *backfill.Promotions
 	backfillSchema  *jsonschema.Schema
 	promotionSchema *jsonschema.Schema
+	// Quarantine serves the quarantine listing and reprocess command; nil
+	// answers 404.
+	Quarantine      *quarantine.Service
+	reprocessSchema *jsonschema.Schema
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -156,7 +161,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	reprocessSchema, err := compiler.Compile(contracts.HTTPSchema("QuarantineReprocessRequest"))
+	if err != nil {
+		return nil, err
+	}
+	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, reprocessSchema: reprocessSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}
@@ -259,6 +268,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.backfillRoutes(w, r, scope) {
+		return
+	}
+	if a.quarantineRoutes(w, r, scope) {
 		return
 	}
 	if a.adminDocumentRoutes(w, r, scope) {
@@ -385,6 +397,8 @@ const (
 	subscriptionPageDomain = "subscription-page"
 	// documentPageDomain signs the admin list of latest documents.
 	documentPageDomain = "document-page"
+	// quarantinePageDomain signs the admin list of quarantined Versions.
+	quarantinePageDomain = "quarantine-page"
 )
 
 // signCursor is the only signer for CursorKey tokens; the domain is required.
