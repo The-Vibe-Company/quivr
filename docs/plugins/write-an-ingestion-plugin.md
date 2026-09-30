@@ -97,7 +97,8 @@ Add it to `plugins` in the `QUIVR_CONFIG` file of every `api`, `worker` and
 
 ## Move a Corpus onto the plugin
 
-Each Corpus keeps the spaces it was built with. A Corpus created before the
+Each Corpus keeps the spaces it was built with. A Corpus created after the
+pin starts on the plugin's spaces. A Corpus created before the
 pin stays on its current space, searchable as before, until you rebuild it
 (`POST /v0/corpora/{corpus_id}/rebuilds`, see the
 [HTTP API reference](../reference/http-api.md)). The rebuild asks the plugin for every Version that has no stored vectors in the

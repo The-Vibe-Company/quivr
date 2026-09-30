@@ -11,11 +11,13 @@ import (
 // that can never be routed again. A route only switches to the target of a
 // running Operation, a terminal Operation never runs again (a rerun is a new
 // Operation with a new generation), and routes are never deleted, so a
-// routed Corpus never falls back to the default generation.
+// routed Corpus never falls back to the default generation, nor to a former
+// default (default_until set): a Corpus served by one when the default moved
+// was routed to it, and a Corpus created later never followed it.
 var abandonedGenerationsSQL = `SELECT o.organization,o.corpus_id,o.target_generation_id FROM operations o
 WHERE o.state IN ('succeeded','failed','canceled') AND o.target_generation_id<>` + routedGenerationSQL("o.organization", "o.corpus_id") + `
 UNION
-SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN projection_generations dg ON dg.active WHERE cr.generation_id<>dg.id`
+SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN projection_generations dg ON dg.active OR dg.default_until IS NOT NULL WHERE cr.generation_id<>dg.id`
 
 // deadVersionSQL is true for a Version aliased v of Record r that can never be
 // served again: its Record is withdrawn or tombstoned (absorbing fences), or it
@@ -84,10 +86,11 @@ RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id`, grace
 	for i := range items {
 		it := &items[i]
 		// A generation lives in its own collection; a Version may have objects
-		// in any collection its Organization's generations or the default use.
+		// in any collection its Organization's generations or the current or
+		// former defaults use.
 		query, args := `SELECT collection FROM projection_generations WHERE id=$1`, []any{it.GenerationID}
 		if it.Kind == retrieval.PurgeVersion {
-			query, args = `SELECT DISTINCT collection FROM projection_generations WHERE active OR organization=$1 ORDER BY collection`, []any{it.Organization}
+			query, args = `SELECT DISTINCT collection FROM projection_generations WHERE active OR default_until IS NOT NULL OR organization=$1 ORDER BY collection`, []any{it.Organization}
 		}
 		cols, err := s.Pool.Query(ctx, query, args...)
 		if err != nil {

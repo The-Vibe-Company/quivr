@@ -68,10 +68,10 @@ port 8080) to rebuild a Corpus projection or to read the plugin registry (`GET /
 
 api and worker run the core.ingest plugin (`127.0.0.1:9950`, `CONNECTORS` in
 `core-entrypoint.py`), which segments and embeds with TEI. After the first deploy with it,
-rebuild each Corpus once with the operator key: `POST /v0/corpora/{corpus_id}/rebuilds`
-with an `idempotency_key`, then poll the Operation. Until then search keeps working in
-every mode and new articles are searchable by keyword at once; their vectors attach at the
-rebuild, which re-embeds with the same model, so results do not change.
+rebuild each earlier Corpus once with the operator key (later ones start on core.ingest):
+`POST /v0/corpora/{corpus_id}/rebuilds` with an `idempotency_key`, then poll the Operation.
+Until then search works in every mode and new articles are searchable by keyword at once;
+their vectors attach at the rebuild, which re-embeds with the same model, so results hold.
 
 ## Connectors in the web app (optional) {#connectors-in-the-web-app-optional}
 

@@ -349,9 +349,12 @@ func Run(command string) error {
 	}
 	// The registry records each space's owner and this deployment's roles; a
 	// space claimed by another owner, or changed under the same version,
-	// refuses startup.
+	// refuses startup. New Corpora then start on the registered spaces.
 	register, cancel := context.WithTimeout(ctx, 5*time.Second)
 	err = store.RegisterSpaces(register, DeploymentSpaces(pins))
+	if err == nil {
+		err = alignDefaultGeneration(register, store)
+	}
 	cancel()
 	if err != nil {
 		return fmt.Errorf("vector space registry: %w", err)

@@ -7,7 +7,8 @@ words in two vector spaces) in place of core.ingest, a deployment pins one
 ingestion plugin, with its small space served and its large space for
 evaluation, restarts the API and the worker on that pin, and runs
 TestIngestionPlugin through the public API: the Corpus keeps core.ingest's
-space until it is rebuilt, the rebuild moves it to the plugin's named spaces,
+space until it is rebuilt, a Corpus created after the swap starts on the
+plugin's spaces, the rebuild moves the first one to the plugin's named spaces,
 and search then encodes queries with the plugin. The stack's configuration
 and processes are restored afterwards, even on failure.
 """

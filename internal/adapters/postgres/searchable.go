@@ -14,12 +14,79 @@ import (
 // BootstrapGeneration creates the default generation of a fresh install with
 // the registry's served and evaluation spaces (spaceID alone when nothing is
 // registered). It is source-namespace and space projected. An install that
-// already has an active default keeps it as recorded.
+// already has an active default keeps it; AlignDefaultGeneration moves it
+// onto the registry's spaces.
 func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
 	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
 SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
+}
+
+// DefaultMove reports a default generation AlignDefaultGeneration replaced:
+// Pinned Corpora were routed to Previous so it keeps serving them, and
+// Corpora created afterwards follow Current. Current is empty when nothing
+// moved.
+type DefaultMove struct {
+	Previous, Current string
+	Pinned            int64
+}
+
+// AlignDefaultGeneration makes Corpora created from now on start on the
+// registry's served and evaluation spaces. When the default generation, which
+// a Corpus without a route follows, carries other spaces (the legacy E5 one
+// after the move to an ingestion plugin, or a plugin's former spaces), every
+// Corpus without a route is first routed to it, so it keeps its results until
+// it is rebuilt. That default is then marked former, and a new default in the
+// same collection and profile, carrying the registry's spaces, takes over.
+// No existing Corpus changes generation, so in-flight work keeps the one it
+// read. A default that already matches, or a database with no default or no
+// served space yet, is left as it is. It runs after RegisterSpaces, in
+// migrate and at api and worker startup.
+func (s ContentStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
+	var move DefaultMove
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return move, err
+	}
+	defer tx.Rollback(ctx)
+	// Concurrent api, worker and migrate startups register and align in turn.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
+		return move, err
+	}
+	// A default built before named spaces carries its one space.
+	var matches bool
+	err = tx.QueryRow(ctx, `SELECT d.id,d.space_id=`+servedSpaceSQL+` AND
+ (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
+ =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))
+FROM projection_generations d WHERE d.active AND `+servedSpaceSQL+` IS NOT NULL`).Scan(&move.Previous, &matches)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
+		return DefaultMove{}, nil
+	}
+	if err != nil {
+		return DefaultMove{}, err
+	}
+	// Corpus creation waits for the switch: a Corpus committed before it is
+	// routed to the previous default, one created after follows the new one.
+	if _, err = tx.Exec(ctx, `LOCK TABLE corpora IN SHARE MODE`); err != nil {
+		return move, err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id)
+SELECT c.organization,c.id,$1 FROM corpora c WHERE NOT EXISTS(SELECT 1 FROM corpus_projection_routes cr WHERE cr.organization=c.organization AND cr.corpus_id=c.id)`, move.Previous)
+	if err != nil {
+		return move, err
+	}
+	move.Pinned = tag.RowsAffected()
+	var collection, profile string
+	if err = tx.QueryRow(ctx, `UPDATE projection_generations SET active=false,default_until=now() WHERE id=$1 RETURNING collection,profile_version`, move.Previous).Scan(&collection, &profile); err != nil {
+		return move, err
+	}
+	move.Current = content.StableID("generation", collection, profile, move.Previous)
+	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
+SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true`, move.Current, collection, profile); err != nil {
+		return move, err
+	}
+	return move, tx.Commit(ctx)
 }
 
 // Generation returns the logical generation PostgreSQL routes the Corpus to.
