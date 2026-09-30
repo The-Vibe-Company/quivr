@@ -1,0 +1,73 @@
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_2ffc0b2365829c 74-75,1097-1124,3177-3420,3422
+  s_54b80c92daa9cb::t_5cdcd4da62546b 3421,3423
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_2ffc0b2365829c 357-386,584-588,594,596,598,600,602,1232-1277,2028-2033,2200-2227,3900-3901,3908-3983,6079-6084,6281-6327
+  s_54b80c92daa9cb::t_e962959e168ba0 6328
+internal/app/run.go
+  s_54b80c92daa9cb::t_18576230a07a4b 332-334
+  s_54b80c92daa9cb::t_5ed800a0eb2688 23,331
+  s_54b80c92daa9cb::t_b2f7b8dc5d8842 382-383
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_43e4e50f360d23 111-112,116-117
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_43e4e50f360d23 37-42
+client/client.gen.go
+  s_54b80c92daa9cb::t_2ffc0b2365829c 357-386,584-588,594,596,598,600,602,1232-1277,2099-2108,2552-2581,3804-3857,6270-6283,6831-6926,9395-9420,10435-10499
+  s_54b80c92daa9cb::t_9ede67325944ff 10500
+scripts/local.py
+  s_54b80c92daa9cb::t_ed59d5c7d0d1c4 74,109-110,265,506-507
+CONTEXT.md
+  s_54b80c92daa9cb::t_9bb4fd652d4f6a 222,225-228,250-251,254
+contracts/http/v0/checks/roundtrip.cjs
+  s_54b80c92daa9cb::t_844ff8129d2295 20-22,24-30
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_9bb4fd652d4f6a 60-62
+internal/adapters/postgres/plugins_test.go
+  s_54b80c92daa9cb::t_71fd23e648125e 1-98
+internal/transport/httpapi/plugins_test.go
+  s_54b80c92daa9cb::t_296217144e5cc2 1-97
+tests/acceptance/plugin_registry_test.go
+  s_54b80c92daa9cb::t_f191e4f07b3110 1-51
+internal/plugins/registry/registry_test.go
+  s_54b80c92daa9cb::t_fd7b712baf489a 1-52
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_5fc32b8be28f4f 1705-1750,2518-2632
+migrations/20260930T1016Z_plugin_registry.sql
+  s_54b80c92daa9cb::t_14dba24eda2c32 1-42
+internal/transport/httpapi/plugins.go
+  s_54b80c92daa9cb::t_d1fc9d1df9e2dd 1-77
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_e365cd164401c5 67-68
+  s_54b80c92daa9cb::t_13b61cd04774a8 30,212
+  s_54b80c92daa9cb::t_5cd3c1b25af2da 213-214
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_5fc32b8be28f4f 1150-1213
+internal/adapters/postgres/plugins.go
+  s_54b80c92daa9cb::t_c76cbc2301d36c 1-95
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_70fcc6fbd547ab 82-83,93-95,122-135,174-177,231,234
+  s_54b80c92daa9cb::t_f3134b8d0dc29c 1-81,84-92,96-121,136-173,178-230,232-233,235-240
+README.md
+  s_54b80c92daa9cb::t_9bb4fd652d4f6a 180-184
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_3bb7f9c5d1e61c 79-82
+internal/app/plugins.go
+  s_54b80c92daa9cb::t_997c5011e6cbaf 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a993b9b4510ecf2a0b20972cccd7fe680eb4db68",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
