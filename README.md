@@ -198,12 +198,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
   disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
   the new version. Quivr never starts a plugin process.
-- **Plugin and search counters**: each process counts every plugin call, search and
-  processing step with its errors and latency, and writes the counts to PostgreSQL every
-  few seconds (`observability.flush_interval`, default 5 s, the most a crash can lose).
-  A key with `observability:read` reads its Organization's last hour, day or week, with
-  p50 and p95, from `GET /v0/admin/stats/plugins`, `searches`, `steps` and `top-queries`;
-  nothing is kept beyond 7 days. Top queries need `observability.record_query_text`, off
+- **Plugin and search counters**: each process counts every plugin call, search,
+  processing step, document received (per source namespace) and Match, with errors and
+  latency, and writes the counts to PostgreSQL every few seconds
+  (`observability.flush_interval`, default 5 s, the most a crash can lose). A key with
+  `observability:read` reads its Organization's last hour, day or week from
+  `GET /v0/admin/stats/plugins`, `searches`, `steps`, `received`, `matches` and
+  `top-queries`; nothing is kept beyond 7 days. Top queries need `observability.record_query_text`, off
   by default because it stores query text. The same counters are on `/metrics`.
 - **External normalizer**: the startup configuration pins one plugin and routes Blob
   media types to its normalizer. A Blob of a routed type, ingested by reference,

@@ -97,7 +97,7 @@ func (f *family) write(w io.Writer) {
 // metrics are the Prometheus metrics a Recorder keeps beside its rollups.
 // They are per process and reset at restart, like every /metrics value.
 type metrics struct {
-	pluginCalls, pluginDurations, searches, searchDurations *family
+	pluginCalls, pluginDurations, searches, searchDurations, matches *family
 }
 
 func newMetrics() *metrics {
@@ -106,6 +106,7 @@ func newMetrics() *metrics {
 		pluginDurations: newFamily("quivr_plugin_call_duration_seconds", "Duration of plugin Contribution invocations.", true, "plugin", "operation"),
 		searches:        newFamily("quivr_searches_total", "Public searches by mode, profile and outcome.", false, "mode", "profile", "outcome"),
 		searchDurations: newFamily("quivr_search_duration_seconds", "Duration of public searches.", true, "mode", "profile"),
+		matches:         newFamily("quivr_matches_created_total", "Matches committed by alerts, by evaluator plugin.", false, "evaluator"),
 	}
 }
 
@@ -128,11 +129,16 @@ func (m *metrics) search(s Search) {
 	m.searchDurations.observe(ms, s.Mode, s.Profile)
 }
 
+func (m *metrics) match(evaluator string) {
+	m.matches.observe(0, evaluator)
+}
+
 func (m *metrics) write(w io.Writer) {
 	m.pluginCalls.write(w)
 	m.pluginDurations.write(w)
 	m.searches.write(w)
 	m.searchDurations.write(w)
+	m.matches.write(w)
 }
 
 func writeCounter(w io.Writer, name, help string, value int64) {

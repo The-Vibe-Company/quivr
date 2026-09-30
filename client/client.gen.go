@@ -960,6 +960,27 @@ func (e WebhookEventType) Valid() bool {
 	}
 }
 
+// Defines values for GetMatchStatsParamsWindow.
+const (
+	GetMatchStatsParamsWindowN1h  GetMatchStatsParamsWindow = "1h"
+	GetMatchStatsParamsWindowN24h GetMatchStatsParamsWindow = "24h"
+	GetMatchStatsParamsWindowN7d  GetMatchStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetMatchStatsParamsWindow enum.
+func (e GetMatchStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetMatchStatsParamsWindowN1h:
+		return true
+	case GetMatchStatsParamsWindowN24h:
+		return true
+	case GetMatchStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPluginCallStatsParamsWindow.
 const (
 	GetPluginCallStatsParamsWindowN1h  GetPluginCallStatsParamsWindow = "1h"
@@ -975,6 +996,27 @@ func (e GetPluginCallStatsParamsWindow) Valid() bool {
 	case GetPluginCallStatsParamsWindowN24h:
 		return true
 	case GetPluginCallStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetReceivedStatsParamsWindow.
+const (
+	GetReceivedStatsParamsWindowN1h  GetReceivedStatsParamsWindow = "1h"
+	GetReceivedStatsParamsWindowN24h GetReceivedStatsParamsWindow = "24h"
+	GetReceivedStatsParamsWindowN7d  GetReceivedStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetReceivedStatsParamsWindow enum.
+func (e GetReceivedStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetReceivedStatsParamsWindowN1h:
+		return true
+	case GetReceivedStatsParamsWindowN24h:
+		return true
+	case GetReceivedStatsParamsWindowN7d:
 		return true
 	default:
 		return false
@@ -1374,6 +1416,12 @@ type CorpusRequest struct {
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
 }
 
+// CountPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+type CountPoint struct {
+	Count int       `json:"count"`
+	Start time.Time `json:"start"`
+}
+
 // CredentialDeposit defines model for CredentialDeposit.
 type CredentialDeposit struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
@@ -1610,6 +1658,31 @@ type MatchEvidence struct {
 type MatchPage struct {
 	Items          []Match `json:"items"`
 	NextPageCursor *string `json:"next_page_cursor,omitempty"`
+}
+
+// MatchStats defines model for MatchStats.
+type MatchStats struct {
+	Count int `json:"count"`
+
+	// Evaluator Plugin id of the evaluator of the Subscriptions that matched.
+	Evaluator string `json:"evaluator"`
+
+	// Points Non-empty buckets, oldest first.
+	Points []CountPoint `json:"points"`
+}
+
+// MatchStatsList defines model for MatchStatsList.
+type MatchStatsList struct {
+	From time.Time `json:"from"`
+
+	// Items Most Matches first.
+	Items             []MatchStats `json:"items"`
+	ResolutionSeconds int          `json:"resolution_seconds"`
+	To                time.Time    `json:"to"`
+
+	// Total Matches of every evaluator.
+	Total  int             `json:"total"`
+	Window StatsWindowName `json:"window"`
 }
 
 // MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
@@ -1898,6 +1971,32 @@ type ReceiptOutcome string
 
 // ReceiptState defines model for Receipt.State.
 type ReceiptState string
+
+// ReceivedStats defines model for ReceivedStats.
+type ReceivedStats struct {
+	Count int `json:"count"`
+
+	// Points Non-empty buckets, oldest first.
+	Points          []CountPoint `json:"points"`
+	SourceNamespace string       `json:"source_namespace"`
+}
+
+// ReceivedStatsList defines model for ReceivedStatsList.
+type ReceivedStatsList struct {
+	From time.Time `json:"from"`
+
+	// Items Most documents first.
+	Items             []ReceivedStats `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+
+	// Sources Source namespaces that received at least one document, listed or not.
+	Sources int       `json:"sources"`
+	To      time.Time `json:"to"`
+
+	// Total Documents received from every source namespace, listed or not.
+	Total  int             `json:"total"`
+	Window StatsWindowName `json:"window"`
+}
 
 // Record defines model for Record.
 type Record struct {
@@ -2325,8 +2424,11 @@ type TimelineStepStep string
 
 // TopQuery defines model for TopQuery.
 type TopQuery struct {
-	Count int    `json:"count"`
-	Query string `json:"query"`
+	Count int `json:"count"`
+
+	// Points Non-empty hourly buckets, oldest first.
+	Points []CountPoint `json:"points"`
+	Query  string       `json:"query"`
 }
 
 // TopQueryList defines model for TopQueryList.
@@ -2335,8 +2437,11 @@ type TopQueryList struct {
 	Items []TopQuery `json:"items"`
 
 	// Recording Whether this deployment records query text (observability.record_query_text).
-	Recording bool            `json:"recording"`
-	Window    StatsWindowName `json:"window"`
+	Recording bool `json:"recording"`
+
+	// ResolutionSeconds Length of a bucket of points; query text is counted per hour.
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	Window            StatsWindowName `json:"window"`
 }
 
 // Upload Upload URL and headers are transfer capabilities. Only verified uploads expose a usable Blob ID. Repeated confirmation of the same session observes the same verification, never a second upload.
@@ -2493,6 +2598,14 @@ type ListPipelinePlansParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetMatchStatsParams defines parameters for GetMatchStats.
+type GetMatchStatsParams struct {
+	Window *GetMatchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetMatchStatsParamsWindow defines parameters for GetMatchStats.
+type GetMatchStatsParamsWindow string
+
 // GetPluginCallStatsParams defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParams struct {
 	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -2500,6 +2613,15 @@ type GetPluginCallStatsParams struct {
 
 // GetPluginCallStatsParamsWindow defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParamsWindow string
+
+// GetReceivedStatsParams defines parameters for GetReceivedStats.
+type GetReceivedStatsParams struct {
+	Window *GetReceivedStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Limit  *int                          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetReceivedStatsParamsWindow defines parameters for GetReceivedStats.
+type GetReceivedStatsParamsWindow string
 
 // GetSearchStatsParams defines parameters for GetSearchStats.
 type GetSearchStatsParams struct {
@@ -3007,10 +3129,20 @@ type ClientInterface interface {
 	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetMatchStats performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
+	//
+	// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
+	GetMatchStats(ctx context.Context, params *GetMatchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetPluginCallStats performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
 	//
 	// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
 	GetPluginCallStats(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetReceivedStats performs a GET /v0/admin/stats/received (the `GetReceivedStats` operationId) request.
+	//
+	// Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats. A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace. Requires observability:read on a key that grants every Corpus.
+	GetReceivedStats(ctx context.Context, params *GetReceivedStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSearchStats performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 	//
@@ -3024,7 +3156,7 @@ type ClientInterface interface {
 
 	// GetTopQueries performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
 	//
-	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 	GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
@@ -3679,11 +3811,41 @@ func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqE
 	return c.Client.Do(req)
 }
 
+// GetMatchStats performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
+//
+// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetMatchStats(ctx context.Context, params *GetMatchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMatchStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetPluginCallStats performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
 //
 // Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetPluginCallStats(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPluginCallStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetReceivedStats performs a GET /v0/admin/stats/received (the `GetReceivedStats` operationId) request.
+//
+// Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats. A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace. Requires observability:read on a key that grants every Corpus.
+func (c *Client) GetReceivedStats(ctx context.Context, params *GetReceivedStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetReceivedStatsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3726,7 +3888,7 @@ func (c *Client) GetStepStats(ctx context.Context, params *GetStepStatsParams, r
 
 // GetTopQueries performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
 //
-// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTopQueriesRequest(c.Server, params)
 	if err != nil {
@@ -5408,6 +5570,60 @@ func NewActivatePluginRequest(server string, registrationId string) (*http.Reque
 	return req, nil
 }
 
+// NewGetMatchStatsRequest constructs an http.Request for the GetMatchStats method
+func NewGetMatchStatsRequest(server string, params *GetMatchStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/matches")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetPluginCallStatsRequest constructs an http.Request for the GetPluginCallStats method
 func NewGetPluginCallStatsRequest(server string, params *GetPluginCallStatsParams) (*http.Request, error) {
 	var err error
@@ -5439,6 +5655,72 @@ func NewGetPluginCallStatsRequest(server string, params *GetPluginCallStatsParam
 		if params.Window != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetReceivedStatsRequest constructs an http.Request for the GetReceivedStats method
+func NewGetReceivedStatsRequest(server string, params *GetReceivedStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/received")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -8200,12 +8482,26 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
 
+	// GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
+	//
+	// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetMatchStatsWithResponse(ctx context.Context, params *GetMatchStatsParams, reqEditors ...RequestEditorFn) (*GetMatchStatsResponse, error)
+
 	// GetPluginCallStatsWithResponse performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
 	//
 	// Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetPluginCallStatsWithResponse(ctx context.Context, params *GetPluginCallStatsParams, reqEditors ...RequestEditorFn) (*GetPluginCallStatsResponse, error)
+
+	// GetReceivedStatsWithResponse performs a GET /v0/admin/stats/received (the `GetReceivedStats` operationId) request.
+	//
+	// Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats. A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace. Requires observability:read on a key that grants every Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetReceivedStatsWithResponse(ctx context.Context, params *GetReceivedStatsParams, reqEditors ...RequestEditorFn) (*GetReceivedStatsResponse, error)
 
 	// GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 	//
@@ -8223,7 +8519,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetTopQueriesWithResponse performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
 	//
-	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error)
@@ -9324,6 +9620,54 @@ func (r ActivatePluginResponse) ContentType() string {
 	return ""
 }
 
+type GetMatchStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *MatchStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetMatchStatsResponse) GetJSON200() *MatchStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetMatchStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMatchStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMatchStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMatchStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMatchStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetPluginCallStatsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9366,6 +9710,54 @@ func (r GetPluginCallStatsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetPluginCallStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetReceivedStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ReceivedStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetReceivedStatsResponse) GetJSON200() *ReceivedStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetReceivedStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetReceivedStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetReceivedStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetReceivedStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetReceivedStatsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -12249,6 +12641,19 @@ func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, re
 	return ParseActivatePluginResponse(rsp)
 }
 
+// GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
+//
+// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetMatchStatsWithResponse(ctx context.Context, params *GetMatchStatsParams, reqEditors ...RequestEditorFn) (*GetMatchStatsResponse, error) {
+	rsp, err := c.GetMatchStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMatchStatsResponse(rsp)
+}
+
 // GetPluginCallStatsWithResponse performs a GET /v0/admin/stats/plugins (the `GetPluginCallStats` operationId) request.
 //
 // Calls, errors and latency of every plugin Contribution invoked for the key's Organization over the window, per plugin version and operation, with the last error code the plugin declared (or plugin_unavailable, invalid_output). Counts are written by each process every few seconds and kept 7 days; a window reads buckets of one resolution (1 minute for 1h, 15 minutes for 24h, 2 hours for 7d) and lists only non-empty ones. Latency percentiles are interpolated from fixed buckets. Requires observability:read on a key that grants every Corpus.
@@ -12260,6 +12665,19 @@ func (c *ClientWithResponses) GetPluginCallStatsWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseGetPluginCallStatsResponse(rsp)
+}
+
+// GetReceivedStatsWithResponse performs a GET /v0/admin/stats/received (the `GetReceivedStats` operationId) request.
+//
+// Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats. A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace. Requires observability:read on a key that grants every Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetReceivedStatsWithResponse(ctx context.Context, params *GetReceivedStatsParams, reqEditors ...RequestEditorFn) (*GetReceivedStatsResponse, error) {
+	rsp, err := c.GetReceivedStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetReceivedStatsResponse(rsp)
 }
 
 // GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
@@ -12290,7 +12708,7 @@ func (c *ClientWithResponses) GetStepStatsWithResponse(ctx context.Context, para
 
 // GetTopQueriesWithResponse performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
 //
-// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error) {
@@ -13717,6 +14135,39 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 	return response, nil
 }
 
+// ParseGetMatchStatsResponse parses an HTTP response from a GetMatchStatsWithResponse call
+func ParseGetMatchStatsResponse(rsp *http.Response) (*GetMatchStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMatchStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MatchStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetPluginCallStatsResponse parses an HTTP response from a GetPluginCallStatsWithResponse call
 func ParseGetPluginCallStatsResponse(rsp *http.Response) (*GetPluginCallStatsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13733,6 +14184,39 @@ func ParseGetPluginCallStatsResponse(rsp *http.Response) (*GetPluginCallStatsRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PluginCallStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetReceivedStatsResponse parses an HTTP response from a GetReceivedStatsWithResponse call
+func ParseGetReceivedStatsResponse(rsp *http.Response) (*GetReceivedStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetReceivedStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ReceivedStatsList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

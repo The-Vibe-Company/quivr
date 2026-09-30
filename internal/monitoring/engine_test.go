@@ -136,7 +136,10 @@ func TestEngineStepOutcomes(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			store := &fakeEvaluation{}
-			progressed, err := engineFor(store, c.decisions, c.enabled).Step(ctx)
+			engine := engineFor(store, c.decisions, c.enabled)
+			var observed []string
+			engine.Matched = func(org, evaluator string) { observed = append(observed, org+"/"+evaluator) }
+			progressed, err := engine.Step(ctx)
 			if err != nil || !progressed {
 				t.Fatal(progressed, err)
 			}
@@ -148,6 +151,10 @@ func TestEngineStepOutcomes(t *testing.T) {
 			}
 			if c.committed != (len(store.committed) == 1) {
 				t.Fatalf("committed %v", store.committed)
+			}
+			// The usage view counts committed Matches by evaluator (THE-798).
+			if c.committed != (len(observed) == 1) || (c.committed && observed[0] != "org/"+monitoring.FixtureEvaluator) {
+				t.Fatalf("observed Matches %v", observed)
 			}
 			if c.negative != (store.negative == 1) || store.withdrawn != 0 {
 				t.Fatalf("negative %d withdrawn %d", store.negative, store.withdrawn)

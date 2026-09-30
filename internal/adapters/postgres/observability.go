@@ -53,11 +53,15 @@ func (s ObservabilityStore) PruneRollups(ctx context.Context, resolution time.Du
 }
 
 // ReadRollups lists one Organization's rows of a series and resolution from
-// from on, by key then bucket.
-func (s ObservabilityStore) ReadRollups(ctx context.Context, org, series string, resolution time.Duration, from time.Time) ([]observability.Row, error) {
+// from on, by key then bucket; only those of keys when any are given.
+func (s ObservabilityStore) ReadRollups(ctx context.Context, org, series string, resolution time.Duration, from time.Time, keys ...string) ([]observability.Row, error) {
+	var only []string
+	if len(keys) > 0 {
+		only = keys
+	}
 	rows, err := s.Pool.Query(ctx, `SELECT key,bucket_start,count,errors,items_sum,duration_sum_ms,buckets,coalesce(last_error_code,''),last_error_at
-FROM observability_rollups WHERE organization=$1 AND series=$2 AND resolution_s=$3 AND bucket_start>=$4
-ORDER BY key,bucket_start LIMIT $5`, org, series, int(resolution/time.Second), from, maxRollupRows)
+FROM observability_rollups WHERE organization=$1 AND series=$2 AND resolution_s=$3 AND bucket_start>=$4 AND ($6::text[] IS NULL OR key=ANY($6))
+ORDER BY key,bucket_start LIMIT $5`, org, series, int(resolution/time.Second), from, maxRollupRows, only)
 	if err != nil {
 		return nil, err
 	}
@@ -80,22 +84,24 @@ ORDER BY key,bucket_start LIMIT $5`, org, series, int(resolution/time.Second), f
 	return out, rows.Err()
 }
 
-// TopKeys sums one series per key over the rows from from on, largest first.
-func (s ObservabilityStore) TopKeys(ctx context.Context, org, series string, resolution time.Duration, from time.Time, limit int) ([]observability.KeyCount, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT key,sum(count)::bigint FROM observability_rollups
+// TopKeys sums one series per key over the rows from from on, largest
+// first. The window functions run before LIMIT, so the total and the number
+// of keys cover every key.
+func (s ObservabilityStore) TopKeys(ctx context.Context, org, series string, resolution time.Duration, from time.Time, limit int) (observability.Ranking, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT key,sum(count)::bigint,(sum(sum(count)) OVER ())::bigint,count(*) OVER () FROM observability_rollups
 WHERE organization=$1 AND series=$2 AND resolution_s=$3 AND bucket_start>=$4
 GROUP BY key ORDER BY sum(count) DESC,key LIMIT $5`, org, series, int(resolution/time.Second), from, limit)
 	if err != nil {
-		return nil, err
+		return observability.Ranking{}, err
 	}
 	defer rows.Close()
-	out := []observability.KeyCount{}
+	out := observability.Ranking{Keys: []observability.KeyCount{}}
 	for rows.Next() {
 		var k observability.KeyCount
-		if err := rows.Scan(&k.Key, &k.Count); err != nil {
-			return nil, err
+		if err := rows.Scan(&k.Key, &k.Count, &out.Total, &out.Distinct); err != nil {
+			return observability.Ranking{}, err
 		}
-		out = append(out, k)
+		out.Keys = append(out.Keys, k)
 	}
 	return out, rows.Err()
 }

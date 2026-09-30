@@ -11,11 +11,14 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-type stubRepository struct{ accepted content.Command }
+type stubRepository struct {
+	accepted    content.Command
+	newRevision bool
+}
 
 func (s *stubRepository) Accept(_ context.Context, _ corpus.Scope, c content.Command) (content.Receipt, error) {
 	s.accepted = c
-	return content.Receipt{ID: "receipt_1", State: "pending"}, nil
+	return content.Receipt{ID: "receipt_1", State: "pending", NewRevision: s.newRevision}, nil
 }
 func (*stubRepository) Withdraw(context.Context, corpus.Scope, content.Withdrawal) (content.Receipt, error) {
 	return content.Receipt{ID: "receipt_withdrawal", State: "resolved", Outcome: "withdrawal_applied"}, nil
@@ -66,6 +69,26 @@ func blobCommand() content.Command {
 
 func scope() corpus.Scope {
 	return corpus.Scope{Organization: "org_a", Actions: []string{"content:write", "content:read"}, Corpora: []string{"*"}}
+}
+
+// The usage view counts a document received only when its command reserved
+// a new revision: a replay or a revision the Record already had is not a
+// new document (THE-798).
+func TestAcceptObservesOnlyNewRevisions(t *testing.T) {
+	for _, c := range []struct {
+		newRevision bool
+		want        []string
+	}{{true, []string{"org_a/news-feed"}}, {false, nil}} {
+		var received []string
+		service := content.Service{Repository: &stubRepository{newRevision: c.newRevision}, Received: func(org, namespace string) { received = append(received, org+"/"+namespace) }}
+		command := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus", Namespace: "news-feed", RecordKey: "r"}, Content: content.Text{Kind: "text", Text: "Bonjour"}}
+		if _, err := service.Accept(context.Background(), scope(), command); err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(received) != fmt.Sprint(c.want) {
+			t.Fatalf("new revision %v: observed %v; want %v", c.newRevision, received, c.want)
+		}
+	}
 }
 
 func TestBlobContentResolvesToImmutableText(t *testing.T) {

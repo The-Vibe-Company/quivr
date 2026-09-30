@@ -431,8 +431,8 @@ It writes `lifecycle.json`.
 **Metrics and the failure drill.** Each process serves Prometheus text on its
 private probe listener at `GET /metrics`. There is no client library, and labels
 come only from fixed sets or the deployment's configuration (plugin ids, search
-profiles): no identifiers or secrets. The stack flushes the plugin call, search and step
-rollups every 200 ms and records query text (`timing_overrides.observability`), so
+profiles): no identifiers or secrets. The stack flushes the plugin call, search, step,
+received and Match rollups every 200 ms and records query text (`timing_overrides.observability`), so
 `TestObservabilityStats` reads them back through the admin stats in `org_o`.
 
 | Process | Metric | Kind |
@@ -445,6 +445,7 @@ rollups every 200 ms and records query text (`timing_overrides.observability`), 
 | Worker | `quivr_delivery_pending`, `quivr_delivery_oldest_pending_age_seconds` (THE-656) | gauges |
 | Both | `quivr_plugin_calls_total{plugin,operation,outcome=succeeded\|failed}`, `quivr_plugin_call_duration_seconds{plugin,operation}` (THE-795) | counter, histogram |
 | API | `quivr_searches_total{mode,profile,outcome}`, `quivr_search_duration_seconds{mode,profile}` (THE-795) | counter, histogram |
+| Worker | `quivr_matches_created_total{evaluator}` (THE-798) | counter |
 | Both | `quivr_observability_flush_failures_total`, `quivr_observability_dropped_events_total` | counters |
 
 Logs are structured JSON with bounded fields:

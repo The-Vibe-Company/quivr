@@ -32,7 +32,7 @@ interface Series {
   points: StatsPoint[];
 }
 
-interface StatsList<T> {
+export interface StatsList<T> {
   window: StatsWindow;
   resolution_seconds: number;
   from: string;
@@ -56,16 +56,39 @@ export interface StepStats extends Series {
   step: string;
 }
 
+/** One non-empty bucket of a counted read (THE-798). */
+export interface CountPoint {
+  start: string;
+  count: number;
+}
+
 export interface TopQueryList {
   window: StatsWindow;
+  /** Query text is counted per hour. */
+  resolution_seconds: number;
   recording: boolean;
-  items: { query: string; count: number }[];
+  items: { query: string; count: number; points: CountPoint[] }[];
+}
+
+/** Documents received: the largest source namespaces, and every one's total. */
+export interface ReceivedStatsList
+  extends StatsList<{ source_namespace: string; count: number; points: CountPoint[] }> {
+  total: number;
+  sources: number;
+}
+
+/** Matches committed by alerts, per evaluator plugin. */
+export interface MatchStatsList
+  extends StatsList<{ evaluator: string; count: number; points: CountPoint[] }> {
+  total: number;
 }
 
 export interface StatsKinds {
   plugins: StatsList<PluginCallStats>;
   searches: StatsList<SearchStats>;
   steps: StatsList<StepStats>;
+  received: ReceivedStatsList;
+  matches: MatchStatsList;
   "top-queries": TopQueryList;
 }
 

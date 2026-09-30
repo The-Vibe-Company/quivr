@@ -33,6 +33,9 @@ type Engine struct {
 	Group int
 	// Metrics observes calls per Record Version and evaluations per call; nil ignores them.
 	Metrics *EvaluationMetrics
+	// Matched observes each committed Match by Organization and evaluator
+	// plugin id (THE-798); nil observes nothing.
+	Matched func(organization, evaluator string)
 }
 
 // EvaluatorKey identifies an installed evaluator implementation.
@@ -370,6 +373,9 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	outcome, err := e.Store.CommitMatch(ctx, in, evidence)
 	if err != nil {
 		return e.retry(ctx, in, "storage_unavailable")
+	}
+	if outcome == OutcomeMatched && e.Matched != nil {
+		e.Matched(in.Organization, evidence.Evaluator.PluginID)
 	}
 	slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
 	return nil

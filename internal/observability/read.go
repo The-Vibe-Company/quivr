@@ -75,14 +75,73 @@ func (r Reader) Report(ctx context.Context, org, series string, w Window) (Repor
 	return out, nil
 }
 
-// TopQueries lists the most frequent normalized queries of org over the
-// window, at most limit. It is empty when query text is not recorded.
-func (r Reader) TopQueries(ctx context.Context, org string, w Window, limit int) ([]KeyCount, error) {
-	if !r.RecordQueryText {
-		return []KeyCount{}, nil
+// CountPoint is one non-empty bucket of a counted key.
+type CountPoint struct {
+	Start time.Time
+	Count int64
+}
+
+// CountSeries is one key of a counted series: its count over the window and
+// its non-empty buckets, oldest first.
+type CountSeries struct {
+	Key    string
+	Count  int64
+	Points []CountPoint
+}
+
+// Counts is the largest keys of a series over a window with their buckets,
+// and the count and number of every key, listed or not.
+type Counts struct {
+	Window     Window
+	Resolution time.Duration
+	From, To   time.Time
+	Total      int64
+	Distinct   int
+	Series     []CountSeries
+}
+
+// Counts reads the limit largest keys of series for org over the window,
+// with their buckets. Query text is counted at its own hourly tier. A read
+// touches the buckets of at most limit keys, however many keys clients
+// created.
+func (r Reader) Counts(ctx context.Context, org, series string, w Window, limit int) (Counts, error) {
+	tier := w.Tier
+	if series == SeriesSearchQuery {
+		tier = QueryTier
 	}
-	from := time.Now().UTC().Add(-w.Span).Truncate(QueryTier.Resolution)
-	return r.Store.TopKeys(ctx, org, SeriesSearchQuery, QueryTier.Resolution, from, limit)
+	to := time.Now().UTC()
+	out := Counts{Window: w, Resolution: tier.Resolution, From: to.Add(-w.Span).Truncate(tier.Resolution), To: to, Series: []CountSeries{}}
+	ranking, err := r.Store.TopKeys(ctx, org, series, tier.Resolution, out.From, limit)
+	if err != nil || len(ranking.Keys) == 0 {
+		return out, err
+	}
+	out.Total, out.Distinct = ranking.Total, ranking.Distinct
+	keys := make([]string, len(ranking.Keys))
+	index := map[string]int{}
+	for i, k := range ranking.Keys {
+		keys[i], index[k.Key] = k.Key, i
+		out.Series = append(out.Series, CountSeries{Key: k.Key, Count: k.Count, Points: []CountPoint{}})
+	}
+	rows, err := r.Store.ReadRollups(ctx, org, series, tier.Resolution, out.From, keys...)
+	if err != nil {
+		return Counts{}, err
+	}
+	for _, row := range rows {
+		if i, ok := index[row.Key]; ok {
+			out.Series[i].Points = append(out.Series[i].Points, CountPoint{Start: row.Start, Count: row.Count})
+		}
+	}
+	return out, nil
+}
+
+// TopQueries lists the most frequent normalized queries of org over the
+// window, at most limit, with their hourly counts. It is empty when query
+// text is not recorded.
+func (r Reader) TopQueries(ctx context.Context, org string, w Window, limit int) (Counts, error) {
+	if !r.RecordQueryText {
+		return Counts{Window: w, Resolution: QueryTier.Resolution, Series: []CountSeries{}}, nil
+	}
+	return r.Counts(ctx, org, SeriesSearchQuery, w, limit)
 }
 
 func summarize(r Row) Summary {

@@ -2255,13 +2255,94 @@ paths:
       tags:
       - Admin
       summary: Get step stats
+  /v0/admin/stats/received:
+    get:
+      operationId: getReceivedStats
+      description: Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats.
+        A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record
+        already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace.
+        Requires observability:read on a key that grants every Corpus.
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceivedStatsList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window
+            or invalid_limit, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get received stats
+  /v0/admin/stats/matches:
+    get:
+      operationId: getMatchStats
+      description: Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in
+        the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts
+        too. Requires observability:read on a key that grants every Corpus.
+      parameters:
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 1h
+          - 24h
+          - 7d
+          default: 1h
+      x-required-permissions:
+      - observability:read
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchStatsList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get match stats
   /v0/admin/stats/top-queries:
     get:
       operationId: getTopQueries
       description: The most frequent search queries of the key's Organization over the window, normalized (lowercased, white
-        space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets
-        observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on
-        a key that grants every Corpus.
+        space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded
+        only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty.
+        Requires observability:read on a key that grants every Corpus.
       parameters:
       - name: window
         in: query
@@ -4022,6 +4103,126 @@ components:
       - from
       - to
       - items
+    CountPoint:
+      type: object
+      additionalProperties: false
+      description: One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+      properties:
+        start:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          minimum: 1
+      required:
+      - start
+      - count
+    ReceivedStats:
+      type: object
+      additionalProperties: false
+      properties:
+        source_namespace:
+          type: string
+          minLength: 1
+        count:
+          type: integer
+          minimum: 1
+        points:
+          type: array
+          description: Non-empty buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/CountPoint'
+      required:
+      - source_namespace
+      - count
+      - points
+    ReceivedStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        total:
+          type: integer
+          minimum: 0
+          description: Documents received from every source namespace, listed or not.
+        sources:
+          type: integer
+          minimum: 0
+          description: Source namespaces that received at least one document, listed or not.
+        items:
+          type: array
+          description: Most documents first.
+          items:
+            $ref: '#/components/schemas/ReceivedStats'
+      required:
+      - window
+      - resolution_seconds
+      - from
+      - to
+      - total
+      - sources
+      - items
+    MatchStats:
+      type: object
+      additionalProperties: false
+      properties:
+        evaluator:
+          type: string
+          minLength: 1
+          description: Plugin id of the evaluator of the Subscriptions that matched.
+        count:
+          type: integer
+          minimum: 1
+        points:
+          type: array
+          description: Non-empty buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/CountPoint'
+      required:
+      - evaluator
+      - count
+      - points
+    MatchStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        total:
+          type: integer
+          minimum: 0
+          description: Matches of every evaluator.
+        items:
+          type: array
+          description: Most Matches first.
+          items:
+            $ref: '#/components/schemas/MatchStats'
+      required:
+      - window
+      - resolution_seconds
+      - from
+      - to
+      - total
+      - items
     StatsWindowName:
       type: string
       enum:
@@ -4039,15 +4240,25 @@ components:
         count:
           type: integer
           minimum: 1
+        points:
+          type: array
+          description: Non-empty hourly buckets, oldest first.
+          items:
+            $ref: '#/components/schemas/CountPoint'
       required:
       - query
       - count
+      - points
     TopQueryList:
       type: object
       additionalProperties: false
       properties:
         window:
           $ref: '#/components/schemas/StatsWindowName'
+        resolution_seconds:
+          type: integer
+          minimum: 1
+          description: Length of a bucket of points; query text is counted per hour.
         recording:
           type: boolean
           description: Whether this deployment records query text (observability.record_query_text).
@@ -4058,6 +4269,7 @@ components:
             $ref: '#/components/schemas/TopQuery'
       required:
       - window
+      - resolution_seconds
       - recording
       - items
     ConnectorKindCatalog:

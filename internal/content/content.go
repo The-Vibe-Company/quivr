@@ -286,6 +286,10 @@ type Service struct {
 	// Supersession lets a routed Version skip normalization once its Record
 	// was withdrawn or desires another revision; nil never skips.
 	Supersession Supersession
+	// Received observes each accepted command that reserved a new revision,
+	// by Organization and source namespace (THE-798); nil observes nothing.
+	// It must not block: it runs on the request path.
+	Received func(organization, sourceNamespace string)
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
@@ -359,6 +363,9 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 		c.Position = n.String()
 	}
 	result, err := s.Repository.Accept(ctx, scope, c)
+	if err == nil && result.NewRevision && s.Received != nil {
+		s.Received(scope.Organization, c.Source.Namespace)
+	}
 	if !scope.Allows("content:read") {
 		result.RecordID = ""
 		result.VersionID = ""

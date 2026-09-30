@@ -21,17 +21,18 @@ func WithObservability(recorder *observability.Recorder, reader observability.Re
 
 const statsPrefix = "/v0/admin/stats/"
 
-// statsRoutes serves GET /v0/admin/stats/{plugins,searches,steps,top-queries}
-// behind observability:read on all Corpora, always for the key's own
-// Organization.
+// statsRoutes serves GET /v0/admin/stats/{plugins,searches,steps,received,
+// matches,top-queries} behind observability:read on all Corpora, always for
+// the key's own Organization.
 func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	if !strings.HasPrefix(r.URL.Path, statsPrefix) {
 		return false
 	}
 	name := strings.TrimPrefix(r.URL.Path, statsPrefix)
-	series := map[string]string{"plugins": observability.SeriesPluginCall, "searches": observability.SeriesSearch, "steps": observability.SeriesStep}[name]
+	series := map[string]string{"plugins": observability.SeriesPluginCall, "searches": observability.SeriesSearch, "steps": observability.SeriesStep,
+		"received": observability.SeriesReceived, "matches": observability.SeriesMatch, "top-queries": observability.SeriesSearchQuery}[name]
 	switch {
-	case series == "" && name != "top-queries":
+	case series == "":
 		failure(w, 404, "not_found")
 	case r.Method != "GET":
 		failure(w, 405, "method_not_allowed")
@@ -46,10 +47,16 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 	return true
 }
 
+// countedLimits are the default and largest limit of the counted reads: the
+// keys of received and top-queries come from clients, so a read lists the
+// largest only. Matches are keyed by evaluator plugin, a deployment set.
+var countedLimits = map[string][2]int{observability.SeriesReceived: {10, 100}, observability.SeriesSearchQuery: {20, 100}, observability.SeriesMatch: {100, 100}}
+
 func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) {
 	q := r.URL.Query()
+	limits, counted := countedLimits[series]
 	for k, v := range q {
-		if (k != "window" && (k != "limit" || series != "")) || len(v) != 1 {
+		if (k != "window" && (k != "limit" || series == observability.SeriesMatch || !counted)) || len(v) != 1 {
 			failure(w, 422, "invalid_query")
 			return
 		}
@@ -60,26 +67,17 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 		return
 	}
 	name := transport.StatsWindowName(window.Name)
-	if series == "" {
-		limit := 20
+	if counted {
+		limit := limits[0]
 		if q.Has("limit") {
 			n, err := strconv.Atoi(q.Get("limit"))
-			if err != nil || n < 1 || n > 100 {
+			if err != nil || n < 1 || n > limits[1] {
 				failure(w, 422, "invalid_limit")
 				return
 			}
 			limit = n
 		}
-		top, err := a.Stats.TopQueries(r.Context(), org, window, limit)
-		if err != nil {
-			failure(w, 503, "storage_unavailable")
-			return
-		}
-		out := transport.TopQueryList{Window: name, Recording: a.Stats.RecordQueryText, Items: make([]transport.TopQuery, 0, len(top))}
-		for _, k := range top {
-			out.Items = append(out.Items, transport.TopQuery{Query: k.Key, Count: int(k.Count)})
-		}
-		send(w, 200, out)
+		a.counts(w, r, org, series, window, limit)
 		return
 	}
 	report, err := a.Stats.Report(r.Context(), org, series, window)
@@ -110,6 +108,53 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 		}
 		send(w, 200, out)
 	}
+}
+
+// counts serves the counted reads: documents received per source namespace,
+// Matches per evaluator and the most frequent queries.
+func (a *API) counts(w http.ResponseWriter, r *http.Request, org, series string, window observability.Window, limit int) {
+	var counts observability.Counts
+	var err error
+	if series == observability.SeriesSearchQuery {
+		counts, err = a.Stats.TopQueries(r.Context(), org, window, limit)
+	} else {
+		counts, err = a.Stats.Counts(r.Context(), org, series, window, limit)
+	}
+	if err != nil {
+		failure(w, 503, "storage_unavailable")
+		return
+	}
+	name := transport.StatsWindowName(window.Name)
+	resolution := int(counts.Resolution / time.Second)
+	switch series {
+	case observability.SeriesSearchQuery:
+		out := transport.TopQueryList{Window: name, ResolutionSeconds: resolution, Recording: a.Stats.RecordQueryText, Items: make([]transport.TopQuery, 0, len(counts.Series))}
+		for _, s := range counts.Series {
+			out.Items = append(out.Items, transport.TopQuery{Query: s.Key, Count: int(s.Count), Points: countPoints(s.Points)})
+		}
+		send(w, 200, out)
+	case observability.SeriesReceived:
+		out := transport.ReceivedStatsList{Window: name, ResolutionSeconds: resolution, From: counts.From, To: counts.To, Total: int(counts.Total), Sources: counts.Distinct,
+			Items: make([]transport.ReceivedStats, 0, len(counts.Series))}
+		for _, s := range counts.Series {
+			out.Items = append(out.Items, transport.ReceivedStats{SourceNamespace: s.Key, Count: int(s.Count), Points: countPoints(s.Points)})
+		}
+		send(w, 200, out)
+	default:
+		out := transport.MatchStatsList{Window: name, ResolutionSeconds: resolution, From: counts.From, To: counts.To, Total: int(counts.Total), Items: make([]transport.MatchStats, 0, len(counts.Series))}
+		for _, s := range counts.Series {
+			out.Items = append(out.Items, transport.MatchStats{Evaluator: s.Key, Count: int(s.Count), Points: countPoints(s.Points)})
+		}
+		send(w, 200, out)
+	}
+}
+
+func countPoints(points []observability.CountPoint) []transport.CountPoint {
+	out := make([]transport.CountPoint, 0, len(points))
+	for _, p := range points {
+		out = append(out, transport.CountPoint{Start: p.Start, Count: int(p.Count)})
+	}
+	return out
 }
 
 func statsSummary(s observability.Summary) transport.StatsSummary {

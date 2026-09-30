@@ -40,7 +40,8 @@ func counted(item map[string]any) bool {
 // TestObservabilityStats ingests a text and searches it in its own
 // Organization, then reads it all back through the admin stats reads: the
 // ingestion plugin's calls, the search by mode and profile, the processing
-// steps and, since the stack records query text, the normalized query.
+// steps, the document received from its source namespace and, since the
+// stack records query text, the normalized query with its hourly count.
 func TestObservabilityStats(t *testing.T) {
 	token := os.Getenv("QUIVR_TEST_OBSERVER")
 	if os.Getenv("QUIVR_TEST_URL") == "" || token == "" {
@@ -85,10 +86,19 @@ func TestObservabilityStats(t *testing.T) {
 		}
 		return steps["baseline"] && steps["accepted_to_searchable"]
 	})
+	// The text was a new revision from inlineCommand's source namespace.
+	awaitStats(t, token, "/v0/admin/stats/received?window=24h&limit=100", func(items []map[string]any) bool {
+		for _, item := range items {
+			if points, _ := item["points"].([]any); item["source_namespace"] == "example-feed" && item["count"].(float64) >= 1 && len(points) >= 1 {
+				return true
+			}
+		}
+		return false
+	})
 	normalized := strings.ToLower("heliotrope lanterns " + run)
 	awaitStats(t, token, "/v0/admin/stats/top-queries?window=1h", func(items []map[string]any) bool {
 		for _, item := range items {
-			if item["query"] == normalized {
+			if points, _ := item["points"].([]any); item["query"] == normalized && len(points) >= 1 {
 				return true
 			}
 		}

@@ -1441,19 +1441,101 @@
     }
   },
   {
+    "name": "received_stats",
+    "schema": "ReceivedStatsList",
+    "value": {
+      "window": "24h",
+      "resolution_seconds": 900,
+      "from": "2026-09-29T10:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "total": 57,
+      "sources": 3,
+      "items": [
+        {
+          "source_namespace": "news-feed",
+          "count": 41,
+          "points": [
+            {
+              "start": "2026-09-30T08:15:00Z",
+              "count": 17
+            },
+            {
+              "start": "2026-09-30T09:45:00Z",
+              "count": 24
+            }
+          ]
+        },
+        {
+          "source_namespace": "api-uploads",
+          "count": 12,
+          "points": [
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 12
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "match_stats",
+    "schema": "MatchStatsList",
+    "value": {
+      "window": "7d",
+      "resolution_seconds": 7200,
+      "from": "2026-09-23T10:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "total": 9,
+      "items": [
+        {
+          "evaluator": "keywords",
+          "count": 9,
+          "points": [
+            {
+              "start": "2026-09-29T14:00:00Z",
+              "count": 4
+            },
+            {
+              "start": "2026-09-30T08:00:00Z",
+              "count": 5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     "name": "top_queries",
     "schema": "TopQueryList",
     "value": {
       "window": "24h",
+      "resolution_seconds": 3600,
       "recording": true,
       "items": [
         {
           "query": "solar energy",
-          "count": 14
+          "count": 14,
+          "points": [
+            {
+              "start": "2026-09-30T08:00:00Z",
+              "count": 5
+            },
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 9
+            }
+          ]
         },
         {
           "query": "storm warning",
-          "count": 6
+          "count": 6,
+          "points": [
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 6
+            }
+          ]
         }
       ]
     }

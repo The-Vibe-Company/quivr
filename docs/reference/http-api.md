@@ -86,6 +86,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/stats/plugins`](#get-v0adminstatsplugins) | `getPluginCallStats` | `observability:read` |
 | [`GET /v0/admin/stats/searches`](#get-v0adminstatssearches) | `getSearchStats` | `observability:read` |
 | [`GET /v0/admin/stats/steps`](#get-v0adminstatssteps) | `getStepStats` | `observability:read` |
+| [`GET /v0/admin/stats/received`](#get-v0adminstatsreceived) | `getReceivedStats` | `observability:read` |
+| [`GET /v0/admin/stats/matches`](#get-v0adminstatsmatches) | `getMatchStats` | `observability:read` |
 | [`GET /v0/admin/stats/top-queries`](#get-v0adminstatstop-queries) | `getTopQueries` | `observability:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
@@ -1371,11 +1373,50 @@ Processing steps of the key's Organization over the window, in the buckets of ge
 | `200` | `application/json` [`StepStatsList`](#stepstatslist) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window, 503 storage unavailable. |
 
+#### `GET /v0/admin/stats/received`
+
+Operation `getReceivedStats`. Requires `observability:read`.
+
+Documents received by the key's Organization over the window per source namespace, in the buckets of getPluginCallStats. A document is counted when a command reserves a new revision of a Record; a replayed command or a revision the Record already had is not. Lists the limit namespaces with most documents, largest first; total and sources cover every namespace. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+| `limit` | query | integer |  | Default `10`. Minimum `1`. Maximum `100`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`ReceivedStatsList`](#receivedstatslist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window or invalid_limit, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/matches`
+
+Operation `getMatchStats`. Requires `observability:read`.
+
+Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`MatchStatsList`](#matchstatslist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 422 invalid_window, 503 storage unavailable. |
+
 #### `GET /v0/admin/stats/top-queries`
 
 Operation `getTopQueries`. Requires `observability:read`.
 
-The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
+The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 
 **Parameters**
 
@@ -4848,6 +4889,276 @@ required:
 
 </details>
 
+### `CountPoint`
+
+One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `start` | string (date-time) | yes |  |
+| `count` | integer | yes | Minimum `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+properties:
+  start:
+    type: string
+    format: date-time
+  count:
+    type: integer
+    minimum: 1
+required:
+  - start
+  - count
+```
+
+</details>
+
+### `ReceivedStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source_namespace` | string | yes | Minimum length `1`. |
+| `count` | integer | yes | Minimum `1`. |
+| `points` | array of [`CountPoint`](#countpoint) | yes | Non-empty buckets, oldest first. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  source_namespace:
+    type: string
+    minLength: 1
+  count:
+    type: integer
+    minimum: 1
+  points:
+    type: array
+    description: Non-empty buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/CountPoint'
+required:
+  - source_namespace
+  - count
+  - points
+```
+
+</details>
+
+### `ReceivedStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `total` | integer | yes | Documents received from every source namespace, listed or not. Minimum `0`. |
+| `sources` | integer | yes | Source namespaces that received at least one document, listed or not. Minimum `0`. |
+| `items` | array of [`ReceivedStats`](#receivedstats) | yes | Most documents first. |
+
+Example `received_stats`:
+
+```json
+{
+  "window": "24h",
+  "resolution_seconds": 900,
+  "from": "2026-09-29T10:00:00Z",
+  "to": "2026-09-30T10:00:12Z",
+  "total": 57,
+  "sources": 3,
+  "items": [
+    {
+      "source_namespace": "news-feed",
+      "count": 41,
+      "points": [
+        {
+          "start": "2026-09-30T08:15:00Z",
+          "count": 17
+        },
+        {
+          "start": "2026-09-30T09:45:00Z",
+          "count": 24
+        }
+      ]
+    },
+    {
+      "source_namespace": "api-uploads",
+      "count": 12,
+      "points": [
+        {
+          "start": "2026-09-30T09:00:00Z",
+          "count": 12
+        }
+      ]
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+  from:
+    type: string
+    format: date-time
+  to:
+    type: string
+    format: date-time
+  total:
+    type: integer
+    minimum: 0
+    description: Documents received from every source namespace, listed or not.
+  sources:
+    type: integer
+    minimum: 0
+    description: Source namespaces that received at least one document, listed or not.
+  items:
+    type: array
+    description: Most documents first.
+    items:
+      $ref: '#/components/schemas/ReceivedStats'
+required:
+  - window
+  - resolution_seconds
+  - from
+  - to
+  - total
+  - sources
+  - items
+```
+
+</details>
+
+### `MatchStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `evaluator` | string | yes | Plugin id of the evaluator of the Subscriptions that matched. Minimum length `1`. |
+| `count` | integer | yes | Minimum `1`. |
+| `points` | array of [`CountPoint`](#countpoint) | yes | Non-empty buckets, oldest first. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  evaluator:
+    type: string
+    minLength: 1
+    description: Plugin id of the evaluator of the Subscriptions that matched.
+  count:
+    type: integer
+    minimum: 1
+  points:
+    type: array
+    description: Non-empty buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/CountPoint'
+required:
+  - evaluator
+  - count
+  - points
+```
+
+</details>
+
+### `MatchStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `total` | integer | yes | Matches of every evaluator. Minimum `0`. |
+| `items` | array of [`MatchStats`](#matchstats) | yes | Most Matches first. |
+
+Example `match_stats`:
+
+```json
+{
+  "window": "7d",
+  "resolution_seconds": 7200,
+  "from": "2026-09-23T10:00:00Z",
+  "to": "2026-09-30T10:00:12Z",
+  "total": 9,
+  "items": [
+    {
+      "evaluator": "keywords",
+      "count": 9,
+      "points": [
+        {
+          "start": "2026-09-29T14:00:00Z",
+          "count": 4
+        },
+        {
+          "start": "2026-09-30T08:00:00Z",
+          "count": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window:
+    $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+  from:
+    type: string
+    format: date-time
+  to:
+    type: string
+    format: date-time
+  total:
+    type: integer
+    minimum: 0
+    description: Matches of every evaluator.
+  items:
+    type: array
+    description: Most Matches first.
+    items:
+      $ref: '#/components/schemas/MatchStats'
+required:
+  - window
+  - resolution_seconds
+  - from
+  - to
+  - total
+  - items
+```
+
+</details>
+
 ### `StatsWindowName`
 
 Type: string. One of `1h`, `24h`, `7d`.
@@ -4871,6 +5182,7 @@ enum:
 | --- | --- | --- | --- |
 | `query` | string | yes | Minimum length `1`. Maximum length `200`. |
 | `count` | integer | yes | Minimum `1`. |
+| `points` | array of [`CountPoint`](#countpoint) | yes | Non-empty hourly buckets, oldest first. |
 
 <details>
 <summary>Full schema</summary>
@@ -4886,9 +5198,15 @@ properties:
   count:
     type: integer
     minimum: 1
+  points:
+    type: array
+    description: Non-empty hourly buckets, oldest first.
+    items:
+      $ref: '#/components/schemas/CountPoint'
 required:
   - query
   - count
+  - points
 ```
 
 </details>
@@ -4898,6 +5216,7 @@ required:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Length of a bucket of points; query text is counted per hour. Minimum `1`. |
 | `recording` | boolean | yes | Whether this deployment records query text (observability.record_query_text). |
 | `items` | array of [`TopQuery`](#topquery) | yes | Most frequent first. |
 
@@ -4906,15 +5225,32 @@ Example `top_queries`:
 ```json
 {
   "window": "24h",
+  "resolution_seconds": 3600,
   "recording": true,
   "items": [
     {
       "query": "solar energy",
-      "count": 14
+      "count": 14,
+      "points": [
+        {
+          "start": "2026-09-30T08:00:00Z",
+          "count": 5
+        },
+        {
+          "start": "2026-09-30T09:00:00Z",
+          "count": 9
+        }
+      ]
     },
     {
       "query": "storm warning",
-      "count": 6
+      "count": 6,
+      "points": [
+        {
+          "start": "2026-09-30T09:00:00Z",
+          "count": 6
+        }
+      ]
     }
   ]
 }
@@ -4929,6 +5265,10 @@ additionalProperties: false
 properties:
   window:
     $ref: '#/components/schemas/StatsWindowName'
+  resolution_seconds:
+    type: integer
+    minimum: 1
+    description: Length of a bucket of points; query text is counted per hour.
   recording:
     type: boolean
     description: Whether this deployment records query text (observability.record_query_text).
@@ -4939,6 +5279,7 @@ properties:
       $ref: '#/components/schemas/TopQuery'
 required:
   - window
+  - resolution_seconds
   - recording
   - items
 ```

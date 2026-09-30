@@ -3,7 +3,10 @@ package observability
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,10 +60,10 @@ func (s *memoryStore) PruneRollups(context.Context, time.Duration, time.Time) (i
 	return 0, nil
 }
 
-func (s *memoryStore) ReadRollups(_ context.Context, org, series string, resolution time.Duration, from time.Time) ([]Row, error) {
+func (s *memoryStore) ReadRollups(_ context.Context, org, series string, resolution time.Duration, from time.Time, keys ...string) ([]Row, error) {
 	var out []Row
 	for _, r := range s.rows {
-		if r.Organization == org && r.Series == series && r.Resolution == resolution && !r.Start.Before(from) {
+		if r.Organization == org && r.Series == series && r.Resolution == resolution && !r.Start.Before(from) && (len(keys) == 0 || slices.Contains(keys, r.Key)) {
 			out = append(out, r)
 		}
 	}
@@ -73,8 +76,28 @@ func (s *memoryStore) ReadRollups(_ context.Context, org, series string, resolut
 	return out, nil
 }
 
-func (s *memoryStore) TopKeys(context.Context, string, string, time.Duration, time.Time, int) ([]KeyCount, error) {
-	return nil, nil
+// TopKeys ranks keys the way the PostgreSQL adapter's contract says: count
+// then key, total and number over every key.
+func (s *memoryStore) TopKeys(ctx context.Context, org, series string, resolution time.Duration, from time.Time, limit int) (Ranking, error) {
+	rows, _ := s.ReadRollups(ctx, org, series, resolution, from)
+	sums := map[string]int64{}
+	var out Ranking
+	for _, r := range rows {
+		sums[r.Key] += r.Count
+		out.Total += r.Count
+	}
+	for k, n := range sums {
+		out.Keys = append(out.Keys, KeyCount{Key: k, Count: n})
+	}
+	sort.Slice(out.Keys, func(i, j int) bool {
+		if out.Keys[i].Count != out.Keys[j].Count {
+			return out.Keys[i].Count > out.Keys[j].Count
+		}
+		return out.Keys[i].Key < out.Keys[j].Key
+	})
+	out.Distinct = len(out.Keys)
+	out.Keys = out.Keys[:min(limit, len(out.Keys))]
+	return out, nil
 }
 
 // rowsOf sums the flushed rows of one series, key and resolution: events
@@ -99,6 +122,9 @@ func TestRecorderAggregatesEventsIntoEveryTier(t *testing.T) {
 	r.PluginCall(ok)
 	r.PluginCall(failed)
 	r.Search(Search{Organization: "org_a", Mode: "hybrid", Profile: "default", Query: "  Secret   Plans ", Results: 3, Duration: time.Millisecond})
+	r.Received("org_a", "news-feed")
+	r.Received("org_a", "news-feed")
+	r.Matched("org_a", "keywords")
 	if err := r.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +137,12 @@ func TestRecorderAggregatesEventsIntoEveryTier(t *testing.T) {
 		search, _ := store.rowsOf(SeriesSearch, Key("hybrid", "default"), tier.Resolution)
 		if search.Count != 1 || search.Items != 3 || search.Errors != 0 {
 			t.Fatalf("tier %s: search row = %+v; want 1 search with 3 results", tier.Resolution, search)
+		}
+		if received, _ := store.rowsOf(SeriesReceived, "news-feed", tier.Resolution); received.Count != 2 {
+			t.Fatalf("tier %s: received row = %+v; want 2 documents", tier.Resolution, received)
+		}
+		if matched, _ := store.rowsOf(SeriesMatch, "keywords", tier.Resolution); matched.Count != 1 {
+			t.Fatalf("tier %s: match row = %+v; want 1 Match", tier.Resolution, matched)
 		}
 	}
 	for _, row := range store.rows {
@@ -137,6 +169,41 @@ func TestRecorderCountsNormalizedQueriesOnlyWhenEnabled(t *testing.T) {
 		if row.Series == SeriesSearchQuery && row.Resolution != QueryTier.Resolution {
 			t.Fatalf("query text written at %s; want only the %s tier", row.Resolution, QueryTier.Resolution)
 		}
+	}
+}
+
+// Source namespaces come from clients: a burst of new ones between two
+// flushes stops at maxPendingKeys per Organization, while keys already
+// buffered keep counting and the next flush takes new keys again.
+func TestRecorderCapsNewSourceNamespacesPerFlush(t *testing.T) {
+	store := &memoryStore{}
+	r := NewRecorder(store, Config{}, false)
+	for i := range maxPendingKeys + 5 {
+		r.Received("org_a", fmt.Sprintf("source-%d", i))
+	}
+	r.Received("org_a", "source-0")
+	r.Received("org_b", "own-source")
+	var metrics strings.Builder
+	r.WriteMetrics(&metrics)
+	if !strings.Contains(metrics.String(), "quivr_observability_dropped_events_total 5\n") {
+		t.Fatalf("dropped events not counted:\n%s", metrics.String())
+	}
+	if err := r.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.Received("org_a", "late-source")
+	if err := r.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]int64{}
+	for _, row := range store.rows {
+		if row.Series == SeriesReceived && row.Resolution == time.Minute {
+			keys[row.Key] += row.Count
+		}
+	}
+	if len(keys) != maxPendingKeys+2 || keys["source-0"] != 2 || keys["late-source"] != 1 || keys["own-source"] != 1 {
+		t.Fatalf("flushed %d namespaces, source-0=%d, late-source=%d, own-source=%d; want %d, 2, 1 and 1 (another Organization is not capped)",
+			len(keys), keys["source-0"], keys["late-source"], keys["own-source"], maxPendingKeys+2)
 	}
 }
 
@@ -186,5 +253,44 @@ func TestReportSummarizesBucketsOfTheWindowTier(t *testing.T) {
 	want := Summary{Count: 4, Errors: 1, MeanMS: 265, P50MS: 50, P95MS: 475, LastErrorCode: "search_unavailable", LastErrorAt: older.LastErrorAt}
 	if s.Summary != want {
 		t.Fatalf("summary = %+v; want %+v", s.Summary, want)
+	}
+}
+
+// A counted read lists the largest keys with their buckets, and totals every
+// key; query text is read from its hourly tier, and not at all when off.
+func TestCountsListLargestKeysAndTotalEveryKey(t *testing.T) {
+	now := time.Now().UTC()
+	row := func(series, key string, resolution time.Duration, ago time.Duration, count int64) Row {
+		return Row{Organization: "org_a", Series: series, Key: key, Resolution: resolution, Start: now.Add(-ago).Truncate(resolution), Count: count}
+	}
+	store := &memoryStore{rows: []Row{
+		row(SeriesReceived, "news-feed", 15*time.Minute, 3*time.Hour, 4),
+		row(SeriesReceived, "news-feed", 15*time.Minute, 0, 5),
+		row(SeriesReceived, "api-uploads", 15*time.Minute, 0, 3),
+		row(SeriesReceived, "archive", 15*time.Minute, 0, 1),
+		row(SeriesReceived, "news-feed", time.Minute, 0, 100),
+		row(SeriesSearchQuery, "solar energy", time.Hour, 2*time.Hour, 2),
+		row(SeriesSearchQuery, "solar energy", time.Hour, 0, 1),
+	}}
+	day, _ := ParseWindow("24h")
+	got, err := Reader{Store: store}.Counts(context.Background(), "org_a", SeriesReceived, day, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ranking and totals are the store's contract (adapter test); the read
+	// joins each listed key to its buckets of the window's tier.
+	if got.Resolution != 15*time.Minute || len(got.Series) != 2 || got.Series[0].Key != "news-feed" || len(got.Series[0].Points) != 2 ||
+		got.Series[1].Key != "api-uploads" || len(got.Series[1].Points) != 1 {
+		t.Fatalf("received counts = %+v; want news-feed with its 2 quarter-hour buckets, then api-uploads with 1", got)
+	}
+	top, err := Reader{Store: store, RecordQueryText: true}.TopQueries(context.Background(), "org_a", day, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top.Resolution != time.Hour || len(top.Series) != 1 || top.Series[0].Count != 3 || len(top.Series[0].Points) != 2 {
+		t.Fatalf("top queries = %+v; want solar energy, 3 searches in 2 hourly buckets", top)
+	}
+	if off, _ := (Reader{Store: store}).TopQueries(context.Background(), "org_a", day, 20); len(off.Series) != 0 {
+		t.Fatalf("top queries with recording off = %+v; want none", off)
 	}
 }

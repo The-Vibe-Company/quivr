@@ -294,8 +294,14 @@ func Run(command string) error {
 	}
 	blobs := s3store.New(cfg.S3)
 	store := postgres.ContentStore{Pool: pool}
+	// Plugin calls, searches, processing steps, documents received and
+	// Matches are counted in memory and flushed as rollups; only the worker
+	// deletes expired ones. The recorder runs once the plan is resolved.
+	rollups := postgres.ObservabilityStore{Pool: pool}
+	recorder := observability.NewRecorder(rollups, cfg.Observability, command == "worker")
 	// Normalizer routes and extension namespaces follow the plan.
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: live, Normalizations: store, Supersession: store, Routes: live}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: live, Normalizations: store, Supersession: store, Routes: live,
+		Received: recorder.Received}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	projection.LegacySpace = tei.Space().ID
@@ -401,10 +407,6 @@ func Run(command string) error {
 	if err != nil {
 		return fmt.Errorf("vector space registry: %w", err)
 	}
-	// Plugin calls, searches and processing steps are counted in memory and
-	// flushed as rollups; only the worker deletes expired ones.
-	rollups := postgres.ObservabilityStore{Pool: pool}
-	recorder := observability.NewRecorder(rollups, cfg.Observability, command == "worker")
 	pluginhttp.Observe(func(c pluginhttp.Call) {
 		recorder.PluginCall(observability.PluginCall{Organization: c.Organization, Plugin: c.PluginID, Version: c.Version, Operation: c.Operation, Duration: c.Duration, ErrorCode: c.ErrorCode})
 	})
@@ -536,7 +538,7 @@ func Run(command string) error {
 		go func() {
 			defer close(evaluationDone)
 			evaluation := postgres.EvaluationStore{ContentStore: store}
-			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics}.Run(ctx)
+			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(ctx)
 		}()
 		deliveryDone := make(chan struct{})
 		defer func() {

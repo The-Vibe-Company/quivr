@@ -92,6 +92,10 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &PluginCallStatsList{}
 			case "TopQueryList":
 				target = &TopQueryList{}
+			case "ReceivedStatsList":
+				target = &ReceivedStatsList{}
+			case "MatchStatsList":
+				target = &MatchStatsList{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

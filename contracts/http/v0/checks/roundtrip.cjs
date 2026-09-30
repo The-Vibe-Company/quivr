@@ -24,6 +24,9 @@ for (const c of cases) {
     DocumentTimeline: [['steps', '*', 'at'], ...['accepted_at', 'materialized_at', 'segmented_at', 'retrieval_ready_at', 'enriched_at']
       .map((step) => ['document', 'steps', step])],
     PluginCallStatsList: [['from'], ['to'], ['items', '*', 'summary', 'last_error_at'], ['items', '*', 'points', '*', 'start']],
+    ReceivedStatsList: [['from'], ['to'], ['items', '*', 'points', '*', 'start']],
+    MatchStatsList: [['from'], ['to'], ['items', '*', 'points', '*', 'start']],
+    TopQueryList: [['items', '*', 'points', '*', 'start']],
   };
   const expand = (parts) => {
     const star = parts.indexOf('*');

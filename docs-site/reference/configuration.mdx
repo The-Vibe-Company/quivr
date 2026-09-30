@@ -30,7 +30,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
 | `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
-| `observability` | no | Counters of plugin calls, searches and document steps, read with an `observability:read` key. See [Observability](#observability). |
+| `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
 | `connector_fixtures` | no | `true` enables the deterministic `fixture` connector kind. Local and CI stacks only. |
@@ -67,7 +67,7 @@ Durations are Go durations: `30s`, `10m`, `168h`.
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`); give it only to an operator key |
-| `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches and steps (`/v0/admin/stats/*`) |
+| `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
 
 ## Object storage
 

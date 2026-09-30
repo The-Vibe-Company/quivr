@@ -73,20 +73,22 @@ const WINDOWS: { value: StatsWindow; label: string }[] = [
   { value: "7d", label: "7 j" },
 ];
 
-/** Which window a section reads: 1 h, 24 h or 7 days. */
+/** Which window a section reads: 1 h, 24 h or 7 days, or only some of them. */
 export function WindowPicker({
   value,
   onChange,
   label,
+  options,
 }: {
   value: StatsWindow;
   onChange: (value: StatsWindow) => void;
   /** What the choice applies to, for assistive technology. */
   label: string;
+  options?: StatsWindow[];
 }) {
   return (
     <div className="segmented admin-window" role="group" aria-label={label}>
-      {WINDOWS.map((w) => (
+      {WINDOWS.filter((w) => !options || options.includes(w.value)).map((w) => (
         <button
           key={w.value}
           type="button"

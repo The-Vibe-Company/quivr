@@ -32,7 +32,16 @@ const SCAN_MS = MINUTE;
 const MAX_CLIENTS = 50;
 const RATE_WINDOW = 10 * MINUTE;
 const WAITING = new Set(["received", "materialized", "building_baseline"]);
-const STATS_KINDS = new Set(["plugins", "searches", "steps", "top-queries"]);
+const STATS_KINDS = new Set([
+  "plugins",
+  "searches",
+  "steps",
+  "received",
+  "matches",
+  "top-queries",
+]);
+// The reads that list only their largest keys take a limit (THE-798).
+const LIMITED_KINDS = new Set(["received", "top-queries"]);
 const STATS_WINDOWS = new Set(["1h", "24h", "7d"]);
 const STATS_MS = 10000;
 
@@ -559,7 +568,7 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
       const response = await rollup(
         kind,
         window,
-        kind === "top-queries" &&
+        LIMITED_KINDS.has(kind) &&
           Number.isInteger(limit) &&
           limit >= 1 &&
           limit <= 100

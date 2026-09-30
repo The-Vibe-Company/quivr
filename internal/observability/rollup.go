@@ -25,6 +25,12 @@ const (
 	// SeriesSearchQuery counts searches by normalized query text. It is
 	// recorded only when the deployment enables record_query_text.
 	SeriesSearchQuery = "search_query"
+	// SeriesReceived is one document received: a command that reserved a new
+	// revision of a Record. Its key is the source namespace (THE-798).
+	SeriesReceived = "received"
+	// SeriesMatch is one Match committed by an alert; its key is the
+	// evaluator plugin id (THE-798).
+	SeriesMatch = "match"
 )
 
 // BoundsMS are the upper bounds, in milliseconds, of the fixed latency

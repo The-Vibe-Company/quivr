@@ -960,6 +960,27 @@ func (e WebhookEventType) Valid() bool {
 	}
 }
 
+// Defines values for GetMatchStatsParamsWindow.
+const (
+	GetMatchStatsParamsWindowN1h  GetMatchStatsParamsWindow = "1h"
+	GetMatchStatsParamsWindowN24h GetMatchStatsParamsWindow = "24h"
+	GetMatchStatsParamsWindowN7d  GetMatchStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetMatchStatsParamsWindow enum.
+func (e GetMatchStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetMatchStatsParamsWindowN1h:
+		return true
+	case GetMatchStatsParamsWindowN24h:
+		return true
+	case GetMatchStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPluginCallStatsParamsWindow.
 const (
 	GetPluginCallStatsParamsWindowN1h  GetPluginCallStatsParamsWindow = "1h"
@@ -975,6 +996,27 @@ func (e GetPluginCallStatsParamsWindow) Valid() bool {
 	case GetPluginCallStatsParamsWindowN24h:
 		return true
 	case GetPluginCallStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetReceivedStatsParamsWindow.
+const (
+	GetReceivedStatsParamsWindowN1h  GetReceivedStatsParamsWindow = "1h"
+	GetReceivedStatsParamsWindowN24h GetReceivedStatsParamsWindow = "24h"
+	GetReceivedStatsParamsWindowN7d  GetReceivedStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetReceivedStatsParamsWindow enum.
+func (e GetReceivedStatsParamsWindow) Valid() bool {
+	switch e {
+	case GetReceivedStatsParamsWindowN1h:
+		return true
+	case GetReceivedStatsParamsWindowN24h:
+		return true
+	case GetReceivedStatsParamsWindowN7d:
 		return true
 	default:
 		return false
@@ -1374,6 +1416,12 @@ type CorpusRequest struct {
 	Retrieval *RetrievalConfig `json:"retrieval,omitempty"`
 }
 
+// CountPoint One non-empty bucket, starting at start and lasting the list's resolution_seconds.
+type CountPoint struct {
+	Count int       `json:"count"`
+	Start time.Time `json:"start"`
+}
+
 // CredentialDeposit defines model for CredentialDeposit.
 type CredentialDeposit struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
@@ -1610,6 +1658,31 @@ type MatchEvidence struct {
 type MatchPage struct {
 	Items          []Match `json:"items"`
 	NextPageCursor *string `json:"next_page_cursor,omitempty"`
+}
+
+// MatchStats defines model for MatchStats.
+type MatchStats struct {
+	Count int `json:"count"`
+
+	// Evaluator Plugin id of the evaluator of the Subscriptions that matched.
+	Evaluator string `json:"evaluator"`
+
+	// Points Non-empty buckets, oldest first.
+	Points []CountPoint `json:"points"`
+}
+
+// MatchStatsList defines model for MatchStatsList.
+type MatchStatsList struct {
+	From time.Time `json:"from"`
+
+	// Items Most Matches first.
+	Items             []MatchStats `json:"items"`
+	ResolutionSeconds int          `json:"resolution_seconds"`
+	To                time.Time    `json:"to"`
+
+	// Total Matches of every evaluator.
+	Total  int             `json:"total"`
+	Window StatsWindowName `json:"window"`
 }
 
 // MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
@@ -1898,6 +1971,32 @@ type ReceiptOutcome string
 
 // ReceiptState defines model for Receipt.State.
 type ReceiptState string
+
+// ReceivedStats defines model for ReceivedStats.
+type ReceivedStats struct {
+	Count int `json:"count"`
+
+	// Points Non-empty buckets, oldest first.
+	Points          []CountPoint `json:"points"`
+	SourceNamespace string       `json:"source_namespace"`
+}
+
+// ReceivedStatsList defines model for ReceivedStatsList.
+type ReceivedStatsList struct {
+	From time.Time `json:"from"`
+
+	// Items Most documents first.
+	Items             []ReceivedStats `json:"items"`
+	ResolutionSeconds int             `json:"resolution_seconds"`
+
+	// Sources Source namespaces that received at least one document, listed or not.
+	Sources int       `json:"sources"`
+	To      time.Time `json:"to"`
+
+	// Total Documents received from every source namespace, listed or not.
+	Total  int             `json:"total"`
+	Window StatsWindowName `json:"window"`
+}
 
 // Record defines model for Record.
 type Record struct {
@@ -2325,8 +2424,11 @@ type TimelineStepStep string
 
 // TopQuery defines model for TopQuery.
 type TopQuery struct {
-	Count int    `json:"count"`
-	Query string `json:"query"`
+	Count int `json:"count"`
+
+	// Points Non-empty hourly buckets, oldest first.
+	Points []CountPoint `json:"points"`
+	Query  string       `json:"query"`
 }
 
 // TopQueryList defines model for TopQueryList.
@@ -2335,8 +2437,11 @@ type TopQueryList struct {
 	Items []TopQuery `json:"items"`
 
 	// Recording Whether this deployment records query text (observability.record_query_text).
-	Recording bool            `json:"recording"`
-	Window    StatsWindowName `json:"window"`
+	Recording bool `json:"recording"`
+
+	// ResolutionSeconds Length of a bucket of points; query text is counted per hour.
+	ResolutionSeconds int             `json:"resolution_seconds"`
+	Window            StatsWindowName `json:"window"`
 }
 
 // Upload Upload URL and headers are transfer capabilities. Only verified uploads expose a usable Blob ID. Repeated confirmation of the same session observes the same verification, never a second upload.
@@ -2493,6 +2598,14 @@ type ListPipelinePlansParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetMatchStatsParams defines parameters for GetMatchStats.
+type GetMatchStatsParams struct {
+	Window *GetMatchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetMatchStatsParamsWindow defines parameters for GetMatchStats.
+type GetMatchStatsParamsWindow string
+
 // GetPluginCallStatsParams defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParams struct {
 	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -2500,6 +2613,15 @@ type GetPluginCallStatsParams struct {
 
 // GetPluginCallStatsParamsWindow defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParamsWindow string
+
+// GetReceivedStatsParams defines parameters for GetReceivedStats.
+type GetReceivedStatsParams struct {
+	Window *GetReceivedStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+	Limit  *int                          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetReceivedStatsParamsWindow defines parameters for GetReceivedStats.
+type GetReceivedStatsParamsWindow string
 
 // GetSearchStatsParams defines parameters for GetSearchStats.
 type GetSearchStatsParams struct {
@@ -2900,8 +3022,14 @@ type ServerInterface interface {
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(w http.ResponseWriter, r *http.Request, registrationId string)
 
+	// (GET /v0/admin/stats/matches)
+	GetMatchStats(w http.ResponseWriter, r *http.Request, params GetMatchStatsParams)
+
 	// (GET /v0/admin/stats/plugins)
 	GetPluginCallStats(w http.ResponseWriter, r *http.Request, params GetPluginCallStatsParams)
+
+	// (GET /v0/admin/stats/received)
+	GetReceivedStats(w http.ResponseWriter, r *http.Request, params GetReceivedStatsParams)
 
 	// (GET /v0/admin/stats/searches)
 	GetSearchStats(w http.ResponseWriter, r *http.Request, params GetSearchStatsParams)
@@ -3337,6 +3465,39 @@ func (siw *ServerInterfaceWrapper) ActivatePlugin(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetMatchStats operation middleware
+func (siw *ServerInterfaceWrapper) GetMatchStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMatchStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMatchStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPluginCallStats operation middleware
 func (siw *ServerInterfaceWrapper) GetPluginCallStats(w http.ResponseWriter, r *http.Request) {
 
@@ -3361,6 +3522,52 @@ func (siw *ServerInterfaceWrapper) GetPluginCallStats(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPluginCallStats(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReceivedStats operation middleware
+func (siw *ServerInterfaceWrapper) GetReceivedStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetReceivedStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReceivedStats(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5208,6 +5415,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/plugins", wrapper.GetPluginCallStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/searches", wrapper.GetSearchStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/steps", wrapper.GetStepStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/received", wrapper.GetReceivedStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/matches", wrapper.GetMatchStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/top-queries", wrapper.GetTopQueries)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/search/profiles", wrapper.ListSearchProfiles)
@@ -5653,6 +5862,45 @@ func (response ActivatePlugindefaultJSONResponse) VisitActivatePluginResponse(w 
 	return err
 }
 
+type GetMatchStatsRequestObject struct {
+	Params GetMatchStatsParams
+}
+
+type GetMatchStatsResponseObject interface {
+	VisitGetMatchStatsResponse(w http.ResponseWriter) error
+}
+
+type GetMatchStats200JSONResponse MatchStatsList
+
+func (response GetMatchStats200JSONResponse) VisitGetMatchStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMatchStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetMatchStatsdefaultJSONResponse) VisitGetMatchStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetPluginCallStatsRequestObject struct {
 	Params GetPluginCallStatsParams
 }
@@ -5681,6 +5929,45 @@ type GetPluginCallStatsdefaultJSONResponse struct {
 }
 
 func (response GetPluginCallStatsdefaultJSONResponse) VisitGetPluginCallStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReceivedStatsRequestObject struct {
+	Params GetReceivedStatsParams
+}
+
+type GetReceivedStatsResponseObject interface {
+	VisitGetReceivedStatsResponse(w http.ResponseWriter) error
+}
+
+type GetReceivedStats200JSONResponse ReceivedStatsList
+
+func (response GetReceivedStats200JSONResponse) VisitGetReceivedStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReceivedStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetReceivedStatsdefaultJSONResponse) VisitGetReceivedStatsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -8014,8 +8301,14 @@ type StrictServerInterface interface {
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(ctx context.Context, request ActivatePluginRequestObject) (ActivatePluginResponseObject, error)
 
+	// (GET /v0/admin/stats/matches)
+	GetMatchStats(ctx context.Context, request GetMatchStatsRequestObject) (GetMatchStatsResponseObject, error)
+
 	// (GET /v0/admin/stats/plugins)
 	GetPluginCallStats(ctx context.Context, request GetPluginCallStatsRequestObject) (GetPluginCallStatsResponseObject, error)
+
+	// (GET /v0/admin/stats/received)
+	GetReceivedStats(ctx context.Context, request GetReceivedStatsRequestObject) (GetReceivedStatsResponseObject, error)
 
 	// (GET /v0/admin/stats/searches)
 	GetSearchStats(ctx context.Context, request GetSearchStatsRequestObject) (GetSearchStatsResponseObject, error)
@@ -8518,6 +8811,32 @@ func (sh *strictHandler) ActivatePlugin(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// GetMatchStats operation middleware
+func (sh *strictHandler) GetMatchStats(w http.ResponseWriter, r *http.Request, params GetMatchStatsParams) {
+	var request GetMatchStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMatchStats(ctx, request.(GetMatchStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMatchStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMatchStatsResponseObject); ok {
+		if err := validResponse.VisitGetMatchStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetPluginCallStats operation middleware
 func (sh *strictHandler) GetPluginCallStats(w http.ResponseWriter, r *http.Request, params GetPluginCallStatsParams) {
 	var request GetPluginCallStatsRequestObject
@@ -8537,6 +8856,32 @@ func (sh *strictHandler) GetPluginCallStats(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetPluginCallStatsResponseObject); ok {
 		if err := validResponse.VisitGetPluginCallStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReceivedStats operation middleware
+func (sh *strictHandler) GetReceivedStats(w http.ResponseWriter, r *http.Request, params GetReceivedStatsParams) {
+	var request GetReceivedStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReceivedStats(ctx, request.(GetReceivedStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReceivedStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReceivedStatsResponseObject); ok {
+		if err := validResponse.VisitGetReceivedStatsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -20,17 +20,26 @@ type Store interface {
 	// before, and returns how many it deleted.
 	PruneRollups(ctx context.Context, resolution time.Duration, before time.Time) (int64, error)
 	// ReadRollups lists the rows of one Organization, series and resolution
-	// that start at or after from, ordered by key then start.
-	ReadRollups(ctx context.Context, org, series string, resolution time.Duration, from time.Time) ([]Row, error)
+	// that start at or after from, ordered by key then start; only the rows
+	// of keys when any are given.
+	ReadRollups(ctx context.Context, org, series string, resolution time.Duration, from time.Time, keys ...string) ([]Row, error)
 	// TopKeys sums the counts of one series per key over the rows that start
-	// at or after from, largest first.
-	TopKeys(ctx context.Context, org, series string, resolution time.Duration, from time.Time, limit int) ([]KeyCount, error)
+	// at or after from: the limit largest, and the total over every key.
+	TopKeys(ctx context.Context, org, series string, resolution time.Duration, from time.Time, limit int) (Ranking, error)
 }
 
 // KeyCount is a key and its summed count.
 type KeyCount struct {
 	Key   string
 	Count int64
+}
+
+// Ranking is the largest keys of a series over a window, largest first,
+// with the count and number of every key, listed or not.
+type Ranking struct {
+	Keys     []KeyCount
+	Total    int64
+	Distinct int
 }
 
 // Config is the observability part of the engine configuration.
@@ -58,10 +67,17 @@ func (c Config) Interval() (time.Duration, bool) {
 
 // Bounds of the in-memory buffer: past them new events are dropped and
 // counted, so an unreachable database never grows a process without limit.
+// Query text and source namespaces come from clients, so each of those
+// series also takes at most maxPendingKeys new keys between two flushes.
 const (
-	maxPendingRows    = 50000
-	maxPendingQueries = 1000
+	maxPendingRows = 50000
+	maxPendingKeys = 1000
 )
+
+// clientKeyed reports a series whose keys come from clients.
+func clientKeyed(series string) bool {
+	return series == SeriesSearchQuery || series == SeriesReceived
+}
 
 // PluginCall is one Contribution invocation.
 type PluginCall struct {
@@ -94,7 +110,10 @@ type Recorder struct {
 
 	mu      sync.Mutex
 	pending map[ID]*Row
-	queries int
+	// keys holds the keys of client-keyed series buffered since the last
+	// flush, per Organization and series, so each takes at most
+	// maxPendingKeys and one Organization never uses up another's.
+	keys map[[2]string]map[string]struct{}
 
 	metrics  *metrics
 	dropped  atomic.Int64
@@ -108,7 +127,7 @@ func NewRecorder(store Store, cfg Config, prune bool) *Recorder {
 	if !ok {
 		interval = DefaultFlushInterval
 	}
-	return &Recorder{store: store, interval: interval, recordQueryText: cfg.RecordQueryText, prune: prune, pending: map[ID]*Row{}, metrics: newMetrics()}
+	return &Recorder{store: store, interval: interval, recordQueryText: cfg.RecordQueryText, prune: prune, pending: map[ID]*Row{}, keys: map[[2]string]map[string]struct{}{}, metrics: newMetrics()}
 }
 
 // RecordsQueryText reports whether query text is recorded.
@@ -135,6 +154,25 @@ func (r *Recorder) Search(s Search) {
 	}
 }
 
+// Received records one document received from a source namespace: a
+// command that reserved a new revision of a Record.
+func (r *Recorder) Received(org, sourceNamespace string) {
+	if r == nil || org == "" || sourceNamespace == "" {
+		return
+	}
+	r.add(org, SeriesReceived, sourceNamespace, Tiers, 0, 0, "")
+}
+
+// Matched records one Match committed by a Subscription whose evaluator is
+// the plugin evaluator.
+func (r *Recorder) Matched(org, evaluator string) {
+	if r == nil || org == "" || evaluator == "" {
+		return
+	}
+	r.metrics.match(evaluator)
+	r.add(org, SeriesMatch, evaluator, Tiers, 0, 0, "")
+}
+
 // Step records one processing step of one Organization.
 func (r *Recorder) Step(org, step string, d time.Duration, errorCode string) {
 	if r == nil || org == "" {
@@ -153,6 +191,22 @@ func (r *Recorder) add(org, series, key string, tiers []Tier, d time.Duration, i
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if clientKeyed(series) {
+		// A key already buffered keeps counting, across bucket boundaries too.
+		scope := [2]string{org, series}
+		seen := r.keys[scope]
+		if _, ok := seen[key]; !ok {
+			if len(seen) >= maxPendingKeys {
+				r.dropped.Add(1)
+				return
+			}
+			if seen == nil {
+				seen = map[string]struct{}{}
+				r.keys[scope] = seen
+			}
+			seen[key] = struct{}{}
+		}
+	}
 	for _, tier := range tiers {
 		event.Resolution, event.Start = tier.Resolution, now.Truncate(tier.Resolution)
 		id := event.ID()
@@ -160,12 +214,9 @@ func (r *Recorder) add(org, series, key string, tiers []Tier, d time.Duration, i
 			row.merge(event)
 			continue
 		}
-		if len(r.pending) >= maxPendingRows || (series == SeriesSearchQuery && r.queries >= maxPendingQueries) {
+		if len(r.pending) >= maxPendingRows {
 			r.dropped.Add(1)
 			continue
-		}
-		if series == SeriesSearchQuery {
-			r.queries++
 		}
 		row := event
 		r.pending[id] = &row
@@ -180,7 +231,7 @@ func (r *Recorder) Flush(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	pending := r.pending
-	r.pending, r.queries = map[ID]*Row{}, 0
+	r.pending, r.keys = map[ID]*Row{}, map[[2]string]map[string]struct{}{}
 	r.mu.Unlock()
 	if len(pending) == 0 {
 		return nil

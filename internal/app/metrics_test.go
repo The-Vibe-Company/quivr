@@ -58,11 +58,11 @@ func (r *rollups) UpsertRollups(_ context.Context, rows []observability.Row) err
 	return nil
 }
 func (*rollups) PruneRollups(context.Context, time.Duration, time.Time) (int64, error) { return 0, nil }
-func (*rollups) ReadRollups(context.Context, string, string, time.Duration, time.Time) ([]observability.Row, error) {
+func (*rollups) ReadRollups(context.Context, string, string, time.Duration, time.Time, ...string) ([]observability.Row, error) {
 	return nil, nil
 }
-func (*rollups) TopKeys(context.Context, string, string, time.Duration, time.Time, int) ([]observability.KeyCount, error) {
-	return nil, nil
+func (*rollups) TopKeys(context.Context, string, string, time.Duration, time.Time, int) (observability.Ranking, error) {
+	return observability.Ranking{}, nil
 }
 
 // The worker records each pipeline step once, when the stage that finishes
