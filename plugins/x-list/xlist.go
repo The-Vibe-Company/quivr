@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -29,6 +30,7 @@ type XList struct {
 const (
 	defaultRecheckWindow = 24 * time.Hour
 	defaultRecheckEvery  = 10 * time.Minute
+	minRecheckEvery      = 60 // seconds, unless the pin allows short rechecks
 	maxBackfill          = 7 * 24 * time.Hour
 	lookupBatch          = 100
 	maxRecheckPosts      = 2000
@@ -66,6 +68,9 @@ func (c config) interval() time.Duration {
 // configuration is the plugin configuration of the pin.
 type configuration struct {
 	APIEndpoint string `json:"api_endpoint"`
+	// AllowShortRecheck accepts recheck intervals below 60 s, for test stacks
+	// only: it holds only with a loopback api_endpoint, never against X.
+	AllowShortRecheck bool `json:"allow_short_recheck"`
 }
 
 // checkpoint is the Acquisition Checkpoint of an x_list instance.
@@ -160,6 +165,9 @@ func (x XList) client(req *quivrplugin.FetchRequest) (client, error) {
 	if base == "" {
 		base = DefaultAPI
 	}
+	if conf.AllowShortRecheck && !loopback(base) {
+		return client{}, quivrplugin.SourceError("invalid_configuration", "allow_short_recheck needs a loopback api_endpoint: it is for test fakes only")
+	}
 	var secret struct {
 		BearerToken string `json:"bearer_token"`
 	}
@@ -170,7 +178,16 @@ func (x XList) client(req *quivrplugin.FetchRequest) (client, error) {
 	if h == nil {
 		h = &http.Client{Timeout: 20 * time.Second}
 	}
-	return client{base: base, token: secret.BearerToken, http: h}, nil
+	return client{base: base, token: secret.BearerToken, http: h, shortRecheck: conf.AllowShortRecheck}, nil
+}
+
+func loopback(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
 }
 
 // Fetch sweeps the list for posts newer than the watermark, then, when due,
@@ -183,6 +200,9 @@ func (x XList) Fetch(ctx context.Context, req *quivrplugin.FetchRequest) (*quivr
 	c, err := x.client(req)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.RecheckInterval > 0 && cfg.RecheckInterval < minRecheckEvery && !c.shortRecheck {
+		return nil, quivrplugin.SourceError("invalid_config", "recheck_interval_seconds must be at least 60")
 	}
 	var cp checkpoint
 	if err := req.DecodeCheckpoint(&cp); err != nil {

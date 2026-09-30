@@ -22,6 +22,9 @@ build, test or pin the plugin.
   follow X's public docs and are tested against fakes only.
 - **Configuration**: `api_endpoint`, the X API origin (default
   `https://api.x.com`). Set it only to point at a test fake.
+  `allow_short_recheck` accepts `recheck_interval_seconds` below 60 so tests
+  need not wait a minute; it holds only with a loopback `api_endpoint`, and
+  every fetch fails with `invalid_configuration` otherwise.
 - **Credential check**: answers ok without calling X, because X bills every
   request. A refused token shows at the first fetch as `unauthorized`.
 
@@ -29,7 +32,7 @@ build, test or pin the plugin.
 
 `make dev`, `make verify` and the browser demo build and pin it on every stack
 start (`QUIVR_X_LIST=off make dev` leaves it out); they point `api_endpoint` at
-the local fake X API. The Railway image runs it beside the worker on
+the local fake X API and set `allow_short_recheck`. The Railway image runs it beside the worker on
 127.0.0.1:9930, and beside the API for webhook deliveries. Elsewhere, build it (`go build .` here) and pin it as
 [Run a connector plugin](../../docs/plugins/run-a-connector-plugin.md) explains.
 

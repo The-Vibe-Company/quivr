@@ -47,9 +47,12 @@ contributions:
               title: Deletion recheck window (seconds)
             recheck_interval_seconds:
               type: integer
-              minimum: 60
+              # At least 60; the plugin refuses less unless the pin sets
+              # allow_short_recheck, which only a loopback test fake may use.
+              minimum: 1
               maximum: 86400
               title: Deletion recheck interval (seconds)
+              description: At least 60 seconds.
             webhook:
               type: object
               additionalProperties: false
@@ -106,6 +109,10 @@ configuration:
         type: string
         pattern: "^https?://[^/]+"
         description: X API origin; default https://api.x.com. Point it at a local fake only in tests.
+      allow_short_recheck:
+        type: boolean
+        default: false
+        description: Accept recheck_interval_seconds below 60. Test stacks only; refused unless api_endpoint is a loopback address.
 extensions:
   connector.x_list:
     "1":

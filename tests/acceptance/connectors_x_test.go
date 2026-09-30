@@ -96,7 +96,7 @@ func TestConnectorXListCollectsPostsCorrectsEditsAndWithdrawsDeletions(t *testin
 	xControl(t, base, list, map[string]any{"posts": []any{map[string]any{"id": "1800000000000000001", "text": "Before creation", "created_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)}}})
 	// A backfill beyond 7 days is refused at the first poll (the plugin checks it).
 	badWindow := request(t, "POST", "/v0/connectors", token, xConnector("x-bad-window", corpusID, "x-bad", list, map[string]any{"backfill_since": time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)}), 201)
-	created := request(t, "POST", "/v0/connectors", token, xConnector("x-list", corpusID, "x", list, map[string]any{"recheck_interval_seconds": 60}), 201)
+	created := request(t, "POST", "/v0/connectors", token, xConnector("x-list", corpusID, "x", list, map[string]any{"recheck_interval_seconds": 1}), 201)
 	noXSecret(t, created)
 	id := created["connector_id"].(string)
 	awaitXHealth(t, token, badWindow["connector_id"].(string), lastError("invalid_config"))
@@ -152,9 +152,10 @@ func TestConnectorXListCollectsPostsCorrectsEditsAndWithdrawsDeletions(t *testin
 
 	// Deleted and protected posts are withdrawn by the periodic recheck.
 	xControl(t, base, list, map[string]any{"delete": []string{"1800000000000000004"}, "protect": []string{"1800000000000000005"}})
-	// The recheck runs every 60 s (the configured minimum), so allow two intervals.
+	// The recheck runs every second: the local pin sets allow_short_recheck
+	// (scripts/connector_plugin.py); deployments keep the 60 s minimum.
 	for _, key := range []string{"1800000000000000004", "1800000000000000005"} {
-		for deadline := time.Now().Add(150 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(250 * time.Millisecond) {
 			if r := request(t, "GET", "/v0/records/"+byKey[key], token, nil, 200); r["withdrawn"] == true {
 				break
 			}

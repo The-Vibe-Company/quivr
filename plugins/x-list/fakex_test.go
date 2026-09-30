@@ -267,6 +267,7 @@ type instance struct {
 	t          *testing.T
 	h          http.Handler
 	api        string
+	shortCheck bool // the pin's allow_short_recheck
 	config     string
 	token      string
 	webhookURL string
@@ -318,7 +319,7 @@ func (in *instance) fetch(pageInRun int) page {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"invocation_id": fmt.Sprintf("test-%d", pageInRun), "contribution": "connector", "organization_id": "org_a",
-		"configuration": map[string]any{"api_endpoint": in.api},
+		"configuration": map[string]any{"api_endpoint": in.api, "allow_short_recheck": in.shortCheck},
 		"connector":     in.connector(),
 		"credential":    map[string]any{"bearer_token": in.token}, "checkpoint": checkpoint,
 		"now": in.now.Format(time.RFC3339), "page_in_run": pageInRun, "reads_today": in.reads,

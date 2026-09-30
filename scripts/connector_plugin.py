@@ -42,7 +42,9 @@ FIRST_PARTY = [
     # RSS and Atom feeds; the tests' fake feeds are on loopback.
     {'id': 'rss', 'configuration': lambda stack: {'allow_private_addresses': True}},
     # X lists; every stack points it at the local fake X API (scripts/fake_x.py), never at X.
-    {'id': 'x-list', 'configuration': lambda stack: {'api_endpoint': f"http://127.0.0.1:{stack.state['fake_x_port']}"}},
+    # allow_short_recheck (loopback endpoints only) lets tests recheck deletions every second.
+    {'id': 'x-list', 'configuration': lambda stack: {'api_endpoint': f"http://127.0.0.1:{stack.state['fake_x_port']}",
+                                                      'allow_short_recheck': True}},
     # Microsoft 365 mail, pinned to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
     {'id': 'm365-mail', 'configuration': lambda stack: {'login_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}",
                                                          'graph_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}/v1.0"}},

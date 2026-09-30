@@ -55,6 +55,28 @@ func TestABackfillOlderThanSevenDaysIsRefusedAtTheFirstPoll(t *testing.T) {
 	}
 }
 
+// A recheck interval under 60 s is refused at the first poll unless the pin
+// sets allow_short_recheck, which holds only for a loopback api_endpoint (a
+// test fake), never for X. A refused run leaves the checkpoint where it was.
+func TestARecheckUnderAMinuteNeedsTheTestOnlyPinGuard(t *testing.T) {
+	_, srv := newFakeX(t)
+	for _, c := range []struct {
+		name, api, code string
+		guard           bool
+	}{
+		{"no guard", srv.URL, "invalid_config", false},
+		{"guard on a loopback fake", srv.URL, "", true},
+		{"guard against X", DefaultAPI, "invalid_configuration", true},
+	} {
+		in := newInstance(t, srv, `{"list_id":"77","recheck_interval_seconds":1}`)
+		in.api, in.shortCheck = c.api, c.guard
+		e := runError(in.run())
+		if c.code == "" && e != nil || c.code != "" && (e == nil || e.Class != "source" || e.Code != c.code || in.checkpoint != nil) {
+			t.Fatalf("%s: got %+v checkpoint %s, want code %q", c.name, e, in.checkpoint, c.code)
+		}
+	}
+}
+
 // An instance advanced by the built-in kind (an interrupted sweep, tracked
 // posts, a deleted post pending recheck) continues on the plugin: the sweep
 // resumes from its token, no post is collected twice and the deleted post is

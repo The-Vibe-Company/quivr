@@ -55,7 +55,7 @@ POST /v0/connectors
 | `backfill_since` | none | Also collect posts created since this instant. It must be within the 7 days before the first poll; otherwise that poll fails with `invalid_config` and nothing is collected. Without it, collection starts at the first poll ("start now") |
 | `max_reads_per_day` | none | Daily spend guard in posts read (minimum 100), see [Spend](#interval-and-spend) |
 | `recheck_window_seconds` | 86400 (24 h) | How long collected posts are rechecked for deletion and protection (1 h to 7 days) |
-| `recheck_interval_seconds` | 600 (10 min) | How often that recheck runs (minimum 60 s) |
+| `recheck_interval_seconds` | 600 (10 min) | How often that recheck runs (minimum 60 s; a shorter value fails the first poll with `invalid_config`) |
 
 `schedule.interval_seconds` defaults to 120 s. The deployment floor is 30 s.
 

@@ -30,6 +30,8 @@ type client struct {
 	base  string
 	token string
 	http  *http.Client
+	// shortRecheck is the pin's allow_short_recheck (loopback test fakes only).
+	shortRecheck bool
 }
 
 type problem struct {
