@@ -1,0 +1,73 @@
+quivr-search/package.json
+  s_54b80c92daa9cb::t_7515bae17110ea 12
+quivr-search/src/components/admin/AdminView.tsx
+  s_54b80c92daa9cb::t_948f5c184a77c4 30-31,36
+quivr-search/tests/fake-admin.ts
+  s_54b80c92daa9cb::t_fba3fffa8c3701 143,146,149,164,178-179,185
+  s_54b80c92daa9cb::t_c3ee208a47ef88 161
+  s_54b80c92daa9cb::t_2955cd86e03692 98
+  s_54b80c92daa9cb::t_8cdd9d5d59f96b 327
+  s_54b80c92daa9cb::t_1fb5c0d00ca0b5 1-26,34-62,68-96,121-135,175-177,186,194-199,204-210,216-220,229-231,237-251,256-257,262-290,298-326,328-343
+  s_54b80c92daa9cb::t_7f62ebca58cb88 27-33,63-67,99-120,136-142,144-145,147-148,150-160,162-163,165-174,180-184,187-193,200-203,211-215,221-228,232-236,252-255,258-261,291-297
+  s_54b80c92daa9cb::t_20f56f7d13b9f1 97
+quivr-search/tests/admin-plugins.test.mjs
+  s_54b80c92daa9cb::t_738f61c4e33617 1-58
+quivr-search/tests/health.spec.ts
+  s_54b80c92daa9cb::t_a0c39637ee04a4 1-7,13-47,54-71,73-74,79,84-90,109,112-122,126-131,136-144,181-187
+  s_54b80c92daa9cb::t_8685aa83bc4555 8-12,48-53,72,75-78,80-83,91-108,110-111,123-125,132-135,145-180
+quivr-search/src/health.css
+  s_54b80c92daa9cb::t_7cf35bf40b4eec 612-616
+  s_54b80c92daa9cb::t_9006130fadd248 495-496,502-504,506-517,519-526
+  s_54b80c92daa9cb::t_7409065aa1b879 124-126,163,167,169-185,217-219,259-264,401,439-441,459
+  s_54b80c92daa9cb::t_e70753f12d100a 1-39,41-69,73-123,127-162,164-166,168,186-216,220-258,265-400,402-438,442-458,460-494,497-501,505,518,527-611,617-622
+  s_54b80c92daa9cb::t_c76d855dff8a27 40,70-72
+quivr-search/tests/admin-health-live.spec.ts
+  s_54b80c92daa9cb::t_4534c335d7316d 1-25,30-36,42-43,45-50,55-65,73
+  s_54b80c92daa9cb::t_383b3c53e796ca 26-29,37-41,51-53,66-72
+  s_54b80c92daa9cb::t_390d3c24821d27 44
+  s_54b80c92daa9cb::t_c8d4d1a2586cb3 54
+quivr-search/src/components/admin/Bottlenecks.tsx
+  s_54b80c92daa9cb::t_7d43524404d623 215-221
+  s_54b80c92daa9cb::t_bf3da4f27d564b 129-136
+  s_54b80c92daa9cb::t_e08fd3ee2687c1 11
+  s_54b80c92daa9cb::t_7a4b506b550239 145-148
+  s_54b80c92daa9cb::t_864bbe5ea14f51 9-10
+  s_54b80c92daa9cb::t_50c55392ad219f 59
+  s_54b80c92daa9cb::t_9aa225aeb9f4b9 49,53-54,57
+  s_54b80c92daa9cb::t_aeeae6012cd93a 234-241
+  s_54b80c92daa9cb::t_97f827677b159d 199
+  s_54b80c92daa9cb::t_7f62ebca58cb88 6,30-33,39-45,56,204-206
+quivr-search/tests/admin-health.spec.ts
+  s_54b80c92daa9cb::t_cb685282a3ee24 1-32,34-36,40-49,57-67,71-76,78-79,83-85,93-96,100-106,108,110-111,115,119-127,129,133,138
+  s_54b80c92daa9cb::t_d80fe471fe5da9 33,77
+  s_54b80c92daa9cb::t_b07afa757f6b27 53
+  s_54b80c92daa9cb::t_7f62ebca58cb88 37-39,50-52,54-56,68-70,80-82,86-92,97-99,116-118,130-132,134-137
+  s_54b80c92daa9cb::t_c3ee208a47ef88 107,128
+  s_54b80c92daa9cb::t_e2c454de25cf61 109
+  s_54b80c92daa9cb::t_383b3c53e796ca 112-114
+quivr-search/src/components/admin/Plugins.tsx
+  s_54b80c92daa9cb::t_9006130fadd248 230-232,263-268,382,400
+  s_54b80c92daa9cb::t_c76d855dff8a27 169,306-307
+  s_54b80c92daa9cb::t_7f62ebca58cb88 39-45,155-156,252-254,259-262,301-302,344-349,354-356,374-377,384-386,388-399
+  s_54b80c92daa9cb::t_dc62966e74e3c6 1-14,16-38,46-154,157-168,170-229,233-251,255-258,269-300,303-305,308-343,350-353,357-373,378-381,383,387,401-464
+  s_54b80c92daa9cb::t_e7b5d0cc89646c 15
+quivr-search/src/lib/health.ts
+  s_54b80c92daa9cb::t_7f62ebca58cb88 205-208,225-228,232-233
+  s_54b80c92daa9cb::t_934559740a04cb 308-310,312-316,327-334,336,339,343-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "393bdf8d10e49c843060e0525aea2cf78b18e68e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
