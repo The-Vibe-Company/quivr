@@ -1,0 +1,38 @@
+plugins/x-list/xlist_test.go
+  s_54b80c92daa9cb::t_24372abe520efc 58-79
+plugins/x-list/fakex_test.go
+  s_54b80c92daa9cb::t_099e99a23fc71a 322
+  s_54b80c92daa9cb::t_3516a51ad971d0 270
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_3fc82f3d0e312a 45-47
+tests/acceptance/connectors_x_test.go
+  s_54b80c92daa9cb::t_6d16de1f585a51 99
+  s_54b80c92daa9cb::t_e5bbb51103f61b 155-156,158
+docs/connectors/x.md
+  s_54b80c92daa9cb::t_f36b367fa5551e 58
+plugins/x-list/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_0823452b693487 50-52,55,112-115
+plugins/x-list/xapi.go
+  s_54b80c92daa9cb::t_30075bb13c36cf 33-34
+plugins/x-list/xlist.go
+  s_54b80c92daa9cb::t_30075bb13c36cf 6,33,71-73,168-170,181-190,204-206
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_e1bea58850fdd8 25-27
+  s_54b80c92daa9cb::t_a10cecdf65bbd6 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "11d287e36456bdcea32a93922dc5a624c247050d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
