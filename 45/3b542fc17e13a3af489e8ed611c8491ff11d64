@@ -1,0 +1,141 @@
+docs-site/reference/plugin-protocol.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-578
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_151336827e1732 7
+docs-site/guides/described-alerts.mdx
+  s_54b80c92daa9cb::t_3663f0ecb64e69 1-81
+docs-site/guides/keyword-alerts.mdx
+  s_54b80c92daa9cb::t_935c89bb4a2556 188-192
+  s_54b80c92daa9cb::t_b797dbbc3c105b 1-171,175-176,180-186,193-210
+  s_54b80c92daa9cb::t_45664cb709d933 172-174,177-179
+  s_54b80c92daa9cb::t_0c5595a54e3ff7 187
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 18,37
+  s_54b80c92daa9cb::t_30f13bd3642e8a 6
+quivr-search/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 26,55,59
+sdks/go/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 89,103,182
+plugins/rss/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 6
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_6e33ba0dbae749 1-56,58-123
+  s_54b80c92daa9cb::t_cfa8c4725b0ecb 57
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_c4e3f31f911a41 1-11,13-121
+  s_54b80c92daa9cb::t_a57d425eaadb94 12
+scripts/mintlify_site.py
+  s_54b80c92daa9cb::t_60d5d2a4fc91c1 696
+  s_54b80c92daa9cb::t_151336827e1732 44-45,600,602
+internal/app/run.go
+  s_54b80c92daa9cb::t_30f13bd3642e8a 156
+docs/inventory.toml
+  s_54b80c92daa9cb::t_d3f31f6040c1e8 15-18,58
+scripts/test_guides.py
+  s_54b80c92daa9cb::t_50ce681ed8e554 56,63,153
+  s_54b80c92daa9cb::t_d110f16534d8f9 140-141,146-152,164-166,182-183
+docs-site/plugins/write-a-connector.mdx
+  s_54b80c92daa9cb::t_1ff711ea52ee5c 1-204
+docs/agents/fleet-workflow.md
+  s_54b80c92daa9cb::t_607e68e8cd41e5 17
+scripts/test_mintlify.py
+  s_54b80c92daa9cb::t_ea831dc8749a42 53,95,115
+  s_54b80c92daa9cb::t_c62583582839f7 1,14-19,24-43,48-49,52,54,57-79,82-88,90,94,96-114,116-124,134
+docs-site/guides/ai-agents.mdx
+  s_54b80c92daa9cb::t_b7431eaa2bff0e 11
+  s_54b80c92daa9cb::t_ba8a791e2b69b5 37,40-41
+  s_54b80c92daa9cb::t_5d0cdee408f50f 48
+  s_54b80c92daa9cb::t_d281447ecbefef 1-10,12-36,38-39,42-47,49-63
+docs-site/reference/mcp.mdx
+  s_54b80c92daa9cb::t_151336827e1732 3,5,8
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-2,4,6-7,9-358
+docs-site/plugins/types.mdx
+  s_54b80c92daa9cb::t_2a733d7935fb80 1-179
+scripts/local.py
+  s_54b80c92daa9cb::t_2588de5a57bf7e 643-644,650
+docs-site/guides/search.mdx
+  s_54b80c92daa9cb::t_da13e28c582ae2 1-6,8-11,13-15,18-26,45-143
+  s_54b80c92daa9cb::t_8147568aa504f7 7,12,16-17,27-44
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-4469
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 15-16
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_31356ecb4fa989 30,34
+  s_54b80c92daa9cb::t_25ef0574cbb97d 32
+  s_54b80c92daa9cb::t_a0d92291e1cf7e 31
+docs/runnable-guides.md
+  s_54b80c92daa9cb::t_19879afc22821d 3-7,11-13,15-19,22-23,28-32,34-38,40-45,62,66-70,73,76-78,82
+docs-site/reference/cli.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-2,4,6-7,9-201
+  s_54b80c92daa9cb::t_151336827e1732 3,5,8
+docs-site/guides/x.mdx
+  s_54b80c92daa9cb::t_223c7ef2f97ca1 1-84
+docs-site/plugins/pin.mdx
+  s_54b80c92daa9cb::t_bb75503690170f 1-76
+docs-site/guides/microsoft-365.mdx
+  s_54b80c92daa9cb::t_24bbc1b91c4cbb 1-98
+docs-site/plugins/write-an-alert-rule.mdx
+  s_54b80c92daa9cb::t_e37605a8a6675a 1-114,116-125
+  s_54b80c92daa9cb::t_6e842f5bad39d3 115
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 366,534,625
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 6
+docs-site/docs.json
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-127
+docs-site/reference/plugin-manifest.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-135
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_30f13bd3642e8a 22
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_607e68e8cd41e5 491,549
+quivr-search/src/components/connectors/SourceList.tsx
+  s_54b80c92daa9cb::t_30f13bd3642e8a 14
+docs-site/plugins/first-plugin.mdx
+  s_54b80c92daa9cb::t_4a23963903a81b 28-31,35
+  s_54b80c92daa9cb::t_ffc61f52a3c045 26-27
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_bb6d138126c746 73,80
+  s_54b80c92daa9cb::t_e7c2067c76fde7 1-72,74-79,81-126
+docs-site/guides/rss.mdx
+  s_54b80c92daa9cb::t_35b785d5268498 1-70
+  s_54b80c92daa9cb::t_17e0f60ee1bfac 71-75
+cmd/quivr-reference/sources.go
+  s_54b80c92daa9cb::t_151336827e1732 68,86
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_151336827e1732 7
+docs-site/guides/connectors.mdx
+  s_54b80c92daa9cb::t_e7096310731c9e 40-43
+  s_54b80c92daa9cb::t_3dee81dec8893f 1-39,44-101
+docs-site/plugins/catalog.mdx
+  s_54b80c92daa9cb::t_32c66110f09063 1-6,8-63
+  s_54b80c92daa9cb::t_dbcc75e129ecf1 7
+docs-site/guides/add-content.mdx
+  s_54b80c92daa9cb::t_96377cb35f5ec9 1-270
+docs-site/api-reference/overview.mdx
+  s_54b80c92daa9cb::t_5d8125d75c943f 1-68
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 106
+  s_54b80c92daa9cb::t_30f13bd3642e8a 90
+README.md
+  s_54b80c92daa9cb::t_a15fbc25b5f91e 79-82,195,216,223,264-268,270-276
+  s_54b80c92daa9cb::t_802711ad02325d 112,122,152,154,165,230,232,243,250
+  s_54b80c92daa9cb::t_7956d9e53a0183 294-295,310-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "453b542fc17e13a3af489e8ed611c8491ff11d64",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
