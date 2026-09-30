@@ -1,0 +1,51 @@
+internal/transport/httpapi/operations.go
+  s_54b80c92daa9cb::t_d108269e2396f3 11
+  s_54b80c92daa9cb::t_d03515fcd0d53a 154-156
+internal/adapters/postgres/quarantine.go
+  s_54b80c92daa9cb::t_286aef5051b398 403-411,603
+  s_54b80c92daa9cb::t_b65f83eef9070f 481
+  s_54b80c92daa9cb::t_285c3d490b25cc 570-573,575-580,587-602
+  s_54b80c92daa9cb::t_34d047b3e29422 19,604
+migrations/20260930T1815Z_quarantine_reprocess.sql
+  s_54b80c92daa9cb::t_5b14765798b428 66-69
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_62b8634f2a0e93 284-288
+  s_54b80c92daa9cb::t_7116b568b9aeaf 29
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_36cdc4461632f7 303
+  s_54b80c92daa9cb::t_72f11f3de81294 276-277
+internal/quarantine/run.go
+  s_54b80c92daa9cb::t_075b4f36548f94 75-81
+  s_54b80c92daa9cb::t_3399cf5eeada85 228-229,235-240
+  s_54b80c92daa9cb::t_ddb2f61989049a 41-47
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_a3c5b5e171b41b 647-649
+internal/adapters/postgres/quarantine_test.go
+  s_54b80c92daa9cb::t_f769a14c96a410 365-377
+client/client.gen.go
+  s_54b80c92daa9cb::t_b79e6fdc637746 3688,3694,4935,4951,9702,9710,14554,14568
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_b79e6fdc637746 351
+docs-site/plugins/reprocess-quarantined-versions.mdx
+  s_54b80c92daa9cb::t_f64ed7c1e402e9 87-97
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_b79e6fdc637746 681-683
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_8a1e17a4553a15 168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f68a282c8f118ccebd19a88d45c724a6ff6269e9",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
