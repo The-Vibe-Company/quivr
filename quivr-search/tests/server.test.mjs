@@ -614,7 +614,17 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   );
   assert.equal(corrected.title, "Feed headline, corrected");
   assert.equal(corrected.updated_at, "2026-09-29T10:02:00.000Z");
+  assert.equal(corrected.previous_version_id, "v_rss", "the text it replaces");
   assert.equal(corrected.link, undefined);
+  // Re-dating the corrected text keeps pointing at what the correction replaced.
+  versions.v_rss3 = versions.v_rss2;
+  records.rec_rss.version = "v_rss3";
+  change("rec_rss", "c1c");
+  await until(/event: item\ndata: [^\n]*"v_rss3"/);
+  const kept = (await (await fetch(base + "/demo/feed")).json()).items.find(
+    (item) => item.record_id === "rec_rss",
+  );
+  assert.equal(kept.previous_version_id, "v_rss");
 
   // A withdrawal removes the item for every reader.
   records.rec_hand.withdrawn = true;

@@ -909,6 +909,35 @@ mark {
   line-height: 1.5;
   color: var(--warning);
 }
+.reader-updated p {
+  margin: 0;
+}
+.reader-updated-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.reader-diff {
+  margin-top: 12px;
+  color: var(--ink-2);
+}
+.reader-diff-text {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.reader-diff del {
+  background: var(--hot-bg);
+  color: var(--hot-strong);
+}
+.reader-diff ins {
+  background: var(--live-bg);
+  color: var(--ink);
+  text-decoration: none;
+  box-shadow: inset 0 -1px var(--live-line);
+}
 .reader-text {
   margin: 0 0 16px;
   font-size: 15.5px;

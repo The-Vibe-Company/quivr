@@ -21,6 +21,8 @@ export interface Article {
   published_at?: string;
   link?: string;
   updated_at?: string;
+  /** The Version a correction replaced. */
+  previous?: { version_id: string; title: string; body: string };
 }
 
 const article = (
@@ -48,7 +50,7 @@ export function workspace() {
     article("storm", "Dépêches exemple", 2, "Orages : la grêle frappe les vergers de la vallée", "Un violent épisode orageux a traversé la vallée en fin d’après-midi. Des grêlons ont été signalés autour du village, où plusieurs vergers ont perdu leur récolte.\n\nLa préfecture a activé sa cellule de crise.", ["meteo", "intemperies", "agriculture"]),
     article("cell", "Météo locale", 5, "Cellule orageuse active au nord de la ville, grêle observée", "Cellule orageuse très active au nord de la ville, grêle observée depuis 20 h 40. Rafales estimées à 90 km/h.", ["meteo", "intemperies"]),
     article("note", "web-demo", 9, "Compte rendu de la réunion du matin", "Compte rendu de la réunion du matin\nPriorités du jour : suivi des intempéries, point sur les transports.", ["redaction"], { link: undefined }),
-    article("tram", "Revue technique", 14, "Les conducteurs de tramway cessent le travail", "Les conducteurs du réseau de tramway ont cessé le travail ce matin. Les lignes sont interrompues jusqu’à nouvel ordre.", ["transports", "social"], { updated_at: minutes(4) }),
+    article("tram", "Revue technique", 14, "Les conducteurs de tramway cessent le travail", "Les conducteurs du réseau de tramway ont cessé le travail ce matin. Les lignes sont interrompues jusqu’à nouvel ordre.", ["transports", "social"], { updated_at: minutes(4), previous: { version_id: "ver_tram_0", title: "Les conducteurs de tramway menacent de cesser le travail", body: "Les conducteurs du réseau de tramway menacent de cesser le travail demain. Les lignes restent ouvertes." } }),
     article("match", "Dépêches exemple", 25, "Football : le match du soir reporté en raison des orages", "La rencontre prévue ce soir a été reportée après la chute de grêle sur la pelouse.", ["sport", "meteo"]),
     article("flood", "Dépêches exemple", 70, "Inondations : la mairie ouvre un gymnase", "Après les pluies de la nuit, la mairie a ouvert un gymnase pour accueillir les personnes évacuées.", ["meteo", "intemperies"]),
     article("battery", "Revue technique", 130, "Batteries : une usine pilote annoncée", "Une jeune entreprise annonce une ligne pilote de batteries sodium-ion, moins dépendantes du lithium.", ["industrie", "energie"]),
@@ -146,6 +148,7 @@ const feedItem = (a: Article) => {
   };
   for (const key of ["received_at", "published_at", "link", "updated_at"] as const)
     if (a[key]) item[key] = a[key];
+  if (a.previous) item.previous_version_id = a.previous.version_id;
   return item;
 };
 
@@ -287,16 +290,17 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (version) {
       const a = find(version[1]);
       if (!a) return json(route, { message: "Document introuvable." }, 404);
+      const shown = a.previous?.version_id === version[2] ? a.previous : a;
       const parts =
         a.namespace === "web-demo"
-          ? [{ key: "text", role: "body", content: { kind: "text", text: a.body } }]
+          ? [{ key: "text", role: "body", content: { kind: "text", text: shown.body } }]
           : [
-              { key: "title", role: "title", content: { kind: "text", text: a.title } },
-              { key: "body", role: "body", content: { kind: "text", text: a.body } },
+              { key: "title", role: "title", content: { kind: "text", text: shown.title } },
+              { key: "body", role: "body", content: { kind: "text", text: shown.body } },
             ];
       return json(route, {
         record_id: a.record_id,
-        version_id: a.version_id,
+        version_id: shown.version_id,
         manifest: { parts },
         availability: { state: "retrieval_ready", searchable: true, is_current: true },
       });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { fetchDocument, search, tokenize } from "../../lib/search";
 import { fetchAlert, type Alert, type CaughtArticle } from "../../lib/alerts";
+import { diffWords, summarize, type Change } from "../../lib/diff";
 import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
 import { hhmm, longTime } from "../../lib/format";
 import type { DocumentDetail } from "../../types";
@@ -18,6 +19,37 @@ const sourceLabel = (namespace?: string) =>
     : namespace === HAND_NAMESPACE
       ? "Ajouté à la main"
       : namespace;
+
+/** The title and text parts of a Version, as the reader shows them. */
+function readable(detail: DocumentDetail | null, fallback?: string) {
+  const parts = (detail?.manifest.parts || []).filter(
+    (part) => part.content.kind === "text" && part.role !== "source_html",
+  );
+  const titlePart = parts.find((part) => part.role === "title");
+  const texts = parts.filter((part) => part !== titlePart);
+  const title =
+    titlePart?.content.text.trim() ||
+    fallback ||
+    texts[0]?.content.text.trim().split("\n")[0] ||
+    "Sans titre";
+  return { title, texts };
+}
+
+function Diff({ changes, label }: { changes: Change[]; label: string }) {
+  return (
+    <p className="reader-diff-text" aria-label={label}>
+      {changes.map((c, i) =>
+        c.kind === "removed" ? (
+          <del key={i}>{c.text}</del>
+        ) : c.kind === "added" ? (
+          <ins key={i}>{c.text}</ins>
+        ) : (
+          <span key={i}>{c.text}</span>
+        ),
+      )}
+    </p>
+  );
+}
 
 /** Why an alert caught this article, in one sentence. */
 function why(alert: Alert, match?: CaughtArticle) {
@@ -59,6 +91,10 @@ export function Reader({
   onSimilar: (text: string) => void;
 }) {
   const [detail, setDetail] = useState<DocumentDetail | null>(null);
+  const [previous, setPrevious] = useState<DocumentDetail | null>(null);
+  const [view, setView] = useState<"current" | "changes" | "previous">(
+    "current",
+  );
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [matches, setMatches] = useState<Map<string, CaughtArticle>>(
@@ -79,6 +115,20 @@ export function Reader({
       });
     return () => controller.abort();
   }, [doc.record, doc.version, attempt]);
+
+  // A corrected article: the Version it replaced, to show what changed.
+  const previousId = item?.previous_version_id;
+  useEffect(() => {
+    setPrevious(null);
+    setView("current");
+    if (!previousId) return;
+    const controller = new AbortController();
+    fetchDocument(doc.record, previousId, controller.signal)
+      .then(setPrevious)
+      // Without the earlier text, the notice only says when it changed.
+      .catch(() => {});
+    return () => controller.abort();
+  }, [doc.record, previousId]);
 
   // What each alert found in this article (its words, or its score).
   const caughtIds = caught.map((a) => a.alert_id).join(",");
@@ -104,16 +154,23 @@ export function Reader({
     return () => controller.abort();
   }, [caughtIds, doc.record]);
 
-  const parts = (detail?.manifest.parts || []).filter(
-    (part) => part.content.kind === "text" && part.role !== "source_html",
+  const { title, texts } = readable(detail, item?.title);
+  const before = previous && readable(previous);
+  const changes = useMemo(
+    () =>
+      detail && before
+        ? {
+            title: diffWords(before.title, title),
+            body: diffWords(
+              before.texts.map((p) => p.content.text).join("\n\n"),
+              texts.map((p) => p.content.text).join("\n\n"),
+            ),
+          }
+        : null,
+    // The texts are derived from these two Versions.
+    [detail, previous, item?.title],
   );
-  const titlePart = parts.find((part) => part.role === "title");
-  const texts = parts.filter((part) => part !== titlePart);
-  const title =
-    titlePart?.content.text.trim() ||
-    item?.title ||
-    texts[0]?.content.text.trim().split("\n")[0] ||
-    "Sans titre";
+  const shown = view === "previous" && before ? before : { title, texts };
 
   // "Sur le même sujet": a semantic search seeded by the article itself.
   const seed = detail
@@ -188,7 +245,7 @@ export function Reader({
       </div>
       <div className="reader-scroll">
         <h2 id="reader-title" ref={heading} tabIndex={-1}>
-          {title}
+          {shown.title}
         </h2>
         {caught.length > 0 && (
           <ul className="reader-caught" aria-label="Pourquoi cet article">
@@ -202,10 +259,48 @@ export function Reader({
           </ul>
         )}
         {item?.updated_at && (
-          <p className="reader-updated">
-            Article corrigé {longTime(item.updated_at)} : Quivr a reçu une
-            nouvelle version et affiche celle-ci.
-          </p>
+          <div className="reader-updated">
+            <p>
+              {view === "previous"
+                ? `Version précédente, remplacée ${longTime(item.updated_at)}.`
+                : `Article corrigé ${longTime(item.updated_at)} : Quivr a reçu une nouvelle version et affiche celle-ci.`}
+              {changes &&
+                ` ${summarize([...changes.title, ...changes.body])}`}
+            </p>
+            {changes && (
+              <div className="reader-updated-actions">
+                <button
+                  type="button"
+                  className="button small"
+                  aria-expanded={view === "changes"}
+                  onClick={() =>
+                    setView(view === "changes" ? "current" : "changes")
+                  }
+                >
+                  {view === "changes"
+                    ? "Masquer les changements"
+                    : "Voir les changements"}
+                </button>
+                <button
+                  type="button"
+                  className="button small"
+                  onClick={() =>
+                    setView(view === "previous" ? "current" : "previous")
+                  }
+                >
+                  {view === "previous"
+                    ? "Revenir à la version actuelle"
+                    : "Lire la version précédente"}
+                </button>
+              </div>
+            )}
+            {changes && view === "changes" && (
+              <div className="reader-diff">
+                <Diff changes={changes.title} label="Changements du titre" />
+                <Diff changes={changes.body} label="Changements du texte" />
+              </div>
+            )}
+          </div>
         )}
         {!detail && !error && <LoadingState label="Chargement de l’article…" rows={3} />}
         {error && (
@@ -217,7 +312,7 @@ export function Reader({
           </Notice>
         )}
         {detail &&
-          texts.map((part) => (
+          shown.texts.map((part) => (
             <div
               key={part.key}
               className="reader-text"

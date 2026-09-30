@@ -18,6 +18,8 @@ export interface FeedItem {
   link?: string;
   /** When the facade saw a new Version of an article it already had. */
   updated_at?: string;
+  /** The Version a correction replaced, still readable. */
+  previous_version_id?: string;
 }
 
 /** Texts added from this web app use this namespace. */

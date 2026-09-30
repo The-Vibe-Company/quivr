@@ -133,7 +133,21 @@ test("le lecteur dit pourquoi l’article est attrapé, propose le même sujet e
   await expect(reader.getByRole("list", { name: "Pourquoi cet article" })).toContainText(
     "Attrapé par votre alerte « Grèves dans les transports » — Quivr a jugé qu’il correspond à votre description (confiance 91 %).",
   );
-  await expect(reader.locator(".reader-updated")).toContainText("Article corrigé il y a 4 min");
+  // A corrected article says what changed, word by word, and keeps the
+  // earlier text readable.
+  const updated = reader.locator(".reader-updated");
+  await expect(updated).toContainText("Article corrigé il y a 4 min");
+  await expect(updated).toContainText("9 mots retirés, 10 mots ajoutés.");
+  await updated.getByRole("button", { name: "Voir les changements" }).click();
+  const titleDiff = updated.getByLabel("Changements du titre");
+  await expect(titleDiff.locator("del")).toHaveText(["menacent de cesser "]);
+  await expect(titleDiff.locator("ins")).toHaveText(["cessent "]);
+  await expect(updated.getByLabel("Changements du texte").locator("del")).toContainText(["demain."]);
+  await updated.getByRole("button", { name: "Lire la version précédente" }).click();
+  await expect(reader.getByRole("heading", { level: 2 })).toHaveText("Les conducteurs de tramway menacent de cesser le travail");
+  await expect(reader.getByTestId("canonical-text")).toContainText("Les lignes restent ouvertes.");
+  await updated.getByRole("button", { name: "Revenir à la version actuelle" }).click();
+  await expect(reader.getByTestId("canonical-text")).toContainText("jusqu’à nouvel ordre");
   const original = reader.getByRole("link", { name: "Ouvrir l’original" });
   await expect(original).toHaveAttribute("href", "https://news.example.org/tram");
   await expect(original).toHaveAttribute("target", "_blank");

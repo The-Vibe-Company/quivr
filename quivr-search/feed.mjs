@@ -185,11 +185,18 @@ export function createFeed({ core, key, corpus, upstream }) {
     // A new Version of an article already in the feed whose title or text
     // changed is a correction: the reader says so, dated by that Version's
     // arrival. A feed that only re-dates its items (a new Version on every
-    // poll) corrects nothing.
+    // poll) corrects nothing. The Version it replaces stays readable
+    // (Versions are immutable), so the reader can show what changed.
     const edited =
       known && (known.title !== item.title || known.excerpt !== item.excerpt);
-    if (edited && arrived) item.updated_at = arrived;
-    else if (known?.updated_at) item.updated_at = known.updated_at;
+    if (edited && arrived) {
+      item.updated_at = arrived;
+      item.previous_version_id = known.version_id;
+    } else if (known?.updated_at) {
+      item.updated_at = known.updated_at;
+      if (known.previous_version_id)
+        item.previous_version_id = known.previous_version_id;
+    }
     upsert(item);
   }
 
