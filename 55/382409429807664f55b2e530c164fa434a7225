@@ -1,0 +1,19 @@
+quivr-search/src/lib/admin.ts
+  s_54b80c92daa9cb::t_f075fa4a65c2d4 234-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55382409429807664f55b2e530c164fa434a7225",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

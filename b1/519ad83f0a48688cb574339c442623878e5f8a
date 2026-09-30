@@ -1,0 +1,50 @@
+quivr-search/src/components/admin/TimelinePanel.tsx
+  s_54b80c92daa9cb::t_aa285f6c832d31 36-47,126-127,195-196,235-242,254-259,270-274,349-352,372-384
+quivr-search/src/lib/admin.ts
+  s_54b80c92daa9cb::t_aa285f6c832d31 133-134,209-213
+  s_54b80c92daa9cb::t_0fe066a1500462 67,69,77-78
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_7998751a30d4fc 352,355-356
+quivr-search/src/components/admin/Throughput.tsx
+  s_54b80c92daa9cb::t_aa285f6c832d31 7-10,18-21,24-25,75-78,93-95
+  s_54b80c92daa9cb::t_0fe066a1500462 29,35,40-44
+quivr-search/src/components/admin/AdminSection.tsx
+  s_54b80c92daa9cb::t_6fb516d372bdbb 1-98
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_50b7e52302f843 655,671-678,683,704-800,812-830
+  s_54b80c92daa9cb::t_9e4339313b18be 801-811
+quivr-search/admin.mjs
+  s_54b80c92daa9cb::t_aa285f6c832d31 48-84,159-161,310-311,333-336,361,429-431,486-488,505-508
+  s_54b80c92daa9cb::t_7998751a30d4fc 11-16,18-20,35-37,237-273,302-305,308-309,312-332,337-343,399,471,496-504,509-513
+  s_54b80c92daa9cb::t_1771053caa91d9 514
+quivr-search/tests/admin.test.mjs
+  s_54b80c92daa9cb::t_aa285f6c832d31 11-21,28-33,45-48,55-59,65-69,74-77,88-93,107-139,141-144,151-155,161-164,167-170,174-194,196-198,200-206,213-219
+  s_54b80c92daa9cb::t_91d96764beeaf2 6,171-173,195,199,207-212,220
+quivr-search/package.json
+  s_54b80c92daa9cb::t_aa285f6c832d31 12
+quivr-search/src/components/admin/AdminView.tsx
+  s_54b80c92daa9cb::t_aa285f6c832d31 81-83,95-101,119-122,155-156,166-170,173-177,303-305,380-381,401-404,408-412,420-425,431-433,445-453,465-466,468-469,486-488,508-512
+  s_54b80c92daa9cb::t_0fe066a1500462 5,30-34,224-226,291-299
+quivr-search/src/admin.css
+  s_54b80c92daa9cb::t_0fe066a1500462 806-842,941-942
+  s_54b80c92daa9cb::t_398fb70c4ff98b 54-55
+quivr-search/src/lib/adminStats.ts
+  s_54b80c92daa9cb::t_49c51f05fd9bb3 1-94,98-139,142,146-159
+  s_54b80c92daa9cb::t_aa285f6c832d31 95-97,140-141,143-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b1519ad83f0a48688cb574339c442623878e5f8a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
