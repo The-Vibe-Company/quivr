@@ -1,0 +1,51 @@
+scripts/eval/test_trec.py
+  s_54b80c92daa9cb::t_0209727532b99a 1-75
+scripts/eval/public_sets.py
+  s_54b80c92daa9cb::t_6f02c20fec8566 164
+  s_54b80c92daa9cb::t_c1c46c9c258994 143
+  s_54b80c92daa9cb::t_4ea06a4e4c580f 155
+  s_54b80c92daa9cb::t_d6d007ec4a72f9 1-16,18-20,22-142,144-154,156-163,165-171
+  s_54b80c92daa9cb::t_d1da4edda01af6 17,21
+scripts/eval/test_public_sets.py
+  s_54b80c92daa9cb::t_95c64572f4fff5 1-48
+scripts/eval/trec.py
+  s_54b80c92daa9cb::t_2e68cda82e19d6 1-116,138-204
+  s_54b80c92daa9cb::t_e9f28bee8a0a09 117-137
+Makefile
+  s_54b80c92daa9cb::t_54cf97db6383de 2
+  s_54b80c92daa9cb::t_32903c2f15cf44 26
+  s_54b80c92daa9cb::t_4e880b0c7587c8 32-35
+scripts/eval/requirements.txt
+  s_54b80c92daa9cb::t_d8daccc7f17845 1-4
+scripts/eval/scoring.py
+  s_54b80c92daa9cb::t_8561cf93e4f208 1-38
+scripts/eval/report.py
+  s_54b80c92daa9cb::t_1d7cc19a3833e6 1-48,50,52-67
+  s_54b80c92daa9cb::t_6f77e24e06a576 49,51
+scripts/eval/test_report.py
+  s_54b80c92daa9cb::t_d9ffebd245f233 1-42
+scripts/eval/test_scoring.py
+  s_54b80c92daa9cb::t_fbb3f79a0abdc4 1-36
+scripts/eval/run.py
+  s_54b80c92daa9cb::t_c01f34d36bf510 1-104,106-174,176-184,186,189-324,326-360
+  s_54b80c92daa9cb::t_273784d1d7af6d 105,175,185,187-188,325
+.github/workflows/measure-search.yml
+  s_54b80c92daa9cb::t_962b5af82d6c3a 8-9
+  s_54b80c92daa9cb::t_f8af3e7da6b951 1-7,10-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "db26af93999f38c4471d12d8c8d20424a6f342af",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
