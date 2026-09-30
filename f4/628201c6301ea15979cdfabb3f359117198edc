@@ -1,0 +1,54 @@
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_52c22aa2e46fd2 223
+internal/adapters/postgres/searchable.go
+  s_54b80c92daa9cb::t_52c22aa2e46fd2 148,217,259
+internal/transport/httpapi/admin_test.go
+  s_54b80c92daa9cb::t_73f850cf01f100 19,57-58,91-92,95-97
+  s_54b80c92daa9cb::t_4e362da338285a 98
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_f966d994c7dfc7 1228,1242,2750,2759,2769,2794,2904,2932
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_f966d994c7dfc7 874,1972,2067,2072,2080
+internal/adapters/postgres/steps_test.go
+  s_54b80c92daa9cb::t_73f850cf01f100 18,92-107
+  s_54b80c92daa9cb::t_fa30643ed4834b 171-196
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_52c22aa2e46fd2 310-316,322-323,325-329
+internal/content/steps.go
+  s_54b80c92daa9cb::t_857ea47aafa5ad 69,71,81-83,85,88,156-158
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_f966d994c7dfc7 1885-1889,1915,2447-2448,2473-2475,2564-2565
+internal/content/steps_test.go
+  s_54b80c92daa9cb::t_73f850cf01f100 36
+client/client.gen.go
+  s_54b80c92daa9cb::t_f966d994c7dfc7 874,1972,2067,2072,2080,2540,3040,7198,10777
+internal/adapters/postgres/embeddings.go
+  s_54b80c92daa9cb::t_52c22aa2e46fd2 116
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_f966d994c7dfc7 1981-1984,2010-2011,2728-2729,2754-2756,2844
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_f966d994c7dfc7 1229,1243,2731,2740,2749,2774,2882,2909
+internal/adapters/postgres/activity.go
+  s_54b80c92daa9cb::t_52c22aa2e46fd2 124-130
+  s_54b80c92daa9cb::t_857ea47aafa5ad 62-67,69,72,83-88
+migrations/20260930T1346Z_version_step_times.sql
+  s_54b80c92daa9cb::t_857ea47aafa5ad 13-14,18-20
+internal/adapters/postgres/evaluation_test.go
+  s_54b80c92daa9cb::t_fd61cded6ae5e7 313-314,332-333,350-360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4628201c6301ea15979cdfabb3f359117198edc",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

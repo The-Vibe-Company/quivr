@@ -1,0 +1,32 @@
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_458e9e2446412c 314-315,330-331
+  s_54b80c92daa9cb::t_2f11cbb75f9272 316-318
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2740,2774
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2755-2756
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2474-2475
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2759,2794
+client/client.gen.go
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2080
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_2f11cbb75f9272 2080
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3519f4a8ea6e8eb66fe28f501c0b5a3f5102963b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
