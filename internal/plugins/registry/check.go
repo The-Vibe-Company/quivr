@@ -39,7 +39,9 @@ func (s Service) Register(ctx context.Context, scope corpus.Scope, req Request) 
 	if err != nil {
 		return Registration{}, &IssueError{Kind: ErrInvalid, Issues: issuesOf(err, "")}
 	}
-	stored, queued, err := s.Store.RegisterPlugin(ctx, registrationOf(pin, StateRegistered), req.Key)
+	r := registrationOf(pin, StateRegistered)
+	r.Origin = OriginRegistration
+	stored, queued, err := s.Store.RegisterPlugin(ctx, r, req.Key)
 	if err == nil && queued && s.Wake != nil {
 		select {
 		case s.Wake <- struct{}{}:

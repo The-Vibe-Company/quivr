@@ -26,6 +26,18 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	}
 	started := time.Now()
 	err = s.enrich(ctx, org, v)
+	if err != nil && !errors.Is(err, content.ErrConflict) && !errors.Is(err, content.ErrIngestionRefused) {
+		// Pinned work whose plugin left the active plan and stays
+		// unreachable stops here: the Version stays searchable by keyword.
+		reason, goneErr := s.gone(ctx, err)
+		if goneErr != nil {
+			err = goneErr
+		} else if reason != nil {
+			slog.Warn("pinned ingestion plugin unreachable; enrichment stops", "component", "worker", "version_id", v.ID, "plan", reason.Plan, "plugin", reason.Plugin, "plugin_version", reason.PluginVersion, "error", err.Error())
+			s.outcome(org, "enrichment", "blocked", receiptID, v, started, reason.Code)
+			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", reason.Code)
+		}
+	}
 	if err != nil {
 		state, code := "retrying", "enrichment_unavailable"
 		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrIngestionRefused) {

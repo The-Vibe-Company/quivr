@@ -75,13 +75,22 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	}
 	out := route{corpusID: r.Source.CorpusID, generation: g}
 	switch {
-	case s.Plugin.Owns(g.SpaceID):
+	case s.Plugin.Owns(ctx, g.SpaceID):
 		return out, nil
 	case s.LegacySpace != "" && g.SpaceID == s.LegacySpace:
 		out.legacy = true
 		return out, nil
 	}
 	return out, ErrSpaceUnowned
+}
+
+// gone is the diagnostic that stops work pinned to a plan after cause
+// (PluginDeriver.gone), or nil to keep retrying.
+func (s Service) gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
+	if s.Plugin == nil {
+		return nil, nil
+	}
+	return s.Plugin.Gone(ctx, cause)
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names,
@@ -145,6 +154,18 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
 		s.outcome(org, "baseline", "blocked", receiptID, v, started, "ingestion_refused")
 		return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "ingestion_refused", true)
+	}
+	if err != nil {
+		// Work pinned to a plan whose ingestion plugin left the active plan
+		// and stays unreachable is quarantined, never moved to another one.
+		reason, goneErr := s.gone(ctx, err)
+		if goneErr != nil {
+			err = goneErr
+		} else if reason != nil {
+			slog.Warn("pinned ingestion plugin unreachable; quarantining the version", "component", "worker", "version_id", v.ID, "plan", reason.Plan, "plugin", reason.Plugin, "plugin_version", reason.PluginVersion, "error", err.Error())
+			s.outcome(org, "baseline", "blocked", receiptID, v, started, reason.Code)
+			return s.Content.QuarantineVersion(ctx, org, v.ID, *reason)
+		}
 	}
 	if err == nil {
 		err = s.Retrieval.Index(ctx, org, v, result)

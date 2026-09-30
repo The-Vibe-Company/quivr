@@ -97,14 +97,15 @@ type Service struct {
 	// Plugin, when set, is the protocol client for every resolved pin
 	// (tests); nil talks to each resolved pin with pluginhttp.
 	Plugin Plugin
-	// Pin routes a media type to its startup-pinned normalizer: a
-	// *plugins.PinSet (several plugins) or a single *plugins.Pin. nil pins none.
+	// Pin routes a media type to its normalizer in the plan the work is
+	// pinned to (plugins.Live); nil routes none.
 	Pin Router
 }
 
-// Router resolves the pinned normalizer of an accepted Blob media type.
+// Router resolves the pinned normalizer of an accepted Blob media type, in
+// the Pipeline Plan of the work ctx carries (plugins.Live).
 type Router interface {
-	Normalizer(mediaType string) (*plugins.Pin, plugins.RouteConfig, bool)
+	Normalizer(ctx context.Context, mediaType string) (*plugins.Pin, plugins.RouteConfig, bool)
 }
 
 func (s Service) client(pin *plugins.Pin) Plugin {
@@ -145,6 +146,8 @@ type invocation struct {
 	optional       bool
 	budget         int
 	provenance     content.Normalization
+	// plan names the plan of work stopped because the normalizer left it.
+	plan string
 }
 
 // Normalize invokes the pinned normalizer for the receipt's routed Blob and
@@ -177,7 +180,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	if s.Pin == nil {
 		return nil
 	}
-	pin, route, routed := s.Pin.Normalizer(c.Content.MediaType)
+	pin, route, routed := s.Pin.Normalizer(ctx, c.Content.MediaType)
 	if !routed {
 		return nil
 	}
@@ -194,7 +197,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", err)
 	}
 	if err := plugin.CheckDiscovery(ctx); err != nil {
-		return s.retry(ctx, org, receiptID, codeUnavailable, err)
+		return s.unavailable(ctx, inv, pin, err)
 	}
 	// Running only once the plugin answers: an outage keeps the receipt's
 	// retrying plugin_unavailable diagnostic between attempts.
@@ -244,7 +247,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 	case err != nil && timedOut:
 		return s.counted(ctx, inv, CodeTimeout, fmt.Sprintf("The normalizer did not answer within %s.", timeout))
 	case err != nil:
-		return s.retry(ctx, org, receiptID, codeUnavailable, err)
+		return s.unavailable(ctx, inv, pin, err)
 	}
 	// Extensions, top-level and on Parts, were checked against the namespaces,
 	// schema versions and schemas the pinned manifest declares: Part ones stay
@@ -314,6 +317,22 @@ func boundedMessage(message string) string {
 	return message
 }
 
+// unavailable retries an unreachable normalizer without limit, unless the
+// work is pinned to a plan the normalizer has left: past the work's budget,
+// the failure is recorded with the plan, and publication quarantines the
+// Version rather than moving it to another normalizer (plugins.Unreachable).
+func (s Service) unavailable(ctx context.Context, inv invocation, pin *plugins.Pin, err error) error {
+	reason, countErr := plugins.Unreachable(ctx, pin, Contribution)
+	switch {
+	case countErr != nil:
+		return s.retry(ctx, inv.org, inv.receiptID, "normalization_store_unavailable", countErr)
+	case reason != nil:
+		inv.plan = reason.Plan
+		return s.fail(ctx, inv, reason.Code, reason.Message, true)
+	}
+	return s.retry(ctx, inv.org, inv.receiptID, codeUnavailable, err)
+}
+
 // retry reports a failure that retrying can fix; it never records an outcome.
 func (s Service) retry(ctx context.Context, org, receiptID, code string, err error) error {
 	_ = s.Content.Repository.Progress(ctx, org, receiptID, "retrying", code)
@@ -342,7 +361,7 @@ func (s Service) counted(ctx context.Context, inv invocation, code, message stri
 func (s Service) fail(ctx context.Context, inv invocation, code, message string, retryable bool) error {
 	message = boundedMessage(message)
 	slog.Warn("normalization failed", "code", code, "optional", inv.optional, "receipt_id", inv.receiptID, "version_id", inv.work.VersionID, "plugin_id", inv.provenance.PluginID, "invocation_id", inv.provenance.InvocationID)
-	failure := &content.NormalizationFailure{Code: code, Message: message, Retryable: retryable}
+	failure := &content.NormalizationFailure{Code: code, Message: message, Retryable: retryable, Plan: inv.plan}
 	outcome := content.Normalized{Outcome: content.OutcomeFailed, Provenance: inv.provenance, InputBlobID: inv.work.Command.Content.BlobID, Failure: failure}
 	if inv.optional {
 		m, err := s.Content.BuiltinManifest(ctx, inv.org, inv.work.Command.Content)

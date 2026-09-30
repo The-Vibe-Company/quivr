@@ -104,7 +104,7 @@ type Activation struct {
 // the running engine.
 func PlanActivation(active Plan, members map[string]Registration, target Registration, validate func(*plugins.PinSet) error) (Activation, error) {
 	switch target.State {
-	case StateValidated, StateInactive:
+	case StateValidated, StateInactive, StateDraining:
 	default:
 		return Activation{}, fmt.Errorf("%w: %s@%s is %s; only a validated registration can be activated", ErrNotValidated, target.PluginID, target.Version, target.State)
 	}
@@ -113,7 +113,7 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "/registrations/"+target.ID)}
 	}
 	if pin.Manifest.Contributions.Subscription != nil {
-		return Activation{}, fmt.Errorf("%w: %s declares an alert rule (subscription); Subscriptions pin their rule's version, so switching it waits for work pinned to its plan (THE-782); pin it in the configuration instead", ErrUnsupportedRole, target.PluginID)
+		return Activation{}, fmt.Errorf("%w: %s declares an alert rule (subscription); each Subscription pins its rule's version, so another version cannot be activated while Subscriptions use this one; pin it in the configuration instead", ErrUnsupportedRole, target.PluginID)
 	}
 	alone, err := plugins.NewPinSet([]*plugins.Pin{pin})
 	if err != nil {

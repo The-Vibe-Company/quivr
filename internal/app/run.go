@@ -94,6 +94,11 @@ type Config struct {
 	// Pipeline Plan changed, to follow it without restart (Go duration,
 	// default 2s).
 	PluginPlanPoll string `json:"plugin_plan_poll"`
+	// PinnedPluginAttempts is how many attempts work pinned to a Pipeline
+	// Plan gets once a plugin of that plan has left the active plan and cannot
+	// be reached, before the work stops with a pinned_plugin_unavailable
+	// diagnostic (worker only; default 10).
+	PinnedPluginAttempts int `json:"pinned_plugin_attempts"`
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
@@ -219,6 +224,13 @@ func Run(command string) error {
 		if planPoll, err = time.ParseDuration(cfg.PluginPlanPoll); err != nil || planPoll <= 0 {
 			return errors.New("plugin_plan_poll must be a positive duration")
 		}
+	}
+	pinnedAttempts := 10
+	switch {
+	case cfg.PinnedPluginAttempts < 0:
+		return errors.New("pinned_plugin_attempts must be a positive number")
+	case cfg.PinnedPluginAttempts > 0:
+		pinnedAttempts = cfg.PinnedPluginAttempts
 	}
 	if err := validPublicURL(cfg.PublicURL); err != nil {
 		return err
@@ -362,6 +374,13 @@ func Run(command string) error {
 		return fmt.Errorf("pipeline plan %s: %w", planID, err)
 	}
 	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) }}
+	// Work pinned to an earlier plan resolves its plugins in that plan.
+	planStore := postgres.PluginStore{Pool: pool}
+	live.Resolve = func(ctx context.Context, plan string) (*plugins.PinSet, error) {
+		return resolvePlanByID(ctx, planStore, plan)
+	}
+	workPinner := workPins{store: planStore, live: live, budget: pinnedAttempts}
+	acquisition.Acquirer.Kinds = (&planKinds{live: live, current: registry, kindsOf: kindsOf}).at
 	// The registry records each space's owner and this deployment's roles; a
 	// space claimed by another owner, or changed under the same version,
 	// refuses startup. New Corpora then start on the registered spaces.
@@ -554,7 +573,7 @@ func Run(command string) error {
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition)
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, workPinner)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

@@ -119,7 +119,10 @@ type fakeDeriver struct {
 	onDerive          func()
 }
 
-func (*fakeDeriver) Owns(space string) bool { return space == "space" }
+func (*fakeDeriver) Owns(_ context.Context, space string) bool { return space == "space" }
+func (*fakeDeriver) Gone(context.Context, error) (*content.Diagnostic, error) {
+	return nil, nil
+}
 func (d *fakeDeriver) segmentation(v content.Version) content.Segmentation {
 	return content.Segmentation{ID: "plugin-seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "plugin-segment-" + v.ID, PartKey: "body"}}}
 }

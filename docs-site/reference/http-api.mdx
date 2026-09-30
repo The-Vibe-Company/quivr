@@ -1500,9 +1500,18 @@ invocation a normalization diagnostic concerns. Codes of external normalization:
 On an optional route every quarantining code above that comes from the normalizer is instead
 listed on a searchable Version published through the built-in text path. A plugin that is
 unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-pinned manifest) is retried with backoff and never produces a diagnostic here; the Receipt shows
-plugin_unavailable while it retries. Quarantined Versions keep their input reference and reason;
-reprocessing them is not available yet.
+pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
+Plan names it; the Receipt shows plugin_unavailable while it retries.
+
+- pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
+  normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
+  reached, or could no longer serve it, for the deployment's attempt budget. The work is never
+  moved to the plugin that
+  replaced it: the Version is quarantined, or, when its text was already searchable, its
+  enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+
+Quarantined Versions keep their input reference and reason; reprocessing them is not available
+yet.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1510,6 +1519,8 @@ reprocessing them is not available yet.
 | `message` | string | yes | Minimum length `1`. |
 | `retryable` | boolean | yes | Whether the same input may succeed if processed again. |
 | `plugin` | string |  | Plugin id of the invocation. Minimum length `1`. |
+| `plugin_version` | string |  | Plugin version of a pinned_plugin_unavailable diagnostic. Minimum length `1`. |
+| `plan` | string |  | Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic. Minimum length `1`. |
 | `contribution` | string |  | Minimum length `1`. |
 | `invocation_id` | string |  | Minimum length `1`. |
 
@@ -1544,9 +1555,18 @@ description: |-
   On an optional route every quarantining code above that comes from the normalizer is instead
   listed on a searchable Version published through the built-in text path. A plugin that is
   unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-  pinned manifest) is retried with backoff and never produces a diagnostic here; the Receipt shows
-  plugin_unavailable while it retries. Quarantined Versions keep their input reference and reason;
-  reprocessing them is not available yet.
+  pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
+  Plan names it; the Receipt shows plugin_unavailable while it retries.
+
+  - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
+    normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
+    reached, or could no longer serve it, for the deployment's attempt budget. The work is never
+    moved to the plugin that
+    replaced it: the Version is quarantined, or, when its text was already searchable, its
+    enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+
+  Quarantined Versions keep their input reference and reason; reprocessing them is not available
+  yet.
 properties:
   code:
     type: string
@@ -1561,6 +1581,14 @@ properties:
     type: string
     minLength: 1
     description: Plugin id of the invocation.
+  plugin_version:
+    type: string
+    minLength: 1
+    description: Plugin version of a pinned_plugin_unavailable diagnostic.
+  plan:
+    type: string
+    minLength: 1
+    description: Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic.
   contribution:
     type: string
     minLength: 1
@@ -3671,7 +3699,8 @@ required:
 | `artifact_digest` | string |  | Artifact digest the plugin reports, recorded as information. Absent when it reports none. Minimum length `1`. |
 | `contributions` | array of string | yes |  |
 | `roles` | array of string | yes | Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:&lt;plugin id> or connector:&lt;kind>. The active plan says which it serves. |
-| `state` | string | yes | registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out. One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `state` | string | yes | registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive. One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `pinned_work` | integer | yes | Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. Minimum `0`. |
 | `check` | [`PluginCheckReport`](#plugincheckreport) |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
@@ -3692,6 +3721,7 @@ Example `plugin_registration_checked`:
     "ingestion"
   ],
   "state": "rejected",
+  "pinned_work": 0,
   "check": {
     "certified": false,
     "checked_at": "2026-09-30T13:00:00Z",
@@ -3774,7 +3804,11 @@ properties:
       - draining
       - inactive
       - rejected
-    description: registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
+    description: registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
+  pinned_work:
+    type: integer
+    minimum: 0
+    description: Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero.
   check:
     $ref: '#/components/schemas/PluginCheckReport'
   created_at:
@@ -3792,6 +3826,7 @@ required:
   - contributions
   - roles
   - state
+  - pinned_work
   - created_at
   - updated_at
 ```
@@ -4035,6 +4070,7 @@ Example `plugin_registrations`:
         "normalizer:application/pdf"
       ],
       "state": "active",
+      "pinned_work": 4,
       "created_at": "2026-09-30T10:00:00Z",
       "updated_at": "2026-09-30T10:00:00Z"
     },
@@ -4051,7 +4087,8 @@ Example `plugin_registrations`:
       "roles": [
         "connector:rss"
       ],
-      "state": "active",
+      "state": "draining",
+      "pinned_work": 1,
       "created_at": "2026-09-30T10:00:00Z",
       "updated_at": "2026-09-30T10:00:00Z"
     }

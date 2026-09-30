@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const normalizationColumns = `outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,coalesce(manifest_key,''),coalesce(manifest_sha256,''),coalesce(manifest_size,0),failure_code,failure_message,failure_retryable,coalesce(conflict_invocation_id,''),coalesce(conflict_manifest_sha256,''),extensions`
+const normalizationColumns = `outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,coalesce(manifest_key,''),coalesce(manifest_sha256,''),coalesce(manifest_size,0),failure_code,failure_message,failure_retryable,coalesce(failure_plan,''),coalesce(conflict_invocation_id,''),coalesce(conflict_manifest_sha256,''),extensions`
 
 // scanNormalization reads one row of normalizationColumns.
 func scanNormalization(row pgx.Row) (content.Normalized, error) {
@@ -19,7 +19,7 @@ func scanNormalization(row pgx.Row) (content.Normalized, error) {
 	var conflict content.NormalizationConflict
 	var extensions []byte
 	err := row.Scan(&n.Outcome, &p.IdempotencyKey, &p.InvocationID, &p.PluginID, &p.PluginVersion, &p.PluginAPI, &p.Contribution, &p.InputSHA256, &n.InputBlobID,
-		&n.Manifest.Key, &n.Manifest.SHA256, &n.Manifest.Size, &failure.Code, &failure.Message, &failure.Retryable, &conflict.InvocationID, &conflict.ManifestSHA256, &extensions)
+		&n.Manifest.Key, &n.Manifest.SHA256, &n.Manifest.Size, &failure.Code, &failure.Message, &failure.Retryable, &failure.Plan, &conflict.InvocationID, &conflict.ManifestSHA256, &extensions)
 	if err != nil {
 		return n, err
 	}
@@ -73,8 +73,8 @@ func (s ContentStore) SaveNormalized(ctx context.Context, org, versionID string,
 	if err != nil {
 		return content.Normalized{}, err
 	}
-	_, err = s.Pool.Exec(ctx, `INSERT INTO normalizations(organization,version_id,outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,manifest_key,manifest_sha256,manifest_size,failure_code,failure_message,failure_retryable,extensions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT DO NOTHING`,
-		org, versionID, outcome, p.IdempotencyKey, p.InvocationID, p.PluginID, p.PluginVersion, p.PluginAPI, p.Contribution, p.InputSHA256, n.InputBlobID, key, sha, size, failure.Code, failure.Message, failure.Retryable, extensionsJSON)
+	_, err = s.Pool.Exec(ctx, `INSERT INTO normalizations(organization,version_id,outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,manifest_key,manifest_sha256,manifest_size,failure_code,failure_message,failure_retryable,extensions,failure_plan) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,'')) ON CONFLICT DO NOTHING`,
+		org, versionID, outcome, p.IdempotencyKey, p.InvocationID, p.PluginID, p.PluginVersion, p.PluginAPI, p.Contribution, p.InputSHA256, n.InputBlobID, key, sha, size, failure.Code, failure.Message, failure.Retryable, extensionsJSON, failure.Plan)
 	if err != nil {
 		return content.Normalized{}, err
 	}

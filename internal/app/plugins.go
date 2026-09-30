@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 )
@@ -54,6 +55,93 @@ func resolvePlan(ctx context.Context, store registry.Store) (string, *plugins.Pi
 	}
 	set, _, err := registry.Resolve(plan.Roles, members)
 	return plan.ID, set, err
+}
+
+// resolvePlanByID loads any plan's plugins, for work pinned to it.
+func resolvePlanByID(ctx context.Context, store registry.Store, id string) (*plugins.PinSet, error) {
+	plan, members, err := store.PlanMembers(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	set, _, err := registry.Resolve(plan.Roles, members)
+	return set, err
+}
+
+// WorkStore records the plan each piece of work is pinned to.
+type WorkStore interface {
+	PinWork(ctx context.Context, kind, org, id, plan string) (string, error)
+	ReleaseWork(ctx context.Context, kind, org, id string) error
+	CountUnavailable(ctx context.Context, kind, org, id string) (int, error)
+}
+
+// workPins pins each piece of work to the Pipeline Plan the process follows
+// when the work is first seen (Spec 5), in PostgreSQL, so its retries,
+// its later activities and a worker restart resolve plugins in that plan.
+// A process that follows no plan leaves work unpinned.
+type workPins struct {
+	store WorkStore
+	live  *plugins.Live
+	// budget is how many attempts pinned work gets once a plugin of its plan
+	// left the active plan and cannot be reached (plugins.Unreachable).
+	budget int
+}
+
+func (p workPins) Pin(ctx context.Context, kind, org, id string) (context.Context, error) {
+	current := p.live.Plan()
+	if current == "" {
+		return ctx, nil
+	}
+	plan, err := p.store.PinWork(ctx, kind, org, id, current)
+	if err != nil {
+		return ctx, err
+	}
+	attempt := func(ctx context.Context) (int, error) { return p.store.CountUnavailable(ctx, kind, org, id) }
+	pinned, err := p.live.Pin(ctx, plugins.Work{Kind: kind, Organization: org, ID: id, Plan: plan}, attempt, p.budget)
+	if err != nil {
+		slog.Error("the plan this work is pinned to cannot be resolved; it retries", "kind", kind, "work_id", id, "plan", plan, "error", err)
+	}
+	return pinned, err
+}
+
+func (p workPins) Release(ctx context.Context, kind, org, id string) error {
+	return p.store.ReleaseWork(ctx, kind, org, id)
+}
+
+// planKinds resolves the connector kinds of the plan a connector run is
+// pinned to, built once per plan from that plan's plugins; a run that is not
+// pinned uses the process's registry. The process's registry is not used for
+// pinned runs even on the current plan: a plan change swaps it just before
+// the plan itself.
+type planKinds struct {
+	live    *plugins.Live
+	current *connectors.Registry
+	kindsOf func(*plugins.PinSet) []connectors.Connector
+	mu      sync.Mutex
+	plans   map[string]*connectors.Registry
+}
+
+func (k *planKinds) at(ctx context.Context) *connectors.Registry {
+	w, ok := plugins.WorkOf(ctx)
+	if !ok {
+		return k.current
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if r, ok := k.plans[w.Plan]; ok {
+		return r
+	}
+	r, err := connectors.NewRegistry(k.kindsOf(k.live.SetFor(ctx))...)
+	if err != nil {
+		// Never another plan's provider: the run finds no provider for its
+		// kind and fails.
+		slog.Error("the connector kinds of the plan this run is pinned to cannot be resolved", "plan", w.Plan, "error", err)
+		return nil
+	}
+	if k.plans == nil {
+		k.plans = map[string]*connectors.Registry{}
+	}
+	k.plans[w.Plan] = r
+	return r
 }
 
 func describeRoles(roles []registry.Assignment) string {

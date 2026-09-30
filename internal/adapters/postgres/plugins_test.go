@@ -75,7 +75,7 @@ func TestPluginConfigurationReconcilesAnEarlierPlan(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_plugin_(registry|activation)\.sql$`))); err != nil {
+	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work)\.sql$`))); err != nil {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
@@ -215,3 +215,83 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 }
 
 var operatorScope = corpus.Scope{Organization: "org_ops", Actions: []string{registry.Action}, Corpora: []string{"*"}}
+
+// TestPinnedWorkDrainsTheRegistrationItNames owns the durable side of
+// pinning work to its plan (THE-782) on real PostgreSQL: work keeps the plan
+// it was first pinned to whatever plan is active when it retries, a
+// registration an activation leaves out reads as draining with the count of
+// work pinned to a plan naming it, and as inactive once that work is
+// released, and each unreachable attempt is counted on the work.
+func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.PluginStore{Pool: pool}
+	seed := configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces})
+	first, err := store.ApplyConfiguration(ctx, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, members, _ := store.ActiveMembers(ctx)
+	set, _, err := registry.Resolve(seed.Roles, members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+		t.Fatal(err)
+	}
+	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", first.Plan); err != nil || pinned != first.Plan {
+		t.Fatalf("pinning work to the active plan: %q (%v)", pinned, err)
+	}
+
+	next := embedderVersion(t, "0.2.0")
+	if _, _, err = store.RegisterPlugin(ctx, next, "register-0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.Service{Store: store, Spaces: app.DeploymentSpaces}.Activate(ctx, operatorScope, next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", second.ID); err != nil || pinned != first.Plan {
+		t.Fatalf("a retry after the activation is pinned to %q (%v), want its first plan %s", pinned, err, first.Plan)
+	}
+	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", second.ID); err != nil || pinned != second.ID {
+		t.Fatalf("new work is pinned to %q (%v), want the active plan", pinned, err)
+	}
+	if plan, byID, err := store.PlanMembers(ctx, first.Plan); err != nil || roles(plan)["ingestion"] != "example.hash_embedder@0.1.0" || len(byID) != 1 {
+		t.Fatalf("the pinned plan's members: %+v %v (%v)", plan, byID, err)
+	}
+	for want := 1; want <= 2; want++ {
+		if n, err := store.CountUnavailable(ctx, plugins.WorkIngestion, "org_a", "receipt_old"); err != nil || n != want {
+			t.Fatalf("unavailable attempt %d counted as %d (%v)", want, n, err)
+		}
+	}
+
+	state := func(id string) (string, int) {
+		t.Helper()
+		r, err := store.PluginRegistration(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.State, r.PinnedWork
+	}
+	old := seed.Registrations[0].ID
+	if s, n := state(old); s != registry.StateDraining || n != 1 {
+		t.Fatalf("0.1.0 after the activation: %s with %d pinned, want draining with 1", s, n)
+	}
+	if s, n := state(next.ID); s != registry.StateActive || n != 1 {
+		t.Fatalf("0.2.0 after the activation: %s with %d pinned, want active with 1", s, n)
+	}
+	if err = store.ReleaseWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old"); err != nil {
+		t.Fatal(err)
+	}
+	if s, n := state(old); s != registry.StateInactive || n != 0 {
+		t.Fatalf("0.1.0 once its work is released: %s with %d pinned, want inactive", s, n)
+	}
+}

@@ -197,6 +197,25 @@ func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code
 		_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, org, id, state, code)
 		return err
 	}
+	return s.quarantine(ctx, org, id, state, code, nil)
+}
+
+// QuarantineVersion quarantines a Version that is not searchable yet, with
+// its structured reason.
+func (s ContentStore) QuarantineVersion(ctx context.Context, org, id string, reason content.Diagnostic) error {
+	return s.quarantine(ctx, org, id, "blocked", reason.Code, &reason)
+}
+
+// quarantine holds a Version that is not searchable yet, announced by
+// record.quarantined; a reason is listed in its diagnostics.
+func (s ContentStore) quarantine(ctx context.Context, org, id, state, code string, reason *content.Diagnostic) error {
+	var raw []byte
+	if reason != nil {
+		var err error
+		if raw, err = json.Marshal(reason); err != nil {
+			return err
+		}
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -214,7 +233,7 @@ func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code
 	if ready || held {
 		return tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true,quarantined_at=`+firstStep("quarantined_at")+` WHERE organization=$1 AND id=$2`, org, id, state, code); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4,quarantined=true,quarantine=$5,quarantined_at=`+firstStep("quarantined_at")+` WHERE organization=$1 AND id=$2`, org, id, state, code, raw); err != nil {
 		return err
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.quarantined", Resource: "record", ResourceID: recordID, MutationID: content.StableID("quarantine", id, code)}); err != nil {

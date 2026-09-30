@@ -164,6 +164,13 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 		t.Fatalf("another ingestion plugin takes the role over: %+v (%v)", takeover, err)
 	}
 
+	// A registration still draining can serve again (a rollback).
+	draining := embedderV2
+	draining.State = registry.StateDraining
+	if _, err := registry.PlanActivation(active, members, draining, nil); err != nil {
+		t.Fatalf("activating a draining registration: %v", err)
+	}
+
 	for name, c := range map[string]struct {
 		target registry.Registration
 		want   error
@@ -172,7 +179,7 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 		// example.markdown would keep text/x-rst and still claim text/markdown.
 		"partial overlap": {markdownOnly, registry.ErrConflict, plugins.CodeRouteConflict},
 		"not validated":   {func() registry.Registration { r := embedderV2; r.State = registry.StateRejected; return r }(), registry.ErrNotValidated, "rejected"},
-		"alert rule":      {registered(t, manifest("example.rule", "1.0.0", "  subscription:\n    expression_schema: {type: object}\n    timeout_ms: 1000\n")), registry.ErrUnsupportedRole, "THE-782"},
+		"alert rule":      {registered(t, manifest("example.rule", "1.0.0", "  subscription:\n    expression_schema: {type: object}\n    timeout_ms: 1000\n")), registry.ErrUnsupportedRole, "each Subscription pins its rule's version"},
 		"adds retrieval":  {registered(t, string(must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml")))), registry.ErrConflict, plugins.CodeRetrievalConflict},
 	} {
 		_, err := registry.PlanActivation(active, members, c.target, nil)
@@ -183,6 +190,36 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 	refused := errors.New("connector kind rss is built in")
 	if _, err := registry.PlanActivation(active, members, embedderV2, func(*plugins.PinSet) error { return refused }); !errors.Is(err, registry.ErrConflict) || !strings.Contains(err.Error(), refused.Error()) {
 		t.Fatalf("a check of the running engine refuses: %v", err)
+	}
+}
+
+// TestSeededRegistrationsKeepTheStartupKeyIdentity owns the idempotency key
+// across the move to the registry: a plugin the configuration pinned and the
+// same plugin resolved from the registration the configuration seeded give
+// its invocations the same idempotency key identity, so work in flight keeps
+// converging. A registration an operator recorded is named by its id, which
+// covers its settings.
+func TestSeededRegistrationsKeepTheStartupKeyIdentity(t *testing.T) {
+	configured, err := plugins.LoadPinManifest([]byte(manifest("example.embedder", "1.0.0", ingestion("example.embedder.small"))), "test", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := plugins.NewPinSet([]*plugins.Pin{configured})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := registry.FromPins(set).Registrations[0]
+	resolved, err := seeded.Pin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "startup:example.embedder@1.0.0#" + configured.ManifestDigest; configured.Generation() != want || resolved.Generation() != want {
+		t.Fatalf("configured %q, seeded %q; want both %q", configured.Generation(), resolved.Generation(), want)
+	}
+	byOperator := seeded
+	byOperator.Origin = registry.OriginRegistration
+	if resolved, err = byOperator.Pin(); err != nil || resolved.Generation() != "registration:"+seeded.ID {
+		t.Fatalf("an operator registration: %q (%v), want registration:%s", resolved.Generation(), err, seeded.ID)
 	}
 }
 

@@ -52,7 +52,7 @@ func rebuildWorkflow(ctx workflow.Context, in RebuildInput) error {
 	return workflow.NewContinueAsNewError(ctx, rebuildWorkflowName, in)
 }
 
-func registerRebuild(w worker.Worker, rebuilder retrieval.Rebuilder) {
+func registerRebuild(w worker.Worker, rebuilder retrieval.Rebuilder, pins Pinner) {
 	w.RegisterWorkflowWithOptions(rebuildWorkflow, workflow.RegisterOptions{Name: rebuildWorkflowName})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in RebuildInput) (bool, error) {
 		stop := make(chan struct{})
@@ -69,10 +69,19 @@ func registerRebuild(w worker.Worker, rebuilder retrieval.Rebuilder) {
 				}
 			}
 		}()
-		done, err := rebuilder.Step(ctx, in.Organization, in.OperationID)
+		// Every step derives through the plan the Operation's first step
+		// pinned; the last one releases it.
+		pinned, err := pins.Pin(ctx, workOperation, in.Organization, in.OperationID)
+		if err != nil {
+			return false, err
+		}
+		done, err := rebuilder.Step(pinned, in.Organization, in.OperationID)
 		if err != nil {
 			// Bounded diagnostics: identifiers and attempt only, never payloads.
 			slog.Warn("projection rebuild retrying", "operation_id", in.OperationID, "attempt", activity.GetInfo(ctx).Attempt)
+		}
+		if err == nil && done {
+			err = pins.Release(ctx, workOperation, in.Organization, in.OperationID)
 		}
 		return done, err
 	}, activity.RegisterOptions{Name: "rebuild-projection-step"})

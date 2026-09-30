@@ -80,14 +80,29 @@ func newPluginWorld(t *testing.T, ctx context.Context, name string) *pluginWorld
 	}
 	w.input = []byte("# Harbour\n\nThe tide turns twice a day.")
 	w.sources = blobSources{}
-	w.contents = content.Service{Repository: w.store, Catalog: w.store, Blobs: w.objects, BlobSource: w.sources, Relations: w.store, Routes: w.pin, Normalizations: w.store, Supersession: w.store}
-	w.service = normalization.Service{Content: w.contents, Store: w.store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: w.pin}, Pin: w.pin}
+	live := liveOf(t, w.pin)
+	w.contents = content.Service{Repository: w.store, Catalog: w.store, Blobs: w.objects, BlobSource: w.sources, Relations: w.store, Routes: live, Normalizations: w.store, Supersession: w.store}
+	w.service = normalization.Service{Content: w.contents, Store: w.store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: w.pin}, Pin: live}
 	t.Cleanup(func() {
 		if w.proc != nil {
 			_ = w.proc.Stop(time.Second)
 		}
 	})
 	return w
+}
+
+// liveOf follows a plan of pin alone, as api and worker follow theirs.
+func liveOf(t *testing.T, pin *plugins.Pin) *plugins.Live {
+	t.Helper()
+	set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := plugins.NewLive("", set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return live
 }
 
 // start runs the fake plugin in mode on the world's fixed port.

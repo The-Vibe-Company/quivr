@@ -57,12 +57,17 @@ type RebuildContent interface {
 // and calls the plugin only for what is missing; a terminal refusal is
 // content.ErrIngestionRefused.
 type SpaceDeriver interface {
-	Owns(space string) bool
+	Owns(ctx context.Context, space string) bool
 	// Segment returns the Version's segmentation alone.
 	Segment(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, error)
 	// Derive returns the segmentation and its vectors in the generation's
 	// spaces the plugin owns.
 	Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error)
+	// Gone reports, for a failed call, the diagnostic that stops work pinned
+	// to a plan whose ingestion plugin left the active plan and could not be
+	// reached, or could no longer serve the work, for the budget; nil keeps
+	// retrying.
+	Gone(ctx context.Context, cause error) (*content.Diagnostic, error)
 }
 
 // GenerationRouter resolves the generation a Corpus is routed to.
@@ -155,7 +160,7 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	if err != nil {
 		return err
 	}
-	if r.Plugin == nil || !r.Plugin.Owns(target.Generation.SpaceID) {
+	if r.Plugin == nil || !r.Plugin.Owns(ctx, target.Generation.SpaceID) {
 		return terminal{failure: operations.Error{Code: "unsupported_vector_space", Message: "the pinned ingestion plugin does not own the target generation's vector space"}}
 	}
 	var seg content.Segmentation
@@ -171,6 +176,15 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	case errors.Is(err, content.ErrConflict):
 		return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "the stored segmentation differs from canonical text"}}
 	case err != nil:
+		// A rebuild pinned to a plan whose plugin left the active plan and
+		// cannot serve it fails, rather than moving to another plugin.
+		reason, goneErr := r.Plugin.Gone(ctx, err)
+		if goneErr != nil {
+			return goneErr
+		}
+		if reason != nil {
+			return terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
+		}
 		return err
 	}
 	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, c.SourceNamespace, v, seg); err != nil {

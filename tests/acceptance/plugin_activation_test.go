@@ -122,3 +122,109 @@ func TestPluginActivationIngests(t *testing.T) {
 		t.Fatalf("a Record ingested after the activation, with only 0.2.0 running: %v", hits)
 	}
 }
+
+// registrationAt finds the registration of a plugin version at an endpoint.
+func registrationAt(t *testing.T, operator, version, endpoint string) map[string]any {
+	t.Helper()
+	for _, raw := range request(t, "GET", "/v0/admin/plugins", operator, nil, 200)["items"].([]any) {
+		r := raw.(map[string]any)
+		if r["plugin_id"] == "example.hash_embedder" && r["version"] == version && r["endpoint"] == endpoint && r["state"] != "rejected" {
+			return r
+		}
+	}
+	t.Fatalf("no registration of example.hash_embedder@%s at %s", version, endpoint)
+	return nil
+}
+
+// pinnedSetup is what scripts/ingestion_plugin.py gives the pinning scenario:
+// 0.2.0 (A) serves the plan and is stopped; 0.1.0 (B), whose registration
+// the configuration seeded, runs again at its address.
+func pinnedSetup(t *testing.T) (operator, a, b string, record map[string]any) {
+	t.Helper()
+	operator, a, _, _ = activationSetup(t)
+	b = os.Getenv("QUIVR_TEST_ROLLBACK_ENDPOINT")
+	if b == "" {
+		t.Skip("make verify restarts 0.1.0 for the pinning scenario")
+	}
+	corpusID, run := ingestionPluginCorpus(t)
+	return operator, a, b, inlineCommand(corpusID, "pinned-"+run, "pinned", "The ferry crossed the fjord twice before the storm.")
+}
+
+// TestPinnedWorkStarts ingests a Record while A, which the active plan names,
+// is stopped: its processing pins A's plan and retries. B is then activated,
+// and A reads as draining, with that work pinned to it.
+func TestPinnedWorkStarts(t *testing.T) {
+	operator, a, b, record := pinnedSetup(t)
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	receipt := awaitReceipt(t, request(t, "POST", "/v0/records", admin, record, 202)["receipt_id"].(string))
+	version := "/v0/records/" + receipt["record_id"].(string) + "/versions/" + receipt["version_id"].(string)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		// Retrying: its processing ran on A's plan and could not reach A.
+		v := request(t, "GET", version, admin, nil, 200)
+		if v["processing"].(map[string]any)["state"] == "retrying" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the Version never retried with A stopped: %v", v)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	rollback := registrationAt(t, operator, "0.1.0", b)
+	plan := request(t, "POST", "/v0/admin/plugins/"+rollback["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	if planRoles(plan)["ingestion"] != "example.hash_embedder@0.1.0" {
+		t.Fatalf("activating 0.1.0 again: %v", plan)
+	}
+	if drained := registrationAt(t, operator, "0.2.0", a); drained["state"] != "draining" || drained["pinned_work"].(float64) < 1 {
+		t.Fatalf("A once B is active: %v, want draining with the Record's processing pinned to it", drained)
+	}
+}
+
+// TestPinnedWorkDrains runs after the harness restarted the worker. New work
+// goes to B while A is still down; the Record pinned to A never reaches B,
+// which is up: its Version is quarantined with a diagnostic naming A's plan
+// and A. A then has nothing pinned to it and reads as inactive.
+func TestPinnedWorkDrains(t *testing.T) {
+	operator, a, _, record := pinnedSetup(t)
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	corpusID, run := ingestionPluginCorpus(t)
+	ingestEnriched(t, corpusID, "after-switch-"+run, "lighthouse", "The lighthouse keeper logged every passing ship.")
+
+	receipt := request(t, "POST", "/v0/records", admin, record, 202)
+	version := "/v0/records/" + receipt["record_id"].(string) + "/versions/" + receipt["version_id"].(string)
+	deadline := time.Now().Add(60 * time.Second)
+	var v map[string]any
+	for {
+		v = request(t, "GET", version, admin, nil, 200)
+		if v["availability"].(map[string]any)["state"] == "quarantined" {
+			break
+		}
+		if v["availability"].(map[string]any)["searchable"] == true || time.Now().After(deadline) {
+			t.Fatalf("the Version pinned to A: %v, want quarantined, never processed by B", v)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	diagnostics := v["diagnostics"].([]any)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics %v, want the pinned plugin's", diagnostics)
+	}
+	d := diagnostics[0].(map[string]any)
+	if d["code"] != "pinned_plugin_unavailable" || d["plugin"] != "example.hash_embedder" || d["plugin_version"] != "0.2.0" || d["contribution"] != "ingestion" {
+		t.Fatalf("diagnostic %v, want pinned_plugin_unavailable naming example.hash_embedder@0.2.0", d)
+	}
+	if pinned := request(t, "GET", "/v0/admin/plugins/plans/"+d["plan"].(string), operator, nil, 200); planRoles(pinned)["ingestion"] != "example.hash_embedder@0.2.0" {
+		t.Fatalf("the diagnostic's plan %v does not name A", pinned)
+	}
+
+	deadline = time.Now().Add(60 * time.Second)
+	for {
+		drained := registrationAt(t, operator, "0.2.0", a)
+		if drained["state"] == "inactive" && drained["pinned_work"].(float64) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("A never finished draining: %v", drained)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}

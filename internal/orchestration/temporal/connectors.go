@@ -31,6 +31,9 @@ const (
 	// acquireHeartbeatTimeout bounds how long a run on a dead worker stays in
 	// flight before Temporal retries it.
 	acquireHeartbeatTimeout = 30 * time.Second
+	// acquireAttempts bounds the attempts of one run; its last attempt
+	// releases the run's plan whatever its outcome.
+	acquireAttempts = 3
 )
 
 // ConnectorScheduler claims due Connector Instance runs.
@@ -56,29 +59,47 @@ func acquireWorkflowFn(ctx workflow.Context, in AcquireInput) error {
 	// Five minutes leaves room for a run storing attachments (up to 25 MB each,
 	// bounded per run by connectors.DefaultAttachmentBudget); the heartbeat
 	// timeout still retries a run whose worker died within seconds.
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute, HeartbeatTimeout: acquireHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute, HeartbeatTimeout: acquireHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: acquireAttempts}})
 	return workflow.ExecuteActivity(ctx, acquireActivity, in).Get(ctx, nil)
 }
 
-func registerConnectors(w worker.Worker, c *Connectors) {
+func registerConnectors(w worker.Worker, c *Connectors, pins Pinner) {
 	w.RegisterWorkflowWithOptions(acquireWorkflowFn, workflow.RegisterOptions{Name: acquireWorkflow})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
-		done := make(chan struct{})
-		defer close(done)
-		go func() {
-			ticker := time.NewTicker(acquireHeartbeatTimeout / 3)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticker.C:
-					activity.RecordHeartbeat(ctx)
-				}
+		// The run's attempts resolve its connector kind in the plan its first
+		// attempt pinned; the run's end releases it.
+		id := fmt.Sprintf("%s:%d", in.ConnectorID, in.Run)
+		pinned, err := pins.Pin(ctx, workConnectorRun, in.Organization, id)
+		if err != nil {
+			return err
+		}
+		err = acquire(pinned, c, in)
+		if err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts {
+			if releaseErr := pins.Release(context.WithoutCancel(ctx), workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
+				err = releaseErr
 			}
-		}()
-		return c.Acquirer.Run(ctx, in.Organization, in.ConnectorID, in.Run)
+		}
+		return err
 	}, activity.RegisterOptions{Name: acquireActivity})
+}
+
+// acquire runs one acquisition attempt while it heartbeats.
+func acquire(ctx context.Context, c *Connectors, in AcquireInput) error {
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(acquireHeartbeatTimeout / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				activity.RecordHeartbeat(ctx)
+			}
+		}
+	}()
+	return c.Acquirer.Run(ctx, in.Organization, in.ConnectorID, in.Run)
 }
 
 // acquisitionWorkflowID is stable per run, so at most one acquisition of an

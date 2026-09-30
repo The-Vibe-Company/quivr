@@ -113,7 +113,7 @@ func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpu
 }
 
 func registrationToTransport(reg registry.Registration) transport.PluginRegistration {
-	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
+	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), PinnedWork: reg.PinnedWork, CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
 	if reg.ArtifactDigest != "" {
 		digest := reg.ArtifactDigest
 		item.ArtifactDigest = &digest

@@ -55,6 +55,9 @@ func (m memoryRegistry) ActivePlanID(context.Context) (string, error) { return "
 func (m memoryRegistry) ActiveMembers(context.Context) (registry.Plan, map[string]registry.Registration, error) {
 	return registry.Plan{}, nil, registry.ErrNoPlan
 }
+func (m memoryRegistry) PlanMembers(context.Context, string) (registry.Plan, map[string]registry.Registration, error) {
+	return registry.Plan{}, nil, registry.ErrNotFound
+}
 func (m memoryRegistry) RegisterPlugin(_ context.Context, r registry.Registration, _ string) (registry.Registration, bool, error) {
 	return r, true, nil
 }

@@ -173,6 +173,13 @@ func (s *memoryStore) SaveNormalized(_ context.Context, _, versionID string, n c
 	return n, nil
 }
 
+// fixed routes every media type its pin routes, whatever the work.
+type fixed struct{ pin *plugins.Pin }
+
+func (f fixed) Normalizer(_ context.Context, mediaType string) (*plugins.Pin, plugins.RouteConfig, bool) {
+	return f.pin.Normalizer(mediaType)
+}
+
 type signer struct{ keys []string }
 
 func (s *signer) PresignGet(_ context.Context, key string, ttl time.Duration) (string, time.Time, error) {
@@ -208,7 +215,7 @@ func setup(t *testing.T, answer func(n int) (int, any)) *fixture {
 	blob := content.VerifiedBlob{ID: "blob_md", MediaType: "text/markdown", Blob: content.Blob{Key: "org/blob", SHA256: content.Hash(input), Size: int64(len(input))}}
 	command := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus_1", Namespace: "docs", RecordKey: "guide"}, Content: content.Text{Kind: "blob", BlobID: "blob_md", MediaType: "text/markdown", BlobSHA256: blob.Blob.SHA256}, Provenance: map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}}
 	f.repo = &repository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", RecordID: "record_1", VersionID: "version_1", Command: command}}
-	f.service = normalization.Service{Content: content.Service{Repository: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Client{Pin: pin}, Pin: pin}
+	f.service = normalization.Service{Content: content.Service{Repository: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Client{Pin: pin}, Pin: fixed{pin}}
 	return f
 }
 
@@ -516,7 +523,7 @@ func optionalSetup(t *testing.T, answer func(int) (int, any)) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service.Pin = pin
+	f.service.Pin = fixed{pin}
 	f.service.Plugin = pluginhttp.Client{Pin: pin}
 	f.blobs.objects["org/blob"] = input
 	return f

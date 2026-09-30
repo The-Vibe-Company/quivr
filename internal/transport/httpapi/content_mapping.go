@@ -304,7 +304,7 @@ func normalizationToTransport(n map[string]any) *transport.NormalizationProvenan
 func diagnosticsToTransport(diagnostics []content.Diagnostic) []transport.Diagnostic {
 	out := []transport.Diagnostic{}
 	for _, d := range diagnostics {
-		out = append(out, transport.Diagnostic{Code: d.Code, Message: d.Message, Retryable: d.Retryable, Plugin: optionalString(d.Plugin), Contribution: optionalString(d.Contribution), InvocationId: optionalString(d.InvocationID)})
+		out = append(out, transport.Diagnostic{Code: d.Code, Message: d.Message, Retryable: d.Retryable, Plugin: optionalString(d.Plugin), PluginVersion: optionalString(d.PluginVersion), Plan: optionalString(d.Plan), Contribution: optionalString(d.Contribution), InvocationId: optionalString(d.InvocationID)})
 	}
 	return out
 }

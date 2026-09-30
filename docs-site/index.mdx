@@ -195,7 +195,11 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   address; Quivr checks it with the Contract Runner, and one call activates it as a new plan
   that api and worker follow without restarting
   ([Switch plugins without restarting](/plugins/switch-plugins-without-restarting)).
-  Quivr never starts a plugin process.
+  Work already started (a receipt's processing, a connector run, a rebuild) finishes on the
+  plan it started on, even across a worker restart. The replaced version shows `draining`
+  with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
+  disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
+  the new version. Quivr never starts a plugin process.
 - **Plugin and search counters**: each process counts every plugin call, search and
   processing step with its errors and latency, and writes the counts to PostgreSQL every
   few seconds (`observability.flush_interval`, default 5 s, the most a crash can lose).

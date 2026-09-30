@@ -91,6 +91,31 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 	return workflow.ExecuteActivity(ctx, "enrich-e5", input).Get(ctx, nil)
 }
 
+// Pinner pins each piece of work to the Pipeline Plan it started on (Spec 5):
+// every activity of the work, retries and restarts included, resolves its
+// plugins in that plan.
+type Pinner interface {
+	// Pin returns ctx carrying the work pinned to its plan: the active one
+	// when the work is first seen.
+	Pin(ctx context.Context, kind, org, id string) (context.Context, error)
+	// Release forgets finished work, so the registrations of its plan can
+	// stop draining.
+	Release(ctx context.Context, kind, org, id string) error
+}
+
+// Work kinds, as the Pinner records them.
+const (
+	workIngestion    = "ingestion"
+	workConnectorRun = "connector_run"
+	workOperation    = "operation"
+)
+
+// unpinned runs work on the active plan at each call, as before pinning.
+type unpinned struct{}
+
+func (unpinned) Pin(ctx context.Context, _, _, _ string) (context.Context, error) { return ctx, nil }
+func (unpinned) Release(context.Context, string, string, string) error            { return nil }
+
 type Runtime struct {
 	Client client.Client
 	Worker worker.Worker
@@ -102,8 +127,13 @@ type Runtime struct {
 }
 
 // Start runs the worker. A non-nil conns also schedules Connector Instance
-// acquisition runs on their own task queue.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors) (*Runtime, error) {
+// acquisition runs on their own task queue. pins pins the processing of each
+// receipt, each Operation and each connector run to the plan it started on;
+// nil leaves them on the active plan.
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, pins Pinner) (*Runtime, error) {
+	if pins == nil {
+		pins = unpinned{}
+	}
 	// The application retries startup after transient connection failures.
 	connect, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -113,25 +143,51 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
 	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
+	// Every activity of a receipt's processing resolves plugins in the plan
+	// its first activity pinned; enrichment, the last one, releases it.
+	pinned := func(ctx context.Context, in Input) (context.Context, error) {
+		return pins.Pin(ctx, workIngestion, in.Organization, in.ReceiptID)
+	}
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
 		return service.Run(ctx, in.Organization, in.ReceiptID)
 	}, activity.RegisterOptions{Name: "process-token-windows"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) (ProcessResult, error) {
-		err := service.Run(ctx, in.Organization, in.ReceiptID)
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return ProcessResult{}, err
+		}
+		err = service.Run(ctx, in.Organization, in.ReceiptID)
 		if errors.Is(err, content.ErrNormalizationPending) {
 			return ProcessResult{NormalizationRequired: true}, nil
 		}
 		return ProcessResult{}, err
 	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
 		return heartbeating(ctx, normalizationHeartbeatTimeout/3, func() error { return service.Normalize(ctx, in.Organization, in.ReceiptID) })
 	}, activity.RegisterOptions{Name: "normalize-external"})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error { return service.Enrich(ctx, in.Organization, in.ReceiptID) }, activity.RegisterOptions{Name: "enrich-e5"})
-	registerRebuild(w, rebuilder)
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		pinnedCtx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
+		if err = service.Enrich(pinnedCtx, in.Organization, in.ReceiptID); err != nil {
+			return err
+		}
+		return pins.Release(ctx, workIngestion, in.Organization, in.ReceiptID)
+	}, activity.RegisterOptions{Name: "enrich-e5"})
+	registerRebuild(w, rebuilder, pins)
 	var cw worker.Worker
 	if conns != nil {
 		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
-		registerConnectors(cw, conns)
+		registerConnectors(cw, conns, pins)
 		if err = cw.Start(); err != nil {
 			c.Close()
 			return nil, err

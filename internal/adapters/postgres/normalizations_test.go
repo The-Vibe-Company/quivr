@@ -105,12 +105,12 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	blob := content.VerifiedBlob{ID: "blob_" + run, MediaType: "text/markdown", Blob: content.Blob{Key: "inputs/" + run, SHA256: content.Hash(input), Size: int64(len(input))}}
 	store := postgres.ContentStore{Pool: pool}
 	objects := &objectMemory{objects: map[string][]byte{}}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: objects, BlobSource: verifiedSource{blob}, Relations: store, Routes: pin, Normalizations: store}
+	contents := content.Service{Repository: store, Catalog: store, Blobs: objects, BlobSource: verifiedSource{blob}, Relations: store, Routes: liveOf(t, pin), Normalizations: store}
 	receipt, err := contents.Accept(ctx, scope, content.Command{Key: "routed-" + run, Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "guide"}, Content: content.Text{Kind: "blob", BlobID: blob.ID, MediaType: "text/markdown"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: pin}, Pin: pin}
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: pin}, Pin: liveOf(t, pin)}
 
 	// Publication before normalization waits; it never publishes the source Blob Part.
 	if err := contents.Materialize(ctx, org, receipt.ID); err == nil {

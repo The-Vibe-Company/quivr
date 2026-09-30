@@ -12,7 +12,7 @@ import (
 
 type routes map[string]bool
 
-func (r routes) Routed(mediaType string) bool { return r[mediaType] }
+func (r routes) Routed(_ context.Context, mediaType string) bool { return r[mediaType] }
 
 var markdownBytes = []byte("# Title\n\nBody")
 

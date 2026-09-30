@@ -146,12 +146,16 @@ type Availability struct {
 // and InvocationID name the external invocation a normalization diagnostic
 // concerns.
 type Diagnostic struct {
-	Code         string `json:"code"`
-	Message      string `json:"message"`
-	Retryable    bool   `json:"retryable"`
-	Plugin       string `json:"plugin,omitempty"`
-	Contribution string `json:"contribution,omitempty"`
-	InvocationID string `json:"invocation_id,omitempty"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
+	Plugin    string `json:"plugin,omitempty"`
+	// PluginVersion and Plan name the plugin version and the Pipeline Plan
+	// that work pinned to a plan was stopped on.
+	PluginVersion string `json:"plugin_version,omitempty"`
+	Plan          string `json:"plan,omitempty"`
+	Contribution  string `json:"contribution,omitempty"`
+	InvocationID  string `json:"invocation_id,omitempty"`
 }
 type Receipt struct {
 	ID           string        `json:"receipt_id"`
@@ -302,7 +306,7 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 			return Receipt{}, ErrUnsupported
 		}
 	case "blob":
-		if s.Routes != nil && s.Routes.Routed(c.Content.MediaType) {
+		if s.Routes != nil && s.Routes.Routed(ctx, c.Content.MediaType) {
 			// A routed Blob is normalized after acceptance, never read here: the
 			// Version identity derives from the verified submitted input.
 			checksum, err := s.verifyPartBlob(ctx, scope.Organization, c.Content)
@@ -830,7 +834,7 @@ var ErrNoDispatch = errors.New("no_pending_dispatch")
 // NormalizerRoutes reports whether a Blob media type is routed to an external
 // normalizer.
 type NormalizerRoutes interface {
-	Routed(mediaType string) bool
+	Routed(ctx context.Context, mediaType string) bool
 }
 
 // Supersession reports, before any external normalization, whether a Record
@@ -881,6 +885,9 @@ type NormalizationFailure struct {
 	Code      string
 	Message   string
 	Retryable bool
+	// Plan is the Pipeline Plan of work stopped because its normalizer left
+	// the active plan and stayed unreachable.
+	Plan string
 }
 
 // NormalizationConflict records a divergent output for the recorded
@@ -916,7 +923,11 @@ func (n Normalized) Diagnostics() []Diagnostic {
 	var out []Diagnostic
 	p := n.Provenance
 	if n.Failure != nil {
-		out = append(out, Diagnostic{Code: n.Failure.Code, Message: n.Failure.Message, Retryable: n.Failure.Retryable, Plugin: p.PluginID, Contribution: p.Contribution, InvocationID: p.InvocationID})
+		d := Diagnostic{Code: n.Failure.Code, Message: n.Failure.Message, Retryable: n.Failure.Retryable, Plugin: p.PluginID, Contribution: p.Contribution, InvocationID: p.InvocationID}
+		if n.Failure.Plan != "" {
+			d.Plan, d.PluginVersion = n.Failure.Plan, p.PluginVersion
+		}
+		out = append(out, d)
 	}
 	if n.Conflict != nil {
 		out = append(out, Diagnostic{Code: CodeNormalizerConflict, Message: "A later invocation with the same idempotency key returned a different output; the recorded output was kept.", Plugin: p.PluginID, Contribution: p.Contribution, InvocationID: n.Conflict.InvocationID})
@@ -995,7 +1006,7 @@ func (s Service) routedManifest(ctx context.Context, work *Work) (Manifest, *Dia
 			return ManifestFor(c), &Diagnostic{Code: CodeNormalizationSuperseded, Message: "A newer revision of the Record was accepted before this Version was normalized; the normalizer was not invoked."}, nil
 		}
 	}
-	if s.Routes != nil && s.Routes.Routed(c.Content.MediaType) {
+	if s.Routes != nil && s.Routes.Routed(ctx, c.Content.MediaType) {
 		return Manifest{}, nil, ErrNormalizationPending
 	}
 	// The route was removed after acceptance.

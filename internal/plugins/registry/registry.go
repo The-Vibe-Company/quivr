@@ -29,8 +29,9 @@ import (
 const Action = "plugins:admin"
 
 // Registration states. A registration is registered while its check runs,
-// then validated or rejected; the plan makes it active, and a later plan that
-// leaves it out makes it inactive.
+// then validated or rejected; the plan makes it active. A later plan that
+// leaves it out makes it draining while work pinned to a plan that names it
+// is unfinished, and inactive once none is.
 const (
 	StateRegistered = "registered"
 	StateValidated  = "validated"
@@ -138,12 +139,19 @@ type Registration struct {
 	Settings Settings
 	// ArtifactDigest is the artifact digest the plugin reports, if any.
 	ArtifactDigest string
-	Contributions  []string
+	// Origin says what recorded the registration first: the startup
+	// configuration or the operator API (KeyIdentity).
+	Origin        string
+	Contributions []string
 	// Roles lists the roles the manifest declares it can serve.
-	Roles     []string
-	State     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Roles []string
+	State string
+	// PinnedWork counts the unfinished work pinned to a plan that names the
+	// registration: a registration that left the active plan is draining
+	// until it reaches zero.
+	PinnedWork int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 	// Check is the Contract Runner's report, once the check ran.
 	Check *CheckReport
 }
@@ -167,13 +175,41 @@ type CheckResult struct {
 	Issues       []plugins.Issue `json:"issues"`
 }
 
+// Registration origins.
+const (
+	// OriginConfiguration is a registration the startup configuration
+	// recorded.
+	OriginConfiguration = "configuration"
+	// OriginRegistration is a registration the operator API recorded.
+	OriginRegistration = "registration"
+)
+
+// KeyIdentity is the registration's identity in the first component of every
+// idempotency key of its invocations (Spec 2). A registration the
+// configuration recorded keeps exactly the startup placeholder of its pin,
+// so work in flight across the upgrade to the registry keeps converging.
+// One the operator registered is named by its id, which covers its settings:
+// two installs of one version with different configurations never share a
+// key.
+func (r Registration) KeyIdentity() string {
+	if r.Origin == OriginRegistration {
+		return "registration:" + r.ID
+	}
+	return plugins.StartupGeneration(r.PluginID, r.Version, r.ManifestDigest)
+}
+
 // Pin loads the registration as the engine calls it.
 func (r Registration) Pin() (*plugins.Pin, error) {
 	if len(r.Manifest) == 0 {
 		return nil, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/registrations/" + r.ID,
 			Message: fmt.Sprintf("%s@%s was recorded before registrations kept their manifest; register it again", r.PluginID, r.Version)}}}
 	}
-	return plugins.LoadPinManifest(r.Manifest, "registration "+r.ID, plugins.PinConfig{Endpoint: r.Endpoint, Configuration: r.Settings.Configuration, Routes: r.Settings.Routes, Kinds: r.Settings.Kinds, Spaces: r.Settings.Spaces})
+	pin, err := plugins.LoadPinManifest(r.Manifest, "registration "+r.ID, plugins.PinConfig{Endpoint: r.Endpoint, Configuration: r.Settings.Configuration, Routes: r.Settings.Routes, Kinds: r.Settings.Kinds, Spaces: r.Settings.Spaces})
+	if err != nil {
+		return nil, err
+	}
+	pin.Registration, pin.KeyIdentity = r.ID, r.KeyIdentity()
+	return pin, nil
 }
 
 // CodePlanUnresolvable is a plan member the engine cannot load.
@@ -225,6 +261,9 @@ type Store interface {
 	ActivePlanID(ctx context.Context) (string, error)
 	// ActiveMembers returns the active plan and its registrations by id.
 	ActiveMembers(ctx context.Context) (Plan, map[string]Registration, error)
+	// PlanMembers returns any plan and its registrations by id, or
+	// ErrNotFound.
+	PlanMembers(ctx context.Context, id string) (Plan, map[string]Registration, error)
 	// RegisterPlugin records a registration under an idempotency key: it
 	// replays the key's registration, refuses a key used for another one
 	// (ErrIdempotencyConflict), queues a new registration for its check and
@@ -320,7 +359,7 @@ func registrationOf(pin *plugins.Pin, state string) Registration {
 	m := pin.Manifest
 	settings := SettingsOf(pin)
 	return Registration{ID: RegistrationID(m.ID, m.Version, pin.ManifestDigest, pin.Endpoint, settings.Digest()), PluginID: m.ID, Version: m.Version, Endpoint: pin.Endpoint,
-		ManifestDigest: pin.ManifestDigest, Manifest: pin.Source, Settings: settings, Contributions: m.Contributions.Names(), Roles: declaredRoles(m), State: state}
+		ManifestDigest: pin.ManifestDigest, Manifest: pin.Source, Settings: settings, Contributions: m.Contributions.Names(), Roles: declaredRoles(m), State: state, Origin: OriginConfiguration}
 }
 
 // FromPins derives the seed of the startup pins: one active registration per

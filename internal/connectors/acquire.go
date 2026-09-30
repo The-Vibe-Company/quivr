@@ -103,8 +103,12 @@ type Ingestor interface {
 type Acquirer struct {
 	Store    RunStore
 	Registry *Registry
-	Sealer   Sealer
-	Ingest   Ingestor
+	// Kinds, when set, resolves the kinds of the Pipeline Plan the run is
+	// pinned to (Spec 5), so a run never changes provider midway; nil uses
+	// Registry.
+	Kinds  func(context.Context) *Registry
+	Sealer Sealer
+	Ingest Ingestor
 	// Blobs grants and verifies attachment uploads; Receipts (optional)
 	// skips revisions already accepted before their attachments are read.
 	Blobs            BlobGrants
@@ -147,7 +151,11 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		slog.Warn("connector acquisition failed", "connector_id", id, "class", string(typed.Class), "code", typed.Code, "retry_after", typed.RetryAfter.String())
 		return a.Store.FinishRun(ctx, org, id, run, &RunError{Class: typed.Class, Code: typed.Code, At: a.now(), RetryAfter: typed.RetryAfter})
 	}
-	connector, ok := a.Registry.Lookup(target.Kind)
+	kinds := a.Registry
+	if a.Kinds != nil {
+		kinds = a.Kinds(ctx)
+	}
+	connector, ok := kinds.Lookup(target.Kind)
 	if !ok {
 		return failure(ClassSource, "unsupported_connector_kind")
 	}

@@ -83,7 +83,14 @@ type Pin struct {
 	Kinds []string
 	// Spaces are the enabled vector spaces by space id, with their role.
 	Spaces map[string]string
-	routes map[string]RouteConfig
+	// Registration is the id of the plugin registration the pin was loaded
+	// from, when it comes from the registry's Pipeline Plan (Spec 5).
+	Registration string
+	// KeyIdentity is that registration's identity in the first component of
+	// every invocation idempotency key; empty for a pin loaded from the
+	// configuration alone.
+	KeyIdentity string
+	routes      map[string]RouteConfig
 }
 
 // PinError lists every actionable issue of a refused pin.
@@ -435,11 +442,22 @@ func (p *Pin) Route(mediaType string) (RouteConfig, bool) {
 	return r, ok
 }
 
-// Generation is the Plugin Generation placeholder of a startup pin, the first
-// component of the invocation idempotency key. Spec 5 substitutes the Plugin
-// Generation id without changing the key's shape.
+// Generation is the first component of every invocation idempotency key
+// (Spec 2): the key identity of the registration the pin was loaded from, or
+// else the startup placeholder, which a registration recorded from the
+// configuration keeps (StartupGeneration).
 func (p *Pin) Generation() string {
-	return "startup:" + p.Manifest.ID + "@" + p.Manifest.Version + "#" + p.ManifestDigest
+	if p.KeyIdentity != "" {
+		return p.KeyIdentity
+	}
+	return StartupGeneration(p.Manifest.ID, p.Manifest.Version, p.ManifestDigest)
+}
+
+// StartupGeneration is the idempotency key placeholder of a plugin version
+// pinned by the startup configuration (Spec 2):
+// startup:<id>@<version>#<manifest digest>.
+func StartupGeneration(id, version, manifestDigest string) string {
+	return "startup:" + id + "@" + version + "#" + manifestDigest
 }
 
 // PluginAPI is the Plugin API version the engine speaks to the pinned plugin:

@@ -10,10 +10,11 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
-// LiveIngestor is the ingestion plugin of the active Pipeline Plan: each call
-// resolves the plan's plugin at that moment, and a derivation resolves it
-// once for all its calls (processing.Following). A process always follows a
-// plan with an ingestion plugin: startup refuses one without.
+// LiveIngestor is the ingestion plugin of the Pipeline Plan: the plan the
+// work a call's context carries is pinned to (plugins.Live.Pin), or else the
+// active one at that moment. A derivation resolves it once for all its calls
+// (processing.Following). A process always follows a plan with an ingestion
+// plugin: startup refuses one without.
 type LiveIngestor struct{ Live *plugins.Live }
 
 var (
@@ -24,8 +25,11 @@ var (
 
 func (l LiveIngestor) now() Ingestor { return Ingestor{Pin: l.Live.Set().Ingestion()} }
 
-// Current is the plan's ingestion plugin now.
-func (l LiveIngestor) Current() processing.IngestionPlugin { return l.now() }
+// Current is the ingestion plugin of the plan the work ctx carries is pinned
+// to, or else of the active plan now.
+func (l LiveIngestor) Current(ctx context.Context) processing.IngestionPlugin {
+	return Ingestor{Pin: l.Live.SetFor(ctx).Ingestion()}
+}
 
 func (l LiveIngestor) Recipe() string              { return l.now().Recipe() }
 func (l LiveIngestor) Producer() string            { return l.now().Producer() }
@@ -37,7 +41,7 @@ func (l LiveIngestor) VectorSpace(space string) (content.VectorSpace, bool) {
 	return l.now().VectorSpace(space)
 }
 func (l LiveIngestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, spaces []string) ([]processing.PluginSegment, error) {
-	return l.now().SegmentAndEmbed(ctx, org, corpusID, v, spaces)
+	return l.Current(ctx).SegmentAndEmbed(ctx, org, corpusID, v, spaces)
 }
 func (l LiveIngestor) EncodeQuery(ctx context.Context, org, space, query string) ([]float32, error) {
 	return l.now().EncodeQuery(ctx, org, space, query)

@@ -30,12 +30,30 @@ type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-const registrationColumns = `id,plugin_id,version,endpoint,manifest_digest,coalesce(artifact_digest,''),contributions,roles,state,created_at,updated_at,manifest,settings,check_report`
+// pinnedWorkSQL counts the unfinished work pinned to a plan that names the
+// registration (THE-782). A connector run lasts at most its three bounded
+// attempts, so a run pinned for longer than connectorRunPinExpiry lost its
+// release with a worker that died during its last attempt and no longer
+// counts.
+const pinnedWorkSQL = `(SELECT count(*) FROM pipeline_plan_work w WHERE (w.kind<>'connector_run' OR w.pinned_at>now()-interval '` + connectorRunPinExpiry + `')
+ AND EXISTS (SELECT 1 FROM pipeline_plan_roles pr WHERE pr.plan_id=w.plan_id AND pr.registration_id=plugin_registrations.id))`
+
+// connectorRunPinExpiry is well past a connector run's longest life: three
+// attempts of at most five minutes and their backoff.
+const connectorRunPinExpiry = "30 minutes"
+
+// registrationColumns read a registration. A registration a plan change left
+// out is draining while work pinned to a plan naming it remains, and inactive
+// once none does: derived when read, so no process has to notice the last
+// piece of work finishing.
+const registrationColumns = `id,plugin_id,version,endpoint,manifest_digest,coalesce(artifact_digest,''),contributions,roles,
+ CASE WHEN state IN ('draining','inactive') THEN CASE WHEN ` + pinnedWorkSQL + `>0 THEN 'draining' ELSE 'inactive' END ELSE state END,
+ created_at,updated_at,manifest,settings,check_report,origin,` + pinnedWorkSQL
 
 func scanRegistration(row pgx.Row) (registry.Registration, error) {
 	var r registry.Registration
 	var settings, report []byte
-	err := row.Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report)
+	err := row.Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report, &r.Origin, &r.PinnedWork)
 	if err != nil {
 		return r, err
 	}
@@ -64,8 +82,12 @@ func insertRegistration(ctx context.Context, q querier, r registry.Registration)
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, `INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,artifact_digest,contributions,roles,state,manifest,settings) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
-		r.ID, r.PluginID, r.Version, r.Endpoint, r.ManifestDigest, r.ArtifactDigest, r.Contributions, r.Roles, r.State, r.Manifest, settings)
+	origin := r.Origin
+	if origin == "" {
+		origin = registry.OriginConfiguration
+	}
+	_, err = q.Exec(ctx, `INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,artifact_digest,contributions,roles,state,manifest,settings,origin) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
+		r.ID, r.PluginID, r.Version, r.Endpoint, r.ManifestDigest, r.ArtifactDigest, r.Contributions, r.Roles, r.State, r.Manifest, settings, origin)
 	return err
 }
 
@@ -158,9 +180,10 @@ func recordPlan(ctx context.Context, tx pgx.Tx, source string, roles []registry.
 	if _, err := tx.Exec(ctx, "INSERT INTO active_pipeline_plan(plan_id) VALUES($1) ON CONFLICT (singleton) DO UPDATE SET plan_id=EXCLUDED.plan_id, activated_at=now()", plan); err != nil {
 		return "", err
 	}
-	// THE-782 keeps a registration that leaves the plan draining while work
-	// pinned to it remains; until then it becomes inactive.
-	if _, err := tx.Exec(ctx, `UPDATE plugin_registrations SET state=CASE WHEN id=ANY($1) THEN 'active' ELSE 'inactive' END, updated_at=now()
+	// A registration that leaves the plan drains: it reads as draining while
+	// work pinned to a plan naming it remains, and inactive afterwards
+	// (registrationColumns).
+	if _, err := tx.Exec(ctx, `UPDATE plugin_registrations SET state=CASE WHEN id=ANY($1) THEN 'active' ELSE 'draining' END, updated_at=now()
  WHERE (id=ANY($1) AND state<>'active') OR (NOT id=ANY($1) AND state='active')`, members); err != nil {
 		return "", err
 	}
@@ -236,6 +259,53 @@ func (s PluginStore) ActivePlanID(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return id, err
+}
+
+// PlanMembers returns any recorded plan and its registrations by id, or
+// registry.ErrNotFound: work pinned to a plan resolves it (THE-782).
+func (s PluginStore) PlanMembers(ctx context.Context, id string) (registry.Plan, map[string]registry.Registration, error) {
+	members := map[string]registry.Registration{}
+	plan, err := pipelinePlan(ctx, s.Pool, id)
+	if err != nil {
+		return plan, members, err
+	}
+	list, err := registrations(ctx, s.Pool, `WHERE id IN (SELECT registration_id FROM pipeline_plan_roles WHERE plan_id=$1)`, plan.ID)
+	for _, r := range list {
+		members[r.ID] = r
+	}
+	return plan, members, err
+}
+
+// PinWork pins a piece of work to plan unless it is pinned already, and
+// returns the plan it is pinned to: its first attempt's, whatever the active
+// plan is when it retries. A connector run pinned past connectorRunPinExpiry
+// no longer counts as draining work, so a run dispatched again under the same
+// identity is pinned again, to plan.
+func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (string, error) {
+	var pinned string
+	err := s.Pool.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,$4)
+ ON CONFLICT (kind,organization,work_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,pinned_at=now(),unavailable_attempts=0
+ WHERE pipeline_plan_work.kind='connector_run' AND pipeline_plan_work.pinned_at<=now()-interval '`+connectorRunPinExpiry+`' RETURNING plan_id)
+ SELECT plan_id FROM pinned UNION ALL SELECT plan_id FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned)
+	return pinned, err
+}
+
+// ReleaseWork forgets a finished piece of work; a registration it kept
+// draining reads as inactive once no other work holds it.
+func (s PluginStore) ReleaseWork(ctx context.Context, kind, org, id string) error {
+	_, err := s.Pool.Exec(ctx, `DELETE FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3`, kind, org, id)
+	return err
+}
+
+// CountUnavailable counts one attempt of a piece of work that found a plugin
+// of its plan unreachable, and returns the work's count.
+func (s PluginStore) CountUnavailable(ctx context.Context, kind, org, id string) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `UPDATE pipeline_plan_work SET unavailable_attempts=unavailable_attempts+1 WHERE kind=$1 AND organization=$2 AND work_id=$3 RETURNING unavailable_attempts`, kind, org, id).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("%s %s is not pinned to a plan", kind, id)
+	}
+	return n, err
 }
 
 // ActiveMembers returns the active plan and its registrations by id.

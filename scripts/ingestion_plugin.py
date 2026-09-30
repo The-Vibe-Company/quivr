@@ -14,8 +14,12 @@ and search then encodes queries with the plugin.
 Then, with no restart (THE-781), the same plugin built as 0.2.0 runs at a
 second address: TestPluginActivation registers, checks and activates it
 through the operator API; the step stops 0.1.0, and TestPluginActivationIngests
-ingests and searches through 0.2.0 alone. The stack's configuration and
-processes are restored afterwards, even on failure.
+ingests and searches through 0.2.0 alone. Finally (THE-782) 0.1.0 runs again
+and 0.2.0 stops: TestPinnedWorkStarts pins a Record to 0.2.0's plan and
+activates 0.1.0, the step restarts the worker, and TestPinnedWorkDrains checks
+that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
+drains. The stack's configuration and processes are restored afterwards, even
+on failure.
 """
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -99,6 +103,19 @@ def verify(stack):
         # Only 0.2.0 is left to segment, embed and encode queries.
         stop_plugin(plugin)
         stack.tests('^TestPluginActivationIngests$', activation)
+        # Work finishes on the plan it started on (THE-782): 0.1.0 runs again
+        # at its address and 0.2.0 stops. TestPinnedWorkStarts pins a Record
+        # to 0.2.0's plan and activates 0.1.0; the worker restarts while 0.2.0
+        # drains, and TestPinnedWorkDrains sees the Record quarantined, never
+        # moved to 0.1.0, and 0.2.0 inactive.
+        plugin = start_plugin(directory, binary, port, SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
+        await_healthy(plugin, port, directory / 'plugin.log')
+        stop_plugin(next_plugin)
+        pinned = {**activation, 'QUIVR_TEST_ROLLBACK_ENDPOINT': f'http://127.0.0.1:{port}'}
+        stack.tests('^TestPinnedWorkStarts$', pinned)
+        stack.stop_worker()
+        stack.start_worker()
+        stack.tests('^TestPinnedWorkDrains$', pinned)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

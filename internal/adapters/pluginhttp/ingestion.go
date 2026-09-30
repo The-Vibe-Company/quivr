@@ -26,6 +26,7 @@ type Ingestor struct {
 
 var (
 	_ processing.IngestionPlugin = Ingestor{}
+	_ processing.Pinned          = Ingestor{}
 	_ retrieval.QueryEncoder     = Ingestor{}
 )
 
@@ -165,6 +166,16 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance}, Vectors: vectors}
 	}
 	return out, nil
+}
+
+// Gone decides whether work pinned to the plugin's plan stops after cause:
+// only when the plugin was unreachable, or no longer owns the space the work
+// needs, and has left the active plan (plugins.Unreachable).
+func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
+	if !errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
+		return nil, nil
+	}
+	return plugins.Unreachable(ctx, i.Pin, "ingestion")
 }
 
 // judgeIngestion maps an invocation result: unavailability and retryable errors are

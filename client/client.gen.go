@@ -1431,17 +1431,32 @@ type DeliveryAttemptPage struct {
 // On an optional route every quarantining code above that comes from the normalizer is instead
 // listed on a searchable Version published through the built-in text path. A plugin that is
 // unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-// pinned manifest) is retried with backoff and never produces a diagnostic here; the Receipt shows
-// plugin_unavailable while it retries. Quarantined Versions keep their input reference and reason;
-// reprocessing them is not available yet.
+// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
+// Plan names it; the Receipt shows plugin_unavailable while it retries.
+//
+//   - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
+//     normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
+//     reached, or could no longer serve it, for the deployment's attempt budget. The work is never
+//     moved to the plugin that
+//     replaced it: the Version is quarantined, or, when its text was already searchable, its
+//     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//
+// Quarantined Versions keep their input reference and reason; reprocessing them is not available
+// yet.
 type Diagnostic struct {
 	Code         string  `json:"code"`
 	Contribution *string `json:"contribution,omitempty"`
 	InvocationId *string `json:"invocation_id,omitempty"`
 	Message      string  `json:"message"`
 
+	// Plan Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic.
+	Plan *string `json:"plan,omitempty"`
+
 	// Plugin Plugin id of the invocation.
 	Plugin *string `json:"plugin,omitempty"`
+
+	// PluginVersion Plugin version of a pinned_plugin_unavailable diagnostic.
+	PluginVersion *string `json:"plugin_version,omitempty"`
 
 	// Retryable Whether the same input may succeed if processed again.
 	Retryable bool `json:"retryable"`
@@ -1717,19 +1732,22 @@ type PluginRegistration struct {
 	// Endpoint Base URL where the operator runs this plugin version.
 	Endpoint       string `json:"endpoint"`
 	ManifestDigest string `json:"manifest_digest"`
+
+	// PinnedWork Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero.
+	PinnedWork     int    `json:"pinned_work"`
 	PluginId       string `json:"plugin_id"`
 	RegistrationId string `json:"registration_id"`
 
 	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
 	Roles []string `json:"roles"`
 
-	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
+	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
 	State     PluginRegistrationState `json:"state"`
 	UpdatedAt time.Time               `json:"updated_at"`
 	Version   string                  `json:"version"`
 }
 
-// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it, inactive once a later plan leaves it out.
+// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
 type PluginRegistrationState string
 
 // PluginRegistrationList defines model for PluginRegistrationList.

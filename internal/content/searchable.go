@@ -110,6 +110,9 @@ type Hydrated struct {
 type BaselineRepository interface {
 	SaveSegmentation(context.Context, string, Segmentation) error
 	BaselineProgress(context.Context, string, string, string, string, bool) error
+	// QuarantineVersion quarantines a Version that is not searchable yet,
+	// with its structured reason, like BaselineProgress with quarantined.
+	QuarantineVersion(ctx context.Context, org, versionID string, reason Diagnostic) error
 	Promote(context.Context, string, Segmentation, Generation) error
 	Hydrate(context.Context, corpus.Scope, Candidate) (Hydrated, Blob, error)
 }
@@ -167,6 +170,12 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 func SegmentationDigest(result Segmentation) string { b, _ := json.Marshal(result); return Hash(b) }
 func (s Service) BaselineProgress(ctx context.Context, org, versionID, state, code string, quarantined bool) error {
 	return s.Baseline.BaselineProgress(ctx, org, versionID, state, code, quarantined)
+}
+
+// QuarantineVersion quarantines a Version that is not searchable yet with a
+// structured reason, listed in its diagnostics.
+func (s Service) QuarantineVersion(ctx context.Context, org, versionID string, reason Diagnostic) error {
+	return s.Baseline.QuarantineVersion(ctx, org, versionID, reason)
 }
 func (s Service) Promote(ctx context.Context, org string, seg Segmentation, g Generation) error {
 	return s.Baseline.Promote(ctx, org, seg, g)
