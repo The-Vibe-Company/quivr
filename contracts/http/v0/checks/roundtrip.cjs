@@ -12,6 +12,7 @@ for (const c of cases) {
   const timestampPaths = {
     WebhookEvent: [['occurred_at']],
     ChangeEvent: [['occurred_at']],
+    Version: [['accepted_at']],
     Delivery: [['event', 'occurred_at']],
     ConnectorCreate: [['credential', 'expires_at']],
     Connector: [['created_at'], ['credential', 'deposited_at'], ['credential', 'expires_at'], ['health', 'evaluated_at'],
@@ -22,6 +23,8 @@ for (const c of cases) {
     const actualParent = parents.reduce((v, key) => v[key], output);
     const expectedParent = parents.reduce((v, key) => v[key], c.value);
     const key = parts[parts.length - 1];
+    // An optional timestamp an example leaves out stays out.
+    if (!(key in expectedParent)) continue;
     const actualTime = Date.parse(actualParent[key]);
     const expectedTime = Date.parse(expectedParent[key]);
     assert.ok(Number.isFinite(actualTime) && Number.isFinite(expectedTime));

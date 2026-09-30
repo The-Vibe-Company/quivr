@@ -56,7 +56,12 @@ func TestInlineMaterialization(t *testing.T) {
 	if availability["searchable"] == true && (availability["state"] != "retrieval_ready" || availability["is_current"] != true) {
 		t.Fatal("inconsistent availability", v)
 	}
-
+	// The read says when the revision was accepted (the adapter test owns its value).
+	if at, _ := v["accepted_at"].(string); at == "" {
+		t.Fatal("Version read has no accepted_at", v)
+	} else if _, err := time.Parse(time.RFC3339Nano, at); err != nil {
+		t.Fatal("accepted_at is not a timestamp", at)
+	}
 }
 
 func TestInlineIdentityAndAuthorization(t *testing.T) {

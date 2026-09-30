@@ -422,6 +422,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   });
   const versions = {
     v_rss: {
+      accepted_at: "2026-09-28T07:00:00Z",
       manifest: {
         parts: [
           text("title", "title", "Feed headline"),
@@ -445,6 +446,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
     },
     // A corrected article whose feed gives a link that is not a web address.
     v_rss2: {
+      accepted_at: "2026-09-29T10:02:00Z",
       manifest: {
         parts: [
           text("title", "title", "Feed headline, corrected"),
@@ -459,9 +461,11 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
       },
     },
     v_hand: {
+      accepted_at: "2026-09-28T06:00:00Z",
       manifest: { parts: [text("text", "body", "Pasted note\nSecond line")] },
     },
     v_new: {
+      accepted_at: "2026-09-29T09:59:59Z",
       manifest: { parts: [text("text", "body", "Fresh arrival\nIts excerpt")] },
     },
   };
@@ -526,14 +530,17 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   assert.deepEqual(
     snapshot.items.map((item) => item.record_id),
     ["rec_rss", "rec_hand"],
-    "withdrawn and out-of-corpus Records stay out; dated items first",
+    "withdrawn and out-of-corpus Records stay out; newest arrival first",
   );
+  // A catalog scan, as after a restart, dates items by their Version's
+  // acceptance, not by the source's publication date.
   assert.deepEqual(snapshot.items[0], {
     record_id: "rec_rss",
     version_id: "v_rss",
     namespace: "wire",
     title: "Feed headline",
     excerpt: "Body of the article",
+    received_at: "2026-09-28T07:00:00.000Z",
     published_at: "2026-09-01T08:00:00.000Z",
     link: "https://news.example.org/headline",
   });
@@ -576,14 +583,18 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   await until(/event: item\ndata: [^\n]*"rec_new"/);
   const after = await (await fetch(base + "/demo/feed")).json();
   assert.equal(after.items[0].record_id, "rec_new");
-  assert.equal(after.items[0].received_at, "2026-09-29T10:00:00.000Z");
+  assert.equal(
+    after.items[0].received_at,
+    "2026-09-29T09:59:59.000Z",
+    "the Version's acceptance, not the event's occurred_at",
+  );
   assert.equal(after.items[0].title, "Fresh arrival");
   assert.equal(after.items[0].excerpt, "Its excerpt");
   assert.equal(after.items[0].updated_at, undefined, "a first Version");
 
   // A new Version with the same title and text (a feed re-dating its items)
   // is not a correction.
-  versions.v_new2 = versions.v_new;
+  versions.v_new2 = { ...versions.v_new, accepted_at: "2026-09-29T10:05:00Z" };
   records.rec_new.version = "v_new2";
   change("rec_new", "c1a");
   await until(/event: item\ndata: [^\n]*"v_new2"/);
@@ -592,7 +603,8 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   assert.equal(redated.updated_at, undefined, "same text, no correction");
 
   // A new Version of a known article whose text changed is a correction,
-  // dated by its event; a link that is not a web address is dropped.
+  // dated by that Version's acceptance; a link that is not a web address is
+  // dropped.
   records.rec_rss.version = "v_rss2";
   change("rec_rss", "c1b");
   await until(/event: item\ndata: [^\n]*"v_rss2"/);
@@ -600,7 +612,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
     (item) => item.record_id === "rec_rss",
   );
   assert.equal(corrected.title, "Feed headline, corrected");
-  assert.equal(corrected.updated_at, "2026-09-29T10:00:00.000Z");
+  assert.equal(corrected.updated_at, "2026-09-29T10:02:00.000Z");
   assert.equal(corrected.link, undefined);
 
   // A withdrawal removes the item for every reader.

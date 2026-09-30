@@ -306,6 +306,7 @@
     "value": {
       "record_id": "record_1",
       "version_id": "version_2",
+      "accepted_at": "2026-09-29T10:00:00Z",
       "manifest": {
         "kind": "manifest",
         "parts": [

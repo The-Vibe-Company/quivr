@@ -1952,6 +1952,10 @@ components:
         version_id:
           type: string
           minLength: 1
+        accepted_at:
+          type: string
+          format: date-time
+          description: When Quivr accepted the revision this Version publishes, before any processing.
         manifest:
           $ref: '#/components/schemas/ManifestContent'
         extensions:

@@ -2198,6 +2198,7 @@ required:
 | --- | --- | --- | --- |
 | `record_id` | string | yes | Minimum length `1`. |
 | `version_id` | string | yes | Minimum length `1`. |
+| `accepted_at` | string (date-time) |  | When Quivr accepted the revision this Version publishes, before any processing. |
 | `manifest` | [`ManifestContent`](#manifestcontent) | yes |  |
 | `extensions` | [`Extensions`](#extensions) |  |  |
 | `provenance` | [`Provenance`](#provenance) |  |  |
@@ -2212,6 +2213,7 @@ Example `version_relations`:
 {
   "record_id": "record_1",
   "version_id": "version_2",
+  "accepted_at": "2026-09-29T10:00:00Z",
   "manifest": {
     "kind": "manifest",
     "parts": [
@@ -2440,6 +2442,10 @@ properties:
   version_id:
     type: string
     minLength: 1
+  accepted_at:
+    type: string
+    format: date-time
+    description: When Quivr accepted the revision this Version publishes, before any processing.
   manifest:
     $ref: '#/components/schemas/ManifestContent'
   extensions:

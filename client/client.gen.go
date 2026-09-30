@@ -1499,6 +1499,8 @@ type UploadRequest struct {
 
 // Version defines model for Version.
 type Version struct {
+	// AcceptedAt When Quivr accepted the revision this Version publishes, before any processing.
+	AcceptedAt   *time.Time   `json:"accepted_at,omitempty"`
 	Availability Availability `json:"availability"`
 
 	// Diagnostics Why the Version needs attention. A quarantined Version lists its reason first. A Version published through an optional route's fallback lists the normalizer failure it fell back from, and a recorded normalizer_conflict is listed on the Version whose output was kept. Omitted when there is nothing to report.

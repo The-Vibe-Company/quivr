@@ -305,7 +305,9 @@ Operations are supported.
 - `GET /v0/changes` (polling) and `GET /v0/changes/stream` (resumable SSE) expose
   committed changes per Organization behind opaque cursors.
 - `GET /v0/records?corpus_id=…` traverses the authorized Record catalog; when a change
-  cursor expires, use it as the `resync_url` to resynchronize.
+  cursor expires, use it as the `resync_url` to resynchronize. A Version read
+  (`GET /v0/records/{id}/versions/{version_id}`) gives `accepted_at`, when Quivr
+  accepted it, so a client rebuilt from the catalog can still date what arrived.
 - `/v0/saved-queries` and `/v0/subscriptions` create pinned, versioned Saved Queries and
   activate, disable or re-enable Subscriptions. Re-enabling resumes evaluation from
   that point, with no backfill of the pause.

@@ -95,6 +95,15 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	if err = pool.QueryRow(ctx, "SELECT count(*) FROM version_parts WHERE organization=$1", scope.Organization).Scan(&parts); err != nil || parts != 1 {
 		t.Fatal("retry duplicated or lost Part", err)
 	}
+	// A Version read carries when its revision was accepted, not when it was published.
+	accepted := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_receipts SET accepted_at=$3 WHERE organization=$1 AND id=$2", scope.Organization, receipt.ID, accepted); err != nil {
+		t.Fatal(err)
+	}
+	published, err := repository.Version(ctx, scope.Organization, work.RecordID, work.VersionID)
+	if err != nil || published.AcceptedAt == nil || !published.AcceptedAt.Equal(accepted) {
+		t.Fatalf("Version %s accepted_at = %v, want %v (err %v)", work.VersionID, published.AcceptedAt, accepted, err)
+	}
 	// Hold one Organization's journal transaction open. Its uncommitted sequence must not be skipped by another committing writer.
 	tx, err := pool.Begin(ctx)
 	if err != nil {

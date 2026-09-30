@@ -4,9 +4,10 @@
 // server key and reread each Record an event names. Browsers read a snapshot
 // and a fan-out SSE stream; the core key and cursors never reach them.
 //
-// Record reads carry no timestamp, so the arrival time is the occurred_at of
-// the change event that revealed a new current Version. Records found by a
-// catalog scan only carry their source's publication date when it has one.
+// An item's arrival time is when Quivr accepted its current Version, read
+// from the Version itself, so Records found by a catalog scan after a restart
+// keep it. The change event's occurred_at stands in only for a core that does
+// not send it.
 
 const MAX_ITEMS = 1000;
 const SNAPSHOT_ITEMS = 300;
@@ -179,18 +180,15 @@ export function createFeed({ core, key, corpus, upstream }) {
     );
     if (version.status === 404) return;
     if (version.status !== 200) throw failure(version.status, "version read");
-    const item = describe(
-      current,
-      version.data,
-      receivedAt || known?.received_at,
-    );
+    const arrived = date(version.data.accepted_at) || receivedAt;
+    const item = describe(current, version.data, arrived || known?.received_at);
     // A new Version of an article already in the feed whose title or text
-    // changed is a correction: the reader says so, dated by the change event
-    // that revealed it. A feed that only re-dates its items (a new Version on
-    // every poll) corrects nothing.
+    // changed is a correction: the reader says so, dated by that Version's
+    // arrival. A feed that only re-dates its items (a new Version on every
+    // poll) corrects nothing.
     const edited =
       known && (known.title !== item.title || known.excerpt !== item.excerpt);
-    if (edited && receivedAt) item.updated_at = receivedAt;
+    if (edited && arrived) item.updated_at = arrived;
     else if (known?.updated_at) item.updated_at = known.updated_at;
     upsert(item);
   }

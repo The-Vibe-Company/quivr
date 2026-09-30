@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -186,6 +187,9 @@ type Version struct {
 	// Diagnostics explain a quarantine, a normalizer fallback or a recorded
 	// normalizer conflict.
 	Diagnostics []Diagnostic `json:"diagnostics"`
+	// AcceptedAt is when the revision this Version publishes was accepted;
+	// nil when no receipt records it.
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
 }
 
 // ResolvedRelation is a separate live view of one source Relation. Unavailable
@@ -224,6 +228,7 @@ type Publication struct {
 
 type StoredVersion struct {
 	RecordID, ID, CorpusID string
+	AcceptedAt             *time.Time
 	ManifestBlob, TextBlob Blob
 	Provenance             map[string]any
 	Extensions             Extensions
@@ -633,7 +638,7 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
-	return Version{RecordID: recordID, ID: id, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
+	return Version{RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
 }
 
 // resolveRelations expands source Relations independently of the immutable

@@ -230,7 +230,7 @@ func recordToTransport(r content.Record) transport.Record {
 	return transport.Record{RecordId: r.ID, Source: sourceToTransport(r.Source), Withdrawn: r.Withdrawn, CurrentVersionId: optionalString(r.CurrentVersionID)}
 }
 func versionToTransport(v content.Version) (transport.Version, error) {
-	out := transport.Version{RecordId: v.RecordID, VersionId: v.ID, Availability: availabilityToTransport(v.Availability), Processing: processingToTransport(v.Processing), Relations: []transport.ResolvedRelation{}, Manifest: transport.ManifestContent{Kind: transport.ManifestContentKind(v.Manifest.Kind), Parts: []transport.Part{}}}
+	out := transport.Version{RecordId: v.RecordID, VersionId: v.ID, AcceptedAt: v.AcceptedAt, Availability: availabilityToTransport(v.Availability), Processing: processingToTransport(v.Processing), Relations: []transport.ResolvedRelation{}, Manifest: transport.ManifestContent{Kind: transport.ManifestContentKind(v.Manifest.Kind), Parts: []transport.Part{}}}
 	if len(v.Diagnostics) > 0 {
 		diagnostics := diagnosticsToTransport(v.Diagnostics)
 		out.Diagnostics = &diagnostics
