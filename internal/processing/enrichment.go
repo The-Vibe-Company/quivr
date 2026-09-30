@@ -35,7 +35,7 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 		} else if reason != nil {
 			slog.Warn("pinned ingestion plugin unreachable; enrichment stops", "component", "worker", "version_id", v.ID, "plan", reason.Plan, "plugin", reason.Plugin, "plugin_version", reason.PluginVersion, "error", err.Error())
 			s.outcome(org, "enrichment", "blocked", receiptID, v, started, reason.Code)
-			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", reason.Code)
+			return s.Content.BlockEnrichment(ctx, org, v.ID, *reason)
 		}
 	}
 	if errors.Is(err, ErrPluginDeadline) {

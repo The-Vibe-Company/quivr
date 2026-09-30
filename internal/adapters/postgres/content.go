@@ -284,13 +284,23 @@ func (s ContentStore) Receipt(ctx context.Context, org, id string) (content.Rece
 		r.Processing = p
 		code = statusCode
 		if a.State == "quarantined" {
-			diagnostics, err := s.versionDiagnostics(ctx, org, r.VersionID, true, code)
+			diagnostics, err := s.versionDiagnostics(ctx, org, r.VersionID, true, false, code)
 			if err != nil {
 				return r, err
 			}
 			if len(diagnostics) > 0 {
 				d := diagnostics[0]
 				r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: d.Code, Message: d.Message, Retryable: false})
+				return r, nil
+			}
+		}
+		if enrichmentBlocked(p) {
+			reason, err := s.enrichmentReason(ctx, org, r.VersionID)
+			if err != nil {
+				return r, err
+			}
+			if reason != nil {
+				r.Diagnostics = append(r.Diagnostics, content.Diagnostic{Code: reason.Code, Message: reason.Message, Retryable: false})
 				return r, nil
 			}
 		}
@@ -341,16 +351,26 @@ func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (co
 		v.Availability, v.Processing, code, err = s.VersionStatus(ctx, org, id)
 	}
 	if err == nil {
-		v.Diagnostics, err = s.versionDiagnostics(ctx, org, id, v.Availability.State == "quarantined", code)
+		v.Diagnostics, err = s.versionDiagnostics(ctx, org, id, v.Availability.State == "quarantined", enrichmentBlocked(v.Processing), code)
 	}
 	return v, notFound(err)
 }
 
 // versionDiagnostics explains a Version: its structured quarantine reason
-// (or, for quarantines that predate it, its code), then the failure a
-// normalizer fallback records and a recorded normalizer conflict.
-func (s ContentStore) versionDiagnostics(ctx context.Context, org, id string, quarantined bool, code string) ([]content.Diagnostic, error) {
+// (or, for quarantines that predate it, its code) or the reason its
+// enrichment stopped with, then the failure a normalizer fallback records and
+// a recorded normalizer conflict.
+func (s ContentStore) versionDiagnostics(ctx context.Context, org, id string, quarantined, enrichmentStopped bool, code string) ([]content.Diagnostic, error) {
 	out := []content.Diagnostic{}
+	if enrichmentStopped {
+		reason, err := s.enrichmentReason(ctx, org, id)
+		if err != nil {
+			return nil, err
+		}
+		if reason != nil {
+			out = append(out, *reason)
+		}
+	}
 	if quarantined {
 		var raw []byte
 		if err := s.Pool.QueryRow(ctx, `SELECT quarantine FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&raw); err != nil {
@@ -371,6 +391,25 @@ func (s ContentStore) versionDiagnostics(ctx context.Context, org, id string, qu
 		return out, err
 	}
 	return append(out, n.Diagnostics()...), nil
+}
+
+// enrichmentBlocked reports a searchable Version whose enrichment stopped.
+func enrichmentBlocked(p content.Processing) bool {
+	return p.State == "blocked" && p.Phase == "enrichment"
+}
+
+// enrichmentReason reads the reason a Version's enrichment stopped with; nil
+// when it stopped with a code only, such as derivation_conflict.
+func (s ContentStore) enrichmentReason(ctx context.Context, org, id string) (*content.Diagnostic, error) {
+	var raw []byte
+	if err := s.Pool.QueryRow(ctx, `SELECT enrichment_reason FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&raw); err != nil || len(raw) == 0 {
+		return nil, err
+	}
+	var d content.Diagnostic
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 func (s ContentStore) Work(ctx context.Context, org, id string) (content.Work, bool, error) {
 	w := content.Work{Organization: org, ReceiptID: id}

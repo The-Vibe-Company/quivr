@@ -55,7 +55,18 @@ func (s ContentStore) SaveEmbedding(ctx context.Context, e content.Embedding, sp
 	return tx.Commit(ctx)
 }
 func (s ContentStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, state, code)
+	_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, state, code)
+	return err
+}
+
+// BlockEnrichment stops an enrichment with its reason, under the guards of
+// EnrichmentProgress: a searchable Version whose enrichment is not done.
+func (s ContentStore) BlockEnrichment(ctx context.Context, org, id string, reason content.Diagnostic) error {
+	raw, err := json.Marshal(reason)
+	if err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, reason.Code, raw)
 	return err
 }
 func (s ContentStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
@@ -119,7 +130,7 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
 		return err
 	}
 	mutation := content.StableID("enrichment", seg.ID, g.ID)

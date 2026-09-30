@@ -66,6 +66,9 @@ type EmbeddingRepository interface {
 	// CountEnrichmentTimeout records that an enrichment call for a Version
 	// ended at the plugin's deadline and returns how many have.
 	CountEnrichmentTimeout(ctx context.Context, org, versionID string) (int, error)
+	// BlockEnrichment stops a Version's enrichment with a structured reason,
+	// listed in the Version's diagnostics.
+	BlockEnrichment(ctx context.Context, org, versionID string, reason Diagnostic) error
 	CommitEnrichment(context.Context, string, Segmentation, Generation, []Embedding) error
 	// EnrichmentEligible reports whether a Version is its Record's current,
 	// eligible Version, the only kind search can serve.
@@ -223,6 +226,16 @@ func (s Service) CountEnrichmentTimeout(ctx context.Context, org, versionID stri
 		return 0, ErrInvalid
 	}
 	return s.Embeddings.CountEnrichmentTimeout(ctx, org, versionID)
+}
+
+// BlockEnrichment stops the enrichment of a searchable Version with a reason
+// that names why, such as work pinned to a plugin that left the active plan.
+// The Version stays searchable by keyword.
+func (s Service) BlockEnrichment(ctx context.Context, org, versionID string, reason Diagnostic) error {
+	if org == "" || versionID == "" || reason.Code == "" || reason.Message == "" {
+		return ErrInvalid
+	}
+	return s.Embeddings.BlockEnrichment(ctx, org, versionID, reason)
 }
 
 // CommitEnrichment records the vectors attached to a generation: every
