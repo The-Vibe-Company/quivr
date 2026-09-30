@@ -1,0 +1,27 @@
+tests/acceptance/quarantine_test.go
+  s_54b80c92daa9cb::t_ff107a8c154036 1-106,108,110-174
+  s_54b80c92daa9cb::t_62d92f2edf3aad 107,109
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_f2f301c5483169 276-281,284-285
+  s_54b80c92daa9cb::t_a495d5f92f1d87 321-322,326-330
+  s_54b80c92daa9cb::t_b3248d64f2c1f0 297-302,306-310
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_b26571a1c3bcd0 141-143
+  s_54b80c92daa9cb::t_4e20b113d432ae 27-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a9505686bc83b92ddb83c0fed78bc247499b34ae",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
