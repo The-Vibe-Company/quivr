@@ -1,0 +1,47 @@
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_e8143a55a2e401 123-128
+  s_54b80c92daa9cb::t_f450db438e1433 155-158
+  s_54b80c92daa9cb::t_8b2f4bf0cba7b2 177
+  s_54b80c92daa9cb::t_171516be38b49e 169-172
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_06253621501481 4268,4291
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_06253621501481 3703-3707
+client/client.gen.go
+  s_54b80c92daa9cb::t_06253621501481 1705,1712
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_06253621501481 110-113
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_06253621501481 1705,1712
+internal/adapters/postgres/plugins_test.go
+  s_54b80c92daa9cb::t_51852dfbf9b9cc 377-379
+  s_54b80c92daa9cb::t_c41c59aaf0d3b9 392-394
+internal/adapters/postgres/plugins.go
+  s_54b80c92daa9cb::t_0eeaa62f0c4fc4 311-318
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_06253621501481 3431-3435
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_0eeaa62f0c4fc4 228
+internal/plugins/registry/rollback.go
+  s_54b80c92daa9cb::t_0eeaa62f0c4fc4 113-116
+internal/app/plugins.go
+  s_54b80c92daa9cb::t_0eeaa62f0c4fc4 75-76,101-104
+internal/plugins/work.go
+  s_54b80c92daa9cb::t_0eeaa62f0c4fc4 39-40,42-45,73,96-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eb71773384b771e5efbe082a082b2ca69b8cba0b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

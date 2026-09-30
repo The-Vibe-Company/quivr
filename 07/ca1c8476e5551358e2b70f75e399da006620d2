@@ -1,0 +1,24 @@
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_659f9e2f16e39c 122-176
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_8bd63bb04f6569 21-25,122-128
+tests/acceptance/plugin_rollback_test.go
+  s_54b80c92daa9cb::t_4936fe646592e9 23,25,35,97
+  s_54b80c92daa9cb::t_e85aeba3d03531 1-22,24,26-34,36-96,98-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "07ca1c8476e5551358e2b70f75e399da006620d2",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
