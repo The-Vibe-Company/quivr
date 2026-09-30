@@ -28,6 +28,7 @@ internal/plugins/registry/registry.go
   s_54b80c92daa9cb::t_b6f07f3aac4b46 144-145
 internal/adapters/postgres/searchable.go
   s_54b80c92daa9cb::t_fd9a7160bedd47 200-218
+  s_54b80c92daa9cb::t_3ec90ea366ac8d 236
 internal/adapters/postgres/normalization_failures_test.go
   s_54b80c92daa9cb::t_e684229186392a 83,94-105
   s_54b80c92daa9cb::t_c756c526b1572a 84-85
