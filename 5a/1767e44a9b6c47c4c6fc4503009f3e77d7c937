@@ -1,0 +1,33 @@
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 31
+docs-site/docs.json
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 17-25,34-38,56,69-74,86-88,96-99,103-106,110-112,119-258
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 1794-1795,1814-1951,1956-1957,3017-3020,3038-3171,3216-3222,3232
+docs-site/plugins/overview.mdx
+  s_54b80c92daa9cb::t_3968aa93a53fff 70
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 62
+README.md
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 190
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_d332c662acd799 1-100
+docs-site/plugins/pin.mdx
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a1767e44a9b6c47c4c6fc4503009f3e77d7c937",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
