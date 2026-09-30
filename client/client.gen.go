@@ -1049,6 +1049,24 @@ type ActionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
+// ActivePlugin defines model for ActivePlugin.
+type ActivePlugin struct {
+	PluginId string `json:"plugin_id"`
+
+	// Roles The plan's roles this version serves, sorted, for example ingestion, retrieval, normalizer:<media type>, subscription:<plugin id> or connector:<kind>.
+	Roles   []string `json:"roles"`
+	Version string   `json:"version"`
+}
+
+// ActivePluginList defines model for ActivePluginList.
+type ActivePluginList struct {
+	// Items One entry per plugin version in the plan, sorted by plugin id then version.
+	Items []ActivePlugin `json:"items"`
+
+	// PlanActivatedAt When the active plan was activated; absent when no plan is active.
+	PlanActivatedAt *time.Time `json:"plan_activated_at,omitempty"`
+}
+
 // AdminDocument defines model for AdminDocument.
 type AdminDocument struct {
 	CorpusId        string `json:"corpus_id"`
@@ -2919,6 +2937,11 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// ListActivePlugins performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
+	//
+	// The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
+	ListActivePlugins(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListAdminDocuments performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 	//
 	// The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -2995,7 +3018,7 @@ type ClientInterface interface {
 
 	// GetStepStats performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
 	//
-	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword) time the worker's runs. materialized, segmented, retrieval_ready and enriched are the document timeline's steps, each timed from the step that causes it, so they include the time a Record Version waited for the step. An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
 	GetStepStats(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetTopQueries performs a GET /v0/admin/stats/top-queries (the `GetTopQueries` operationId) request.
@@ -3456,6 +3479,21 @@ type ClientInterface interface {
 	ConfirmUpload(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
+// ListActivePlugins performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
+//
+// The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
+func (c *Client) ListActivePlugins(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListActivePluginsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListAdminDocuments performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 //
 // The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -3672,7 +3710,7 @@ func (c *Client) GetSearchStats(ctx context.Context, params *GetSearchStatsParam
 
 // GetStepStats performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
 //
-// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword) time the worker's runs. materialized, segmented, retrieval_ready and enriched are the document timeline's steps, each timed from the step that causes it, so they include the time a Record Version waited for the step. An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetStepStats(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetStepStatsRequest(c.Server, params)
 	if err != nil {
@@ -4950,6 +4988,33 @@ func (c *Client) ConfirmUpload(ctx context.Context, uploadId string, reqEditors 
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewListActivePluginsRequest constructs an http.Request for the ListActivePlugins method
+func NewListActivePluginsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/active-plugins")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewListAdminDocumentsRequest constructs an http.Request for the ListAdminDocuments method
@@ -8043,6 +8108,13 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// ListActivePluginsWithResponse performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
+	//
+	// The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListActivePluginsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListActivePluginsResponse, error)
+
 	// ListAdminDocumentsWithResponse performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 	//
 	// The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -8143,7 +8215,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetStepStatsWithResponse performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
 	//
-	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+	// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword) time the worker's runs. materialized, segmented, retrieval_ready and enriched are the document timeline's steps, each timed from the step that causes it, so they include the time a Record Version waited for the step. An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetStepStatsWithResponse(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*GetStepStatsResponse, error)
@@ -8714,6 +8786,54 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ConfirmUploadWithResponse(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*ConfirmUploadResponse, error)
+}
+
+type ListActivePluginsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ActivePluginList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListActivePluginsResponse) GetJSON200() *ActivePluginList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListActivePluginsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListActivePluginsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListActivePluginsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListActivePluginsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListActivePluginsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type ListAdminDocumentsResponse struct {
@@ -11959,6 +12079,19 @@ func (r ConfirmUploadResponse) ContentType() string {
 	return ""
 }
 
+// ListActivePluginsWithResponse performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
+//
+// The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListActivePluginsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListActivePluginsResponse, error) {
+	rsp, err := c.ListActivePlugins(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListActivePluginsResponse(rsp)
+}
+
 // ListAdminDocumentsWithResponse performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 //
 // The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -12143,7 +12276,7 @@ func (c *ClientWithResponses) GetSearchStatsWithResponse(ctx context.Context, pa
 
 // GetStepStatsWithResponse performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
 //
-// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+// Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword) time the worker's runs. materialized, segmented, retrieval_ready and enriched are the document timeline's steps, each timed from the step that causes it, so they include the time a Record Version waited for the step. An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) GetStepStatsWithResponse(ctx context.Context, params *GetStepStatsParams, reqEditors ...RequestEditorFn) (*GetStepStatsResponse, error) {
@@ -13205,6 +13338,39 @@ func (c *ClientWithResponses) ConfirmUploadWithResponse(ctx context.Context, upl
 		return nil, err
 	}
 	return ParseConfirmUploadResponse(rsp)
+}
+
+// ParseListActivePluginsResponse parses an HTTP response from a ListActivePluginsWithResponse call
+func ParseListActivePluginsResponse(rsp *http.Response) (*ListActivePluginsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListActivePluginsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ActivePluginList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseListAdminDocumentsResponse parses an HTTP response from a ListAdminDocumentsWithResponse call

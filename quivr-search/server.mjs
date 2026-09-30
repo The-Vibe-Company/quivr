@@ -8,6 +8,7 @@ import { feedGuard, parseSuggestions } from "./feeds.mjs";
 import { createFeed } from "./feed.mjs";
 import { alertRoutes } from "./alerts.mjs";
 import { createAdmin } from "./admin.mjs";
+import { activePlugins } from "./admin-plugins.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -58,6 +59,8 @@ let feed;
 let admin;
 const feedFor = (corpus) =>
   (feed ||= createFeed({ core, key, corpus, upstream }));
+// The plugins the engine runs, for the Admin tab's Plugins section (THE-797).
+const plugins = activePlugins({ upstream: (...args) => upstream(...args) });
 // The Admin tab (THE-796) follows the Fil's change stream of the demo corpus.
 const adminFor = (corpus) =>
   (admin ||= createAdmin({
@@ -354,6 +357,8 @@ const server = http.createServer(async (req, res) => {
         response = await adminFor(id).timeline(timeline[1]);
       else if (stats && req.method === "GET")
         response = await adminFor(id).stats(stats[1], url);
+      else if (path === "/demo/admin/plugins" && req.method === "GET")
+        response = await plugins();
       else if (path.startsWith("/demo/alerts"))
         response = await alerts(req, path, id);
       else if (path === "/demo/feeds/suggestions" && req.method === "GET")

@@ -141,6 +141,52 @@ func TestPluginRegistryReadsNeedPluginsAdmin(t *testing.T) {
 	}
 }
 
+// TestActivePluginsNeedOnlyObservabilityRead owns the operator views' plugin
+// list: observability:read on every Corpus reads it without plugins:admin,
+// it groups the plan's roles by plugin version, and it never names an
+// address.
+func TestActivePluginsNeedOnlyObservabilityRead(t *testing.T) {
+	at := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	plan := registry.Plan{ID: "plan_1", CreatedAt: at, ActivatedAt: at, Roles: []registry.Assignment{
+		{Role: "connector:rss", RegistrationID: "plugin_registration_rss", PluginID: "rss", Version: "1.0.0"},
+		{Role: "ingestion", RegistrationID: "plugin_registration_core", PluginID: "core-ingest", Version: "0.2.0"},
+		{Role: "normalizer:application/pdf", RegistrationID: "plugin_registration_pdf", PluginID: "pdf-text", Version: "0.1.0"},
+		{Role: "normalizer:text/html", RegistrationID: "plugin_registration_pdf", PluginID: "pdf-text", Version: "0.1.0"},
+	}}
+	const observer = "observer-token-0123456789abcdef0123456789ab"
+	const fenced = "fenced-observer-token-0123456789abcdef01234"
+	keys := map[string]corpus.Scope{
+		observer:          {Organization: "org_o", Actions: []string{content.ObservabilityRead}, Corpora: []string{"*"}},
+		fenced:            {Organization: "org_o", Actions: []string{content.ObservabilityRead}, Corpora: []string{"corpus_1"}},
+		organizationAdmin: {Organization: "org_a", Actions: []string{"corpora:read", "content:read", "search:query"}, Corpora: []string{"*"}},
+	}
+	serve := func(store memoryRegistry) *httptest.Server {
+		handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithPlugins(registry.Service{Store: store}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(handler)
+		t.Cleanup(server.Close)
+		return server
+	}
+	server := serve(memoryRegistry{plan: &plan})
+	// The plan is the deployment's: a key limited to some Corpora cannot read it.
+	for _, key := range []string{organizationAdmin, fenced} {
+		if res, body := operationCall(t, server, "GET", "/v0/admin/active-plugins", key, "", ""); res.StatusCode != 403 || body["code"] != "forbidden" {
+			t.Fatalf("without observability:read on every Corpus: %d %v, want 403 forbidden", res.StatusCode, body)
+		}
+	}
+	res, body := operationCall(t, server, "GET", "/v0/admin/active-plugins", observer, "", "")
+	got, _ := json.Marshal(body)
+	want := `{"items":[{"plugin_id":"core-ingest","roles":["ingestion"],"version":"0.2.0"},{"plugin_id":"pdf-text","roles":["normalizer:application/pdf","normalizer:text/html"],"version":"0.1.0"},{"plugin_id":"rss","roles":["connector:rss"],"version":"1.0.0"}],"plan_activated_at":"2026-09-30T10:00:00Z"}`
+	if res.StatusCode != 200 || string(got) != want {
+		t.Fatalf("active plugins: %d\n got %s\nwant %s", res.StatusCode, got, want)
+	}
+	if res, body := operationCall(t, serve(memoryRegistry{}), "GET", "/v0/admin/active-plugins", observer, "", ""); res.StatusCode != 200 || len(body["items"].([]any)) != 0 {
+		t.Fatalf("without an active plan: %d %v, want 200 and no item", res.StatusCode, body)
+	}
+}
+
 // TestPluginRegistrationAndActivationRoutes owns the operator commands'
 // routing, authorization and request validation: an Organization key is
 // refused, a manifest the engine refuses is 422 invalid_plugin naming the

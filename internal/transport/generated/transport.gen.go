@@ -1049,6 +1049,24 @@ type ActionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
+// ActivePlugin defines model for ActivePlugin.
+type ActivePlugin struct {
+	PluginId string `json:"plugin_id"`
+
+	// Roles The plan's roles this version serves, sorted, for example ingestion, retrieval, normalizer:<media type>, subscription:<plugin id> or connector:<kind>.
+	Roles   []string `json:"roles"`
+	Version string   `json:"version"`
+}
+
+// ActivePluginList defines model for ActivePluginList.
+type ActivePluginList struct {
+	// Items One entry per plugin version in the plan, sorted by plugin id then version.
+	Items []ActivePlugin `json:"items"`
+
+	// PlanActivatedAt When the active plan was activated; absent when no plan is active.
+	PlanActivatedAt *time.Time `json:"plan_activated_at,omitempty"`
+}
+
 // AdminDocument defines model for AdminDocument.
 type AdminDocument struct {
 	CorpusId        string `json:"corpus_id"`
@@ -2848,6 +2866,9 @@ func (t *Part_Content) UnmarshalJSON(b []byte) error {
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
+	// (GET /v0/admin/active-plugins)
+	ListActivePlugins(w http.ResponseWriter, r *http.Request)
+
 	// (GET /v0/admin/documents)
 	ListAdminDocuments(w http.ResponseWriter, r *http.Request, params ListAdminDocumentsParams)
 
@@ -3061,6 +3082,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListActivePlugins operation middleware
+func (siw *ServerInterfaceWrapper) ListActivePlugins(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListActivePlugins(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListAdminDocuments operation middleware
 func (siw *ServerInterfaceWrapper) ListAdminDocuments(w http.ResponseWriter, r *http.Request) {
@@ -5166,6 +5201,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans", wrapper.ListPipelinePlans)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/plan/rollback", wrapper.RollbackPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/active-plugins", wrapper.ListActivePlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents", wrapper.ListAdminDocuments)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents/{version_id}/timeline", wrapper.GetDocumentTimeline)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/plugins", wrapper.GetPluginCallStats)
@@ -5178,6 +5214,44 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
 	return m
+}
+
+type ListActivePluginsRequestObject struct {
+}
+
+type ListActivePluginsResponseObject interface {
+	VisitListActivePluginsResponse(w http.ResponseWriter) error
+}
+
+type ListActivePlugins200JSONResponse ActivePluginList
+
+func (response ListActivePlugins200JSONResponse) VisitListActivePluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActivePluginsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListActivePluginsdefaultJSONResponse) VisitListActivePluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListAdminDocumentsRequestObject struct {
@@ -7906,6 +7980,9 @@ func (response ConfirmUploaddefaultJSONResponse) VisitConfirmUploadResponse(w ht
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /v0/admin/active-plugins)
+	ListActivePlugins(ctx context.Context, request ListActivePluginsRequestObject) (ListActivePluginsResponseObject, error)
+
 	// (GET /v0/admin/documents)
 	ListAdminDocuments(ctx context.Context, request ListAdminDocumentsRequestObject) (ListAdminDocumentsResponseObject, error)
 
@@ -8148,6 +8225,30 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListActivePlugins operation middleware
+func (sh *strictHandler) ListActivePlugins(w http.ResponseWriter, r *http.Request) {
+	var request ListActivePluginsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListActivePlugins(ctx, request.(ListActivePluginsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListActivePlugins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListActivePluginsResponseObject); ok {
+		if err := validResponse.VisitListActivePluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListAdminDocuments operation middleware

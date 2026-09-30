@@ -94,11 +94,13 @@ func (s Service) gone(ctx context.Context, cause error) (*content.Diagnostic, er
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names,
-// the failure code and how long the stage ran) and when a Receipt's Version
-// became searchable.
+// the failure code and how long the stage ran), when a Receipt's Version
+// became searchable and when an enrichment stage that ran for `ran` gave it
+// its vectors.
 type Observer interface {
 	Outcome(org, stage, outcome, code string, d time.Duration)
 	Searchable(ctx context.Context, org, receiptID string)
+	Enriched(ctx context.Context, org, receiptID string, ran time.Duration)
 }
 
 // outcome reports one stage outcome to the Observer and a correlated log line.

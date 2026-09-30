@@ -351,6 +351,17 @@ func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, erro
 	return s.Store.ActivePlan(ctx)
 }
 
+// ActivePlugins returns the active plan for the operator views, behind
+// observability:read on every Corpus rather than plugins:admin: callers
+// expose only its roles and the plugin versions serving them, never a
+// registration's address, settings or manifest.
+func (s Service) ActivePlugins(ctx context.Context, scope corpus.Scope) (Plan, error) {
+	if !scope.Allows(content.ObservabilityRead) || !scope.AllCorpora() {
+		return Plan{}, corpus.ErrForbidden
+	}
+	return s.Store.ActivePlan(ctx)
+}
+
 // PipelinePlan returns any recorded plan: plans are immutable, so earlier
 // ones stay readable.
 func (s Service) PipelinePlan(ctx context.Context, scope corpus.Scope, id string) (Plan, error) {

@@ -70,6 +70,8 @@ The **Admin** tab (`?view=admin`, read-only) shows what goes through Quivr right
 
 `admin.mjs` reads `GET /v0/admin/documents` and the timelines with the server key, refreshes on each change the Fil's stream reports (every 5 s otherwise) and relays the step rollups (`/v0/admin/stats/*`) to the sections, which share `AdminSection` and `useAdminStats`. It needs `observability:read` on a key for all Corpora; without it the tab says the view is off.
 
+Below the flow, over 1 h, 24 h or 7 days, **Goulots par étape** shows each step's p50 and p95 on one scale with the documents waiting at it, and names the step whose recent p95 doubled against its earlier buckets, else a queue waiting over a minute and twice its p95. **Plugins** lists the plugins of the engine's active plan (`admin-plugins.mjs` relays `GET /v0/admin/active-plugins`) with calls per minute, p95, errors over time, last error, their sources for connectors, and a state from their latest minutes of calls: *En panne*, *Dégradé*, *Opérationnel* or *Au repos*. `src/lib/health.ts` holds these rules; `tests/health.spec.ts` checks them.
+
 ## Frontend development and checks
 
 With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`. Design tokens sit at the top of `src/styles.css` and `src/dashboard.css` (the dashboard's layout); the Geist font is bundled from `src/fonts/` (SIL Open Font License, `src/fonts/OFL.txt`), so the page loads no font from another origin; loading, empty and error states come from `src/components/ui.tsx`. `tests/dashboard.spec.ts` runs the dashboard's flows against a fake engine behind the facade routes (`tests/fake-engine.ts`).

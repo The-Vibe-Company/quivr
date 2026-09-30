@@ -27,11 +27,13 @@ import {
 } from "../../lib/admin";
 import { Throughput } from "./Throughput";
 import { TimelinePanel } from "./TimelinePanel";
+import { Bottlenecks } from "./Bottlenecks";
+import { Plugins } from "./Plugins";
 import type { SectionProps } from "./AdminSection";
 
 // The sections below the flow, in reading order: each is one component in
 // its own file under admin/, built on AdminSection (THE-797, THE-798).
-const SECTIONS: ComponentType<SectionProps>[] = [];
+const SECTIONS: ComponentType<SectionProps>[] = [Bottlenecks, Plugins];
 
 const clock = new Intl.DateTimeFormat("fr-FR", {
   hour: "2-digit",

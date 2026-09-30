@@ -80,6 +80,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins/plans`](#get-v0adminpluginsplans) | `listPipelinePlans` | `plugins:admin` |
 | [`POST /v0/admin/plugins/plan/rollback`](#post-v0adminpluginsplanrollback) | `rollbackPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
+| [`GET /v0/admin/active-plugins`](#get-v0adminactive-plugins) | `listActivePlugins` | `observability:read` |
 | [`GET /v0/admin/documents`](#get-v0admindocuments) | `listAdminDocuments` | `observability:read` |
 | [`GET /v0/admin/documents/{version_id}/timeline`](#get-v0admindocumentsversion_idtimeline) | `getDocumentTimeline` | `observability:read` |
 | [`GET /v0/admin/stats/plugins`](#get-v0adminstatsplugins) | `getPluginCallStats` | `observability:read` |
@@ -1261,6 +1262,19 @@ The active Pipeline Plan, an immutable mapping of every role of the deployment t
 | `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 no active plan, 503 storage unavailable. |
 
+#### `GET /v0/admin/active-plugins`
+
+Operation `listActivePlugins`. Requires `observability:read`.
+
+The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`ActivePluginList`](#activepluginlist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read on every Corpus, 404 on a deployment without a plugin registry, 503 storage unavailable. |
+
 #### `GET /v0/admin/documents`
 
 Operation `listAdminDocuments`. Requires `observability:read`.
@@ -1342,7 +1356,7 @@ Searches of the key's Organization over the window per mode and search profile, 
 
 Operation `getStepStats`. Requires `observability:read`.
 
-Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword). An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
+Processing steps of the key's Organization over the window, in the buckets of getPluginCallStats: baseline (cut into segments and made searchable by keyword), enrichment (vectors added) and accepted_to_searchable (from acceptance to searchable by keyword) time the worker's runs. materialized, segmented, retrieval_ready and enriched are the document timeline's steps, each timed from the step that causes it, so they include the time a Record Version waited for the step. An error is a step that is retried or blocked, with its code. Requires observability:read on a key that grants every Corpus.
 
 **Parameters**
 
@@ -4368,6 +4382,70 @@ required:
   - created_at
   - activated_at
   - source
+  - roles
+```
+
+</details>
+
+### `ActivePluginList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plan_activated_at` | string (date-time) |  | When the active plan was activated; absent when no plan is active. |
+| `items` | array of [`ActivePlugin`](#activeplugin) | yes | One entry per plugin version in the plan, sorted by plugin id then version. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plan_activated_at:
+    type: string
+    format: date-time
+    description: When the active plan was activated; absent when no plan is active.
+  items:
+    type: array
+    description: One entry per plugin version in the plan, sorted by plugin id then version.
+    items:
+      $ref: '#/components/schemas/ActivePlugin'
+required:
+  - items
+```
+
+</details>
+
+### `ActivePlugin`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_id` | string | yes | Minimum length `1`. |
+| `version` | string | yes | Minimum length `1`. |
+| `roles` | array of string | yes | The plan's roles this version serves, sorted, for example ingestion, retrieval, normalizer:<media type>, subscription:<plugin id> or connector:<kind>. Each item: Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plugin_id:
+    type: string
+    minLength: 1
+  version:
+    type: string
+    minLength: 1
+  roles:
+    type: array
+    description: The plan's roles this version serves, sorted, for example ingestion, retrieval, normalizer:<media type>, subscription:<plugin id> or connector:<kind>.
+    items:
+      type: string
+      minLength: 1
+required:
+  - plugin_id
+  - version
   - roles
 ```
 

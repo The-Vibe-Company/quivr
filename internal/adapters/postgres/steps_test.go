@@ -151,6 +151,14 @@ func TestStepTimesAreWrittenOnceByTheirStep(t *testing.T) {
 	}
 	same("version retrieval_ready", ready.Steps.RetrievalReady, stored.Steps.RetrievalReady)
 	same("version accepted", ready.Steps.Accepted, stored.Steps.Accepted)
+	// So does the worker, through the Receipt, when it records step rollups.
+	receiptSteps, _, err := store.ReceiptSteps(ctx, org, searchable.ReceiptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("receipt accepted", ready.Steps.Accepted, receiptSteps.Accepted)
+	same("receipt materialized", ready.Steps.Materialized, receiptSteps.Materialized)
+	same("receipt retrieval_ready", ready.Steps.RetrievalReady, receiptSteps.RetrievalReady)
 
 	// A quarantine is recorded once, even when the baseline reports it again.
 	publish("held", held)

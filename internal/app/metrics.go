@@ -4,18 +4,20 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 )
 
 // processingObserver feeds the worker's processing metrics (THE-662) and
-// the step rollups (THE-795).
+// the step rollups (THE-795, THE-797).
 type processingObserver struct {
 	metrics *telemetry.Processing
 	store   interface {
-		ReceiptAge(context.Context, string, string) (time.Duration, error)
+		ReceiptSteps(context.Context, string, string) (content.Steps, time.Duration, error)
 	}
 	steps *observability.Recorder
 }
@@ -37,13 +39,48 @@ func (o processingObserver) Outcome(org, stage, outcome, code string, d time.Dur
 }
 
 // Searchable measures acceptance to searchable from the Receipt's durable
-// acceptance time; a failed read skips the observation rather than guessing.
+// acceptance time, and records the pipeline steps the baseline finished:
+// materialized, segmented and retrieval_ready. A failed read skips the
+// observation rather than guessing.
 func (o processingObserver) Searchable(ctx context.Context, org, receiptID string) {
+	steps, age, ok := o.read(ctx, org, receiptID)
+	if !ok {
+		return
+	}
+	o.metrics.Searchable(age)
+	o.steps.Step(org, StepSearchable, age, "")
+	o.record(org, steps, content.StepMaterialized, content.StepSegmented, content.StepRetrievalReady)
+}
+
+// Enriched records the enriched step once the Version has its vectors, only
+// when the stage that just ran for `ran` set it: a re-run on a Version
+// enriched earlier would count the old duration again. Both ages are read
+// on the database clock, so a skewed worker clock does not matter.
+func (o processingObserver) Enriched(ctx context.Context, org, receiptID string, ran time.Duration) {
+	steps, age, ok := o.read(ctx, org, receiptID)
+	if !ok || steps.Enriched == nil || steps.Accepted == nil {
+		return
+	}
+	if since := age - steps.Enriched.Sub(*steps.Accepted); since <= ran+time.Second {
+		o.record(org, steps, content.StepEnriched)
+	}
+}
+
+func (o processingObserver) read(ctx context.Context, org, receiptID string) (content.Steps, time.Duration, bool) {
 	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	if age, err := o.store.ReceiptAge(read, org, receiptID); err == nil {
-		o.metrics.Searchable(age)
-		o.steps.Step(org, StepSearchable, age, "")
+	steps, age, err := o.store.ReceiptSteps(read, org, receiptID)
+	return steps, age, err == nil
+}
+
+// record adds each named step to the step rollups, timed like the document
+// timeline: from the step that causes it, so the time the Version waited for
+// the step counts. A step missing either time is skipped.
+func (o processingObserver) record(org string, steps content.Steps, names ...string) {
+	for _, s := range content.Timeline(content.Activity{Steps: steps}) {
+		if s.Since != "" && slices.Contains(names, s.Step) {
+			o.steps.Step(org, s.Step, s.Duration, "")
+		}
 	}
 }
 

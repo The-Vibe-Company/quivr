@@ -245,6 +245,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	if a.adminDocumentRoutes(w, r, scope) {
 		return
 	}
+	if a.activePluginRoutes(w, r, scope) {
+		return
+	}
 	if a.statsRoutes(w, r, scope) {
 		return
 	}

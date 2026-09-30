@@ -54,6 +54,9 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 		return errors.New("enrichment unavailable")
 	}
 	s.outcome(org, "enrichment", "succeeded", receiptID, v, started, "")
+	if s.Observer != nil {
+		s.Observer.Enriched(ctx, org, receiptID, time.Since(started))
+	}
 	return nil
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) error {
