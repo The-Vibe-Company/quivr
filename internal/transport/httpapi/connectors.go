@@ -160,6 +160,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 	case len(path) == 3 && path[1] != "" && path[2] == "disable" && r.Method == "POST":
 	case len(path) == 3 && path[1] != "" && path[2] == "credential" && r.Method == "PUT":
 	case len(path) == 3 && path[1] != "" && path[2] == "schedule" && r.Method == "PUT":
+	case len(path) == 3 && path[1] != "" && path[2] == "runs" && r.Method == "POST":
 	case len(path) <= 3:
 		failure(w, 405, "method_not_allowed")
 		return true
@@ -214,6 +215,17 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			return true
 		}
 		send(w, 200, a.connectorToTransport(inst))
+	case path[2] == "runs":
+		var body transport.ActionRequest
+		if !decodeInto(w, r, a.actionSchema, &body) {
+			return true
+		}
+		req, err := a.Connectors.RequestRun(ctx, scope, path[1], body.IdempotencyKey)
+		if err != nil {
+			connectorFailure(w, err)
+			return true
+		}
+		send(w, 202, transport.ConnectorRunRequest{ConnectorId: req.ConnectorID, RunAt: req.RunAt.UTC()})
 	case path[2] == "schedule":
 		var body transport.ScheduleChange
 		if !decodeInto(w, r, a.scheduleSchema, &body) {

@@ -282,6 +282,10 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(weather.locator('[data-state="failing"]')).toHaveText("Ne répond plus");
   await expect(weather).toContainText("Le site ne répond pas.");
   await expect(page.locator(".list-count")).toHaveText("1 à vérifier");
+  // Checking it again now reports the source answering once that check ends.
+  await weather.getByRole("button", { name: "Réessayer Météo locale" }).click();
+  await expect(weather.locator('[data-state="active"]')).toBeVisible();
+  await expect(weather.getByRole("button", { name: "Réessayer Météo locale" })).toHaveCount(0);
   await weather.getByRole("button", { name: "Mettre en pause Météo locale" }).click();
   await expect(weather.locator('[data-state="paused"]')).toBeVisible();
   await weather.getByRole("button", { name: "Reprendre Météo locale" }).click();

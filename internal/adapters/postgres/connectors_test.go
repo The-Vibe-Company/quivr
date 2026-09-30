@@ -318,3 +318,71 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 		t.Fatalf("disabled: %v", err)
 	}
 }
+
+// TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter drives the
+// check-now command against the real store: it pulls the next run in, never
+// before the interval floor after the last run nor before the source's
+// Retry-After, repeats harmlessly and is refused once disabled.
+func TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-run-request-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Run requests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
+	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Minute}
+	hour := 3600
+	created, err := service.Create(ctx, scope, connectors.CreateInput{Key: "k", CorpusID: c.ID, Namespace: "wire", Kind: "fixture", Config: json.RawMessage(`{"script":[]}`), IntervalSeconds: &hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRunIn := func() float64 {
+		var seconds float64
+		if err := pool.QueryRow(ctx, "SELECT EXTRACT(EPOCH FROM next_run_at-now()) FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&seconds); err != nil {
+			t.Fatal(err)
+		}
+		return seconds
+	}
+	request := func(want float64) {
+		t.Helper()
+		if _, err := service.RequestRun(ctx, scope, created.ID, "now"); err != nil {
+			t.Fatal(err)
+		}
+		if in := nextRunIn(); in < want-5 || in > want+5 {
+			t.Fatalf("next run in %v s, want about %v s", in, want)
+		}
+	}
+	finish := func(failure *connectors.RunError) {
+		t.Helper()
+		target, err := store.LoadRun(ctx, scope.Organization, created.ID)
+		if err == nil {
+			err = store.FinishRun(ctx, scope.Organization, created.ID, target.RunSequence, failure)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Never run yet, scheduled an hour out: due now, and repeating changes nothing.
+	if _, err = pool.Exec(ctx, "UPDATE connector_instances SET next_run_at=now()+interval '1 hour' WHERE organization=$1 AND id=$2", scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	request(0)
+	request(0)
+	// Just after a run: not before the one-minute floor.
+	finish(nil)
+	request(60)
+	// The source asked to wait ten minutes: the request honours it.
+	finish(&connectors.RunError{Class: connectors.ClassTransient, Code: "rate_limited", RetryAfter: 10 * time.Minute})
+	request(600)
+	if _, err = service.Disable(ctx, scope, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.RequestRun(ctx, scope, created.ID, "now"); !errors.Is(err, connectors.ErrDisabled) {
+		t.Fatalf("disabled: %v", err)
+	}
+}

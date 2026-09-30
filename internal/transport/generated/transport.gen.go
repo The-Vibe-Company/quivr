@@ -866,6 +866,14 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorRunRequest defines model for ConnectorRunRequest.
+type ConnectorRunRequest struct {
+	ConnectorId string `json:"connector_id"`
+
+	// RunAt When the requested run is due; now unless the interval floor or the source's Retry-After defers it.
+	RunAt time.Time `json:"run_at"`
+}
+
 // ConnectorSchedule defines model for ConnectorSchedule.
 type ConnectorSchedule struct {
 	// IntervalSeconds Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
@@ -1608,6 +1616,9 @@ type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
 // DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
 type DisableConnectorJSONRequestBody = ActionRequest
 
+// RequestConnectorRunJSONRequestBody defines body for RequestConnectorRun for application/json ContentType.
+type RequestConnectorRunJSONRequestBody = ActionRequest
+
 // ChangeConnectorScheduleJSONRequestBody defines body for ChangeConnectorSchedule for application/json ContentType.
 type ChangeConnectorScheduleJSONRequestBody = ScheduleChange
 
@@ -1899,6 +1910,9 @@ type ServerInterface interface {
 
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (POST /v0/connectors/{connector_id}/runs)
+	RequestConnectorRun(w http.ResponseWriter, r *http.Request, connectorId string)
 
 	// (PUT /v0/connectors/{connector_id}/schedule)
 	ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request, connectorId string)
@@ -2381,6 +2395,32 @@ func (siw *ServerInterfaceWrapper) DisableConnector(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DisableConnector(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestConnectorRun operation middleware
+func (siw *ServerInterfaceWrapper) RequestConnectorRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestConnectorRun(w, r, connectorId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3596,6 +3636,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/disable", wrapper.DisableConnector)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/credential", wrapper.ReplaceConnectorCredential)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/schedule", wrapper.ChangeConnectorSchedule)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
@@ -4057,6 +4098,46 @@ type DisableConnectordefaultJSONResponse struct {
 }
 
 func (response DisableConnectordefaultJSONResponse) VisitDisableConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestConnectorRunRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Body        *RequestConnectorRunJSONRequestBody
+}
+
+type RequestConnectorRunResponseObject interface {
+	VisitRequestConnectorRunResponse(w http.ResponseWriter) error
+}
+
+type RequestConnectorRun202JSONResponse ConnectorRunRequest
+
+func (response RequestConnectorRun202JSONResponse) VisitRequestConnectorRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestConnectorRundefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RequestConnectorRundefaultJSONResponse) VisitRequestConnectorRunResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5572,6 +5653,9 @@ type StrictServerInterface interface {
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(ctx context.Context, request DisableConnectorRequestObject) (DisableConnectorResponseObject, error)
 
+	// (POST /v0/connectors/{connector_id}/runs)
+	RequestConnectorRun(ctx context.Context, request RequestConnectorRunRequestObject) (RequestConnectorRunResponseObject, error)
+
 	// (PUT /v0/connectors/{connector_id}/schedule)
 	ChangeConnectorSchedule(ctx context.Context, request ChangeConnectorScheduleRequestObject) (ChangeConnectorScheduleResponseObject, error)
 
@@ -6019,6 +6103,39 @@ func (sh *strictHandler) DisableConnector(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DisableConnectorResponseObject); ok {
 		if err := validResponse.VisitDisableConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RequestConnectorRun operation middleware
+func (sh *strictHandler) RequestConnectorRun(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request RequestConnectorRunRequestObject
+
+	request.ConnectorId = connectorId
+
+	var body RequestConnectorRunJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestConnectorRun(ctx, request.(RequestConnectorRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestConnectorRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestConnectorRunResponseObject); ok {
+		if err := validResponse.VisitRequestConnectorRunResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

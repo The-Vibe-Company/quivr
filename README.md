@@ -146,13 +146,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   The deployment `credential_key` is optional. Without it, credential deposits are
   refused with `503 credentials_unavailable`, and everything else works.
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
-  Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval, and
-  validation errors name the offending field as a JSON Pointer.
+  Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval,
+  `POST /v0/connectors/{id}/runs` checks a source again now, and validation errors name the offending field as a JSON Pointer.
 - **Sources page in the web app** (`quivr-search`, **Sources** tab): paste a site
   or feed address and the web app finds its RSS or Atom feed (refusing private
   addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.
   Each source shows its health and last article, and can be paused, resumed or
-  removed. Other kinds keep forms generated from their schemas, so new kinds need
+  removed; a failing one can be checked again at once (**Réessayer**). Other kinds keep forms generated from their schemas, so new kinds need
   no UI change ([guide](docs/connectors/README.md#from-the-web-interface)).
 - **Live feed page in the web app** (**Veille** tab): everything entering the demo
   Corpus, newest first, with source, time, title and excerpt. New items arrive over

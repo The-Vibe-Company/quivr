@@ -93,6 +93,13 @@ func (m *memoryConnectors) ChangeSchedule(ctx context.Context, org, id string, i
 	m.items[id] = in
 	return in, nil
 }
+func (m *memoryConnectors) RequestRun(ctx context.Context, org, id string, _ time.Duration) (time.Time, error) {
+	in, err := m.ReadConnector(ctx, org, id)
+	if err == nil && !in.Enabled {
+		err = connectors.ErrDisabled
+	}
+	return time.Date(2026, 9, 28, 10, 0, 30, 0, time.UTC), err
+}
 
 const (
 	connectorKey = "connector-key-0123456789abcdef0123456"
@@ -321,6 +328,39 @@ func TestConnectorScheduleChangesAreValidatedAndAuthorized(t *testing.T) {
 	}
 	if status, _ := postJSON(t, handler, path, connectorKey, map[string]any{"interval_seconds": 60}); status != 405 {
 		t.Fatalf("POST schedule: %d", status)
+	}
+}
+
+func TestConnectorRunRequestsAreAuthorizedAndRefusedOnceDisabled(t *testing.T) {
+	handler := connectorAPI(t)
+	_, created := postJSON(t, handler, "/v0/connectors", connectorKey, map[string]any{"idempotency_key": "r1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}}})
+	id := created["connector_id"].(string)
+	path := "/v0/connectors/" + id + "/runs"
+	status, body := postJSON(t, handler, path, connectorKey, map[string]any{"idempotency_key": "now"})
+	if status != 202 || body["connector_id"] != id || body["run_at"] != "2026-09-28T10:00:30Z" {
+		t.Fatalf("request: %d %v", status, body)
+	}
+	conforms(t, "ConnectorRunRequest", body)
+	for _, c := range []struct {
+		name   string
+		path   string
+		key    string
+		body   any
+		status int
+		code   string
+	}{
+		{"no idempotency key", path, connectorKey, map[string]any{}, 422, "invalid_schema"},
+		{"read-only key", path, readerKey, map[string]any{"idempotency_key": "now"}, 403, "forbidden"},
+		{"writer of another Corpus", path, otherCorpusKey, map[string]any{"idempotency_key": "now"}, 404, "not_found"},
+		{"unknown instance", "/v0/connectors/connector_missing/runs", connectorKey, map[string]any{"idempotency_key": "now"}, 404, "not_found"},
+	} {
+		if status, body := postJSON(t, handler, c.path, c.key, c.body); status != c.status || body["code"] != c.code {
+			t.Errorf("%s: %d %v", c.name, status, body)
+		}
+	}
+	postJSON(t, handler, "/v0/connectors/"+id+"/disable", connectorKey, map[string]any{"idempotency_key": "off"})
+	if status, body := postJSON(t, handler, path, connectorKey, map[string]any{"idempotency_key": "now"}); status != 409 || body["code"] != "connector_disabled" {
+		t.Fatalf("disabled: %d %v", status, body)
 	}
 }
 

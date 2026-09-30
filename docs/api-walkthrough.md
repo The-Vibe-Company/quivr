@@ -425,6 +425,12 @@ Setting the current value changes nothing. A new value commits
 longer one applies after the run already scheduled. A disabled instance is
 `409 connector_disabled`.
 
+`POST /v0/connectors/{connector_id}/runs` with `{"idempotency_key":"…"}` asks for a
+run now, for example to check again a source that failed. It answers `202` with
+`run_at`, never earlier than the interval floor after the previous run nor than the
+source's Retry-After. Repeating it changes nothing, and the run's outcome shows in
+health like any other.
+
 A `422` on connector commands carries `field`, a JSON Pointer to the rejected
 member of your request, for example `{"code":"invalid_config","field":"/config/url"}`
 or `/credential/secret/token`. For a choice between credential formats it points at

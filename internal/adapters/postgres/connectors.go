@@ -309,6 +309,24 @@ func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, inte
 	return in, tx.Commit(ctx)
 }
 
+// RequestRun pulls the next run of an enabled instance in, bounded by the
+// floor after the last run and by the source's Retry-After, in one statement
+// so a concurrent FinishRun or disable is seen whole. Repeating it is a no-op.
+func (s ConnectorStore) RequestRun(ctx context.Context, org, id string, floor time.Duration) (time.Time, error) {
+	var enabled bool
+	var at time.Time
+	err := s.Pool.QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled THEN LEAST(next_run_at,GREATEST(now(),
+  COALESCE(last_run_at+make_interval(secs => $3::double precision),now()),COALESCE(retry_until,now()))) ELSE next_run_at END
+WHERE organization=$1 AND id=$2 RETURNING enabled,GREATEST(next_run_at,now())`, org, id, floor.Seconds()).Scan(&enabled, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return at, corpus.ErrNotFound
+	}
+	if err == nil && !enabled {
+		err = connectors.ErrDisabled
+	}
+	return at, err
+}
+
 // ReplaceCredential deposits the next credential version, or replays one
 // deposited under the same key and request.
 func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
@@ -557,7 +575,8 @@ func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64
 	// Healthy push relaxes pull to the kind's reported poll interval.
 	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision,
   CASE WHEN push_state='active' AND push_error_code IS NULL THEN COALESCE(push_poll_interval_seconds,0) ELSE 0 END::double precision)),
- last_success_at=CASE WHEN $3 THEN now() ELSE last_success_at END,
+ last_success_at=CASE WHEN $3 THEN now() ELSE last_success_at END,last_run_at=now(),
+ retry_until=CASE WHEN $6::double precision>0 THEN now()+make_interval(secs => $6::double precision) END,
  access_error_at=CASE WHEN $3 THEN NULL WHEN $5='access' THEN now() ELSE access_error_at END,
  last_error_code=COALESCE($4,last_error_code),last_error_class=COALESCE($5,last_error_class),last_error_at=CASE WHEN $4::text IS NULL THEN last_error_at ELSE now() END
 WHERE organization=$1 AND id=$2`, org, id, success, code, class, retry)

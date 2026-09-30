@@ -11,6 +11,7 @@ import {
   fetchSuggestions,
   pollChanges,
   removeSource,
+  requestRun,
   type Connector,
   type FeedChoice,
   type KindCatalog,
@@ -27,6 +28,8 @@ import { displayState } from "./HealthBadge";
 import type { SourceStats } from "./SourceList";
 
 const LIVE_INTERVAL = 5000;
+// How often a retried source is read until its check is recorded.
+const RETRY_POLL = 2000;
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -239,6 +242,28 @@ export function ConnectorsView({
       notify(`« ${c.source_namespace} » en pause : plus de nouveaux articles jusqu’à la reprise.`);
       onChanged();
     });
+  // Asks the core to check the source now, then follows the instance until
+  // that check is recorded (its health is evaluated again), a minute past
+  // the moment the core scheduled it at most.
+  const onRetry = (c: Connector) =>
+    guarded(async () => {
+      const id = c.connector_id;
+      const { run_at } = await requestRun(id, `retry:${id}:${Date.now()}`);
+      notify(`Nouvelle vérification de « ${c.source_namespace} » demandée.`);
+      const deadline = Math.max(Date.parse(run_at), Date.now()) + 60_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_POLL));
+        const fresh = await fetchConnector(id);
+        if (fresh.health.evaluated_at === c.health.evaluated_at) continue;
+        upsert(fresh);
+        notify(
+          displayState(fresh) === "active"
+            ? `« ${c.source_namespace} » répond de nouveau.`
+            : `« ${c.source_namespace} » ne répond toujours pas.`,
+        );
+        return;
+      }
+    });
   // The core cannot re-enable an instance: resuming creates a new one on the
   // same Source Namespace, so collected Records keep their identity.
   const onResume = (c: Connector) =>
@@ -383,6 +408,7 @@ export function ConnectorsView({
                 highlight={highlight}
                 onOpen={setSelected}
                 onPause={onPause}
+                onRetry={onRetry}
                 onResume={onResume}
                 onRemove={onRemove}
               />

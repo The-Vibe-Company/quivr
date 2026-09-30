@@ -52,6 +52,10 @@ func (s *recordingStore) ChangeSchedule(ctx context.Context, org, id string, _ t
 	return s.ReadConnector(ctx, org, id)
 }
 
+func (s *recordingStore) RequestRun(context.Context, string, string, time.Duration) (time.Time, error) {
+	return time.Time{}, nil
+}
+
 var writer = corpus.Scope{Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}}
 
 func keylessService(t *testing.T, store Store) Service {

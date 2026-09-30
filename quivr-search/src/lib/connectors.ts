@@ -134,6 +134,12 @@ export const rotateCredential = (
 export const disableConnector = (id: string, key: string) =>
   request<Connector>(`${connectorPath(id)}/disable`, { idempotency_key: key });
 
+/** Asks the core to check the source now; run_at is when the run is due. */
+export const requestRun = (id: string, key: string) =>
+  request<{ connector_id: string; run_at: string }>(`${connectorPath(id)}/runs`, {
+    idempotency_key: key,
+  });
+
 // Sources (THE-732): feed discovery, suggestions and removal are facade
 // routes; the facade fetches the address under the private-address refusal.
 export interface FeedChoice {

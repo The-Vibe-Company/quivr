@@ -197,9 +197,9 @@ async function connectorRoute(req, path, url, corpus) {
     return upstream(path, "POST", body);
   }
   const match = path.match(
-    /^\/v0\/connectors\/([\w-]+)(?:\/(disable|credential|schedule))?$/,
+    /^\/v0\/connectors\/([\w-]+)(?:\/(disable|credential|schedule|runs))?$/,
   );
-  const method = { disable: "POST", credential: "PUT", schedule: "PUT" }[
+  const method = { disable: "POST", credential: "PUT", schedule: "PUT", runs: "POST" }[
     match?.[2]
   ];
   if (!match || req.method !== (method || "GET")) return undefined;

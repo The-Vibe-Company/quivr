@@ -64,6 +64,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/connectors/{connector_id}/disable`](#post-v0connectorsconnector_iddisable) | `disableConnector` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/credential`](#put-v0connectorsconnector_idcredential) | `replaceConnectorCredential` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/schedule`](#put-v0connectorsconnector_idschedule) | `changeConnectorSchedule` | `connectors:write` |
+| [`POST /v0/connectors/{connector_id}/runs`](#post-v0connectorsconnector_idruns) | `requestConnectorRun` | `connectors:write` |
 | [`GET /v0/connector-webhooks/{connector_id}`](#get-v0connector-webhooksconnector_id) | `relayConnectorChallenge` |  |
 | [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
@@ -947,6 +948,27 @@ Set the polling interval of an enabled instance. Setting the current value commi
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`Connector`](#connector) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/connectors/{connector_id}/runs`
+
+Operation `requestConnectorRun`. Requires `connectors:write`.
+
+Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `202` | `application/json` [`ConnectorRunRequest`](#connectorrunrequest) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
 
 ### Connector webhooks
@@ -2943,6 +2965,33 @@ properties:
     minimum: 1
     maximum: 86400
     description: Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
+```
+
+</details>
+
+### `ConnectorRunRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `connector_id` | string | yes |  |
+| `run_at` | string (date-time) | yes | When the requested run is due; now unless the interval floor or the source's Retry-After defers it. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  connector_id:
+    type: string
+  run_at:
+    type: string
+    format: date-time
+    description: When the requested run is due; now unless the interval floor or the source's Retry-After defers it.
+required:
+  - connector_id
+  - run_at
 ```
 
 </details>

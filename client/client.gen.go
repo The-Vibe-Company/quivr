@@ -866,6 +866,14 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorRunRequest defines model for ConnectorRunRequest.
+type ConnectorRunRequest struct {
+	ConnectorId string `json:"connector_id"`
+
+	// RunAt When the requested run is due; now unless the interval floor or the source's Retry-After defers it.
+	RunAt time.Time `json:"run_at"`
+}
+
 // ConnectorSchedule defines model for ConnectorSchedule.
 type ConnectorSchedule struct {
 	// IntervalSeconds Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
@@ -1608,6 +1616,9 @@ type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
 // DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
 type DisableConnectorJSONRequestBody = ActionRequest
 
+// RequestConnectorRunJSONRequestBody defines body for RequestConnectorRun for application/json ContentType.
+type RequestConnectorRunJSONRequestBody = ActionRequest
+
 // ChangeConnectorScheduleJSONRequestBody defines body for ChangeConnectorSchedule for application/json ContentType.
 type ChangeConnectorScheduleJSONRequestBody = ScheduleChange
 
@@ -2013,6 +2024,18 @@ type ClientInterface interface {
 	//
 	// Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable). Commits connector.disabled and connector.health_changed.
 	DisableConnector(ctx context.Context, connectorId string, body DisableConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestConnectorRunWithBody performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	RequestConnectorRunWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestConnectorRun performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	RequestConnectorRun(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ChangeConnectorScheduleWithBody performs a PUT /v0/connectors/{connector_id}/schedule (the `ChangeConnectorSchedule` operationId) request,
 	// with any type of body and a specified content type.
@@ -2539,6 +2562,38 @@ func (c *Client) DisableConnectorWithBody(ctx context.Context, connectorId strin
 // Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable). Commits connector.disabled and connector.health_changed.
 func (c *Client) DisableConnector(ctx context.Context, connectorId string, body DisableConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDisableConnectorRequest(c.Server, connectorId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestConnectorRunWithBody performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
+// with any type of body and a specified content type.
+//
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+func (c *Client) RequestConnectorRunWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestConnectorRunRequestWithBody(c.Server, connectorId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestConnectorRun performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+func (c *Client) RequestConnectorRun(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestConnectorRunRequest(c.Server, connectorId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3934,6 +3989,53 @@ func NewDisableConnectorRequestWithBody(server string, connectorId string, conte
 	}
 
 	operationPath := fmt.Sprintf("/v0/connectors/%s/disable", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRequestConnectorRunRequest calls the generic RequestConnectorRun builder with application/json body
+func NewRequestConnectorRunRequest(server string, connectorId string, body RequestConnectorRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRequestConnectorRunRequestWithBody(server, connectorId, "application/json", bodyReader)
+}
+
+// NewRequestConnectorRunRequestWithBody constructs an http.Request for the RequestConnectorRun method, with any body, and a specified content type
+func NewRequestConnectorRunRequestWithBody(server string, connectorId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/runs", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5756,6 +5858,20 @@ type ClientWithResponsesInterface interface {
 	// Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable). Commits connector.disabled and connector.health_changed.
 	DisableConnectorWithResponse(ctx context.Context, connectorId string, body DisableConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*DisableConnectorResponse, error)
 
+	// RequestConnectorRunWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RequestConnectorRunWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error)
+
+	// RequestConnectorRunWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	RequestConnectorRunWithResponse(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error)
+
 	// ChangeConnectorScheduleWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/schedule (the `ChangeConnectorSchedule` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -6636,6 +6752,54 @@ func (r DisableConnectorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r DisableConnectorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RequestConnectorRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *ConnectorRunRequest
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RequestConnectorRunResponse) GetJSON202() *ConnectorRunRequest {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RequestConnectorRunResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RequestConnectorRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RequestConnectorRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RequestConnectorRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RequestConnectorRunResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8607,6 +8771,32 @@ func (c *ClientWithResponses) DisableConnectorWithResponse(ctx context.Context, 
 	return ParseDisableConnectorResponse(rsp)
 }
 
+// RequestConnectorRunWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
+// with any type of body and a specified content type.
+//
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RequestConnectorRunWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error) {
+	rsp, err := c.RequestConnectorRunWithBody(ctx, connectorId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestConnectorRunResponse(rsp)
+}
+
+// RequestConnectorRunWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+func (c *ClientWithResponses) RequestConnectorRunWithResponse(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error) {
+	rsp, err := c.RequestConnectorRun(ctx, connectorId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestConnectorRunResponse(rsp)
+}
+
 // ChangeConnectorScheduleWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/schedule (the `ChangeConnectorSchedule` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -9644,6 +9834,39 @@ func ParseDisableConnectorResponse(rsp *http.Response) (*DisableConnectorRespons
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRequestConnectorRunResponse parses an HTTP response from a RequestConnectorRunWithResponse call
+func ParseRequestConnectorRunResponse(rsp *http.Response) (*RequestConnectorRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RequestConnectorRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ConnectorRunRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

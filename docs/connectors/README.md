@@ -90,6 +90,13 @@ A shorter interval brings the next run forward; a longer one applies after the r
 already scheduled. The interval must be between the deployment floor and 24 hours
 (`422 invalid_interval`). A disabled instance is `409 connector_disabled`.
 
+## Check a source again now
+
+`POST /v0/connectors/{connector_id}/runs` with an `idempotency_key` brings the next
+run forward and answers `202` with `run_at`. Repeating it is harmless. Rate limits
+hold: the deployment floor after the previous run, and the source's Retry-After.
+The run records its outcome in health. A disabled instance is `409 connector_disabled`.
+
 ## Deposit and rotate credentials
 
 - **Storage.** Secrets are encrypted at rest and never returned or logged.
@@ -164,6 +171,7 @@ serves. There you can:
 - **List** sources, one per Source Namespace, with a health badge (active, silent,
   failing when the latest run failed, paused), the last article, the interval and
   the last error in plain words.
+- **Retry** a failing, silent or refused source: **Réessayer** [checks it again now](#check-a-source-again-now).
 - **Pause, resume or remove** a source. Pausing disables the instance. Because
   [disabling is final](#disable), resuming creates a new instance on the same Source
   Namespace, so the Records already collected keep their identity. Resuming is only

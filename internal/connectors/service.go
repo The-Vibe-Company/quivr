@@ -106,6 +106,11 @@ type Store interface {
 	// ChangeSchedule sets the interval of an enabled instance (ErrDisabled
 	// otherwise), committing connector.schedule_changed only on a change.
 	ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (Instance, error)
+	// RequestRun pulls the next run of an enabled instance in (ErrDisabled
+	// otherwise) to now, but never before floor after the last run ended nor
+	// before the source's Retry-After, and never later than already
+	// scheduled. It returns when the run is due.
+	RequestRun(ctx context.Context, org, id string, floor time.Duration) (time.Time, error)
 }
 
 // Service authorizes and validates Connector Instance commands.
@@ -319,6 +324,34 @@ func (s Service) ChangeSchedule(ctx context.Context, scope corpus.Scope, id stri
 		return Instance{}, WithField(ErrInvalidInterval, "/interval_seconds")
 	}
 	return s.Store.ChangeSchedule(ctx, scope.Organization, id, interval)
+}
+
+// RunRequest answers a run request: the run is due at RunAt, and the
+// scheduler starts it on its next claim after that.
+type RunRequest struct {
+	ConnectorID string
+	RunAt       time.Time
+}
+
+// RequestRun asks for a run now instead of at the next scheduled time. The
+// deployment floor still separates two runs and a source's Retry-After still
+// holds, so a request cannot poll a source faster than a schedule could.
+// Repeating it changes nothing; a run already in flight answers it.
+func (s Service) RequestRun(ctx context.Context, scope corpus.Scope, id, key string) (RunRequest, error) {
+	if !scope.Allows("connectors:write") {
+		return RunRequest{}, corpus.ErrForbidden
+	}
+	if _, err := s.authorized(ctx, scope, id); err != nil {
+		return RunRequest{}, err
+	}
+	if !validText(key) {
+		return RunRequest{}, WithField(ErrInvalid, "/idempotency_key")
+	}
+	at, err := s.Store.RequestRun(ctx, scope.Organization, id, s.minInterval())
+	if err != nil {
+		return RunRequest{}, err
+	}
+	return RunRequest{ConnectorID: id, RunAt: at}, nil
 }
 
 func (s Service) validInterval(d time.Duration) bool {

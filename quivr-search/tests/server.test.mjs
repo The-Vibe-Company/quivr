@@ -169,6 +169,7 @@ test("connector routes are fenced to the demo corpus and mutations must be same-
     ["POST", "/disable"],
     ["PUT", "/credential"],
     ["PUT", "/schedule"],
+    ["POST", "/runs"],
   ]) {
     const before = seen.length;
     const response = await call(`/v0/connectors/connector_outside${suffix}`, {

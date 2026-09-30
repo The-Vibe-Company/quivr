@@ -372,6 +372,14 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       ws.connectors.push(c);
       return json(route, c, 201);
     }
+    // A requested check that finds the source answering again.
+    const runs = path.match(/^\/v0\/connectors\/([\w-]+)\/runs$/);
+    if (runs) {
+      const c = ws.connectors.find((x) => x.connector_id === runs[1])!;
+      const now = new Date().toISOString();
+      Object.assign(c.health, { state: "active", evaluated_at: now, last_success_at: now });
+      return json(route, { connector_id: c.connector_id, run_at: now }, 202);
+    }
     const disable = path.match(/^\/v0\/connectors\/([\w-]+)\/disable$/);
     if (disable) {
       const c = ws.connectors.find((x) => x.connector_id === disable[1])!;

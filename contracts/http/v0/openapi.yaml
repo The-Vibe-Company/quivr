@@ -1530,6 +1530,45 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ScheduleChange'
+  /v0/connectors/{connector_id}/runs:
+    post:
+      operationId: requestConnectorRun
+      description: Ask for an acquisition run now instead of at the next scheduled time, for example to
+        check again a source that failed. The next run is pulled in, never pushed out, so repeating the
+        request changes nothing and a run already in flight answers it. Rate limits still hold -- the run
+        starts no sooner than the deployment interval floor (30 s by default) after the previous run ended,
+        nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease
+        and records its outcome in health, committing connector.health_changed when the state changes; the
+        request itself commits no event. run_at is when the run is due; the scheduler starts it within
+        seconds after. A disabled instance is 409 connector_disabled.
+      x-required-permissions:
+      - connectors:write
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorRunRequest'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: connector_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
   /v0/connector-kinds:
     get:
       operationId: listConnectorKinds
@@ -2255,6 +2294,20 @@ components:
           maximum: 86400
           description: Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120);
             values below the deployment floor (30 s by default) are 422 invalid_interval.
+    ConnectorRunRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        connector_id:
+          type: string
+        run_at:
+          type: string
+          format: date-time
+          description: When the requested run is due; now unless the interval floor or the source's
+            Retry-After defers it.
+      required:
+      - connector_id
+      - run_at
     ScheduleChange:
       type: object
       additionalProperties: false

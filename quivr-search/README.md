@@ -39,7 +39,8 @@ health in plain words, its last article, its interval and its counts in the feed
 can be paused, resumed or removed. Pausing disables the instance. Resuming creates
 a new instance on the same Source Namespace, because the core cannot re-enable one;
 articles already collected keep their identity. Removing disables every instance
-of the source and hides them; collected articles stay searchable.
+of the source and hides them; collected articles stay searchable. **Réessayer** on a
+failing source checks it now (`POST /v0/connectors/{id}/runs`) and shows the result.
 
 `make demo` also enables the test `fixture` kind, under **Ajouter un connecteur
 d’un autre type**. Its token field accepts any value, except values starting with

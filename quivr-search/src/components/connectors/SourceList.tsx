@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, Trash } from "@phosphor-icons/react";
+import { ArrowClockwise, Pause, Play, Trash } from "@phosphor-icons/react";
 import {
   formatAbsolute,
   formatInterval,
@@ -79,6 +79,7 @@ export function SourceList({
   highlight,
   onOpen,
   onPause,
+  onRetry,
   onResume,
   onRemove,
 }: {
@@ -88,6 +89,7 @@ export function SourceList({
   highlight: string | null;
   onOpen: (id: string) => void;
   onPause: (c: Connector) => Promise<void>;
+  onRetry: (c: Connector) => Promise<void>;
   onResume: (c: Connector) => Promise<void>;
   onRemove: (c: Connector) => Promise<void>;
 }) {
@@ -102,6 +104,7 @@ export function SourceList({
           highlight={highlight === c.connector_id}
           onOpen={onOpen}
           onPause={onPause}
+          onRetry={onRetry}
           onResume={onResume}
           onRemove={onRemove}
         />
@@ -117,6 +120,7 @@ function SourceRow({
   highlight,
   onOpen,
   onPause,
+  onRetry,
   onResume,
   onRemove,
 }: {
@@ -126,10 +130,13 @@ function SourceRow({
   highlight: boolean;
   onOpen: (id: string) => void;
   onPause: (c: Connector) => Promise<void>;
+  onRetry: (c: Connector) => Promise<void>;
   onResume: (c: Connector) => Promise<void>;
   onRemove: (c: Connector) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  // A check can take a minute; it leaves the other actions available.
+  const [checking, setChecking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
   const row = useRef<HTMLLIElement>(null);
@@ -140,6 +147,9 @@ function SourceRow({
   const source = sourceSummary(c, kind);
   const problem = sourceProblem(state);
   const renew = state === "access_error" || state === "credential_expiring";
+  const retryable =
+    c.enabled &&
+    (state === "failing" || state === "access_error" || state === "silent");
 
   useEffect(() => {
     if (highlight) row.current?.scrollIntoView({ block: "nearest" });
@@ -181,6 +191,19 @@ function SourceRow({
       setError(e instanceof Error ? e.message : "La demande a échoué.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const retry = async () => {
+    if (checking) return;
+    setChecking(true);
+    setError("");
+    try {
+      await onRetry(c);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La demande a échoué.");
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -304,6 +327,18 @@ function SourceRow({
               >
                 Renouveler la connexion
                 <span className="visually-hidden"> de {c.source_namespace}</span>
+              </button>
+            )}
+            {retryable && (
+              <button
+                type="button"
+                className="button small"
+                disabled={checking}
+                onClick={retry}
+                aria-label={`Réessayer ${c.source_namespace}`}
+              >
+                <ArrowClockwise size={14} weight="bold" aria-hidden="true" />
+                {checking ? "Vérification…" : "Réessayer"}
               </button>
             )}
             {c.enabled ? (
