@@ -633,7 +633,7 @@
           "type": "integer",
           "minimum": 50,
           "maximum": 10000,
-          "description": "Deadline of one whole search under this profile, every round and every candidate request included. The core stops a search that runs longer and answers search_deadline_exceeded."
+          "description": "Latency objective (p95 target) of one whole search under this profile, every round and every candidate request included. A search that takes longer still answers; the core stops one only at the hard bound, four times this value, at least 2 s and at most 9 s, and answers search_deadline_exceeded."
         },
         "max_cost_cents": {
           "type": "number",

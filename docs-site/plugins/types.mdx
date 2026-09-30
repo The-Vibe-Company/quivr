@@ -84,7 +84,7 @@ Quivr keeps the instances, schedules, checkpoints, encrypted credentials and hea
 | | |
 | --- | --- |
 | What it does | Cuts a Version's text into passages (segments), embeds each one in the vector spaces the plugin owns, and encodes search queries into the same spaces. |
-| When Quivr calls it | In the worker for every new Version, and during rebuilds; in the API for every semantic or hybrid search (`embed_query`). |
+| When Quivr calls it | In the worker for every new Version, and during rebuilds; in the API for every semantic or hybrid search (`embed_query`), and once per space when the API starts, so the first search does not wait for the plugin to load. |
 | Operations | `segment_and_embed`, `embed_query` |
 | SDK | Go |
 | First-party | `core-ingest`: token windows embedded with `multilingual-e5-small` |

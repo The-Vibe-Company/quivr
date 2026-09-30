@@ -63,7 +63,7 @@ run:
   command: [go, run, .]
 ```
 
-`max_latency_ms` is a hard deadline for the whole search: Quivr stops one that runs longer and answers `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
+`max_latency_ms` is the profile's latency objective, a p95 target: a search that takes longer still answers, and the API logs a warning that names the slowest phase. Quivr stops a search only at the profile's hard limit, four times `max_latency_ms`, at least 2 seconds and at most 9 seconds. Past it, Quivr answers `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
 
 </Step>
 <Step title="Rank">
@@ -122,6 +122,6 @@ The response lists your profiles. A search response names the profile that answe
 | `503 search_unavailable` | The plugin is down or answered a retryable error. |
 | `422 unsupported_search` | The plugin answered a terminal error. |
 | `502 retrieval_plugin_invalid` | The plugin ranked a candidate it was never served, asked for too much, or sent an answer the checks refuse. |
-| `504 search_deadline_exceeded` | The plugin's rounds outran the profile's `max_latency_ms`. |
-| `503 search_unavailable` after `max_latency_ms` | Quivr could not serve candidates in time: a dependency, such as the embedding service, is down or slow. |
+| `504 search_deadline_exceeded` | The plugin's rounds outran the profile's hard limit, four times `max_latency_ms` (2 to 9 seconds). |
+| `503 search_unavailable` after the hard limit | Quivr could not serve candidates in time: a dependency, such as the embedding service, is down or slow. |
 | `422 unsupported_profile` | The client named a profile the plugin does not declare. |

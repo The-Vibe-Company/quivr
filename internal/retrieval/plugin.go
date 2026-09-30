@@ -17,7 +17,8 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
-// ErrDeadline reports a search that outran its profile's max_latency_ms.
+// ErrDeadline reports a search that outran its profile's hard bound
+// (plugins.RetrievalProfile.Deadline).
 var ErrDeadline = errors.New("search_deadline_exceeded")
 
 // ErrPluginInvalid reports a retrieval plugin answer the engine refuses: a
@@ -101,22 +102,24 @@ func invocationID() string {
 // rank answers a search through the pinned retrieval plugin: each round the
 // plugin asks for candidates, which the engine serves after authorization,
 // withdrawal fences and generation routing, or returns the ranking, which may
-// hold only served candidates. The whole search runs under the profile's
-// max_latency_ms.
-func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result) (Result, error) {
-	started := time.Now()
+// hold only served candidates. The profile's max_latency_ms is its latency
+// objective: a search over it still answers and is reported with the time
+// each phase took. ctx carries the profile's hard bound, and started is when
+// Search began authorizing and routing (Search).
+func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
 	m := s.Ranker.Manifest()
 	profile := m.Contributions.Retrieval.Profiles[q.Profile]
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(profile.MaxLatencyMS)*time.Millisecond)
-	defer cancel()
+	timing := &phases{routing: time.Since(started)}
 	out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
 	query, err := normalizeQuery(q.Query)
 	if err != nil {
 		return out, ErrUnsupported
 	}
+	phase := time.Now()
 	spaces, err := s.searchSpaces(ctx, scope.Organization, routes)
+	timing.coverage += time.Since(phase)
 	if err != nil {
-		return out, s.unserved(ctx, m.ID, ErrUnavailable)
+		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
 	session := plugins.NewRetrievalSession(m, plugins.SearchRequest{
 		InvocationID: invocationID(), OrganizationID: scope.Organization, Configuration: s.Ranker.Configuration(),
@@ -125,9 +128,11 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing}
 	for {
+		phase := time.Now()
 		body, err := s.Ranker.Round(ctx, session.Request())
+		timing.rounds += time.Since(phase)
 		switch {
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
@@ -136,7 +141,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 		case errors.Is(err, ErrPluginInvalid):
 			return out, err
 		default:
-			return out, s.deadline(ctx, ErrUnavailable)
+			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
@@ -149,6 +154,10 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 			}
 			usage := session.Usage()
 			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: usage.PaidCalls, CostCents: usage.CostCents}
+			if out.Usage.Elapsed > profile.Objective() {
+				slog.Warn("search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
+					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
+			}
 			if issue := session.Budget(); issue != nil {
 				slog.Warn("retrieval plugin over budget", "component", "search", "plugin", m.ID, "profile", q.Profile, "detail", issue.Message)
 			}
@@ -157,7 +166,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 		served := make([][]plugins.Candidate, len(answer.Requests))
 		for i, request := range answer.Requests {
 			if served[i], err = sv.serve(ctx, q, request); err != nil {
-				return out, s.unserved(ctx, m.ID, err)
+				return out, s.unserved(ctx, m.ID, err, timing)
 			}
 		}
 		session.Serve(invocationID(), answer.Requests, served)
@@ -165,24 +174,47 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 }
 
 // deadline turns a failure of the plugin's round caused by the profile's
-// deadline into ErrDeadline: the plugin outran its budget.
-func (s Service) deadline(ctx context.Context, err error) error {
+// hard bound into ErrDeadline: the plugin outran it.
+func (s Service) deadline(ctx context.Context, plugin string, err error, timing *phases) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		slog.Warn("retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return ErrDeadline
 	}
 	return err
 }
 
 // unserved reports a failure of the engine to serve candidates as it is,
-// even when the profile's deadline passed meanwhile: then a dependency of the
-// engine (the space owner encoding the query, the index, canonical storage)
-// did not answer in time, as when the embedding service is down, so the
-// search is unavailable (retryable), not a plugin that outran its budget.
-func (s Service) unserved(ctx context.Context, plugin string, err error) error {
+// even when the profile's hard bound passed meanwhile: then a dependency of
+// the engine (the space owner encoding the query, the index, canonical
+// storage) did not answer in time, as when the embedding service is down, so
+// the search is unavailable (retryable), not a plugin that outran its bound.
+func (s Service) unserved(ctx context.Context, plugin string, err error, timing *phases) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		slog.Warn("search candidates not served within the profile's deadline", "component", "search", "plugin", plugin, "error", err.Error())
+		slog.Warn("search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
 	return err
+}
+
+// phases is the time one search spent in each of its phases.
+type phases struct {
+	routing, coverage, rounds, encoding, index, hydration time.Duration
+}
+
+// attrs are the phases as log attributes, preceded by the slowest one.
+func (p *phases) attrs() []any {
+	named := []struct {
+		name string
+		d    time.Duration
+	}{{"routing", p.routing}, {"coverage", p.coverage}, {"plugin_rounds", p.rounds}, {"query_encoding", p.encoding}, {"index_query", p.index}, {"hydration", p.hydration}}
+	slowest := named[0]
+	out := []any{}
+	for _, n := range named {
+		if n.d > slowest.d {
+			slowest = n
+		}
+		out = append(out, n.name+"_ms", n.d.Milliseconds())
+	}
+	return append([]any{"slowest_phase", slowest.name}, out...)
 }
 
 // searchSpaces lists the vector spaces every routed generation carries, as
@@ -255,6 +287,7 @@ type server struct {
 	hydrated map[string]content.Hydrated
 	// vectors caches query encodings by space and text.
 	vectors map[string][]float32
+	timing  *phases
 }
 
 // serve runs one candidate request through the projection and hydrates what
@@ -298,7 +331,9 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			pq.Vector = vector
 		}
 	}
+	phase := time.Now()
 	found, err := sv.s.Projection.Search(ctx, sv.routes, sv.scope, pq)
+	sv.timing.index += time.Since(phase)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -323,7 +358,9 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 	for next := 0; next < len(unique) && len(out) < c.K; {
 		wave := unique[next:min(len(unique), next+min(hydrateParallelism, c.K-len(out)))]
 		next += len(wave)
+		phase := time.Now()
 		hydrated, err := sv.hydrate(ctx, wave)
+		sv.timing.hydration += time.Since(phase)
 		if err != nil {
 			return nil, err
 		}
@@ -414,6 +451,8 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 	}
 	var vector []float32
 	var err error
+	started := time.Now()
+	defer func() { sv.timing.encoding += time.Since(started) }()
 	switch {
 	case sv.s.Embedder != nil && space == sv.s.Embedder.Space().ID:
 		vector, err = sv.s.Embedder.Embed(ctx, "query: "+text)

@@ -354,7 +354,14 @@ func Run(command string) error {
 	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{PublicURL: cfg.PublicURL, Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error { return postgres.SchemaReady(ctx, pool) }
+	// The api is ready once its query encoding is warm, or warmBound passed.
+	settled := make(chan struct{})
+	close(settled)
+	var warming <-chan struct{} = settled
 	ready := func(ctx context.Context) error {
+		if !warmed(warming) {
+			return errWarming
+		}
 		err := schemaReady(ctx)
 		if err == nil && command == "worker" {
 			rt := runtime.Load()
@@ -397,6 +404,11 @@ func Run(command string) error {
 	}
 	if err = live.Store(planID, resolved); err != nil {
 		return fmt.Errorf("pipeline plan %s: %w", planID, err)
+	}
+	if command == "api" {
+		// The first search must not pay the ingestion plugin's first-use
+		// loading (THE-813); the worker never encodes a query.
+		warming = warmQueries(ctx, pluginhttp.Ingestor{Pin: resolved.Ingestion()}.Warm, warmBound, warmRetry)
 	}
 	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) }}
 	// Work pinned to an earlier plan resolves its plugins in that plan.
@@ -479,7 +491,10 @@ func Run(command string) error {
 	probes.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		if ready(ctx) != nil {
+		if err := ready(ctx); errors.Is(err, errWarming) {
+			http.Error(w, err.Error(), 503)
+			return
+		} else if err != nil {
 			http.Error(w, "database/schema unavailable", 503)
 			return
 		}

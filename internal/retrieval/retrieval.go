@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -210,6 +211,10 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		return out, ErrUnsupportedProfile
 	}
 	out.Profile = q.Profile
+	// The whole search, authorization and routing included, runs under the
+	// profile's hard bound.
+	ctx, cancel := context.WithTimeout(ctx, s.Ranker.Manifest().Contributions.Retrieval.Profiles[q.Profile].Deadline())
+	defer cancel()
 	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Limit < 1 || q.Limit > MaxLimit || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
@@ -233,6 +238,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		namespaces[ns] = true
 	}
+	started := time.Now()
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		return out, err
 	}
@@ -258,7 +264,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		served = g.SpaceID
 		routes = append(routes, Route{CorpusID: id, Generation: g})
 	}
-	return s.rank(ctx, scope, q, routes, out)
+	return s.rank(ctx, scope, q, routes, out, started)
 }
 
 // normalizeQuery prepares a query: valid text of at most MaxQueryCodepoints,

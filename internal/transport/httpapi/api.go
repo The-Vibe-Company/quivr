@@ -224,8 +224,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		a.streamChanges(w, r, scope)
 		return
 	}
-	// A search answered by a retrieval plugin runs under its profile's
-	// max_latency_ms instead of the API's request deadline.
+	// A search answered by a retrieval plugin runs under its profile's hard
+	// bound (plugins.RetrievalProfile.Deadline) instead of the API's request
+	// deadline.
 	if r.Method == "POST" && r.URL.Path == "/v0/search" && a.Retrieval.Ranker != nil {
 		a.search(w, r, scope)
 		return

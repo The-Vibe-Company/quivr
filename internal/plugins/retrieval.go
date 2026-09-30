@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"time"
 )
 
 // SearchRoute is the route of the retrieval Contribution.
@@ -63,6 +64,25 @@ type RetrievalProfile struct {
 	Description  string  `json:"description,omitempty"`
 	MaxLatencyMS int     `json:"max_latency_ms"`
 	MaxCostCents float64 `json:"max_cost_cents"`
+}
+
+// Objective is the profile's latency objective, max_latency_ms: a search
+// that takes longer still answers, and is reported as over its objective.
+func (p RetrievalProfile) Objective() time.Duration {
+	return time.Duration(p.MaxLatencyMS) * time.Millisecond
+}
+
+// retrievalDeadlineCap keeps every search bound under the api's 10 s HTTP
+// write timeout, so the error that ends a search always reaches the client.
+const retrievalDeadlineCap = 9 * time.Second
+
+// Deadline is the hard bound of one search under the profile: four times its
+// objective, at least 2 s, at most 9 s (THE-813). The objective is a p95
+// target, so a deadline equal to it would fail a slice of healthy searches
+// under load; the bound only stops a search whose plugin or dependency is
+// stuck.
+func (p RetrievalProfile) Deadline() time.Duration {
+	return min(max(4*p.Objective(), 2*time.Second), retrievalDeadlineCap)
 }
 
 // RetrievalLimits bound one search.

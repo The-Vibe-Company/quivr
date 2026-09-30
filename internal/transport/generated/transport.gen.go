@@ -2245,7 +2245,7 @@ type SearchProfileDescription struct {
 	// MaxCostCents Most a search may spend on paid calls.
 	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
 
-	// MaxLatencyMs Deadline of one search under this profile.
+	// MaxLatencyMs Latency objective (p95 target) of one search under this profile. A slower search still answers; the hard bound is four times this value, at least 2 s and at most 9 s.
 	MaxLatencyMs *int   `json:"max_latency_ms,omitempty"`
 	Name         string `json:"name"`
 	Provider     struct {

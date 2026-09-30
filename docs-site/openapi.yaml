@@ -2582,8 +2582,8 @@ paths:
             409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector
             space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid
             (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency
-            unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's max_latency_ms;
-            a dependency that does not answer in time is 503).
+            unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four
+            times max_latency_ms; a dependency that does not answer in time is 503).
           content:
             application/json:
               schema:
@@ -5934,7 +5934,8 @@ components:
         max_latency_ms:
           type: integer
           minimum: 1
-          description: Deadline of one search under this profile.
+          description: Latency objective (p95 target) of one search under this profile. A slower search still answers; the
+            hard bound is four times this value, at least 2 s and at most 9 s.
         max_cost_cents:
           type: number
           minimum: 0

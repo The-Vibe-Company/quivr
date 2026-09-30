@@ -97,7 +97,9 @@ func (r *run) retrievalFixtures(own []ownFixture) []retrievalRun {
 }
 
 // search drives one whole search under a profile within its max_latency_ms,
-// serving candidates from the fixture.
+// serving candidates from the fixture. Certification holds a plugin to its
+// latency objective on its own fixtures; the engine stops a search only at
+// the looser hard bound (plugins.RetrievalProfile.Deadline).
 func (r *run) search(ctx context.Context, rr retrievalRun, profile, suffix string) (*devhost.SearchOutcome, []plugins.Issue) {
 	budget := r.m.Contributions.Retrieval.Profiles[profile].MaxLatencyMS
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(budget)*time.Millisecond)
@@ -106,7 +108,7 @@ func (r *run) search(ctx context.Context, rr retrievalRun, profile, suffix strin
 	if err != nil {
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 			return nil, []plugins.Issue{{Code: CodeDeadlineExceeded, Path: "/contributions/retrieval/profiles/" + profile + "/max_latency_ms",
-				Message: fmt.Sprintf("the search did not end within profile %q's max_latency_ms %d; the engine stops it at this deadline", profile, budget)}}
+				Message: fmt.Sprintf("the search did not end within profile %q's max_latency_ms %d, its latency objective", profile, budget)}}
 		}
 		return nil, []plugins.Issue{{Code: CodeUnavailable, Message: err.Error()}}
 	}

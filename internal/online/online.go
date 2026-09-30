@@ -197,7 +197,7 @@ var hints = map[string]string{
 	"unsupported_profile":       "the deployment does not answer this profile; GET /v0/search/profiles lists the ones it does",
 	"query_too_long":            "the query is longer than the profile accepts; the message names the limit: shorten the query",
 	"retrieval_plugin_invalid":  "the deployment's retrieval plugin answered something the engine refuses; an operator checks the plugin",
-	"search_deadline_exceeded":  "the search outran its profile's latency budget; retry, or use a faster profile",
+	"search_deadline_exceeded":  "the search outran its profile's hard time limit; retry, or use a faster profile",
 	"search_unavailable":        "the search backend is unavailable; retry later",
 	"source_filter_unavailable": "a requested Corpus predates source filtering; an operator rebuilds it once (POST /v0/corpora/{id}/rebuilds)",
 }

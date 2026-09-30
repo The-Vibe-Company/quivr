@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -126,8 +127,8 @@ func TestPluginRanksServedCandidates(t *testing.T) {
 	}
 }
 
-// The engine enforces the contract on every plugin answer, and the profile's
-// deadline on the whole search.
+// The engine enforces the contract on every plugin answer, and a deadline on
+// the whole search.
 func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
 	for _, c := range []struct {
@@ -136,6 +137,9 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 		answer  func(context.Context, plugins.SearchRequest) ([]byte, error)
 		want    error
 		rounds  int
+		// timeout is the caller's deadline, which stands in for the profile's
+		// hard bound (at least 2 s) so the test does not wait for it.
+		timeout time.Duration
 	}{
 		{name: "a candidate never served", answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
 			return answer(map[string]any{"ranking": map[string]any{"hits": []any{map[string]any{"segment_id": "a", "score": 1}}}})
@@ -152,18 +156,45 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 		{name: "the plugin is unreachable", answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
 			return nil, errors.New("connection refused")
 		}, want: retrieval.ErrUnavailable, rounds: 1},
-		{name: "the profile's deadline passes", profile: "deep", answer: func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
+		{name: "the search's deadline passes", answer: func(ctx context.Context, _ plugins.SearchRequest) ([]byte, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}, want: retrieval.ErrDeadline, rounds: 1},
+		}, want: retrieval.ErrDeadline, rounds: 1, timeout: 20 * time.Millisecond},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := &scriptedRanker{answer: c.answer}
-			_, err := rankedService(p, r).Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: c.profile})
+			ctx := context.Background()
+			if c.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, c.timeout)
+				defer cancel()
+			}
+			_, err := rankedService(p, r).Search(ctx, searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: c.profile})
 			if !errors.Is(err, c.want) || len(r.sent) != c.rounds {
 				t.Fatalf("error %v after %d rounds, want %v after %d", err, len(r.sent), c.want, c.rounds)
 			}
 		})
+	}
+}
+
+// max_latency_ms is the profile's objective, not its deadline (THE-813): a
+// search may run past it, up to the profile's hard bound, four times the
+// objective and at least 2 s. The plugin's rounds see how long they have left.
+func TestASearchMayRunPastItsObjective(t *testing.T) {
+	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
+	var left time.Duration
+	answer := func(ctx context.Context, request plugins.SearchRequest) ([]byte, error) {
+		if deadline, ok := ctx.Deadline(); ok && left == 0 {
+			left = time.Until(deadline)
+		}
+		return passthrough(ctx, request)
+	}
+	// deep's objective is 50 ms.
+	if _, err := rankedService(p, &scriptedRanker{answer: answer}).Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "deep"}); err != nil {
+		t.Fatal(err)
+	}
+	if left < time.Second {
+		t.Fatalf("the first round had %s left under a 50 ms objective; want the hard bound, at least 2 s", left)
 	}
 }
 
@@ -204,13 +235,16 @@ func (stalledEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 	return nil, ctx.Err()
 }
 
-// When the engine cannot serve candidates before the profile's deadline, a
+// When the engine cannot serve candidates before the search's deadline (the
+// profile's hard bound; the caller's shorter one stands in for it), a
 // dependency is down (here the embedding service): the search is unavailable
-// and retryable, 503, not a plugin that outran its budget, 504.
+// and retryable, 503, not a plugin that outran its bound, 504.
 func TestADependencyOutrunningTheDeadlineMakesSearchUnavailable(t *testing.T) {
 	s := rankedService(&fakeProjection{}, &scriptedRanker{answer: passthrough})
 	s.Embedder = stalledEmbedder{}
-	_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: "semantic", CorpusIDs: []string{"corpus"}, Profile: "deep"})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := s.Search(ctx, searchScope, retrieval.Request{Query: "lanterne", Mode: "semantic", CorpusIDs: []string{"corpus"}, Profile: "deep"})
 	if !errors.Is(err, retrieval.ErrUnavailable) {
 		t.Fatalf("error %v, want ErrUnavailable", err)
 	}

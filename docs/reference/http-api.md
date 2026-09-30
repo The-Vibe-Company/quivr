@@ -1530,7 +1530,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's max_latency_ms; a dependency that does not answer in time is 503). |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). |
 
 #### `GET /v0/search/profiles`
 
@@ -8347,7 +8347,7 @@ required:
 | --- | --- | --- | --- |
 | `name` | string | yes | Minimum length `1`. |
 | `description` | string |  |  |
-| `max_latency_ms` | integer |  | Deadline of one search under this profile. Minimum `1`. |
+| `max_latency_ms` | integer |  | Latency objective (p95 target) of one search under this profile. A slower search still answers; the hard bound is four times this value, at least 2 s and at most 9 s. Minimum `1`. |
 | `max_cost_cents` | number |  | Most a search may spend on paid calls. Minimum `0`. |
 | `provider` | object | yes |  |
 | `provider.kind` | string | yes | plugin, the retrieval plugin that answers the profile. engine is no longer returned since the engine's own search moved into core.retrieve. One of `engine`, `plugin`. |
@@ -8369,7 +8369,7 @@ properties:
   max_latency_ms:
     type: integer
     minimum: 1
-    description: Deadline of one search under this profile.
+    description: Latency objective (p95 target) of one search under this profile. A slower search still answers; the hard bound is four times this value, at least 2 s and at most 9 s.
   max_cost_cents:
     type: number
     minimum: 0

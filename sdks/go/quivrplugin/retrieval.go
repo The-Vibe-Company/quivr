@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 )
 
 // Retriever answers searches in rounds (the retrieval Contribution, Plugin
@@ -187,16 +186,16 @@ func (p *Plugin) serveSearch(w http.ResponseWriter, r *http.Request) {
 	if !p.readIngestion(w, r, "plugins/v0/retrieval-search-request.schema.json", &req) {
 		return
 	}
-	profile, ok := p.m.Retrieval.Profiles[req.Profile]
+	_, ok := p.m.Retrieval.Profiles[req.Profile]
 	if !ok {
 		refuse(w, 400, "unknown_profile", fmt.Sprintf("profile %q is not declared by %s", req.Profile, p.m.ID), Credential{})
 		return
 	}
 	req.logger = p.logger.With("invocation_id", req.InvocationID, "round", req.Round)
 	defer p.ingestPanic(w, req.logger)
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(profile.MaxLatencyMS)*time.Millisecond)
-	defer cancel()
-	answer, err := p.retriever.Search(ctx, &req)
+	// max_latency_ms is the profile's latency objective, not a deadline: the
+	// engine ends the request, and so this context, at its hard bound.
+	answer, err := p.retriever.Search(r.Context(), &req)
 	if err != nil {
 		var e *SearchError
 		if errors.As(err, &e) {

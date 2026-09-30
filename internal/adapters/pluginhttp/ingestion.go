@@ -249,17 +249,8 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 	if !ok {
 		return nil, fmt.Errorf("%w: space %s is not declared by the pinned ingestion plugin", ErrUnavailable, key)
 	}
-	body, err := json.Marshal(embedQueryRequest{InvocationID: invocationID(), Contribution: "ingestion", OrganizationID: org, Configuration: i.Pin.Configuration, Space: id, Query: embedQuery{Modality: "text", Text: text}})
-	if err != nil {
-		return nil, err
-	}
-	m := &i.Pin.Manifest
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().QueryTimeoutMS)*time.Millisecond)
-	defer cancel()
 	started := time.Now()
-	result, err := devhost.InvokeEmbedQuery(callCtx, i.Pin.Endpoint, body, func(b []byte) []plugins.Issue {
-		return plugins.CheckEmbedQueryOutput(b, id, m)
-	})
+	result, err := i.embedQuery(ctx, invocationID(), org, id, text)
 	observe(i.Pin, org, OpEmbedQuery, started, result, err)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
@@ -281,4 +272,38 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	return plugins.Float32s(answer.Vector), nil
+}
+
+// embedQuery posts one embed_query within the contribution's query_timeout_ms.
+func (i Ingestor) embedQuery(ctx context.Context, invocation, org, space, text string) (*devhost.Result, error) {
+	body, err := json.Marshal(embedQueryRequest{InvocationID: invocation, Contribution: "ingestion", OrganizationID: org, Configuration: i.Pin.Configuration, Space: space, Query: embedQuery{Modality: "text", Text: text}})
+	if err != nil {
+		return nil, err
+	}
+	m := &i.Pin.Manifest
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().QueryTimeoutMS)*time.Millisecond)
+	defer cancel()
+	return devhost.InvokeEmbedQuery(ctx, i.Pin.Endpoint, body, func(b []byte) []plugins.Issue {
+		return plugins.CheckEmbedQueryOutput(b, space, m)
+	})
+}
+
+// WarmUpOrganization is the organization_id of a warm-up embed_query: it
+// belongs to no Organization.
+const WarmUpOrganization = "engine.warm-up"
+
+// Warm sends one embed_query to each space the pin enables, served first, so
+// that the plugin loads what it loads on first use (core.ingest starts its
+// tokenizer process) before a search waits for it, not within that search's
+// latency budget. Any answer, even an error envelope such as an unavailable
+// embedding service, means the plugin did that loading; only a plugin that
+// does not answer is an error (ErrUnavailable). The calls count for no
+// Organization, so they are not observed.
+func (i Ingestor) Warm(ctx context.Context) error {
+	for _, space := range i.Pin.EnabledSpaces() {
+		if _, err := i.embedQuery(ctx, "warm-up-"+invocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil {
+			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+	}
+	return nil
 }

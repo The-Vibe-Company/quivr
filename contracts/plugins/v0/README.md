@@ -566,7 +566,13 @@ once, with the spaces.
 
 **`embed_query`** (`ingestion-embed-query-request.schema.json`) carries the
 `space` and a `query` (`modality: text`, `text`) and answers `{"vector"}`
-within `query_timeout_ms`, which a search waits for.
+within `query_timeout_ms`, which a search waits for. When the api starts, it
+sends a warm-up `embed_query` to each enabled space, with `organization_id`
+`engine.warm-up`, an `invocation_id` starting with `warm-up-` and the text
+`warm-up`. It retries while the plugin does not answer, and reports ready once
+the plugin has answered, even with an error, or after 5 seconds. A plugin loads what it needs
+on its first call then (core.ingest starts its tokenizer), not within the
+first search's latency budget. The answer is discarded.
 
 **Errors.** Unavailability or a `retryable: true` envelope delays the Version,
 retried with backoff; a terminal envelope, or an answer the checks below
@@ -633,8 +639,8 @@ them before any candidate reaches the plugin. Write one with the
 
 **Profiles.** `contributions.retrieval.profiles` declares the search profiles
 the plugin answers, by name (`^[a-z][a-z0-9_]{0,31}$`), `default` required.
-Each has a `max_latency_ms` (50 to 10000), the deadline of a whole search
-under it, and a `max_cost_cents`, the most one search may report spending in
+Each has a `max_latency_ms` (50 to 10000), the latency objective of a whole
+search under it (see **Time** below), and a `max_cost_cents`, the most one search may report spending in
 `usage`. `limits` bound a search: `max_rounds` (1 to 3, default 3),
 `max_requests` per round (1 to 8, default 4), `max_candidates`, the largest
 `k` (1 to 100, default 50), and `max_response_bytes` (default 1 MiB, cap
@@ -665,10 +671,20 @@ yield the same answer.
 **Errors.** A terminal envelope refuses the search (422
 `unsupported_search`); unavailability or a retryable envelope makes it
 unavailable (503); an answer the checks below refuse fails it with 502
-`retrieval_plugin_invalid`; a search whose rounds outrun the profile's
-`max_latency_ms` fails with 504 `search_deadline_exceeded`, and one whose
-candidates the engine could not serve in time (a dependency such as the
-embedding service is down) with 503.
+`retrieval_plugin_invalid`.
+
+**Time.** A profile's `max_latency_ms` is its latency objective, a p95
+target: a search that takes longer still answers, and the api logs it at WARN
+with the time each phase took (routing, coverage counts, plugin rounds, query encoding,
+index query, hydration). The engine stops a search only at the profile's hard
+bound, four times `max_latency_ms`, at least 2 s and at most 9 s (below the
+api's 10 s write timeout), counted from the start of the search. An objective
+above 9 s is therefore cut at 9 s. A search whose rounds outrun the bound fails with
+504 `search_deadline_exceeded`, and one whose candidates the engine could not
+serve in time (a dependency such as the embedding service is down) with 503.
+This replaces THE-778's rule, which stopped a search at `max_latency_ms` and so
+failed a slice of healthy searches under load (THE-813). The Contract Runner
+still holds a plugin to `max_latency_ms` on its own fixtures.
 
 `CheckSearchOutput` and `RetrievalSession` in `internal/plugins` judge every
 answer for the engine and the Contract Runner:

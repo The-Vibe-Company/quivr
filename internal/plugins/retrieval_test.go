@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
@@ -33,4 +34,15 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// A profile's hard bound gives a search four times its latency objective,
+// never less than 2 s, and never 10 s or more, so the error that ends a search
+// always reaches the client before the api's 10 s write timeout (THE-813).
+func TestSearchHardBound(t *testing.T) {
+	for objective, want := range map[int]time.Duration{50: 2 * time.Second, 1000: 4 * time.Second, 2000: 8 * time.Second, 3000: 9 * time.Second, 10000: 9 * time.Second} {
+		if got := (plugins.RetrievalProfile{MaxLatencyMS: objective}).Deadline(); got != want {
+			t.Errorf("objective %d ms: bound %s, want %s", objective, got, want)
+		}
+	}
 }

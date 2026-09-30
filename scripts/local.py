@@ -494,6 +494,7 @@ def parts():
     (.github/workflows/verify.yml); `make verify` runs them one after another. To add a step, add one
     line to the part whose state it needs: acceptance('name','^TestPattern') or step('name',fn)."""
     from embedding_outage import verify as verify_embedding_outage
+    from first_search import verify as verify_first_search
     from rebuild_recovery import verify as verify_rebuild_recovery
     from operation_control import verify as verify_operation_control
     from connector_restart import verify as verify_connector_restart
@@ -507,6 +508,8 @@ def parts():
         # Core contracts, adapters, outages of every dependency, then the change feed and the CLI.
         'core':setup+[
             acceptance('core_acceptance','TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch'),
+            # A cold query encoder and a fresh api answer the first semantic and hybrid searches (THE-813).
+            step('first_search_after_start',verify_first_search),
             step('adapter_integration',adapters),
             # The core.ingest plugin reproduces the engine's former segments and vectors, and is certified.
             step('core_ingest_plugin',core_ingest_plugin.verify),
