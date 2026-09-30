@@ -1,0 +1,134 @@
+.github/workflows/docs-site.yml
+  s_54b80c92daa9cb::t_567fc5593baf28 2-5,20,26-28
+scripts/mintlify_nav.py
+  s_54b80c92daa9cb::t_519049ada20562 1,3-6,11,13,40
+docs/inventory.toml
+  s_54b80c92daa9cb::t_e82d9f087d6416 15-17,57
+Makefile
+  s_54b80c92daa9cb::t_77f23723f4bae5 41,48-50,53-55,57
+  s_54b80c92daa9cb::t_20ac2165c01955 2
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_40e4f746781046 35-36
+scripts/docs.py
+  s_54b80c92daa9cb::t_cc9bb7bfd8b08f 19-22,28,57-58,613,616-620,622-637,669
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_5e66a1daa1ca5f 26
+scripts/test_mintlify.py
+  s_54b80c92daa9cb::t_f4ed3c7c792601 58,82-84
+  s_54b80c92daa9cb::t_00ac7741bca772 1,12,24-28,38,41-44,50-51,54-57,60-81
+scripts/mintlify_site.py
+  s_54b80c92daa9cb::t_a62b37c52d77cd 1,3-7,16,22,24-26,29,39,41-50,346-348,378-379,381-384,388-389,395,398-400,402-441,448-453
+  s_54b80c92daa9cb::t_a25c820d86b202 352-356
+docs-site/agents.mdx
+  s_54b80c92daa9cb::t_09e8be89458608 1-46
+docs-site/agents/documentation.mdx
+  s_54b80c92daa9cb::t_65dbbe4059b827 1-58
+docs-site/agents/domain.mdx
+  s_54b80c92daa9cb::t_f2793d9a922cb1 1-47
+docs-site/agents/evaluation.mdx
+  s_54b80c92daa9cb::t_317943f2dcc6fb 1-92
+docs-site/agents/fleet-workflow.mdx
+  s_54b80c92daa9cb::t_64178d507cdd9d 1-63
+docs-site/agents/issue-tracker.mdx
+  s_54b80c92daa9cb::t_68e46750482ec9 1-104
+docs-site/agents/testing.mdx
+  s_54b80c92daa9cb::t_8d1f8e241f4937 1-83
+docs-site/agents/triage-labels.mdx
+  s_54b80c92daa9cb::t_208bdb7f9bbfb1 1-16
+docs-site/api-walkthrough.mdx
+  s_54b80c92daa9cb::t_33e150c78eacdd 1-482
+docs-site/connect-an-ai-agent.mdx
+  s_54b80c92daa9cb::t_13b65de2c98e1c 1-96
+docs-site/connectors/index.mdx
+  s_54b80c92daa9cb::t_f74a3dbf70d595 1-232
+docs-site/connectors/microsoft-365.mdx
+  s_54b80c92daa9cb::t_b4b8dc238ff048 1-233
+docs-site/connectors/rss.mdx
+  s_54b80c92daa9cb::t_1c05fd66aae726 1-192
+docs-site/connectors/x-webhooks.mdx
+  s_54b80c92daa9cb::t_d121c29b150b2c 1-92
+docs-site/connectors/x.mdx
+  s_54b80c92daa9cb::t_a1312fbee8e305 1-191
+docs-site/context.mdx
+  s_54b80c92daa9cb::t_4770e029f72f73 1-318
+docs-site/contracts/http/v0/index.mdx
+  s_54b80c92daa9cb::t_27690ea085dc8b 1-128
+docs-site/contracts/plugins/v0/index.mdx
+  s_54b80c92daa9cb::t_bebec426e3259f 1-790
+docs-site/dated/index.mdx
+  s_54b80c92daa9cb::t_e3a7a415a0f105 1-68
+docs-site/deploy/railway/index.mdx
+  s_54b80c92daa9cb::t_7f655e9abfa33d 1-204
+docs-site/described-alerts.mdx
+  s_54b80c92daa9cb::t_36835dfdc1e43a 1-150
+docs-site/docs.json
+  s_54b80c92daa9cb::t_846c490cd2b0ef 11-26
+docs-site/first-search.mdx
+  s_54b80c92daa9cb::t_a5d17e33dd4b36 1-298
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_87ae24e4baa1e2 1-311
+docs-site/keyword-alerts.mdx
+  s_54b80c92daa9cb::t_0d4491ba780ec3 1-149
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_6a5de8b250814e 1-4356
+docs-site/plugins/alerts/index.mdx
+  s_54b80c92daa9cb::t_a39ae4beaa2585 1-329
+docs-site/plugins/pdf-text/index.mdx
+  s_54b80c92daa9cb::t_1ae5b673c6217d 1-117
+docs-site/plugins/rss/index.mdx
+  s_54b80c92daa9cb::t_746a3e9dcbe96b 1-60
+docs-site/plugins/run-a-connector-plugin.mdx
+  s_54b80c92daa9cb::t_f48c9da57da01d 1-85
+docs-site/plugins/write-a-normalizer.mdx
+  s_54b80c92daa9cb::t_6164ffde95f05c 1-344
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_a77e115bbc2334 1-116
+docs-site/plugins/x-list/index.mdx
+  s_54b80c92daa9cb::t_eb7a0a1b5a122e 1-56
+docs-site/quivr-search/index.mdx
+  s_54b80c92daa9cb::t_f6e22e7292c59d 1-110
+docs-site/quivr-v2-local-harness.mdx
+  s_54b80c92daa9cb::t_4db0dbc41b6598 1-584
+docs-site/quivr-v2-remaining-limits.mdx
+  s_54b80c92daa9cb::t_16c560c6423ed8 1-158
+docs-site/reference/cli.mdx
+  s_54b80c92daa9cb::t_c0c38fdce72c05 1-201
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_1e110d07c05210 1-6263
+docs-site/reference/mcp.mdx
+  s_54b80c92daa9cb::t_33d5f3322369c5 1-362
+docs-site/runnable-guides.mdx
+  s_54b80c92daa9cb::t_e60450f9bf02c6 1-81
+docs-site/sdks/go/index.mdx
+  s_54b80c92daa9cb::t_181200f4af499d 1-179
+docs-site/sdks/python/index.mdx
+  s_54b80c92daa9cb::t_b0ccb4126d6e22 1-119
+docs-site/start/contributor.mdx
+  s_54b80c92daa9cb::t_0b50796ce24aff 1-34
+docs-site/start/functional.mdx
+  s_54b80c92daa9cb::t_6175bfc41e9f95 1-42
+docs-site/start/plugin-author.mdx
+  s_54b80c92daa9cb::t_5bece50b97ffae 1-27
+docs-site/tests/acceptance/index.mdx
+  s_54b80c92daa9cb::t_8af8ba373a9b2a 1-48
+docs-site/third_party/index.mdx
+  s_54b80c92daa9cb::t_925eba08f2a98b 1-34
+docs-site/what-quivr-can-do.mdx
+  s_54b80c92daa9cb::t_3c02ca68bd4d0e 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c973c8dc10ba1347579c60d7520ee362fcd1c438",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
