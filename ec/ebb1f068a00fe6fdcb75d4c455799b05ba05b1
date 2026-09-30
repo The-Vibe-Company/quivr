@@ -1,0 +1,184 @@
+scripts/docs.py
+  s_54b80c92daa9cb::t_8acedff0ad7d5b 19-25,31,618-619,622,654
+scripts/test_mintlify.py
+  s_54b80c92daa9cb::t_c62583582839f7 1,14-19,24-43,48-49,52,54,57-79,82-88,90,94,96-114,116-124,134
+  s_54b80c92daa9cb::t_ea831dc8749a42 53,95,115
+plugins/rss/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 6
+docs-site/guides/search.mdx
+  s_54b80c92daa9cb::t_da13e28c582ae2 1-6,8-11,13-15,18-26,45-143
+  s_54b80c92daa9cb::t_8147568aa504f7 7,12,16-17,27-44
+docs-site/reference/plugin-protocol.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-578
+docs-site/plugins/write-a-connector.mdx
+  s_54b80c92daa9cb::t_1ff711ea52ee5c 1-201
+  s_54b80c92daa9cb::t_9f08faf66038a3 202
+docs-site/reference/cli.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 6
+  s_54b80c92daa9cb::t_151336827e1732 3,8
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_bb6d138126c746 73,80
+  s_54b80c92daa9cb::t_e7c2067c76fde7 3-4,7,9-13,17,19-23,25-26,28-36,38,40-41,43-46,50-72,74-75,78,81-82,84,86-87,89-90,93,95-96,98,100,103,107-116,118,120,122-126
+docs-site/concepts.mdx
+  s_54b80c92daa9cb::t_809d466dc0b5dd 1-86
+docs-site/guides/described-alerts.mdx
+  s_54b80c92daa9cb::t_3663f0ecb64e69 1-81
+README.md
+  s_54b80c92daa9cb::t_7956d9e53a0183 297-298,313-315
+  s_54b80c92daa9cb::t_a15fbc25b5f91e 79-82,198,219,226,267-271,273-279
+  s_54b80c92daa9cb::t_802711ad02325d 112,122,152,154,165,233,235,246,253
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 190
+docs/inventory.toml
+  s_54b80c92daa9cb::t_d3f31f6040c1e8 15-18,58
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_6e33ba0dbae749 1-30,32-57,59-124
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 31
+  s_54b80c92daa9cb::t_cfa8c4725b0ecb 58
+docs-site/guides/keyword-alerts.mdx
+  s_54b80c92daa9cb::t_b797dbbc3c105b 1-171,175-176,180-186,193-210
+  s_54b80c92daa9cb::t_935c89bb4a2556 188-192
+  s_54b80c92daa9cb::t_0c5595a54e3ff7 187
+  s_54b80c92daa9cb::t_45664cb709d933 172-174,177-179
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 15-16
+quivr-search/src/components/connectors/SourceList.tsx
+  s_54b80c92daa9cb::t_30f13bd3642e8a 14
+Makefile
+  s_54b80c92daa9cb::t_a34fdded958da4 2,6-8
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 6
+cmd/quivr-reference/sources.go
+  s_54b80c92daa9cb::t_151336827e1732 68,86
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_607e68e8cd41e5 491,549
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 18,37
+  s_54b80c92daa9cb::t_30f13bd3642e8a 6
+docs-site/docs.json
+  s_54b80c92daa9cb::t_40993f607c6cc3 5,33,41,43-45,47,49,51-52,54-55,57,61,63-66,68,76,82-85,89-95,100-102,107-109,113-114,117-118,259
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 36-37,56,70-73,86-88,96-99,103-106,110-112,119-258
+docs-site/plugins/first-plugin.mdx
+  s_54b80c92daa9cb::t_3c3f3c1f138ff4 1-25,32-34,36-168,170-174,176-187,189-196,201-222,224-230,232-281
+  s_54b80c92daa9cb::t_4a23963903a81b 29-30,35
+  s_54b80c92daa9cb::t_421c4db0566a24 28,31
+  s_54b80c92daa9cb::t_5de62b53618b41 188,197-200,223,231
+  s_54b80c92daa9cb::t_c8363c777f8206 169,175
+  s_54b80c92daa9cb::t_ffc61f52a3c045 26-27
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_151336827e1732 7
+docs/runnable-guides.md
+  s_54b80c92daa9cb::t_19879afc22821d 3-7,11-13,15-19,22-23,28-32,34-38,40-45,62,66-70,73,76-78,82
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_40993f607c6cc3 3,5-6
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_a0d92291e1cf7e 31
+  s_54b80c92daa9cb::t_25ef0574cbb97d 32
+  s_54b80c92daa9cb::t_31356ecb4fa989 30,34
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_c4e3f31f911a41 3-4,7,9,11,14-31,34-36,47-50,53-56,58,60-61,63,65,67-68,70-71,74,76-77,79,81,84-85,89-116,118-121
+  s_54b80c92daa9cb::t_a57d425eaadb94 12
+docs-site/plugins/catalog.mdx
+  s_54b80c92daa9cb::t_dbcc75e129ecf1 7
+  s_54b80c92daa9cb::t_32c66110f09063 1-6,8-63
+docs-site/guides/x.mdx
+  s_54b80c92daa9cb::t_223c7ef2f97ca1 1-84
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_9535d0d4b64fbb 21,23,25,44
+  s_54b80c92daa9cb::t_b686d7ee289515 2-4,7,9,13-16,19,27,29-42,46,48,50,52-62
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_30f13bd3642e8a 22
+docs-site/plugins/overview.mdx
+  s_54b80c92daa9cb::t_45b01412331cfc 1-23,25-69,71-77,79-102
+  s_54b80c92daa9cb::t_9f08faf66038a3 24,78
+  s_54b80c92daa9cb::t_3968aa93a53fff 70
+internal/app/run.go
+  s_54b80c92daa9cb::t_30f13bd3642e8a 160
+docs-site/guides/connectors.mdx
+  s_54b80c92daa9cb::t_e7096310731c9e 40-43
+  s_54b80c92daa9cb::t_3dee81dec8893f 1-39,44-101
+docs-site/guides/rss.mdx
+  s_54b80c92daa9cb::t_35b785d5268498 1-70
+  s_54b80c92daa9cb::t_17e0f60ee1bfac 71-75
+docs-site/guides/ai-agents.mdx
+  s_54b80c92daa9cb::t_b7431eaa2bff0e 11
+  s_54b80c92daa9cb::t_d281447ecbefef 1-10,12-36,38-39,42-47,49-63
+  s_54b80c92daa9cb::t_ba8a791e2b69b5 37,40-41
+  s_54b80c92daa9cb::t_5d0cdee408f50f 48
+docs-site/plugins/pin.mdx
+  s_54b80c92daa9cb::t_bb75503690170f 1-66,68-76
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 67
+sdks/go/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 89,103,182
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_f6c5397c7e7a42 62
+  s_54b80c92daa9cb::t_802711ad02325d 106
+  s_54b80c92daa9cb::t_30f13bd3642e8a 90
+docs/agents/fleet-workflow.md
+  s_54b80c92daa9cb::t_607e68e8cd41e5 17
+docs-site/quickstart.mdx
+  s_54b80c92daa9cb::t_a5e3d0ab9a25a0 84-90,131,168-176,195-202,221-227
+  s_54b80c92daa9cb::t_ead02e452963ac 1-6,8-21,23-83,91-122,126-130,132-145,149-167,177-194,203-220,228-270
+  s_54b80c92daa9cb::t_f5e7ea233fb4d0 7,22
+  s_54b80c92daa9cb::t_3b6d35ff85e687 123-125,146-148
+docs-site/reference/mcp.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 6
+  s_54b80c92daa9cb::t_151336827e1732 3,8
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_d332c662acd799 3-4,7-100
+docs-site/guides/microsoft-365.mdx
+  s_54b80c92daa9cb::t_24bbc1b91c4cbb 1-98
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 366,534,625
+docs-site/plugins/types.mdx
+  s_54b80c92daa9cb::t_2a733d7935fb80 1-179
+quivr-search/README.md
+  s_54b80c92daa9cb::t_802711ad02325d 26,55,59
+scripts/local.py
+  s_54b80c92daa9cb::t_d0c5491f89502e 649-650
+  s_54b80c92daa9cb::t_413966bd58b42c 656
+  s_54b80c92daa9cb::t_c9a4e1c5b90941 638
+  s_54b80c92daa9cb::t_a34fdded958da4 134-136,647-648,651-655,657,660,663
+docs-site/guides/add-content.mdx
+  s_54b80c92daa9cb::t_5de62b53618b41 171,178-181
+  s_54b80c92daa9cb::t_96377cb35f5ec9 1-162,164-170,172-177,182-272
+  s_54b80c92daa9cb::t_413966bd58b42c 163
+scripts/mintlify_site.py
+  s_54b80c92daa9cb::t_4e99d3122a74c2 411-447,563,567-584
+  s_54b80c92daa9cb::t_49056596a1b720 397-403,467-470,511
+  s_54b80c92daa9cb::t_8add3079c27003 564-565
+  s_54b80c92daa9cb::t_f23c6754319a12 488-490
+  s_54b80c92daa9cb::t_60d5d2a4fc91c1 696
+  s_54b80c92daa9cb::t_fe6c3d8b90173c 1-25,39-43,46-49,60,64,66,68,73-74,80-81,320-321,323,358,370-396,404-410,448-466,471-487,491-510,512-562,566,585-593,595-599,601,603-605,609-610,613-623,626-666,669-677,679-695,697-722,728-729,736,738-740
+  s_54b80c92daa9cb::t_151336827e1732 44-45,600,602
+docs-site/plugins/write-an-alert-rule.mdx
+  s_54b80c92daa9cb::t_6e842f5bad39d3 115
+  s_54b80c92daa9cb::t_e37605a8a6675a 1-114,116-125
+docs-site/api-reference/overview.mdx
+  s_54b80c92daa9cb::t_5d8125d75c943f 1-35,37-55,57-68
+  s_54b80c92daa9cb::t_ba6080cbd2f854 36,56
+docs-site/reference/plugin-manifest.mdx
+  s_54b80c92daa9cb::t_40993f607c6cc3 1-135
+scripts/test_guides.py
+  s_54b80c92daa9cb::t_50ce681ed8e554 56,63,153
+  s_54b80c92daa9cb::t_d110f16534d8f9 140-141,146-152,164-166,182-183
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_151336827e1732 7
+scripts/guides.py
+  s_54b80c92daa9cb::t_1a5e5a817a117d 2,4-9,12-13,16,32,49-53,124-137,139,142,145,147,149-152,250-265,284-285,324-326,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ecebb1f068a00fe6fdcb75d4c455799b05ba05b1",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
