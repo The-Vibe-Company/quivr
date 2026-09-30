@@ -1,0 +1,46 @@
+README.md
+  s_54b80c92daa9cb::t_b862523341c50e 229-235
+  s_54b80c92daa9cb::t_0d9dc432c0fd04 268
+tests/acceptance/ingestion_plugin_test.go
+  s_54b80c92daa9cb::t_6506ffae9c8a6e 1-96
+sdks/go/README.md
+  s_54b80c92daa9cb::t_29b38515e336ea 9-11,79-89
+  s_54b80c92daa9cb::t_f6502a0bc4a916 90
+docs/inventory.toml
+  s_54b80c92daa9cb::t_0397fd9d3f44e5 84
+  s_54b80c92daa9cb::t_29b38515e336ea 100,135
+  s_54b80c92daa9cb::t_5163a728285f7d 128
+scripts/local.py
+  s_54b80c92daa9cb::t_bf3bff5a80585a 12,514-516
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_5248f9256474fb 4,8-9,27-28,33,49,56,65,67,98-99,132-134,520-600,680,763-774,784-786
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_f6439b87f3533a 303-305
+docs/plugins/write-an-ingestion-plugin.md
+  s_54b80c92daa9cb::t_0397fd9d3f44e5 30-36,98-100
+  s_54b80c92daa9cb::t_57387c3e37dad2 1-29,37-97,101-112
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_fa756893f271a6 1-36,38-68
+  s_54b80c92daa9cb::t_c142dde359a66e 37
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_29b38515e336ea 19
+  s_54b80c92daa9cb::t_0397fd9d3f44e5 16
+CONTEXT.md
+  s_54b80c92daa9cb::t_499a3dff9a74ef 63-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b713d57387c65723058979f6cbcfc31157ebfb3a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
