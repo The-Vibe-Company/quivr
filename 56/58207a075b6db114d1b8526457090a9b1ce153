@@ -6,6 +6,7 @@ internal/orchestration/temporal/ingestion.go
   s_54b80c92daa9cb::t_ed8641356668b8 117
 internal/processing/processing.go
   s_54b80c92daa9cb::t_0a3ba1e3d75d8c 78,87-95,158-165,167-169
+  s_54b80c92daa9cb::t_5dedff14987ff5 166
 internal/app/plugins.go
   s_54b80c92daa9cb::t_0140c96b305f39 12,60-143
   s_54b80c92daa9cb::t_d4561bdbd32ef2 144
@@ -76,6 +77,7 @@ internal/retrieval/rebuild_test.go
   s_54b80c92daa9cb::t_e011e9b5664303 122
 internal/processing/enrichment.go
   s_54b80c92daa9cb::t_0a3ba1e3d75d8c 29-36,38-40
+  s_54b80c92daa9cb::t_5dedff14987ff5 37
 internal/plugins/registry/check.go
   s_54b80c92daa9cb::t_b4c3d5f51d6885 42-44
 internal/retrieval/rebuild.go
