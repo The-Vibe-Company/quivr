@@ -1,0 +1,21 @@
+internal/transport/httpapi/catalog_test.go
+  s_54b80c92daa9cb::t_a15619bf2b1cd5 24-26,31,33,36,97-99,101,124-144,172-174
+internal/transport/httpapi/changes_test.go
+  s_54b80c92daa9cb::t_6166c69922904b 22-24,28,35,42,131-132,135,211-229,231-237,246,300-302,317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8efe5a04c0fe9465bed4ad2b1aa6607d2048d4f6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
