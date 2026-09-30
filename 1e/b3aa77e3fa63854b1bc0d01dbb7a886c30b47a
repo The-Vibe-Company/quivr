@@ -1,0 +1,29 @@
+docs-site/quivr-v2-local-harness.mdx
+  s_54b80c92daa9cb::t_04a777c11c5e84 341-344
+internal/content/content_test.go
+  s_54b80c92daa9cb::t_ac411c269100d5 278-286
+internal/operations/operations_test.go
+  s_54b80c92daa9cb::t_1d66b980032944 68
+internal/transport/httpapi/batch_test.go
+  s_54b80c92daa9cb::t_013f91402bb594 344-345
+internal/transport/httpapi/catalog_test.go
+  s_54b80c92daa9cb::t_b92e522f9e4dea 129-130
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_761bf21d51c94e 242-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1eb3aa77e3fa63854b1bc0d01dbb7a886c30b47a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
