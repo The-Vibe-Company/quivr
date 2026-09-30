@@ -1,0 +1,81 @@
+---
+title: "Runnable guide blocks"
+description: "Write guide blocks that make verify replays"
+---
+
+A guide can mark its shell commands as runnable. `make verify` then replays them
+against the real local stack, so a change in the API breaks the guide in CI
+instead of leaving it silently wrong. [Your first search](/first-search) is the
+reference example.
+
+## Mark a block {#mark-a-block}
+
+Tag a shell fence with `runnable`, and follow it with the output it must print,
+tagged `output`:
+
+````markdown
+```sh runnable
+curl -s -X POST "$QUIVR_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "News", "idempotency_key": "news-corpus"}'
+```
+
+```json output
+{"corpus_id": "{{CORPUS_ID}}", "name": "News"}
+```
+````
+
+- The command runs with `bash -eo pipefail` in an empty temporary folder, with
+  `QUIVR_URL` (the API address) and `QUIVR_KEY` (a key with every action on the whole
+  Organization) set. A non-zero exit fails the block.
+- The output block is optional and must come right after its command, with only prose
+  in between. A `json output` block is compared as JSON; any other `output` block is
+  compared as trimmed text.
+- `sh runnable retry` reruns the command, once a second for up to 60 seconds, until
+  its output matches. Use it where the reader waits too: a Receipt resolving, a
+  Record becoming searchable.
+- Fences without `runnable`, such as the reader's own `export` lines, are not run.
+  A kept value (below) that a later block uses must be exported in such a fence
+  before that block, or the page is refused: readers copying it would miss it.
+
+## Expected JSON {#expected-json}
+
+The expected output asserts only what it shows, so write the stable fields a
+reader relies on and leave the rest out.
+
+| You write | It matches |
+| --- | --- |
+| an object | an object with at least these keys, each matching; other keys are ignored |
+| an array | an array of the same length, item by item |
+| an array ending with `"..."` | an array starting with these items, then any others |
+| `"..."` | any value, such as a timestamp or an identifier nobody reuses |
+| `"{{NAME}}"` | any string or number the first time, which is kept as `NAME`; the same value afterwards |
+| anything else | exactly that value |
+
+A kept value is exported as `$NAME` to the page's later blocks. Tell readers to do
+the same with a plain `sh` block, for example `export CORPUS_ID=<the corpus_id above>`.
+
+## How pages are replayed {#how-pages-are-replayed}
+
+`scripts/guides.py` reads every page declared in the
+documentation inventory (`docs/inventory.toml`). In `make verify`, after the timed
+scenarios, it replays each page with runnable blocks in order, in its own
+Organization, and stops a page at its first failing block because later blocks
+depend on it. Results are written to `guides.json` in the verification folder. A
+failure names the page, the block and the difference:
+
+```text
+docs/first-search.md:262: block 11: $.items[0].excerpt.text: expected "…Monday.", got "…Tuesday."; output "{…}" (after 61 attempts)
+```
+
+Against a stack you started with `make dev`, with a key of an Organization the page
+has not run in yet: idempotency keys are fixed, so a second run replays the first
+one's results and a page that changes content, like the first-search guide, no
+longer matches (`make reset` starts over):
+
+```sh
+python3 scripts/guides.py --list
+QUIVR_URL=http://127.0.0.1:<port> QUIVR_KEY=<key> python3 scripts/guides.py docs/first-search.md
+```
+
+Runnable blocks are the only request and response examples a guide should show;
+link to [`openapi.yaml`](/openapi.yaml) for the rest.

@@ -1,0 +1,47 @@
+---
+title: "Domain documentation"
+description: "How the domain documentation is laid out"
+---
+
+How engineering skills and agents consume this repository's domain documentation.
+
+## Layout {#layout}
+
+Quivr V2 is currently a single-context repository:
+
+```text
+/
+├── CONTEXT.md
+├── docs/adr/
+└── src/
+```
+
+- `CONTEXT.md` is the canonical glossary for the domain-neutral Quivr engine.
+- `docs/adr/` contains repository-wide architecture decisions when they are created.
+- Customer and vertical-specific concepts belong in plugins or their own repositories, not in the core glossary.
+- Business rules such as limits, quotas, billing, plans and entitlements are not engine concepts. They belong to an API or product layer above Quivr, and the glossary does not define them.
+
+## Before exploring or implementing {#before-exploring-or-implementing}
+
+- Read `CONTEXT.md` before naming domain concepts, designing interfaces, writing tests, or drafting tracker issues.
+- Read the ADRs in `docs/adr/` that touch the area being changed.
+- If a referenced domain file or ADR directory does not exist, proceed silently. `/domain-modeling` creates documentation lazily when a term or decision is actually resolved.
+
+## Use the glossary's vocabulary {#use-the-glossarys-vocabulary}
+
+Use the terms defined in `CONTEXT.md` in issue titles, specifications, interfaces, test names, and documentation. Do not drift toward synonyms the glossary explicitly marks with `_Avoid_`.
+
+If a required concept is missing, first question whether it is unnecessary or vertical-specific. When it is a genuine engine concept, use `/domain-modeling` to define it before spreading a new term through the project.
+
+## Respect architecture decisions {#respect-architecture-decisions}
+
+Surface any conflict with an existing ADR explicitly instead of silently overriding it:
+
+> Contradicts ADR-0007, but is worth reopening because...
+
+Record a new hard-to-reverse architecture decision in `docs/adr/` with the next available numeric prefix. Do not use an ADR for an easily reversible implementation detail.
+
+This repository overrides the `/domain-modeling` ADR template on two points (ADR 0004 (`docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md`)); `make docs` enforces both:
+
+- Under the title, write a `Date: YYYY-MM-DD` line and a `Status:` line (`proposed` or `accepted`) as plain text, not frontmatter.
+- Never edit an ADR once it is accepted, not even to mark it superseded. The new ADR states which one it supersedes and why.

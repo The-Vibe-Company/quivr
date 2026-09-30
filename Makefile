@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure eval docs start-pages denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -38,13 +38,23 @@ generate:
 contracts:
 	GO=$(GO) bash scripts/contracts.sh check
 # Fails on an undeclared or missing doc page, a broken link or a missing path, a page over its line budget,
-# a malformed glossary term, a stale start page, or an edited dated doc or accepted ADR (compared with where
-# the branch forked from origin/main); see docs/inventory.toml and docs/agents/documentation.md.
+# a malformed glossary term, a stale start page or documentation site, or an edited dated doc or accepted ADR
+# (compared with where the branch forked from origin/main); see docs/inventory.toml and docs/agents/documentation.md.
 docs:
 	python3 scripts/docs.py
 # Regenerates the per-reader start pages (docs/start/) from docs/inventory.toml, then checks.
 start-pages:
 	python3 scripts/docs.py --write-start-pages
+# The public documentation site (THE-719): docs-site regenerates docs-site/ from the living pages
+# (scripts/mintlify_site.py; needs PyYAML from contracts/http/v0/checks/requirements.txt). docs-site-check runs
+# the pinned Mintlify CLI on it as CI does, and docs-preview serves it on http://localhost:3000 (Node 20.17+).
+MINT ?= npx --yes mint@4.2.952
+docs-site:
+	python3 scripts/mintlify_site.py
+docs-site-check:
+	cd docs-site && $(MINT) validate && $(MINT) broken-links --check-anchors
+docs-preview:
+	cd docs-site && $(MINT) dev
 # Fails when a denylisted (hashed) customer term appears; see scripts/denylist.py.
 denylist:
 	python3 scripts/denylist.py

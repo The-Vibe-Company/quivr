@@ -1,0 +1,140 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Quivr",
+  "description": "An open-source engine that turns continuous content streams into search and monitoring.",
+  "colors": {
+    "primary": "#5b3fd6",
+    "light": "#b29aff",
+    "dark": "#4b31be"
+  },
+  "api": {
+    "playground": {
+      "display": "interactive"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Using Quivr",
+            "pages": [
+              "index",
+              "start/functional",
+              {
+                "group": "Understand how it works",
+                "pages": [
+                  "contracts/http/v0/index",
+                  "quivr-v2-remaining-limits",
+                  "what-quivr-can-do"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "api-walkthrough",
+                  "connect-an-ai-agent",
+                  "connectors/index",
+                  "connectors/microsoft-365",
+                  "connectors/rss",
+                  "connectors/x",
+                  "connectors/x-webhooks",
+                  "deploy/railway/index",
+                  "described-alerts",
+                  "first-search",
+                  "keyword-alerts",
+                  "quivr-search/index"
+                ]
+              },
+              {
+                "group": "Reference",
+                "pages": [
+                  "reference/cli",
+                  "reference/mcp"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Writing plugins",
+            "pages": [
+              "start/plugin-author",
+              {
+                "group": "Understand how it works",
+                "pages": [
+                  "contracts/plugins/v0/index",
+                  "plugins/alerts/index",
+                  "plugins/x-list/index"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "plugins/pdf-text/index",
+                  "plugins/rss/index",
+                  "plugins/run-a-connector-plugin",
+                  "plugins/write-a-normalizer",
+                  "plugins/write-an-ingestion-plugin",
+                  "sdks/go/index",
+                  "sdks/python/index"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Contributing to Quivr",
+            "pages": [
+              "start/contributor",
+              {
+                "group": "Understand how it works",
+                "pages": [
+                  "context",
+                  "quivr-v2-local-harness"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "agents",
+                  "agents/documentation",
+                  "agents/domain",
+                  "agents/evaluation",
+                  "agents/fleet-workflow",
+                  "agents/issue-tracker",
+                  "agents/testing",
+                  "agents/triage-labels",
+                  "runnable-guides",
+                  "tests/acceptance/index"
+                ]
+              },
+              {
+                "group": "More lists",
+                "pages": [
+                  "dated/index",
+                  "third_party/index"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "openapi": "openapi.yaml"
+      }
+    ]
+  }
+}

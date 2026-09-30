@@ -1,15 +1,18 @@
-# Documentation conventions
+---
+title: "Documentation conventions"
+description: "Living and dated documents, the inventory, budgets and when docs may change"
+---
 
 How documentation is organised in this repository, and when it may change. `make docs` (`scripts/docs.py`, the first step of `make verify`) checks the inventory, links and repository paths, line budgets, the glossary form, start pages, the site navigation and frozen dated documents, and each failure names the rule, the file, the line and the fix. The other conventions here, including the signal rule, are checked in review.
 
-## Living and dated documents
+## Living and dated documents {#living-and-dated-documents}
 
 - **Living** documents describe current behaviour. They are updated in the pull request that changes that behaviour, and their links and repository paths must resolve.
-- **Dated** documents record what was decided or observed at a date: ADRs in `docs/adr/`, and design records, evidence and research in `docs/dated/` (listed in [its index](../dated/README.md)). Each starts with `Date:` and `Status:` lines and keeps its original language. Once merged it is frozen: `make docs` fails when a branch edits or removes one, unless its status is `proposed`, so a newer document supersedes it instead ([ADR 0004](../adr/0004-documentation-rules-are-enforced-by-ci-only.md)).
+- **Dated** documents record what was decided or observed at a date: ADRs in `docs/adr/`, and design records, evidence and research in `docs/dated/` (listed in [its index](/dated)). Each starts with `Date:` and `Status:` lines and keeps its original language. Once merged it is frozen: `make docs` fails when a branch edits or removes one, unless its status is `proposed`, so a newer document supersedes it instead (ADR 0004 (`docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md`)).
 
 Living documentation is written in English, with neutral examples: no customer names or configurations (see the generic-repository rule in `AGENTS.md`). Contract facts such as endpoints, request shapes, limits and error codes live in their artifacts (the OpenAPI contract, the code); prose links to them instead of restating them.
 
-## The inventory
+## The inventory {#the-inventory}
 
 `docs/inventory.toml` is the single list of living pages. Every Markdown file is either declared under `[pages]`, matched by the `dated` list, or matched by the `excluded` list (Markdown that is not Quivr documentation). A new living page is one line, in path order:
 
@@ -25,15 +28,15 @@ Each audience has one start page in `docs/start/`, generated from the inventory:
 
 The inventory also defines the public documentation site. Mintlify builds it from `docs-site/` on main, which `make docs-site` generates: every living page as MDX, the navigation and the bundled HTTP contract, and nothing else, so no dated document (frozen pages cannot be kept renderable) and no source file. Never edit `docs-site/`; after changing a living page or the inventory, run `make docs-site`, or `make docs` fails with `stale-docs-site`. Pages stay Markdown written for GitHub. The repository is private: a link to a living page opens that page on the site, and a link to any other file (code, schemas, dated documents) shows there as its path in code, so the sentence must read without the link. CI runs Mintlify's own checks on `docs-site/` (`make docs-site-check`).
 
-## Line budgets
+## Line budgets {#line-budgets}
 
 `AGENTS.md`, `CONTEXT.md` and every page of kind `guide` have a maximum number of lines under `[budgets]` in the inventory. A new budget is set about 5% above the page's size when it is added; `make docs` prints the line to paste. When a page reaches its budget, shorten it first: link to the authoritative source, remove repetition, split a guide by task. Raise a budget only in a pull request whose signal needs the extra lines, and say so in its description.
 
-## Runnable guide blocks
+## Runnable guide blocks {#runnable-guide-blocks}
 
-A guide shows API requests and responses only as runnable blocks, which `make verify` replays against the local stack; link to the OpenAPI contract for the rest. See [Runnable guide blocks](../runnable-guides.md).
+A guide shows API requests and responses only as runnable blocks, which `make verify` replays against the local stack; link to the OpenAPI contract for the rest. See [Runnable guide blocks](/runnable-guides).
 
-## Glossary form
+## Glossary form {#glossary-form}
 
 `CONTEXT.md` is the engine glossary. Each term is one paragraph: the term in bold followed by a colon, one or two sentences of definition, then an `_Avoid_:` line listing words not to use for it. Repository conventions such as living, dated, inventory and signal belong on this page, not in the glossary.
 
@@ -43,7 +46,7 @@ A logical collection of records that share an access and retrieval boundary.
 _Avoid_: Index, database
 ```
 
-## When documentation may change
+## When documentation may change {#when-documentation-may-change}
 
 A living document changes only because of a **signal**:
 

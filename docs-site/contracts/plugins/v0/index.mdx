@@ -1,0 +1,790 @@
+---
+title: "Plugin Protocol v0"
+description: "The plugin manifest, routes, schemas and fixtures"
+---
+
+The authoritative, language-neutral contract between the Quivr engine and an
+external plugin. It covers **Plugin API version `0.6.0`**: `0.2.0` added the
+`subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
+`0.3.1` the instance scope to connector fetch requests, the declared
+checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
+connector attachments, `0.5.0` the connector push mode (`receive`), and
+`0.6.0` the `ingestion` Contribution. JSON Schemas in this
+directory are the source of truth; SDKs and the Contract Runner implement them,
+not the other way round. Design context: ADR 0001 (`docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md`),
+ADR 0002 (`docs/adr/0002-record-version-identity-from-submitted-input.md`)
+and the glossary in [CONTEXT.md](/context).
+
+| Schema | Describes |
+| --- | --- |
+| `plugin-manifest.schema.json` | `quivr-plugin.yaml`, validated as its JSON equivalent |
+| `discovery.schema.json` | `GET /v0/discovery` response |
+| `health.schema.json` | `GET /v0/health` 200 response |
+| `normalizer-request.schema.json` | `POST /v0/contributions/normalizer` request |
+| `normalizer-response.schema.json` | `POST /v0/contributions/normalizer` 200 response |
+| `subscription-request.schema.json` | `POST /v0/contributions/subscription` request (since 0.2) |
+| `subscription-response.schema.json` | `POST /v0/contributions/subscription` 200 response (since 0.2) |
+| `connector-fetch-request.schema.json`, `connector-fetch-response.schema.json` | `POST /v0/contributions/connector/fetch` request and 200 response (since 0.3) |
+| `connector-check-credential-request.schema.json`, `connector-check-credential-response.schema.json` | `POST /v0/contributions/connector/check_credential` request and 200 response (since 0.3) |
+| `connector-receive-request.schema.json`, `connector-receive-response.schema.json` | `POST /v0/contributions/connector/receive` request and 200 response (since 0.5) |
+| `ingestion-segment-and-embed-request.schema.json`, `ingestion-segment-and-embed-response.schema.json` | `POST /v0/contributions/ingestion/segment_and_embed` request and 200 response (since 0.6) |
+| `ingestion-embed-query-request.schema.json`, `ingestion-embed-query-response.schema.json` | `POST /v0/contributions/ingestion/embed_query` request and 200 response (since 0.6) |
+| `error.schema.json` | Body of every non-2xx response |
+| `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
+| `subscription-fixture.schema.json` | Subscription fixture: a local test input that tools turn into subscription requests (since 0.2) |
+| `connector-fixture.schema.json` | Connector fixture: a local test input that tools turn into connector requests (since 0.3) |
+| `ingestion-fixture.schema.json` | Ingestion fixture: a local test input that tools turn into ingestion requests (since 0.6) |
+| `reports/contract-report.schema.json` | JSON report of `quivr plugin test --report` (tooling, not protocol) |
+
+The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
+are **not** defined here. They come from
+`contracts/shared/v0/manifest.schema.json`,
+the single source also used by the public HTTP contract, so a normalizer
+returns exactly the Manifest a client could submit as `kind: "manifest"`.
+`go test ./contracts/` (part of `make test`) fails if an `openapi.yaml`
+component for one of those shapes is anything but an alias to the shared file,
+or if a plugin schema declares a `$defs` entry with a shared name; the bundler
+used by `make contracts` also rejects a malformed alias. Reviewers still keep
+equivalent copies under other names out of both contracts.
+
+## Contributions {#contributions}
+
+Plugin API 0.6 accepts four Contributions, and a manifest declares at least one:
+
+| Contribution | Since | Purpose |
+| --- | --- | --- |
+| **`normalizer`** | 0.1 | Turn one input Blob into the Parts, Relations and extensions of a Record Version |
+| **`subscription`** | 0.2 | An alert rule: decide whether one Record Version matches each Saved Query expression of a batch ([below](#subscription-contribution)) |
+| **`connector`** | 0.3 | A source collector: fetch pages of new or changed items after an opaque checkpoint ([below](#connector-contribution)) |
+| **`ingestion`** | 0.6 | Cut a Record Version into segments, embed them in the vector spaces the plugin owns, and encode queries into those spaces ([below](#ingestion-contribution)) |
+
+The names `enricher`, `validator`, `projector` and `retriever`
+are **reserved**. A manifest that declares them is rejected
+(`reserved_contribution`).
+
+### Plugin API versions {#plugin-api-versions}
+
+A minor Plugin API version only adds to the previous one. This engine
+implements `0.6.0` and still serves every `0.1` to `0.5` plugin unchanged: a
+manifest is compatible when its `plugin_api` range admits any supported version
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0` or `0.6.0`), and the engine speaks the highest one the range admits.
+A manifest field introduced by a later minor version needs a range that admits
+it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
+is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
+at its `modes`.
+A patch version only adds optional fields; a plugin that validates requests
+strictly accepts them once it is built with an SDK of that version.
+`quivr plugin inspect` reports that negotiated version. Discovery must serve
+a supported version inside the declared range that is at least the version
+each declared Contribution needs; SDKs serve the negotiated one. A
+Contribution needs a range that admits the version that introduced it:
+`subscription` with `plugin_api: ">=0.1.0 <0.2.0"` is
+`incompatible_plugin_api` at `/contributions/subscription`. Discovery lists
+Contributions as a set, in any order.
+
+## HTTP routes {#http-routes}
+
+The plugin serves JSON over HTTP. Paths are versioned by the Plugin API major
+version.
+
+| Route | Success | Purpose |
+| --- | --- | --- |
+| `GET /v0/discovery` | 200 discovery document | Identity, implemented Plugin API version, Contributions and `manifest_digest` |
+| `GET /v0/health` | 200 `{"status":"ok"}` | Ready to accept invocations; otherwise 503 with the error envelope |
+| `POST /v0/contributions/normalizer` | 200 normalizer response | Normalize one input Blob |
+| `POST /v0/contributions/subscription` | 200 subscription response | Decide a batch of evaluations for one Record Version |
+| `POST /v0/contributions/connector/fetch` | 200 fetch response | Fetch one page of items after a checkpoint |
+| `POST /v0/contributions/connector/check_credential` | 200 `{"status":"ok"}` | Check that the source accepts a credential |
+| `POST /v0/contributions/connector/describe_attachment` | 200 size and SHA-256, or a skip | Describe one attachment's bytes (since 0.4, with `attachments`) |
+| `POST /v0/contributions/connector/upload_attachment` | 200 `{"status":"uploaded"}` | Upload one attachment to a core grant (since 0.4, with `attachments`) |
+| `POST /v0/contributions/connector/receive` | 200 verdict and answer | Verify one relayed delivery and return its items (since 0.5, for a push kind) |
+| `POST /v0/contributions/ingestion/segment_and_embed` | 200 segments with their vectors | Segment and embed one Record Version (since 0.6) |
+| `POST /v0/contributions/ingestion/embed_query` | 200 `{"vector"}` | Encode one query into one space (since 0.6) |
+
+- **Errors.** Every non-2xx response carries the error envelope
+  `{code, message, retryable}`. `retryable: true` asks the engine to retry
+  within the declared retry intent. `retryable: false` is terminal.
+- **Unavailability.** A connection failure, a timeout, or a 5xx without a valid
+  envelope counts as plugin unavailability, not a plugin decision.
+- **Manifest digest.** `manifest_digest` is `sha256:` followed by the lowercase
+  hex SHA-256 of the exact bytes of the `quivr-plugin.yaml` the plugin was built
+  from. `quivr plugin inspect` prints the same value.
+- **Future Contributions** use `/v0/contributions/<name>`, with one sub-route
+  per operation when a Contribution has several (`connector/fetch`).
+
+## Manifest (`quivr-plugin.yaml`) {#manifest-quivr-pluginyaml}
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Lowercase identifier of letters, digits, `-` and `_` segments separated by dots, at most 64 characters (`_` since 0.3.1) |
+| `version` | SemVer 2.0.0 plugin version |
+| `description` | Optional human description |
+| `compatibility.engine`, `compatibility.plugin_api` | Version ranges (grammar below) |
+| `contributions.normalizer.media_types` | Exact Blob media types the normalizer accepts; startup configuration routes them |
+| `contributions.normalizer.timeout_ms` | Per-invocation timeout, 1000–300000, default 30000 |
+| `contributions.normalizer.retry.max_attempts` | Retry intent for retryable errors, 1–10, default 3; the engine may cap it |
+| `contributions.normalizer.limits` | Declared `max_response_bytes` (default 4 MiB, at most 16 MiB) and `max_parts` (default and maximum 256) |
+| `contributions.subscription.expression_schema` | JSON Schema 2020-12 of the Saved Query expression (a JSON object) the rule interprets |
+| `contributions.subscription.configuration_schema` | Optional JSON Schema 2020-12 of the per-Subscription evaluator configuration (a JSON object); absent accepts any object |
+| `contributions.subscription.max_batch_size` | Most evaluations per request, 1–256, default 32; the core splits larger batches |
+| `contributions.subscription.timeout_ms`, `.retry.max_attempts`, `.limits.max_response_bytes` | As for the normalizer |
+| `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
+| `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
+| `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
+| `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
+| `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`; the id is the plugin id or starts with `<id>.` |
+| `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
+| `contributions.ingestion.limits` | `max_segments` per Version (default 256, at most 1024) and `max_response_bytes` (default and cap 16 MiB) |
+| `configuration.schema` | JSON Schema 2020-12 for installer configuration |
+| `secrets[]` | Secret names (`^[A-Z][A-Z0-9_]*$`), description, `required` (default true). Values never appear in the manifest |
+| `extensions` | Owned extension namespaces: namespace, then schema version, then JSON Schema 2020-12 |
+| `run.command` | Local development argv, without a shell |
+
+### Version ranges {#version-ranges}
+
+A range is one or more comparators separated by whitespace, and every
+comparator must hold. A comparator is an optional operator (`>=`, `>`, `<=`,
+`<`, `=`) directly followed by `MAJOR.MINOR.PATCH`. No operator means `=`.
+Shorthands (`^`, `~`, `x`), `||` and pre-release versions inside a range are
+not part of the grammar.
+
+Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
+`<0.2.0`. A range that no release version satisfies, such as
+`>=0.3.0 <0.2.0`, is invalid. `fixtures/ranges.json` is normative for every
+implementation.
+
+This engine implements Plugin API `0.3.1` (and serves `0.1.0`, `0.2.0` and `0.3.0`) and reports
+engine version `0.1.0`. Release builds may override the engine version.
+`quivr plugin inspect --json` reports both, and the negotiated Plugin API
+version under `compatibility.plugin_api.version`.
+
+## Invocation context {#invocation-context}
+
+The normalizer request carries:
+
+- the invocation id and idempotency key;
+- the Organization, Corpus, Record and Record Version ids;
+- the source namespace and Record Key;
+- the input Blob id, media type, size and SHA-256;
+- the submitted extensions and provenance;
+- the validated plugin configuration;
+- a reference to the input Blob: a short-lived signed GET URL or, in local
+  development only, a `file://` URL.
+
+Bodies are never inline. The idempotency key is opaque to plugins and stable
+across retries of the same logical invocation. The same key must produce the
+same logical output.
+
+## Validation rules {#validation-rules}
+
+**Checked today.** `quivr plugin inspect` checks a manifest against:
+
+- the manifest schema, including unknown fields;
+- well-formed and satisfiable ranges;
+- compatibility with this engine and a supported Plugin API version, and
+  with the version each declared Contribution needs;
+- reserved Contributions and reserved fields;
+- subscription expression and configuration schemas that compile as JSON
+  Schema 2020-12 (`invalid_expression_schema`, `invalid_config_schema`);
+- connector kind config and credential schemas that compile
+  (`invalid_config_schema`, `invalid_credential_schema`);
+- extension namespaces equal to the plugin id or prefixed by `<id>.`;
+- configuration and extension schemas that compile as JSON Schema 2020-12;
+- duplicate secret names.
+
+The normalizer response fixtures are checked against the response schema plus
+the engine's structural Manifest rules: unique Part keys, known and acyclic
+parents, valid text, complete Relation targets, and the Part count and
+structure bounds.
+
+**Protocol rules checked at certification time and enforced at ingestion.**
+These rules are part of the v0 contract. `quivr plugin test` (the Contract
+Runner, below) checks them on every normalizer response with the validation in
+`internal/plugins` (`CheckNormalizerOutput`), and the engine applies the same
+function to every invocation of a pinned normalizer before anything is
+recorded.
+
+1. **Blob Parts may reference only the input Blob.** A normalizer response
+   must not introduce other Blobs. A Blob Part must name the input Blob id
+   with its media type (`foreign_blob`, `unverified_blob`). The public Blob
+   Part carries no checksum. The reference is resolved to the verified input
+   Blob, and its SHA-256 must equal the request's `input.sha256`. The runner
+   re-hashes the file it served. *Checked by the Contract Runner; enforced by
+   the engine (THE-683).*
+2. **Response size cap.** A response larger than the declared
+   `max_response_bytes` (default 4 MiB) is invalid output
+   (`response_too_large`). The engine caps the declared value at 16 MiB.
+   *Checked by the Contract Runner; enforced by the engine (THE-683).*
+3. **Namespace ownership.** Response extensions, top-level and on Parts, may
+   use only namespaces and schema versions the plugin declares, with data
+   valid against the declared schema (`undeclared_namespace`,
+   `undeclared_schema_version`, `invalid_extension`). Clients may not write
+   plugin-owned namespaces. *The output side is checked by the Contract
+   Runner. The engine enforces both sides (THE-684): it registers the pinned
+   plugin's namespaces at startup (refusing a namespace not prefixed by the
+   plugin id, `foreign_namespace`, or clashing with a built-in one,
+   `namespace_conflict`), publishes valid output extensions on the Version,
+   fails invalid ones as `normalizer_invalid_output`, and rejects client
+   writes with 422 `extension_namespace_owned`. Retrieval mappings may point
+   at `/extensions/{plugin namespace}/...`.*
+
+A response with more Parts than the declared `max_parts` is also invalid
+(`too_many_parts`).
+
+## Subscription Contribution {#subscription-contribution}
+
+An alert rule (since Plugin API 0.2). The core sends one Record Version and a
+batch of distinct evaluations; the plugin answers one decision per
+evaluation. A plugin pinned at startup (`plugins` in the core configuration,
+beside the normalizers) is installed as the evaluator `<id>@<version>`, and
+Subscriptions pin it by `plugin_id` and `version`.
+
+**When the core asks.** When a Record Version becomes searchable
+(`record.retrieval_ready`), and again once its embeddings are attached
+(`record.enrichment_available`) for every Subscription that answered
+`not_ready`. A rule that needs enrichment answers `not_ready` while `enriched`
+is false. Nothing is evaluated at acceptance time, before the Version is
+searchable. The core batches every due Subscription of one Record Version
+pinned to the plugin, across Subscriptions and owners, into as few requests as
+`max_batch_size` allows. A Subscription Version that decided a Record Version
+(`match` or `no_match`) is not asked about it again, even when a later trigger
+arrives while it is being decided, so a rule that calls a paid backend pays
+once per Record Version. One worker at a time claims the due evaluations of a
+Record Version, so they are not split between concurrent requests.
+
+**Previews.** The API also asks when a client previews a proposed Subscription
+(`POST /v0/subscription-previews`): one request per recent Record Version,
+each with one evaluation whose `subscriptions` holds a single synthetic
+reference whose Subscription and Subscription Version ids are `preview` (its
+Saved Query ids too, when the Saved Query is inline). The decision is
+returned to the client and never stored. So the API process must reach the
+plugin's endpoint too, and a plugin that calls a paid backend pays for each
+Record Version a preview judges (at most 50 per preview).
+
+**Request** (`subscription-request.schema.json`):
+
+- `invocation_id`, `idempotency_key`, `organization_id` and the validated
+  plugin (installer) `configuration`, as for every Contribution;
+- `record`: the Corpus, Record and Record Version ids, `enriched` (embedding
+  coverage in the active generation) and the canonical text `parts`
+  (`key`, `role`, `text`; at most 256, unique keys, Blob Parts are not sent);
+- the record's metadata, which rules may test besides the text. They are
+  optional in the schema and the core always sends them (the extensions when
+  the Version has some):
+  - `source`: the Source `namespace`, `record_key` and, when the producer sent
+    one, the Source `position` of the accepted revision;
+  - `accepted_at`: when Quivr accepted the revision (RFC 3339, UTC);
+  - `provenance`: `origin` (`connector` for a revision a Connector Instance
+    acquired, `client` otherwise; a client cannot claim `connector`), the
+    `producer` and `producer_version`, the `connector` (`instance_id`,
+    `kind`) and the external `normalization` (`plugin_id`, `plugin_version`,
+    `contribution`, `fallback`);
+  - `extensions`: the Version's structured metadata by namespace, such as an
+    author, a section or categories when the source provides them.
+
+  These fields were added to Plugin API 0.2 before the core first called
+  subscription plugins. A plugin that validates requests against an earlier
+  copy of the 0.2 schemas (Python SDK 0.2.0) refuses them: rebuild it with the
+  current SDK (0.2.1 or later);
+- `evaluations`: 1 to `max_batch_size` items, each with an `id` unique in the
+  request, the pinned Saved Query Version `expression`, the pinned Subscription
+  evaluator `configuration`, and the `subscriptions` (Subscription, Subscription
+  Version, Saved Query and Saved Query Version ids, and the Subscription
+  `owner` when it has one) it stands for.
+
+The core **deduplicates**: Subscriptions that share the same expression and
+configuration become one evaluation. The ids are informational (logs,
+tracing). A decision must depend only on the record, the expression and the
+configurations, never on the ids, the position in the batch or the other
+evaluations, because the core batches freely. The same idempotency key must
+yield the same decisions and evidence. Requests stay within 16 MiB: the core
+splits a batch whose request would be larger. The call deadline is
+`timeout_ms`, capped by the core at 30 seconds.
+
+Per-Part `vector` and per-evaluation `query_vector` are **reserved** for
+local-vector matching; Plugin API 0.2 never sends them and the schemas reject
+them.
+
+**Response** (`subscription-response.schema.json`): `decisions`, exactly one
+per requested evaluation id.
+
+| `decision` | Meaning |
+| --- | --- |
+| `match` | The Record Version satisfies the expression. Evidence is required; the core stores it with the Match |
+| `no_match` | It does not. Evidence is optional |
+| `not_ready` | It cannot be decided yet, for example before enrichment. The core evaluates again on a later trigger |
+
+A rule that cannot decide at all (a backend down) answers with the error
+envelope. The core keeps every evaluation of the batch pending and retries it
+with backoff (from one second up to five minutes) until it is decided; a
+plugin that is down, times out, serves another manifest or answers outside
+these rules is treated the same way. Plugin unavailability never becomes a
+negative decision: alerts are delayed, never lost or skipped. An error
+envelope applies to the whole request. A `retryable: true` envelope (a backend
+down) retries the batch as one; after a terminal envelope or an invalid answer
+the core halves the batch until the evaluation that fails is alone, so the
+other evaluations are decided. A request the schemas reject is refused
+with `retryable: false`.
+
+**Evidence bounds.** They mirror the bounds the monitoring engine applies to
+Match evidence (`internal/monitoring`), and `CheckSubscriptionOutput` in
+`internal/plugins` judges every answer:
+
+| Rule | Code |
+| --- | --- |
+| `explanation` non-empty, at most 4096 Unicode code points | `evidence_too_large` (schema: `schema_violation`) |
+| `part_keys` at most 100, each a Part key of the request | `evidence_too_large`, `unknown_part_key` |
+| `details` a JSON object of at most 16 KiB once serialized | `details_too_large` |
+| No NUL character in the evidence | `invalid_evidence` |
+| One decision per requested id, none for other ids | `missing_decision`, `duplicate_decision`, `unknown_decision` |
+| A `match` carries evidence | `missing_evidence` |
+| Response within `max_response_bytes` | `response_too_large` |
+
+**Expression and configuration schemas.** The core validates Saved Query
+expressions against `expression_schema` and Subscription configurations
+against `configuration_schema` when it pins them, so a rule receives only
+values its schemas accept (`ValidateSubscriptionItem`, codes
+`invalid_expression` and `invalid_subscription_configuration`). Creating a
+Subscription or a Subscription Version whose expression or configuration the
+schemas refuse is 422 with that code, the request member at fault in `field`
+and the first schema issue in `message`. To offer
+several kinds of alert, discriminate them with a `oneOf` over a constant
+`kind` property; `quivr plugin inspect` lists the kinds. An installation may
+accept only some of them: the pin's optional `kinds` in the core startup
+configuration (for example `["keywords"]`, when the plugin has no credentials
+for the backend of another kind) must name declared kinds, and the core
+refuses a Saved Query of any other kind with `invalid_expression`.
+
+## Connector Contribution {#connector-contribution}
+
+A source collector (since Plugin API 0.3). The core keeps everything durable:
+Connector Instances, schedules and leases, Acquisition Checkpoints, Deposited
+Credentials and Connector Health. The plugin only fetches, and is stateless
+between invocations. Pinned connector plugins provide Connector Instance kinds
+([Run a connector plugin](/plugins/run-a-connector-plugin)).
+
+**`fetch`** (`connector-fetch-request.schema.json`) carries `invocation_id`,
+`organization_id`, the installer `configuration`, the Connector Instance
+(`connector`: `instance_id`, `kind`, `config`, and since 0.3.1 the `corpus_id`
+and `source_namespace` the instance writes to, so a plugin can bind Relation
+targets to full Source Identities), the decrypted `credential` (null
+for a kind without one), the opaque `checkpoint` the plugin returned last (null
+on a first run), `now`, `page_in_run` (0, then counting up while the plugin
+answers `more: true`) and `reads_today`. The response carries:
+
+- `items`, at most `max_items`. Each has a `record_key` (unique in the page), an
+  optional `revision` and `source_position`, and exactly one of `content` (the
+  shared `TextContent` or `ManifestContent`) and `withdraw: true` (a Tombstone,
+  such as a post deleted at the source). Extensions, on the item and its Parts,
+  use only namespaces the plugin declares. A Manifest has no Blob Parts
+  (`blob_part_not_allowed`): binary Parts are `attachments` (`key`,
+  `parent_key`, `role`, `media_type`, optional `size_bytes`, `sha256` and
+  `extensions`, and an opaque `ref`), which need Manifest content and a
+  manifest that declares `attachments` (`attachments_unsupported` otherwise).
+  The core asks for their bytes later, only for an item it does not already
+  have ([Connector attachments](#connector-attachments));
+- `checkpoint` (required, any JSON value of at most `max_checkpoint_bytes`
+  serialized as compact JSON, 64 KiB unless the manifest declares more), which resumes after
+  this page. The core persists it and advances it only after the page's items
+  are accepted, so a migrated plugin keeps reading the checkpoints it wrote;
+- `more`, which asks for another page in the same run and needs a checkpoint
+  that moved;
+- optional `reads` (source resources read, for usage counters), `diagnostics`
+  (an object of at most 16 KiB, shown as Connector Health diagnostics) and
+  `notice` (a code that ends a run that otherwise completed, such as a spend cap);
+- `not_due: true` when the source asked not to be polled yet, with no items,
+  `more: false` and the request's checkpoint unchanged; the core skips the run.
+
+There is no idempotency key: a fetch reads a changing source, and the core
+deduplicates items by Record Key and revision. `CheckConnectorOutput` in
+`internal/plugins` judges every answer: the rules above, `invalid_item`,
+`duplicate_record_key`, `too_many_items`, `checkpoint_too_large`,
+`diagnostics_too_large`, `invalid_not_due`, the engine's Manifest rules with
+the attachments as Parts, declared namespaces and `response_too_large`.
+
+### Connector attachments {#connector-attachments}
+
+Since Plugin API 0.4, a manifest that declares `contributions.connector.attachments`
+(`max_bytes`, at most and by default 25 MiB, and `timeout_ms`, at most and by
+default 120 s, per call) lets items carry attachments. The plugin never writes
+to storage on its own. For each attachment of an item the core has not accepted
+yet:
+
+1. **`describe_attachment`** (`connector-describe-attachment-request.schema.json`)
+   carries the usual envelope, the `item` (`record_key`, `revision`, current
+   `extensions`) and the `attachment` descriptor. The plugin reads the bytes and
+   answers `{"size_bytes", "sha256"}` (lowercase hex), or `{"skip": "<code>"}`
+   with optional `item_extensions` that replace the item's, for example to
+   record the skipped attachment. A size above `max_bytes` is
+   `attachment_too_large`: answer `{"skip": "too_large"}` instead. A descriptor
+   that already carries an exact `size_bytes` and `sha256` is not described.
+2. The core reuses a verified Blob with the same identity, or issues a
+   **grant**: one presigned PUT (`url`, `method`, `headers`, `size_bytes`,
+   `sha256`, `media_type`, `expires_at`) that storage accepts only with exactly
+   those bytes. A grant is a capability: never log or return it
+   (`credential_leak`).
+3. **`upload_attachment`** (`connector-upload-attachment-request.schema.json`)
+   carries the same fields and the `grant`. The plugin sends the PUT with
+   exactly the grant's headers and answers `{"status": "uploaded"}`. Bytes that
+   changed at the source since they were described are a source error
+   `attachment_changed`; the core describes the attachment again once, then
+   rejects only that item.
+4. The core reads the stored bytes back and checks their size and SHA-256
+   before the Blob becomes a Blob Part of the item. Bytes that fail the check
+   are never used, the item is not accepted and the checkpoint does not move.
+
+`CheckAttachmentAnswer` and `CheckUploadAnswer` in `internal/plugins` judge
+the answers for the engine and the Contract Runner.
+
+**`check_credential`** (`connector-check-credential-request.schema.json`)
+carries the same Instance, credential and `now`, and answers
+`{"status": "ok"}` with an optional `expires_at`, which drives the
+`credential_expiring` health state. A refused credential is an access error.
+
+**Errors.** A connector error envelope carries `error_class`:
+
+| `error_class` | `retryable` | Meaning and Connector Health |
+| --- | --- | --- |
+| `access` | false | The source refuses the credential or the access: `access_error` until an operator acts |
+| `transient` | true | An outage, a timeout or a rate limit: retried with backoff. `retry_after_seconds` defers the next run |
+| `source` | false | The source returned data the plugin cannot use: a failed run |
+
+A connector error without `error_class`, or whose `retryable` disagrees with
+it, is `wrong_error_class`. Refusing an invalid request stays a terminal
+envelope, with or without a class.
+
+**Credentials** reach the plugin only in the invocation that needs them. A
+plugin never logs, returns or stores them; the Go SDK redacts them from its
+logs and error messages, and the Contract Runner checks that none appears in a
+response or in the plugin's output.
+
+**Connector fixtures** (`connector-fixture.schema.json`, a file with a
+top-level `connector` property) hold the `kind`, `config`, `credential`, an
+optional plugin `configuration`, a starting `checkpoint` (default null), `now`
+(default `2026-01-01T00:00:00Z`), `max_pages` (default 10) and what to `expect`:
+the Record Keys (and `more`) of each page, an `error` (`error_class`, optional
+`code`) or the `check_credential` answer. The Instance is
+`dev-connector-<digest>`, invocations `dev-invocation-<digest>-<page>`, from the
+first 16 hex digits of the SHA-256 of the fixture bytes; fetch requests carry
+`corpus_id` `dev-corpus` and `source_namespace` `dev-namespace`, and for a
+push kind the `webhook_url` `https://quivr.invalid/v0/connector-webhooks/<instance>`.
+`fixtures/connectors/feed.json` is a normative example. A push kind's fixture
+lists `receive` cases (since 0.5): a `request` (`method`, `query`, `headers`,
+and a text `body` or a `body_base64`) and what to `expect` (`verdict`,
+`status`, `record_keys`, `body_contains`, or an `error`), relayed with the
+fixture's config, credential and checkpoint; `fixtures/connectors/push.json`
+is a normative example.
+
+### Connector push {#connector-push}
+
+Since Plugin API 0.5, a kind with `modes: [pull, push]` also receives what
+the source sends. The core owns one public route per Connector Instance,
+`/v0/connector-webhooks/<instance>` under the deployment's `public_url`, and
+sends that address to the plugin as `connector.webhook_url` in fetch
+requests, so the plugin registers it with the source and is never exposed
+itself. For each `GET` or `POST` to the route, with a body of at most 1 MiB,
+the core calls **`receive`** (`connector-receive-request.schema.json`) with the
+Instance (and its `corpus_id` and `source_namespace`), the credential, the
+current checkpoint (read-only), `now`, `reads_today` and the relayed
+`request`: `method`, raw `query`, `headers` by lowercase name (at most 64; no
+hop-by-hop header or `Cookie`) and `body_base64`, the exact bytes a signature
+covers. The deadline is `timeout_ms`, capped at 8 seconds.
+
+The plugin verifies the request with the credential and answers
+(`connector-receive-response.schema.json`) a `verdict` and the `response` the
+core returns to the source (`status`, optional `content_type` and a text
+`body` of at most 64 KiB):
+
+- `accepted` with a 2xx status: the request is authentic. Its `items` (the
+  fetch item shape, without attachments) are ingested before the source is
+  answered, through the same path as a pull run's, so an item both paths
+  return converges on the same Receipt. A challenge, such as a CRC check, is
+  `accepted` with no items and the answer in the body. `reads` counts toward
+  the usage counters.
+- `refused` with a 4xx status and no items: not authentic or not for this
+  instance. The core answers the source and changes nothing.
+
+`CheckReceiveOutput` judges every answer (`invalid_verdict`, the item rules,
+declared namespaces). An answer carries no checkpoint: pull runs own it. When
+the plugin is unavailable, or answers a `transient` error, the source gets a
+503 with `Retry-After`; an `access` or `source` error is a 500. Those failures
+show in Connector Health (`health.push`), never a refused request.
+
+A fetch answer may report the kind's push channel in `push`: `state`
+`active`, `pending` (with an optional `code` saying why) or `failed` (with
+`error_class` and `code`). An `access` failure is the `access_error` health
+state while pull carries on. With `active`, `poll_interval_seconds` relaxes
+pull to a safety net while nothing goes wrong. A pull run that, with push
+active since before it started, still creates new Record Versions reports
+`missed_deliveries` and returns pull to the instance's interval, so a plugin
+holds back items the source may still be delivering. Only a plugin with a push
+kind reports a push status (`invalid_push_status`).
+
+## Ingestion Contribution {#ingestion-contribution}
+
+Segmentation and embedding (since Plugin API 0.6). The plugin cuts one Record
+Version's text into segments and embeds each segment in the vector spaces it
+owns; it also encodes queries into those spaces, so a query vector always comes
+from the model that made the document vectors. The core keeps everything else:
+the vector space registry, Weaviate and its named vectors, projection
+generations and rebuilds, authorization and withdrawal. Write one with the
+[Go SDK](/sdks/go) and pin it as described in
+[Write an ingestion plugin](/plugins/write-an-ingestion-plugin).
+
+**Spaces.** `contributions.ingestion.spaces` declares each space by id: the
+plugin id or an id starting with `<plugin id>.` (`foreign_space` otherwise),
+so a space has exactly one owner. A space's identity is its id and `version`
+together (`<id>@<version>`, as search hits and the registry report it); bump
+the version whenever the vectors change. `model`, `dimensions`, `metric`
+(`cosine`, `dot` or `l2`) and the modalities it `indexes` and accepts as
+`query_modalities` (only `text` in 0.6) describe it. At startup the core
+registers the enabled spaces and refuses one registered under another owner
+(`space_owner_conflict`) or with another model, dimensions or metric under the
+same version (`space_changed`).
+
+**`segment_and_embed`** (`ingestion-segment-and-embed-request.schema.json`)
+carries the usual envelope and idempotency key, the Record Version identity,
+an optional `language` hint, the Version's text `parts` (`key`, `role`,
+`text`, in Manifest order) and the `spaces` to embed, the ones the deployment
+enables. The answer (`ingestion-segment-and-embed-response.schema.json`) lists
+`segments` in reading order: `part_key`, `start` and `end` in Unicode code
+points, `vectors` with exactly one vector per requested space, and optionally
+`lexical_text` (text the core indexes in a separate keyword field, while
+excerpts keep the source text) and `provenance` (stored, never interpreted).
+The same idempotency key must yield the same answer: rebuilds reuse stored
+segments and vectors, and a different answer for the same Version is refused.
+
+**`embed_query`** (`ingestion-embed-query-request.schema.json`) carries the
+`space` and a `query` (`modality: text`, `text`) and answers `{"vector"}`
+within `query_timeout_ms`, which a search waits for.
+
+**Errors.** Unavailability or a `retryable: true` envelope delays the Version,
+retried with backoff; a terminal envelope, or an answer the checks below
+refuse, blocks it as `ingestion_refused`. For `embed_query`, a terminal
+envelope refuses the search (422) and anything else makes it unavailable
+(503).
+
+`CheckSegmentAndEmbedOutput` and `CheckEmbedQueryOutput` in `internal/plugins`
+judge every answer for the engine and the Contract Runner:
+
+| Rule | Code |
+| --- | --- |
+| Response within `max_response_bytes` (default and cap 16 MiB; embed_query 1 MiB) | `response_too_large` |
+| A Part of the request | `unknown_part_key` |
+| `0 <= start <= end <=` the Part's length | `offset_out_of_range` |
+| `start = end` only when the request has a Part with the role `title` | `empty_segment` |
+| Each Part and offsets once; at most `max_segments` | `duplicate_segment`, `too_many_segments` |
+| One vector per requested space, none other | `missing_vector`, `unrequested_space` |
+| The space's `dimensions`; finite as 32-bit floats; not all zeros under `cosine` | `dimension_mismatch`, `invalid_vector` |
+| Lexical text without NUL, at most 16384 code points | `invalid_lexical_text`, `lexical_text_too_large` |
+| Provenance without NUL, at most 4 KiB | `invalid_provenance`, `provenance_too_large` |
+
+**Deployment.** A pin enables spaces with `spaces: {"<id>": "served" |
+"evaluation"}` (absent: the only declared space, served); exactly one is
+served, and a deployment pins one ingestion plugin (`ingestion_conflict`). A
+projection generation carries the spaces enabled when it was built, served
+first, each as a named vector. A Corpus goes through the plugin once its
+routed generation is served by one of the plugin's spaces; a Corpus built
+before keeps its path until it is rebuilt, and the rebuild calls the plugin
+only for Versions without stored vectors in the new spaces.
+`GET /v0/corpora/{corpus_id}/vector-spaces` lists a Corpus's spaces with their
+owner, role and coverage.
+
+**Ingestion fixtures** (`ingestion-fixture.schema.json`, a file with a
+top-level `ingestion` property) hold the `parts`, an optional `language`,
+`configuration`, `spaces` (default: every declared space) and `queries`
+(default: the first 200 code points of the first non-empty Part), and what to
+`expect`: the exact `segments` and whether every segment carries
+`lexical_text`. Ids derive from the first 16 hex digits of the SHA-256 of the
+fixture bytes (`dev-record-…`, `dev-version-…`), with Corpus `dev-corpus`,
+Organization `dev-organization` and idempotency key `dev:<sha256>`.
+`fixtures/ingestion/article.json` is the normative fixture every ingestion
+plugin is certified with.
+
+## Normative fixtures {#normative-fixtures}
+
+`fixtures/index.json` lists every fixture with its schema and two outcomes.
+`schema_valid` is the result of JSON Schema validation alone. `valid` is the
+result after the semantic rules. For manifests, normalizer responses and
+subscription responses, `errors` lists the exact set of error codes. A
+subscription response is judged against the request its `request` field
+names. `fixtures/ranges.json` binds range parsing and matching.
+
+Go tests (`go test ./internal/plugins/...`) run all fixtures through the
+engine's validation. `checks/validate.py`, run by `make contracts`, checks the
+schema outcomes with an independent JSON Schema implementation.
+
+## Local development {#local-development}
+
+These conventions are part of the v0 tooling contract. They bind SDKs in every
+language and the Contract Runner, but not the engine.
+
+**Run convention.** `quivr plugin dev` starts the manifest's `run.command`
+(argv, no shell) in the plugin directory, in its own process group, with:
+
+| Variable | Value |
+| --- | --- |
+| `QUIVR_PLUGIN_HOST` | Interface to bind, `127.0.0.1` |
+| `QUIVR_PLUGIN_PORT` | Port assigned for the session |
+| `QUIVR_PLUGIN_MANIFEST` | Absolute path of the inspected `quivr-plugin.yaml` |
+
+The plugin must serve the routes above on that address. `dev` stops it with
+SIGTERM, then SIGKILL after five seconds.
+
+**Invocation fixtures** (`plugin-fixture.schema.json`) name an input file,
+relative to the fixture, with its media type and optional `configuration`,
+`source`, `extensions` and `provenance`. A tool turns one into a normalizer
+request:
+
+- `input.reference` is `{"kind": "file", "url": <absolute file:// URL>}`, and
+  `size_bytes` and `sha256` are computed from the file;
+- the ids are development values derived from the first 16 hex digits of the
+  input SHA-256: `dev-invocation-…`, `dev-record-…`, `dev-version-…`,
+  `dev-blob-…`, plus `organization_id` `dev-organization`;
+- `idempotency_key` is `dev:<input sha256>`;
+- `source` defaults to `{"corpus_id": "dev-corpus", "namespace": "dev",
+  "record_key": <input.path>}`, and `corpus_id` follows `source.corpus_id`;
+- `configuration` defaults to `{}` and is validated against the manifest
+  configuration schema.
+
+`fixtures/invocations/markdown.json` is a normative example.
+
+**Subscription fixtures** (`subscription-fixture.schema.json`) hold the
+record's text Parts (and `enriched`), its optional metadata (`source`,
+`accepted_at`, `provenance`, `extensions`), optional plugin `configuration`, and the
+evaluations, each with an `expression`, an optional `configuration` and an
+optional `expect`ed decision. A file is a subscription fixture when it has a
+top-level `evaluations` property. A tool turns one into requests:
+
+- evaluations are numbered `e1`, `e2`, … in order; evaluation *n* stands for
+  Subscription `dev-subscription-n` (Version `dev-subscription-version-n`) of
+  Saved Query `dev-saved-query-n` (Version `dev-saved-query-version-n`);
+- the Record Version ids derive from the first 16 hex digits of the SHA-256
+  of the fixture bytes: `dev-record-…`, `dev-version-…`, Corpus `dev-corpus`,
+  Organization `dev-organization`;
+- metadata the fixture omits defaults to `source` `dev-namespace` /
+  `dev-record-…`, `provenance` `{"origin": "client"}` and `accepted_at`
+  `2026-01-01T00:00:00Z`;
+- evaluations are split into batches of `max_batch_size`; batch *i* has
+  invocation id `dev-invocation-…-i` and idempotency key `dev:<sha256>:i`;
+- the configuration, every expression and every evaluation configuration are
+  validated against the manifest schemas, and Part keys must be unique.
+
+`fixtures/subscriptions/strike.json` and `fixtures/subscriptions/metadata.json`
+are normative examples. `quivr plugin dev` does not replay connector fixtures;
+`quivr plugin test` runs them.
+
+## Try it {#try-it}
+
+```bash
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/full.yaml
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/subscription.yaml
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/connector.yaml
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/ingestion.yaml
+go run ./cmd/quivr plugin inspect --json contracts/plugins/v0/fixtures/manifests/invalid/reserved-contribution.yaml
+```
+
+Exit codes: `0` valid, `1` invalid or incompatible, `2` usage error.
+
+Scaffold and run a Python normalizer with the SDK in [`sdks/python`](/sdks/python):
+
+```bash
+quivr plugin init demo && cd demo
+python3 -m venv .venv && . .venv/bin/activate && pip install -e <quivr-v2 checkout>/sdks/python
+quivr plugin dev --fixture fixtures/sample.json
+```
+
+`quivr plugin init alerts --kind subscription` scaffolds an alert rule
+instead: a case-insensitive phrase rule with a kind-discriminated
+`expression_schema`, a subscription fixture with expected decisions, and tests.
+
+`quivr plugin dev [--fixture <file>] [--watch] [--port <n>] [--startup-timeout <duration>] [<plugin-dir>]`
+runs these steps:
+
+1. inspects the manifest;
+2. starts `run.command`, waits for `GET /v0/health` and checks that
+   `GET /v0/discovery` matches the manifest: digest, id, version, Plugin API
+   range and Contributions;
+3. with `--fixture`, sends the fixture's request, validates the answer with the
+   same output checks as the Contract Runner (engine Manifest rules, response
+   size, Blob Parts, declared namespaces), and prints the response on stdout.
+   With a subscription fixture, it sends every batch, validates each answer
+   with `CheckSubscriptionOutput` and the expected decisions, and prints the
+   decisions of all batches.
+
+It exits `0` when every check passes and `1` otherwise. Without `--fixture`,
+or with `--watch`, it keeps running and restarts the plugin when a file in the
+plugin directory changes; hidden directories, `__pycache__`, virtual
+environments and build outputs are ignored.
+
+## Contract Runner {#contract-runner}
+
+`quivr plugin test [--endpoint <url>] [--report <file>] [--fixture <file>]... [--startup-timeout <duration>] [<plugin-dir>]`
+certifies that the engine can safely invoke every Contribution a plugin
+declares. It talks
+only the public protocol, so it applies to a plugin in any language, and it
+judges answers with the engine's own validation, never a copy. It starts
+`run.command` like `dev`. With `--endpoint`, it targets a running plugin
+instead and still reads `quivr-plugin.yaml` from `<plugin-dir>`, because
+discovery carries only the manifest digest.
+
+| Check | Passes when |
+| --- | --- |
+| `manifest`, `compatibility` | `quivr plugin inspect` accepts the manifest, and this engine and Plugin API version satisfy its ranges. Otherwise the plugin is not started. |
+| `health`, `discovery` | `GET /v0/health` answers 200, and discovery matches the manifest (digest, id, version, Plugin API, Contributions). |
+| `fixtures` | At least one invocation fixture applies. The runner uses the normative `fixtures/invocations/*.json` whose media type the plugin declares and whose configuration it accepts, plus the plugin's `fixtures/*.json` (or `--fixture`). |
+| `invoke` (per fixture) | The answer is a 200 within the declared `timeout_ms` (`deadline_exceeded` otherwise) that passes the output checks above: response schema (unknown fields rejected), engine Manifest rules, `max_parts`, response size, input-Blob-only Blob Parts and declared namespaces. |
+| `replay` (per fixture) | The same `idempotency_key` with a new `invocation_id` yields the same Manifest, extensions and language (`nondeterministic_output` names the first difference). |
+| `invalid_request` | A non-JSON body, an unknown request field and the normative invalid requests in `fixtures/requests/` are refused with a non-2xx error envelope and `retryable: false`. A request the schema rejects can never succeed, so `retryable: true` is `wrong_error_class`. |
+
+These normalizer checks carry `"contribution": "normalizer"` in the JSON
+report. When the manifest declares `subscription`, the runner adds checks with
+`"contribution": "subscription"`:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | At least one of the plugin's own subscription fixtures applies (no normative fixture can know a rule's expression shape), and each builds valid requests. |
+| `invoke` (per batch) | The answer is a 200 within `timeout_ms` that passes `CheckSubscriptionOutput` (one decision per evaluation, evidence bounds above) and matches every `expect`ed decision (`unexpected_decision`). |
+| `replay` (per batch) | The same `idempotency_key` with a new `invocation_id` yields the same decisions and evidence (`nondeterministic_output`). |
+| `batch` (per batch) | The same evaluations sent in reverse order get the same decisions and evidence (`batch_dependent_decision`). Skipped for a single evaluation. |
+| `invalid_request` | A non-JSON body, an unknown field and the normative invalid requests in `fixtures/requests/subscription/` are refused with a terminal error envelope. |
+
+When the manifest declares `connector`, it adds checks with
+`"contribution": "connector"`, from the plugin's own connector fixtures:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | At least one connector fixture applies, and its config and credential match the kind's schemas. |
+| `invoke` (per fixture) | Pages are fetched from the fixture's checkpoint, each returned checkpoint fed back, until `more` is false or `max_pages`. Every answer is a 200 within `timeout_ms` that passes `CheckConnectorOutput` and the expected pages (`unexpected_items`), and a page with `more: true` moves the checkpoint (`stalled_checkpoint`). An expected error comes back with its class (`unexpected_error`); any connector error carries a coherent class (`wrong_error_class`). |
+| `resume` (per fixture) | A new run from the final checkpoint returns no item already returned with the same revision (`checkpoint_not_honoured`). |
+| `check_credential` (per fixture) | The answer is `ok` or a classified error, as the fixture expects. |
+| `invalid_request` | A non-JSON body, an unknown field, an undeclared kind and the normative invalid requests in `fixtures/requests/connector/` are refused on both routes with a terminal error envelope. |
+| `credentials` | No fixture credential string of 8 characters or more appears in any answer, or in the plugin's output when the runner launched it (`credential_leak`). |
+| `attachments` (per fixture) | When the manifest declares `attachments`, each attachment the pages returned is described (unless its descriptor is exact), granted to the runner's loopback storage and uploaded; the stored bytes match the description (`attachment_mismatch`, `attachment_too_large`). |
+| `receive` (per case) | When a kind declares `push`: each fixture `receive` case is answered within `timeout_ms` with a verdict `CheckReceiveOutput` accepts (`invalid_verdict`) and the case's expectation (`unexpected_items`). At least one case exists (`no_fixture`). Invalid receive requests are refused like the others. |
+
+When the manifest declares `ingestion`, it adds checks with
+`"contribution": "ingestion"`:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | The normative `fixtures/ingestion/*.json` whose configuration the plugin accepts, plus the plugin's own ingestion fixtures, build valid requests. |
+| `invoke` (per fixture) | The answer is a 200 within `timeout_ms` that passes `CheckSegmentAndEmbedOutput` and the expected segments (`unexpected_segments`). |
+| `replay` (per fixture) | The same `idempotency_key` with a new `invocation_id` yields the same answer (`nondeterministic_output`). |
+| `embed_query` (per fixture and space) | Each fixture query is answered within `query_timeout_ms` with a vector `CheckEmbedQueryOutput` accepts, the same one twice. |
+| `invalid_request` | A non-JSON body, an unknown field, an undeclared space and the normative invalid requests in `fixtures/requests/ingestion/` are refused on both routes with a terminal error envelope. |
+| `credentials` | No value of a declared secret set in the runner's environment (8 characters or more) appears in an answer or the plugin's output (`credential_leak`). |
+
+The human report goes to stdout; the plugin's own output goes to stderr.
+`--report <file>` writes the JSON report described by
+`reports/contract-report.schema.json`. Exit codes: `0` certified, `1` not
+certified, `2` usage error.
+
+The deliberately broken plugins in `tests/plugin-contract/` show one failure
+per rule, for every Contribution; the connector rules run one fake plugin in a
+broken mode each. CI certifies both `quivr plugin init` templates and the Go
+SDK's sample connector, and publishes their reports as the
+`plugin-contract-report`, `subscription-plugin-contract-report`,
+`go-connector-contract-report` and, for the Go SDK's sample ingestion plugin,
+`go-ingestion-contract-report` workflow artifacts. Write a connector with the
+[Go SDK](/sdks/go).

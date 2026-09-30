@@ -12,8 +12,9 @@
 #   "docs/path/to/page.md" = { audience = "functional", kind = "guide", summary = "what a reader finds there" }
 #
 # summary is optional: one line shown after the page title on its audience's
-# start page. Then run `make start-pages`: `make docs` fails with
-# `stale-start-page` until the start pages match this list.
+# start page. Then run `make start-pages` and `make docs-site`: `make docs` fails
+# with `stale-start-page` or `stale-docs-site` until the start pages and the
+# generated documentation site (docs-site/) match this list.
 #
 # audience: who reads it
 #   functional     integrators and non-developers learning what Quivr does
@@ -53,6 +54,7 @@ excluded = [
     "internal/reference/*/testdata/*",                     # reference generator test fixtures
     "third_party/*/NOTICE.md",                             # upstream notices
     "third_party/*/MODEL_CARD.md",                         # upstream model card
+    "docs-site/*",                                         # the generated site (make docs-site)
 ]
 
 [pages]

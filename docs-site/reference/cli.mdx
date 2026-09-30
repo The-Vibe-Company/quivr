@@ -1,0 +1,201 @@
+---
+title: "Command-line reference"
+description: "Every quivr command, what it needs to run, its flags and exit codes"
+---
+
+> Generated from `cmd/quivr-reference/sources.go` by `make generate`. Do not edit this page: change the source and regenerate.
+
+Every command of the `quivr` binary, from the tables the binary itself dispatches on, in `internal/app/run.go` (engine), `internal/plugins/cli/cli.go` (offline) and `internal/online/online.go` (online). The **Needs** column says whether a command runs the engine, works offline, or needs a running server. For a walk through the online commands, see [From the command line](/api-walkthrough#from-the-command-line); for AI agents, see [Connect an AI agent](/connect-an-ai-agent) and the [MCP reference](/reference/mcp).
+
+## Commands {#commands}
+
+| Command | Needs | Summary |
+| --- | --- | --- |
+| [`quivr api`](#quivr-api) | a configuration file (`QUIVR_CONFIG`) | Serve the public HTTP API until interrupted. |
+| [`quivr worker`](#quivr-worker) | a configuration file (`QUIVR_CONFIG`) | Run the background work that processes content, pulls connectors and delivers events, until interrupted. |
+| [`quivr migrate`](#quivr-migrate) | a configuration file (`QUIVR_CONFIG`) | Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready. |
+| [`quivr plugin dev`](#quivr-plugin-dev) | nothing: works offline | Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`. |
+| [`quivr plugin init`](#quivr-plugin-init) | nothing: works offline | Write a new Python plugin from a template: a normalizer, or an alert rule with `--kind subscription`. |
+| [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
+| [`quivr plugin test`](#quivr-plugin-test) | nothing: works offline | Certify that the engine can safely invoke every Contribution the plugin declares. |
+| [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
+| [`quivr mcp`](#quivr-mcp) | a running server | Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile. |
+
+## Engine commands {#engine-commands}
+
+Engine commands run Quivr itself. Each reads the JSON configuration file named by `QUIVR_CONFIG` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. They take no flags.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `QUIVR_CONFIG` | path of the JSON configuration file |
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | stopped cleanly, or migrate finished |
+| 1 | the process failed, or the command is unknown; the reason is logged as JSON on stderr |
+| 2 | no command, or more than one argument |
+
+### quivr api {#quivr-api}
+
+Serve the public HTTP API until interrupted.
+
+```text
+quivr api
+```
+
+### quivr worker {#quivr-worker}
+
+Run the background work that processes content, pulls connectors and delivers events, until interrupted.
+
+```text
+quivr worker
+```
+
+### quivr migrate {#quivr-migrate}
+
+Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready.
+
+```text
+quivr migrate
+```
+
+## Offline commands {#offline-commands}
+
+`quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | success; for `test`, the plugin is certified |
+| 1 | the command failed: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified |
+| 2 | invalid flags or arguments |
+
+### quivr plugin dev {#quivr-plugin-dev}
+
+Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`.
+
+```text
+quivr plugin dev [--fixture <file>] [--watch] [--port <n>] [--startup-timeout <duration>] [<plugin-dir>]
+```
+
+### quivr plugin init {#quivr-plugin-init}
+
+Write a new Python plugin from a template: a normalizer, or an alert rule with `--kind subscription`.
+
+```text
+quivr plugin init <name> [--kind normalizer|subscription] [--dir <path>]
+```
+
+### quivr plugin inspect {#quivr-plugin-inspect}
+
+Validate a plugin manifest and print what the plugin declares.
+
+```text
+quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yaml>
+```
+
+### quivr plugin test {#quivr-plugin-test}
+
+Certify that the engine can safely invoke every Contribution the plugin declares.
+
+```text
+quivr plugin test [--endpoint <url>] [--report <file>] [--fixture <file>]... [--startup-timeout <duration>] [<plugin-dir>]
+```
+
+## Online commands {#online-commands}
+
+Online commands reach a running Quivr through its public HTTP API only, with an API key. They need no configuration file. Each prints its flags, environment and exit codes with `--help`, shown below.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `QUIVR_API_URL` | base URL of the Quivr API; `--api-url` overrides it |
+| `QUIVR_API_KEY` | API key sent as a bearer token; `--api-key` overrides it |
+
+### quivr search {#quivr-search}
+
+Search one or more Corpora of a running Quivr and print ranked hits with their provenance.
+
+`quivr search --help` prints:
+
+```text
+usage: quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>
+
+Search one or more Corpora of a running Quivr and print ranked hits with their provenance.
+
+Flags:
+  -api-key string
+    	API key sent as a bearer token (default $QUIVR_API_KEY)
+  -api-url string
+    	Quivr API base URL (default $QUIVR_API_URL)
+  -corpus value
+    	Corpus ID to search; repeat or separate with commas (required)
+  -json
+    	print the public API response unchanged
+  -limit int
+    	maximum number of hits, 1 to 50 (server default: 10)
+  -mode string
+    	search mode: lexical, semantic or hybrid (server default: hybrid)
+  -profile string
+    	retrieval profile: fast, balanced or deep (server default: balanced)
+  -source value
+    	keep only Records from this Source Namespace, ranked among themselves; repeat or separate with commas
+
+This command needs a running Quivr server. It reads the server address from
+QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key
+override them. It talks to the server only through its public HTTP API.
+
+Exit codes:
+  0  success
+  1  unexpected failure
+  2  invalid arguments, or a missing or malformed API URL
+  3  API key rejected, or not allowed on a requested resource (401, 403)
+  4  request rejected as invalid (400, 404, 409, 422)
+  5  server unreachable or unavailable (connection error, timeout, 5xx)
+  130  interrupted
+```
+
+### quivr mcp {#quivr-mcp}
+
+Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile.
+
+`quivr mcp --help` prints:
+
+```text
+usage: quivr mcp --profile read|ingest [--api-url <url>] [--api-key <key>]
+
+Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile.
+
+Flags:
+  -api-key string
+    	API key sent as a bearer token (default $QUIVR_API_KEY)
+  -api-url string
+    	Quivr API base URL (default $QUIVR_API_URL)
+  -profile string
+    	tool profile to serve (required): read|ingest
+
+Profiles:
+  read  list reachable Corpora, search them and read Records; no tool changes data
+    list_corpora  List reachable Corpora
+    search  Search Corpora
+    read_record  Read a Record
+  ingest  the read tools, plus ingest text into a Corpus and follow its Ingestion Receipt; no tool withdraws or deletes
+    list_corpora  List reachable Corpora
+    search  Search Corpora
+    read_record  Read a Record
+    ingest_text  Ingest text into a Corpus
+    read_receipt  Read an Ingestion Receipt
+
+This command needs a running Quivr server. It reads the server address from
+QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key
+override them. It talks to the server only through its public HTTP API, and
+the API key decides which Corpora every tool may reach.
+
+An MCP client starts it and speaks JSON-RPC on stdin and stdout; diagnostics go
+to stderr. A refused or failed API call is returned to the agent as a tool
+error carrying the public error code, such as forbidden or unreachable.
+
+Exit codes:
+  0  the client closed the connection
+  1  unexpected failure
+  2  invalid arguments, or a missing or malformed API URL
+  130  interrupted
+```
