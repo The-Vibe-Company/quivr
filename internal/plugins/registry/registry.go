@@ -134,9 +134,12 @@ func (s Service) SeedFrom(ctx context.Context, seed Seed) (seeded bool, differen
 }
 
 // Role names.
-func normalizerRole(mediaType string) string { return "normalizer:" + mediaType }
+func normalizerRole(mediaType string) string  { return "normalizer:" + mediaType }
 func subscriptionRole(pluginID string) string { return "subscription:" + pluginID }
 func connectorRole(kind string) string        { return "connector:" + kind }
+
+// ingestionRole is the one ingestion role of a deployment (Plugin API 0.6).
+const ingestionRole = "ingestion"
 
 // RegistrationID identifies a plugin version at an address.
 func RegistrationID(pluginID, version, manifestDigest, endpoint string) string {
@@ -169,6 +172,9 @@ func FromPins(pins *plugins.PinSet) Seed {
 	for _, pinned := range pins.Connectors() {
 		seed.Roles = append(seed.Roles, assign(connectorRole(pinned.Kind), byPin[pinned.Pin]))
 	}
+	if pin := pins.Ingestion(); pin != nil {
+		seed.Roles = append(seed.Roles, assign(ingestionRole, byPin[pin]))
+	}
 	sort.Slice(seed.Roles, func(i, j int) bool { return seed.Roles[i].Role < seed.Roles[j].Role })
 	return seed
 }
@@ -196,6 +202,9 @@ func declaredRoles(m plugins.Manifest) []string {
 		for kind := range c.Kinds {
 			roles = append(roles, connectorRole(kind))
 		}
+	}
+	if m.Contributions.Ingestion != nil {
+		roles = append(roles, ingestionRole)
 	}
 	sort.Strings(roles)
 	return roles

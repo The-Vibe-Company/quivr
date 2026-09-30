@@ -19,18 +19,18 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.5.0"
+const PluginAPIVersion = "0.6.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
 // admits that version or a later supported one.
-var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0"}
+var ContributionSince = map[string]string{"normalizer": "0.1.0", "subscription": "0.2.0", "connector": "0.3.0", "ingestion": "0.6.0"}
 
 // FieldSince is the Plugin API version that introduced a manifest field
 // inside a Contribution (a JSON Pointer). A manifest that declares it needs a
@@ -74,6 +74,10 @@ const (
 	// DefaultAttachmentTimeoutMS is the default and the engine cap of
 	// attachments.timeout_ms.
 	DefaultAttachmentTimeoutMS = 120000
+	// DefaultQueryTimeoutMS is the default deadline of one embed_query.
+	DefaultQueryTimeoutMS = 2000
+	// DefaultMaxSegments is the default segment bound of one Record Version.
+	DefaultMaxSegments = 256
 )
 
 // Stable issue codes.
@@ -95,6 +99,7 @@ const (
 	CodeReservedField           = "reserved_field"
 	CodeInvalidCredentialSchema = "invalid_credential_schema"
 	CodeInvalidModes            = "invalid_modes"
+	CodeForeignSpace            = "foreign_space"
 )
 
 // Issue is one actionable validation failure. Path is a JSON Pointer into the
@@ -127,6 +132,7 @@ type Contributions struct {
 	Normalizer   *Normalizer   `json:"normalizer,omitempty"`
 	Subscription *Subscription `json:"subscription,omitempty"`
 	Connector    *Connector    `json:"connector,omitempty"`
+	Ingestion    *Ingestion    `json:"ingestion,omitempty"`
 }
 
 // Names lists the declared Contributions in protocol order, as discovery
@@ -141,6 +147,9 @@ func (c Contributions) Names() []string {
 	}
 	if c.Connector != nil {
 		names = append(names, "connector")
+	}
+	if c.Ingestion != nil {
+		names = append(names, "ingestion")
 	}
 	return names
 }
@@ -157,6 +166,35 @@ type Subscription struct {
 	TimeoutMS           int                `json:"timeout_ms"`
 	Retry               Retry              `json:"retry"`
 	Limits              SubscriptionLimits `json:"limits"`
+}
+
+// Ingestion segments and embeds Record Versions (Plugin API 0.6): it cuts the
+// text Parts of one Version into segments, embeds each in the vector spaces
+// the plugin owns, and encodes queries into one of them.
+type Ingestion struct {
+	// Spaces are the vector spaces the plugin owns, by space id.
+	Spaces         map[string]VectorSpace `json:"spaces"`
+	TimeoutMS      int                    `json:"timeout_ms"`
+	QueryTimeoutMS int                    `json:"query_timeout_ms"`
+	Limits         IngestionLimits        `json:"limits"`
+}
+
+// VectorSpace is one declared vector space. Its identity is the id and the
+// version together (SpaceKey).
+type VectorSpace struct {
+	Version         string   `json:"version"`
+	Model           string   `json:"model"`
+	Dimensions      int      `json:"dimensions"`
+	Metric          string   `json:"metric"`
+	Indexes         []string `json:"indexes"`
+	QueryModalities []string `json:"query_modalities"`
+	Description     string   `json:"description,omitempty"`
+}
+
+// IngestionLimits bound one segment_and_embed answer.
+type IngestionLimits struct {
+	MaxSegments      int `json:"max_segments"`
+	MaxResponseBytes int `json:"max_response_bytes"`
 }
 
 // Connector is a source collector (Plugin API 0.3): it fetches pages of new or
@@ -391,6 +429,20 @@ func applyDefaults(m *Manifest) {
 			}
 		}
 	}
+	if in := m.Contributions.Ingestion; in != nil {
+		if in.TimeoutMS == 0 {
+			in.TimeoutMS = DefaultTimeoutMS
+		}
+		if in.QueryTimeoutMS == 0 {
+			in.QueryTimeoutMS = DefaultQueryTimeoutMS
+		}
+		if in.Limits.MaxSegments == 0 {
+			in.Limits.MaxSegments = DefaultMaxSegments
+		}
+		if in.Limits.MaxResponseBytes == 0 {
+			in.Limits.MaxResponseBytes = EngineMaxResponseBytes
+		}
+	}
 	for i := range m.Secrets {
 		if m.Secrets[i].Required == nil {
 			required := true
@@ -428,7 +480,7 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 		for _, name := range ReservedContributions {
 			if _, declared := contributions[name]; declared {
 				issues = append(issues, Issue{Code: CodeReservedContribution, Path: "/contributions/" + name,
-					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer, subscription or connector", name, PluginAPIVersion)})
+					Message: fmt.Sprintf("%q is a reserved Contribution name that Plugin API %s does not accept; declare only normalizer, subscription, connector or ingestion", name, PluginAPIVersion)})
 			}
 		}
 		if sub, ok := contributions["subscription"].(map[string]any); ok {
@@ -446,6 +498,10 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 		}
 		if connector, ok := contributions["connector"].(map[string]any); ok {
 			issues = append(issues, connectorKindIssues(connector)...)
+		}
+		if ingestion, ok := contributions["ingestion"].(map[string]any); ok {
+			id, _ := root["id"].(string)
+			issues = append(issues, spaceIssues(id, ingestion)...)
 		}
 		for _, field := range reservedFields {
 			if pointerPresent(root, field.path) {
@@ -677,6 +733,20 @@ func pointerPresent(doc any, pointer string) bool {
 		}
 	}
 	return true
+}
+
+// spaceIssues checks that every declared vector space id is the plugin's own:
+// the plugin id or prefixed by "<id>.", so two plugins never claim one space.
+func spaceIssues(id string, ingestion map[string]any) []Issue {
+	spaces, _ := ingestion["spaces"].(map[string]any)
+	var issues []Issue
+	for _, name := range sortedKeys(spaces) {
+		if id != "" && name != id && !strings.HasPrefix(name, id+".") {
+			issues = append(issues, Issue{Code: CodeForeignSpace, Path: "/contributions/ingestion/spaces/" + pointerToken(name),
+				Message: fmt.Sprintf("vector space %q must be %q or start with %q: a space has exactly one owner plugin", name, id, id+".")})
+		}
+	}
+	return issues
 }
 
 // connectorKindIssues checks what the schema cannot for each declared

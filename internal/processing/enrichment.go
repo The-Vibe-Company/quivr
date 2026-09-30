@@ -33,7 +33,7 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	err = s.enrich(ctx, org, v)
 	if err != nil {
 		state, code := "retrying", "enrichment_unavailable"
-		if errors.Is(err, content.ErrConflict) {
+		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrIngestionRefused) {
 			state, code = "blocked", "derivation_conflict"
 		}
 		s.outcome("enrichment", state, receiptID, v, started, code)
@@ -47,6 +47,17 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	return nil
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) error {
+	plugin, corpusID, g, err := s.pluginRoute(ctx, org, v)
+	if err != nil {
+		return err
+	}
+	if plugin {
+		seg, data, err := s.Plugin.Derive(ctx, org, corpusID, v, g)
+		if err != nil {
+			return err
+		}
+		return s.Enrichment.IndexEmbeddings(ctx, org, v, seg, data)
+	}
 	seg, err := s.Processor.Process(ctx, Input{Organization: org, Version: v})
 	if err != nil {
 		return err

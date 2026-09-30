@@ -4,6 +4,8 @@ package retrieval
 import (
 	"context"
 	"errors"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -28,6 +30,18 @@ var ErrUnavailable = errors.New("search_unavailable")
 // generation predates projected Source Namespaces; a rebuild enables it.
 var ErrSourceFilterUnavailable = errors.New("source_filter_unavailable")
 
+// ErrSpaceUnavailable reports a request for a named vector space that a
+// routed generation does not carry: it was built before named spaces, or
+// without that space. A rebuild enables it.
+var ErrSpaceUnavailable = errors.New("space_unavailable")
+
+// ErrRouteChanged reports that routing moved to a generation of other spaces
+// while vectors were derived for the prior one; the caller retries.
+var ErrRouteChanged = errors.New("projection route changed")
+
+// MaxQueryCodepoints bounds a query sent to an ingestion plugin's space.
+const MaxQueryCodepoints = 8192
+
 // MaxSourceNamespaces bounds the Source Namespaces one search may filter on.
 const MaxSourceNamespaces = 50
 
@@ -44,6 +58,10 @@ type Request struct {
 	Mode, Profile    string
 	Limit            int
 	Vector           []float32
+	// Space names the vector space to search, which every routed generation
+	// must carry as a named space; empty searches the generations' served
+	// space. The projection receives the resolved space.
+	Space string
 }
 type Result struct {
 	Hits []content.Hydrated
@@ -77,12 +95,24 @@ type QueryEmbedder interface {
 	Embed(context.Context, string) ([]float32, error)
 	Space() content.VectorSpace
 }
+
+// QueryEncoder encodes queries into the vector spaces a pinned ingestion
+// plugin owns, so a query vector comes from the model that made the document
+// vectors. A refusal of the query itself is content.ErrInvalid.
+type QueryEncoder interface {
+	Owns(space string) bool
+	EncodeQuery(ctx context.Context, org, space, query string) ([]float32, error)
+}
 type Service struct {
+	// Embedder encodes queries into the built-in space, after QueryNormalizer.
 	Embedder        QueryEmbedder
 	QueryNormalizer QueryNormalizer
-	Routing         Routing
-	Projection      Projection
-	Content         content.Service
+	// Spaces encodes queries into plugin-owned spaces; nil when no ingestion
+	// plugin is pinned.
+	Spaces     QueryEncoder
+	Routing    Routing
+	Projection Projection
+	Content    content.Service
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
@@ -139,22 +169,15 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		return out, err
 	}
-	normalized, err := s.QueryNormalizer.NormalizeQuery(ctx, q.Query)
-	if errors.Is(err, content.ErrInvalid) {
-		return out, ErrUnsupported
-	}
-	if err != nil {
-		return out, ErrUnavailable
-	}
-	q.Query = normalized
 	routes := make([]Route, 0, len(q.CorpusIDs))
 	routed := map[string]string{}
+	named := q.Space != ""
 	for _, id := range q.CorpusIDs {
 		g, err := s.Routing.Generation(ctx, scope.Organization, id)
 		if err != nil {
 			return out, ErrUnavailable
 		}
-		if g.ProfileVersion != ProfileVersion || g.SpaceID != s.Embedder.Space().ID {
+		if g.ProfileVersion != ProfileVersion {
 			return out, ErrUnsupported
 		}
 		// Objects of an older generation carry no Source Namespace, so a
@@ -162,12 +185,49 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		if len(q.SourceNamespaces) > 0 && !g.SourceNamespaceProjected {
 			return out, ErrSourceFilterUnavailable
 		}
+		switch {
+		case named && (!g.SpacesProjected || !g.Carries(q.Space)):
+			return out, ErrSpaceUnavailable
+		case !named && q.Space == "":
+			q.Space = g.SpaceID
+		case !named && q.Space != g.SpaceID:
+			// One query ranks every Corpus in one space.
+			return out, ErrUnsupported
+		}
 		routes = append(routes, Route{CorpusID: id, Generation: g})
 		routed[g.ID] = id
 	}
+	builtin := q.Space == s.Embedder.Space().ID
+	plugin := !builtin && s.Spaces != nil && s.Spaces.Owns(q.Space)
+	if !builtin && !plugin && (named || q.Mode != "lexical") {
+		// No pinned owner can encode a query into this space.
+		return out, ErrUnsupported
+	}
+	var normalized string
+	var err error
+	if builtin {
+		normalized, err = s.QueryNormalizer.NormalizeQuery(ctx, q.Query)
+	} else {
+		normalized, err = normalizeQuery(q.Query)
+	}
+	if errors.Is(err, content.ErrInvalid) {
+		return out, ErrUnsupported
+	}
+	if err != nil {
+		return out, ErrUnavailable
+	}
+	q.Query = normalized
 	out.ProfileVersion = ProfileVersion
 	if q.Mode != "lexical" {
-		q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
+		if builtin {
+			q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
+		} else {
+			q.Vector, err = s.Spaces.EncodeQuery(ctx, scope.Organization, q.Space, q.Query)
+			if errors.Is(err, content.ErrInvalid) {
+				// The owner refuses this query: it can never be encoded.
+				return out, ErrUnsupported
+			}
+		}
 		if err != nil {
 			return out, ErrUnavailable
 		}
@@ -202,6 +262,20 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	return out, nil
 }
 
+// normalizeQuery prepares a query for a plugin-owned space: valid text of at
+// most MaxQueryCodepoints, line breaks as LF, trimmed, not empty. The plugin
+// applies its own template and length limits.
+func normalizeQuery(q string) (string, error) {
+	if !content.ValidText(q) || utf8.RuneCountInString(q) > MaxQueryCodepoints {
+		return "", content.ErrInvalid
+	}
+	q = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(q, "\r\n", "\n"), "\r", "\n"))
+	if q == "" {
+		return "", content.ErrInvalid
+	}
+	return q, nil
+}
+
 // IndexEmbeddings attaches a Version's vectors to its routed generation. A
 // Version that is no longer current and eligible has nothing to serve, so its
 // enrichment ends here instead of retrying against objects a rebuild never
@@ -219,8 +293,9 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 	if err != nil {
 		return err
 	}
-	if g.SpaceID != s.Embedder.Space().ID {
-		return ErrUnsupported
+	if content.CheckCoverage(seg, g, data) != nil {
+		// Derived for a generation of other spaces: routing moved meanwhile.
+		return ErrRouteChanged
 	}
 	if err = s.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
 		if errors.Is(err, ErrProjectionMissing) {

@@ -261,6 +261,48 @@ func TestRebuildCancellationBeforeActivationPreventsCutover(t *testing.T) {
 	}
 }
 
+// fakeDeriver stands for the pinned ingestion plugin that owns the target's space.
+type fakeDeriver struct {
+	err     error
+	derived int
+}
+
+func (*fakeDeriver) Owns(space string) bool { return space == "space" }
+func (d *fakeDeriver) Derive(_ context.Context, org, _ string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	d.derived++
+	seg := content.Segmentation{ID: "plugin-seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "plugin-segment-" + v.ID, PartKey: "body"}}}
+	data := []content.EmbeddingData{{Artifact: content.Embedding{ID: "plugin-artifact", Organization: org, SegmentID: "plugin-segment-" + v.ID, SpaceID: g.SpaceID}, Vector: []float32{1}}}
+	return seg, data, d.err
+}
+
+// A target served by an ingestion plugin's space is derived through the
+// plugin, which reuses stored artifacts and embeds only what is missing; the
+// built-in segmenter and artifact reuse are not involved. A plugin refusal
+// fails the rebuild, an outage retries it.
+func TestRebuildDerivesPluginServedTargetsThroughThePlugin(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+	c, p, d := &fakeRebuildContent{loadErr: corpus.ErrNotFound}, &fakeRebuildProjection{}, &fakeDeriver{}
+	r := rebuilder(store, c, p)
+	r.Plugin = d
+	run(t, r)
+	if !store.activated || d.derived != 1 || c.loads != 0 || len(store.covered["v1"]) != 1 || store.covered["v1"][0].ID != "plugin-artifact" || p.vectors != 1 {
+		t.Fatalf("activated=%v derived=%d loads=%d covered=%v projection=%+v", store.activated, d.derived, c.loads, store.covered, p)
+	}
+	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	r = rebuilder(store, c, &fakeRebuildProjection{})
+	r.Plugin = &fakeDeriver{err: fmt.Errorf("%w: terminal", content.ErrIngestionRefused)}
+	run(t, r)
+	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "ingestion_refused" {
+		t.Fatalf("refusal: activated=%v failed=%v", store.activated, store.failed)
+	}
+	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	r = rebuilder(store, c, &fakeRebuildProjection{})
+	r.Plugin = &fakeDeriver{err: errors.New("plugin unavailable")}
+	if _, err := r.Step(context.Background(), "org", "op"); err == nil || len(store.failed) != 0 {
+		t.Fatalf("outage: err=%v failed=%v", err, store.failed)
+	}
+}
+
 // A terminal failure discovered after cancellation was requested settles as
 // canceled: the earlier operator request wins over the later failure.
 func TestRebuildTerminalFailureAfterCancelRequestSettlesCanceled(t *testing.T) {

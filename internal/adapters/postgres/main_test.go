@@ -53,5 +53,5 @@ func bootstrap(path string) error {
 		return err
 	}
 	defer pool.Close()
-	return app.BootstrapDatabase(ctx, pool)
+	return app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil))
 }

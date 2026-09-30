@@ -233,6 +233,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
   `quivr plugin test` checks that pages resume from their checkpoint and that no
   credential leaks. The core does not call connector plugins yet.
+- **Segmentation and embedding as a plugin** (Plugin API 0.6, the `ingestion`
+  Contribution): a pinned plugin declares the vector spaces it owns, one served and
+  others for evaluation, cuts each article into segments with a vector per space and an
+  optional keyword text, and encodes queries for its spaces. A Corpus moves onto it
+  with a rebuild; `GET /v0/corpora/{id}/vector-spaces` shows each space's owner, role
+  and coverage ([Write an ingestion plugin](docs/plugins/write-an-ingestion-plugin.md)).
+  The built-in E5 path stays the default.
 
 ## What comes next
 
@@ -265,7 +272,7 @@ cmd/quivr/          single binary: API, worker, migrations
 internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
 contracts/http/v0/  OpenAPI contract, examples and checks
 contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
-sdks/go/            Go Plugin SDK for source collectors
+sdks/go/            Go Plugin SDK for source collectors and ingestion plugins
 sdks/python/        Python Plugin SDK
 plugins/pdf-text/   reference normalizer: PDF text, one Part per page
 migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)

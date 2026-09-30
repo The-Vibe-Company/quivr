@@ -44,7 +44,18 @@ type PinConfig struct {
 	// out a kind whose backend the plugin has no credentials for: the core
 	// never sees the plugin's environment.
 	Kinds []string `json:"kinds,omitempty"`
+	// Spaces enables vector spaces of an ingestion Contribution, by space
+	// id: "served" (search uses it) or "evaluation" (indexed and compared,
+	// never served). Exactly one is served. Absent enables the only declared
+	// space as served.
+	Spaces map[string]string `json:"spaces,omitempty"`
 }
+
+// Space roles of a deployment.
+const (
+	SpaceServed     = "served"
+	SpaceEvaluation = "evaluation"
+)
 
 // RouteConfig maps one accepted Blob media type to the pinned normalizer.
 type RouteConfig struct {
@@ -64,7 +75,9 @@ type Pin struct {
 	// Configuration is the validated plugin configuration JSON object.
 	Configuration json.RawMessage
 	// Kinds is the offered subset of the declared alert kinds; nil offers all.
-	Kinds  []string
+	Kinds []string
+	// Spaces are the enabled vector spaces by space id, with their role.
+	Spaces map[string]string
 	routes map[string]RouteConfig
 }
 
@@ -111,7 +124,7 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	switch {
 	case m.Contributions.Normalizer == nil && len(c.Routes) > 0:
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "the manifest declares no normalizer Contribution to route to; remove the routes of this pin"})
-	case m.Contributions.Normalizer != nil && m.Contributions.Subscription == nil && len(c.Routes) == 0:
+	case m.Contributions.Normalizer != nil && m.Contributions.Subscription == nil && m.Contributions.Ingestion == nil && len(c.Routes) == 0:
 		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/routes", Message: "a pin needs at least one media type route"})
 	}
 	for _, namespace := range namespacesOf(m) {
@@ -120,6 +133,8 @@ func LoadPin(c PinConfig) (*Pin, error) {
 		}
 	}
 	issues = append(issues, checkKinds(m, c.Kinds)...)
+	spaces, spaceIssues := checkSpaces(m, c.Spaces)
+	issues = append(issues, spaceIssues...)
 	declared := map[string]bool{}
 	if m.Contributions.Normalizer != nil {
 		for _, mediaType := range m.Contributions.Normalizer.MediaTypes {
@@ -154,7 +169,79 @@ func LoadPin(c PinConfig) (*Pin, error) {
 	if len(issues) > 0 {
 		return nil, refuse(issues)
 	}
-	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, Kinds: c.Kinds, routes: routes}, nil
+	return &Pin{Manifest: *m, ManifestDigest: report.ManifestDigest, Path: report.Path, Endpoint: strings.TrimRight(c.Endpoint, "/"), Configuration: config, Kinds: c.Kinds, Spaces: spaces, routes: routes}, nil
+}
+
+// checkSpaces resolves the vector spaces a pin enables: declared ones, each
+// served or evaluation, exactly one served. Without a spaces map the only
+// declared space is served.
+func checkSpaces(m *Manifest, spaces map[string]string) (map[string]string, []Issue) {
+	in := m.Contributions.Ingestion
+	if in == nil {
+		if spaces != nil {
+			return nil, []Issue{{Code: CodeInvalidPin, Path: "/spaces", Message: "the manifest declares no ingestion Contribution; remove spaces from this pin"}}
+		}
+		return nil, nil
+	}
+	declared := make([]string, 0, len(in.Spaces))
+	for id := range in.Spaces {
+		declared = append(declared, id)
+	}
+	sort.Strings(declared)
+	if spaces == nil {
+		if len(declared) != 1 {
+			return nil, []Issue{{Code: CodeInvalidPin, Path: "/spaces", Message: fmt.Sprintf("%s declares %d vector spaces (%s); say which one is served and which are for evaluation, for example {\"%s\": \"served\"}", m.ID, len(declared), strings.Join(declared, ", "), declared[0])}}
+		}
+		return map[string]string{declared[0]: SpaceServed}, nil
+	}
+	var issues []Issue
+	served := 0
+	for _, id := range sortedStringKeys(spaces) {
+		path := "/spaces/" + pointerToken(id)
+		switch role := spaces[id]; {
+		case !contains(declared, id):
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path, Message: fmt.Sprintf("vector space %q is not declared by %s (declared: %s)", id, m.ID, strings.Join(declared, ", "))})
+		case role == SpaceServed:
+			served++
+		case role != SpaceEvaluation:
+			issues = append(issues, Issue{Code: CodeInvalidPin, Path: path, Message: fmt.Sprintf("unknown role %q; use \"served\" or \"evaluation\"", role)})
+		}
+	}
+	if served != 1 {
+		issues = append(issues, Issue{Code: CodeInvalidPin, Path: "/spaces", Message: fmt.Sprintf("%d served vector spaces; exactly one is served, the others are for evaluation", served)})
+	}
+	return spaces, issues
+}
+
+func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// EnabledSpace is one vector space a pin enables.
+type EnabledSpace struct {
+	// ID is the declared space id; Key is its identity with the version.
+	ID, Key string
+	Role    string
+	Space   VectorSpace
+}
+
+// EnabledSpaces lists the pin's enabled vector spaces, served first, then by id.
+func (p *Pin) EnabledSpaces() []EnabledSpace {
+	if p == nil || p.Manifest.Contributions.Ingestion == nil {
+		return nil
+	}
+	out := []EnabledSpace{}
+	for _, id := range sortedStringKeys(p.Spaces) {
+		space := p.Manifest.Contributions.Ingestion.Spaces[id]
+		out = append(out, EnabledSpace{ID: id, Key: SpaceKey(id, space.Version), Role: p.Spaces[id], Space: space})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Role == SpaceServed && out[j].Role != SpaceServed })
+	return out
 }
 
 // ExpressionKinds lists the alert kinds of a subscription expression schema

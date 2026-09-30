@@ -9,6 +9,7 @@ import (
 	"errors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ var producerSource []byte
 const Image = "ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07"
 
 func Space() content.VectorSpace {
-	return content.VectorSpace{ID: content.Hash(append([]byte("quivr/vector-space/v1\x00"), manifest...)), Manifest: append([]byte(nil), manifest...)}
+	return content.VectorSpace{ID: content.Hash(append([]byte("quivr/vector-space/v1\x00"), manifest...)), Manifest: append([]byte(nil), manifest...), Dimensions: 384}
 }
 
 type Encoder struct{ Endpoint string }
@@ -57,10 +58,28 @@ func (e Encoder) Embed(ctx context.Context, input string) ([]float32, error) {
 	if err = json.NewDecoder(io.LimitReader(res.Body, 32768)).Decode(&vectors); err != nil || len(vectors) != 1 {
 		return nil, errors.New("inference response invalid")
 	}
-	if _, err = content.VectorBytes(vectors[0]); err != nil {
+	if err = checkUnit(vectors[0]); err != nil {
 		return nil, errors.New("inference vector invalid")
 	}
 	return vectors[0], nil
+}
+
+// checkUnit accepts the pinned model's vectors only: 384 finite values of unit norm.
+func checkUnit(vector []float32) error {
+	if len(vector) != 384 {
+		return content.ErrInvalid
+	}
+	if _, err := content.VectorBytes(vector); err != nil {
+		return err
+	}
+	norm := 0.0
+	for _, x := range vector {
+		norm += float64(x) * float64(x)
+	}
+	if math.Abs(math.Sqrt(norm)-1) > .001 {
+		return content.ErrInvalid
+	}
+	return nil
 }
 
 // TEI cannot attest weight hashes over HTTP. Preparation verifies every mounted

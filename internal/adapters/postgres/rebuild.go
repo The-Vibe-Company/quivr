@@ -12,13 +12,16 @@ import (
 )
 
 // rebuildGapSQL selects current eligible Versions of Corpus $2 that target
-// generation $3 does not yet cover: no projection coverage, or a segment whose
-// vectors the routed generation serves without target vector coverage. The
-// same predicate lists work and validates activation, so they cannot drift.
-// It requires aliases r and v and parameters $1 (organization), $2, $3.
+// generation $3 does not yet cover: no projection coverage, or a segment of
+// the target's segmentation whose vectors the routed generation serves
+// without target vector coverage. A target with another segmentation (another
+// ingestion plugin or version) gets its vectors with its projection. The same
+// predicate lists work and validates activation, so they cannot drift. It
+// requires aliases r and v and parameters $1 (organization), $2, $3.
 var rebuildGapSQL = `r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND (
  NOT EXISTS(SELECT 1 FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3)
  OR EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id)
+  JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3)
   WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
    AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `
    AND NOT EXISTS(SELECT 1 FROM embedding_coverage te WHERE te.organization=ec.organization AND te.segment_id=ec.segment_id AND te.generation_id=$3)))`
@@ -70,8 +73,11 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 		op.State = operations.StateRunning
 	}
 	g := &out.Generation
-	var cfg []byte
-	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &cfg); err != nil {
+	var cfg, spaces []byte
+	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg); err != nil {
+		return out, err
+	}
+	if g.Spaces, err = scanSpaces(spaces); err != nil {
 		return out, err
 	}
 	if g.Fields, err = retrievalFields(cfg); err != nil {
@@ -86,7 +92,9 @@ func (s ContentStore) RebuildCandidates(ctx context.Context, org, id string, lim
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
+	// Vectors are required only when the routed generation serves the
+	// target's space: a target of another space derives its own.
+	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
 FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org, op.CorpusID, op.TargetGenerationID, limit)
 	if err != nil {
 		return nil, err
@@ -138,8 +146,12 @@ func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 	if digest != content.SegmentationDigest(seg) {
 		return false, content.ErrConflict
 	}
-	var space string
-	if err = tx.QueryRow(ctx, `SELECT space_id FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&space); err != nil {
+	target := content.Generation{ID: op.TargetGenerationID}
+	var spaces []byte
+	if err = tx.QueryRow(ctx, `SELECT space_id,spaces,spaces_projected FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&target.SpaceID, &spaces, &target.SpacesProjected); err != nil {
+		return false, err
+	}
+	if target.Spaces, err = scanSpaces(spaces); err != nil {
 		return false, err
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, op.TargetGenerationID, seg.ID)
@@ -152,11 +164,11 @@ func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 		segments[p.ID] = true
 	}
 	for _, e := range artifacts {
-		if e.Organization != org || !segments[e.SegmentID] || e.SpaceID != space {
+		if e.Organization != org || !segments[e.SegmentID] || !target.Carries(e.SpaceID) {
 			return false, content.ErrInvalid
 		}
 		var stored string
-		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, space).Scan(&stored); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
 			if err == pgx.ErrNoRows {
 				return false, content.ErrConflict
 			}
@@ -165,7 +177,7 @@ func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 		if stored != e.ID {
 			return false, content.ErrConflict
 		}
-		tag, err = tx.Exec(ctx, `INSERT INTO embedding_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, e.SegmentID, op.TargetGenerationID, e.ID)
+		tag, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, op.TargetGenerationID, e.ID, e.SpaceID)
 		if err != nil {
 			return false, err
 		}

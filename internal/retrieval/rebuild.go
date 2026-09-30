@@ -63,6 +63,15 @@ type ArtifactIdentity interface {
 // Segmenter re-derives a Version's segmentation locally from canonical text.
 type Segmenter func(ctx context.Context, org string, v content.Version) (content.Segmentation, error)
 
+// SpaceDeriver derives a Version's segmentation and its vectors in the
+// spaces of a generation whose served space a pinned ingestion plugin owns.
+// It reuses the stored segmentation and artifacts and calls the plugin only
+// for what is missing; a terminal refusal is content.ErrIngestionRefused.
+type SpaceDeriver interface {
+	Owns(space string) bool
+	Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error)
+}
+
 // rebuildBatch bounds the work of one step so progress is durable and
 // heartbeats stay frequent.
 const rebuildBatch = 25
@@ -75,6 +84,9 @@ type Rebuilder struct {
 	Projection Projection
 	Segment    Segmenter
 	Artifacts  ArtifactIdentity
+	// Plugin derives targets served by a pinned ingestion plugin's space; nil
+	// when none is pinned.
+	Plugin SpaceDeriver
 }
 
 // terminal is a deterministic failure that retrying cannot repair.
@@ -145,16 +157,30 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	if err != nil {
 		return err
 	}
-	seg, err := r.Segment(ctx, org, v)
-	if errors.Is(err, content.ErrInvalid) || errors.Is(err, content.ErrConflict) {
-		return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "segmentation cannot be reconstructed from canonical text"}}
-	}
-	if err != nil {
-		return err
-	}
-	data, err := r.vectors(ctx, org, corpusID, v, seg, target.Generation, c.VectorsRequired)
-	if err != nil {
-		return err
+	var seg content.Segmentation
+	var data []content.EmbeddingData
+	if r.Plugin != nil && r.Plugin.Owns(target.Generation.SpaceID) {
+		seg, data, err = r.Plugin.Derive(ctx, org, corpusID, v, target.Generation)
+		switch {
+		case errors.Is(err, content.ErrIngestionRefused):
+			return terminal{failure: operations.Error{Code: "ingestion_refused", Message: "the ingestion plugin refuses a Version of the Corpus; its log names why"}}
+		case errors.Is(err, content.ErrConflict):
+			return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "the stored segmentation differs from canonical text"}}
+		case err != nil:
+			return err
+		}
+	} else {
+		seg, err = r.Segment(ctx, org, v)
+		if errors.Is(err, content.ErrInvalid) || errors.Is(err, content.ErrConflict) {
+			return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "segmentation cannot be reconstructed from canonical text"}}
+		}
+		if err != nil {
+			return err
+		}
+		data, err = r.vectors(ctx, org, corpusID, v, seg, target.Generation, c.VectorsRequired)
+		if err != nil {
+			return err
+		}
 	}
 	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, c.SourceNamespace, v, seg); err != nil {
 		return err

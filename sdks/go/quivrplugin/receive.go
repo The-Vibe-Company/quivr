@@ -140,6 +140,9 @@ type deliveryJSON struct {
 
 // pushes reports whether a declared kind pushes.
 func (p *Plugin) pushes() bool {
+	if p.m.Connector == nil {
+		return false
+	}
 	for _, kind := range p.m.Connector.Kinds {
 		if kind.Pushes() {
 			return true

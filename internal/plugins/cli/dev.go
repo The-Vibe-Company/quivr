@@ -211,6 +211,9 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 		if devhost.IsConnectorFixture(raw) {
 			issues = []plugins.Issue{{Code: plugins.CodeInvalidManifest, Path: "/connector",
 				Message: "quivr plugin dev does not replay connector fixtures; run quivr plugin test, which fetches every page of a connector fixture"}}
+		} else if devhost.IsIngestionFixture(raw) {
+			issues = []plugins.Issue{{Code: plugins.CodeInvalidManifest, Path: "/ingestion",
+				Message: "quivr plugin dev does not replay ingestion fixtures; run quivr plugin test, which segments, embeds and encodes the fixture's queries"}}
 		} else if devhost.IsSubscriptionFixture(raw) || (unparsable && m.Contributions.Normalizer == nil) {
 			batches, issues, err = devhost.BuildSubscriptionRequests(s.fixture, m)
 		} else if m.Contributions.Normalizer == nil {

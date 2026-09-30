@@ -1,0 +1,10 @@
+{
+  "invocation_id": "inv-2",
+  "contribution": "ingestion",
+  "organization_id": "org-1",
+  "configuration": {},
+  "query": {
+    "modality": "text",
+    "text": "port closed"
+  }
+}

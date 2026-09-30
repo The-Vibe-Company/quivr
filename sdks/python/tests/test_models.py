@@ -34,6 +34,11 @@ MODELS = {
     "connector-upload-attachment-response.schema.json": models.ConnectorUploadAttachmentResponse,
     "connector-receive-request.schema.json": models.ConnectorReceiveRequest,
     "connector-receive-response.schema.json": models.ConnectorReceiveResponse,
+    "ingestion-segment-and-embed-request.schema.json": models.SegmentAndEmbedRequest,
+    "ingestion-segment-and-embed-response.schema.json": models.SegmentAndEmbedResponse,
+    "ingestion-embed-query-request.schema.json": models.EmbedQueryRequest,
+    "ingestion-embed-query-response.schema.json": models.EmbedQueryResponse,
+    "ingestion-fixture.schema.json": models.IngestionFixture,
 }
 
 

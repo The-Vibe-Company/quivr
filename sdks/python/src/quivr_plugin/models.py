@@ -167,7 +167,7 @@ class Discovery(Model):
     plugin_api: str
     plugin: PluginIdentity
     manifest_digest: str
-    contributions: list[Literal["normalizer", "subscription", "connector"]]
+    contributions: list[Literal["normalizer", "subscription", "connector", "ingestion"]]
 
 
 @dataclass(kw_only=True)
@@ -268,12 +268,42 @@ class ConnectorContribution(Model):
 
 
 @dataclass(kw_only=True)
+class VectorSpace(Model):
+    "One vector space the plugin owns. Its identity is the id and the version together: vectors of another version belong to another space."
+
+    version: str
+    model: str
+    dimensions: int
+    metric: Literal["cosine", "dot", "l2"]
+    indexes: list[Literal["text"]]
+    query_modalities: list[Literal["text"]]
+    description: str | None = None
+
+
+@dataclass(kw_only=True)
+class IngestionLimits(Model):
+    max_segments: int | None = None
+    max_response_bytes: int | None = None
+
+
+@dataclass(kw_only=True)
+class Ingestion(Model):
+    "Segmentation and embedding, since Plugin API 0.6: cut one Record Version's text Parts into segments and embed each segment in the vector spaces the plugin owns (segment_and_embed), and encode a query into one of those spaces (embed_query). The core keeps the index, the registry of spaces, authorization, withdrawal and projection generations."
+
+    spaces: dict[str, VectorSpace]
+    timeout_ms: int | None = None
+    query_timeout_ms: int | None = None
+    limits: IngestionLimits | None = None
+
+
+@dataclass(kw_only=True)
 class ManifestContributions(Model):
-    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2) and connector (since 0.3). The other names are reserved and rejected."
+    "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3) and ingestion (since 0.6). The other names are reserved and rejected."
 
     normalizer: NormalizerContribution | None = None
     subscription: SubscriptionContribution | None = None
     connector: ConnectorContribution | None = None
+    ingestion: Ingestion | None = None
 
 
 @dataclass(kw_only=True)
@@ -788,6 +818,110 @@ class ConnectorReceiveResponse(Model):
     reads: int | None = None
 
 
+@dataclass(kw_only=True)
+class SegmentAndEmbedRequestVersion(Model):
+    "The Record Version being ingested. Informational: the answer must depend only on the Parts, the language, the spaces and the configuration."
+
+    corpus_id: str
+    record_id: str
+    record_version_id: str
+
+
+@dataclass(kw_only=True)
+class SegmentAndEmbedRequestPartsItem(Model):
+    key: str
+    role: str
+    text: str
+
+
+@dataclass(kw_only=True)
+class SegmentAndEmbedRequest(Model):
+    "POST /v0/contributions/ingestion/segment_and_embed, since Plugin API 0.6. One Record Version's text Parts and the enabled vector spaces to embed each segment in."
+
+    invocation_id: str
+    idempotency_key: str
+    contribution: Literal["ingestion"] = "ingestion"
+    organization_id: str
+    configuration: dict[str, Any]
+    version: SegmentAndEmbedRequestVersion
+    language: str | None = None
+    parts: list[SegmentAndEmbedRequestPartsItem]
+    spaces: list[str]
+
+
+@dataclass(kw_only=True)
+class SegmentAndEmbedResponseSegmentsItem(Model):
+    part_key: str
+    start: int
+    end: int
+    vectors: dict[str, list[float]]
+    lexical_text: str | None = None
+    provenance: dict[str, Any] | None = None
+
+
+@dataclass(kw_only=True)
+class SegmentAndEmbedResponse(Model):
+    "200 answer of segment_and_embed. Segments are listed in reading order; the core numbers them in that order."
+
+    segments: list[SegmentAndEmbedResponseSegmentsItem]
+
+
+@dataclass(kw_only=True)
+class EmbedQueryRequestQuery(Model):
+    modality: Literal["text"] = "text"
+    text: str
+
+
+@dataclass(kw_only=True)
+class EmbedQueryRequest(Model):
+    "POST /v0/contributions/ingestion/embed_query, since Plugin API 0.6. Encode one query into one of the plugin's spaces, so a query vector always comes from the model that produced the document vectors."
+
+    invocation_id: str
+    contribution: Literal["ingestion"] = "ingestion"
+    organization_id: str
+    configuration: dict[str, Any]
+    space: str
+    query: EmbedQueryRequestQuery
+
+
+@dataclass(kw_only=True)
+class EmbedQueryResponse(Model):
+    "200 answer of embed_query."
+
+    vector: list[float]
+
+
+@dataclass(kw_only=True)
+class IngestionFixtureIngestionExpectSegmentsItem(Model):
+    part_key: str
+    start: int
+    end: int
+
+
+@dataclass(kw_only=True)
+class IngestionFixtureIngestionExpect(Model):
+    segments: list[IngestionFixtureIngestionExpectSegmentsItem] | None = None
+    lexical_text: bool | None = None
+
+
+@dataclass(kw_only=True)
+class IngestionFixtureIngestion(Model):
+    parts: list[SegmentAndEmbedRequestPartsItem]
+    language: str | None = None
+    configuration: dict[str, Any] | None = None
+    spaces: list[str] | None = None
+    queries: list[str] | None = None
+    expect: IngestionFixtureIngestionExpect | None = None
+
+
+@dataclass(kw_only=True)
+class IngestionFixture(Model):
+    "A local test input for an ingestion plugin (since Plugin API 0.6): the text Parts of one Record Version, the queries to encode and what to expect. quivr plugin test turns it into segment_and_embed and embed_query requests."
+
+    description: str | None = None
+    ingestion: IngestionFixtureIngestion
+
+
 # Keys are extension namespaces.
 Extensions = dict[str, ExtensionEntry]
 
@@ -817,6 +951,9 @@ __all__ = [
     "ConnectorUploadAttachmentResponse",
     "Decision",
     "Discovery",
+    "EmbedQueryRequest",
+    "EmbedQueryRequestQuery",
+    "EmbedQueryResponse",
     "ErrorEnvelope",
     "EvaluatedRecord",
     "Evaluation",
@@ -835,6 +972,12 @@ __all__ = [
     "FixtureReceiveRequest",
     "FixtureRecord",
     "Health",
+    "Ingestion",
+    "IngestionFixture",
+    "IngestionFixtureIngestion",
+    "IngestionFixtureIngestionExpect",
+    "IngestionFixtureIngestionExpectSegmentsItem",
+    "IngestionLimits",
     "InputBlob",
     "InvocationFixture",
     "ManifestCompatibility",
@@ -864,6 +1007,11 @@ __all__ = [
     "RetryIntent",
     "RunCommand",
     "Secret",
+    "SegmentAndEmbedRequest",
+    "SegmentAndEmbedRequestPartsItem",
+    "SegmentAndEmbedRequestVersion",
+    "SegmentAndEmbedResponse",
+    "SegmentAndEmbedResponseSegmentsItem",
     "SignedUrlReference",
     "SourceIdentity",
     "SubscriptionContribution",
@@ -875,4 +1023,5 @@ __all__ = [
     "TextContent",
     "UploadAttachmentItem",
     "UploadGrant",
+    "VectorSpace",
 ]

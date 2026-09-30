@@ -3,9 +3,10 @@
 #  1. the SDK's embedded schema copies match the contracts;
 #  2. go vet and the SDK unit tests pass (sdks/go is its own module, which the
 #     root `go test ./...` does not enter);
-#  3. the sample connector sdks/go/examples/static-source passes `quivr plugin
-#     inspect` and `quivr plugin test` (JSON report in
-#     .scratch/plugin-sdk/static-source-contract-report.json);
+#  3. the sample connector sdks/go/examples/static-source and the sample
+#     ingestion plugin sdks/go/examples/hash-embedder pass `quivr plugin
+#     inspect` and `quivr plugin test` (JSON reports in
+#     .scratch/plugin-sdk/<example>-contract-report.json);
 #  4. every first-party Go connector plugin under plugins/ passes its own
 #     tests and `quivr plugin test`. A plugin whose source needs a local fake
 #     (plugins/x-list) has scripts/plugin_<id>_fixtures.py, which serves the
@@ -30,6 +31,13 @@ cd "$root/sdks/go/examples/static-source"
 grep -q "^CERTIFIED" "$work/static-source-contract.log" || { cat "$work/static-source-contract.log"; exit 1; }
 grep -q "PASS  credentials" "$work/static-source-contract.log" || { cat "$work/static-source-contract.log"; exit 1; }
 echo "quivr plugin test certified the Go SDK sample connector: $work/static-source-contract-report.json"
+cd "$root/sdks/go/examples/hash-embedder"
+"$GO" build -o /dev/null .
+"$quivr" plugin inspect . > "$work/hash-embedder-inspect.log"
+"$quivr" plugin test --startup-timeout 120s --report "$work/hash-embedder-contract-report.json" . > "$work/hash-embedder-contract.log" 2>&1 || { cat "$work/hash-embedder-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/hash-embedder-contract.log" || { cat "$work/hash-embedder-contract.log"; exit 1; }
+grep -q "PASS  embed_query" "$work/hash-embedder-contract.log" || { cat "$work/hash-embedder-contract.log"; exit 1; }
+echo "quivr plugin test certified the Go SDK sample ingestion plugin: $work/hash-embedder-contract-report.json"
 
 # First-party Go connector plugins (plugins/<id> with a go.mod, each its own
 # module on the SDK): go vet, their unit tests (parity with the connector they

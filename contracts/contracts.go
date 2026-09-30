@@ -19,7 +19,7 @@ import (
 //go:embed http/v0/openapi.yaml shared/v0/manifest.schema.json plugins/v0/*.schema.json
 var files embed.FS
 
-//go:embed plugins/v0/fixtures/invocations plugins/v0/fixtures/requests
+//go:embed plugins/v0/fixtures/invocations plugins/v0/fixtures/requests plugins/v0/fixtures/ingestion
 var pluginFixtures embed.FS
 
 // PluginFixtures returns the normative Plugin Protocol v0 invocation fixtures

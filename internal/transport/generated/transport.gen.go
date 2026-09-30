@@ -621,6 +621,63 @@ func (e UploadUploadMethod) Valid() bool {
 	}
 }
 
+// Defines values for VectorSpaceMetric.
+const (
+	Cosine VectorSpaceMetric = "cosine"
+	Dot    VectorSpaceMetric = "dot"
+	L2     VectorSpaceMetric = "l2"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceMetric enum.
+func (e VectorSpaceMetric) Valid() bool {
+	switch e {
+	case Cosine:
+		return true
+	case Dot:
+		return true
+	case L2:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VectorSpaceOwnerKind.
+const (
+	Engine VectorSpaceOwnerKind = "engine"
+	Plugin VectorSpaceOwnerKind = "plugin"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceOwnerKind enum.
+func (e VectorSpaceOwnerKind) Valid() bool {
+	switch e {
+	case Engine:
+		return true
+	case Plugin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VectorSpaceRole.
+const (
+	Evaluation VectorSpaceRole = "evaluation"
+	Served     VectorSpaceRole = "served"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceRole enum.
+func (e VectorSpaceRole) Valid() bool {
+	switch e {
+	case Evaluation:
+		return true
+	case Served:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookEventSchemaVersion.
 const (
 	N1 WebhookEventSchemaVersion = "1"
@@ -1643,6 +1700,47 @@ type UploadRequest struct {
 	SizeBytes int    `json:"size_bytes"`
 }
 
+// VectorSpace defines model for VectorSpace.
+type VectorSpace struct {
+	Coverage struct {
+		Segments int `json:"segments"`
+	} `json:"coverage"`
+	Dimensions int               `json:"dimensions"`
+	Indexes    []string          `json:"indexes"`
+	Metric     VectorSpaceMetric `json:"metric"`
+	Model      string            `json:"model"`
+	Name       string            `json:"name"`
+	Owner      struct {
+		Kind          VectorSpaceOwnerKind `json:"kind"`
+		PluginId      *string              `json:"plugin_id,omitempty"`
+		PluginVersion *string              `json:"plugin_version,omitempty"`
+	} `json:"owner"`
+	QueryModalities []string        `json:"query_modalities"`
+	Role            VectorSpaceRole `json:"role"`
+
+	// VectorSpaceId The space's identity, as search hits report it. A plugin space is <name>@<version>.
+	VectorSpaceId string `json:"vector_space_id"`
+	Version       string `json:"version"`
+}
+
+// VectorSpaceMetric defines model for VectorSpace.Metric.
+type VectorSpaceMetric string
+
+// VectorSpaceOwnerKind defines model for VectorSpace.Owner.Kind.
+type VectorSpaceOwnerKind string
+
+// VectorSpaceRole defines model for VectorSpace.Role.
+type VectorSpaceRole string
+
+// VectorSpaceList defines model for VectorSpaceList.
+type VectorSpaceList struct {
+	Items                  []VectorSpace `json:"items"`
+	ProjectionGenerationId string        `json:"projection_generation_id"`
+
+	// Segments Current segments the generation projects; a space whose coverage equals it holds a vector for every one.
+	Segments int `json:"segments"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// AcceptedAt When Quivr accepted the revision this Version publishes, before any processing.
@@ -2084,6 +2182,9 @@ type ServerInterface interface {
 
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(w http.ResponseWriter, r *http.Request, corpusId string)
+
+	// (GET /v0/corpora/{corpus_id}/vector-spaces)
+	ListVectorSpaces(w http.ResponseWriter, r *http.Request, corpusId string)
 
 	// (GET /v0/deliveries/{delivery_id})
 	GetDelivery(w http.ResponseWriter, r *http.Request, deliveryId string)
@@ -2775,6 +2876,32 @@ func (siw *ServerInterfaceWrapper) ConfigureRetrieval(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ConfigureRetrieval(w, r, corpusId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListVectorSpaces operation middleware
+func (siw *ServerInterfaceWrapper) ListVectorSpaces(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "corpus_id" -------------
+	var corpusId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "corpus_id", r.PathValue("corpus_id"), &corpusId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVectorSpaces(w, r, corpusId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3900,6 +4027,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}/vector-spaces", wrapper.ListVectorSpaces)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
 	return m
@@ -4722,6 +4850,45 @@ type ConfigureRetrievaldefaultJSONResponse struct {
 }
 
 func (response ConfigureRetrievaldefaultJSONResponse) VisitConfigureRetrievalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVectorSpacesRequestObject struct {
+	CorpusId string `json:"corpus_id"`
+}
+
+type ListVectorSpacesResponseObject interface {
+	VisitListVectorSpacesResponse(w http.ResponseWriter) error
+}
+
+type ListVectorSpaces200JSONResponse VectorSpaceList
+
+func (response ListVectorSpaces200JSONResponse) VisitListVectorSpacesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVectorSpacesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListVectorSpacesdefaultJSONResponse) VisitListVectorSpacesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -6136,6 +6303,9 @@ type StrictServerInterface interface {
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(ctx context.Context, request ConfigureRetrievalRequestObject) (ConfigureRetrievalResponseObject, error)
 
+	// (GET /v0/corpora/{corpus_id}/vector-spaces)
+	ListVectorSpaces(ctx context.Context, request ListVectorSpacesRequestObject) (ListVectorSpacesResponseObject, error)
+
 	// (GET /v0/deliveries/{delivery_id})
 	GetDelivery(ctx context.Context, request GetDeliveryRequestObject) (GetDeliveryResponseObject, error)
 
@@ -6837,6 +7007,32 @@ func (sh *strictHandler) ConfigureRetrieval(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ConfigureRetrievalResponseObject); ok {
 		if err := validResponse.VisitConfigureRetrievalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListVectorSpaces operation middleware
+func (sh *strictHandler) ListVectorSpaces(w http.ResponseWriter, r *http.Request, corpusId string) {
+	var request ListVectorSpacesRequestObject
+
+	request.CorpusId = corpusId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVectorSpaces(ctx, request.(ListVectorSpacesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVectorSpaces")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVectorSpacesResponseObject); ok {
+		if err := validResponse.VisitListVectorSpacesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

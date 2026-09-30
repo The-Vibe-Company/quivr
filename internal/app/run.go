@@ -254,6 +254,7 @@ func Run(command string) error {
 	}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
+	projection.LegacySpace = tei.Space().ID
 	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
 	encoder := &tokenizer.Server{Config: cfg.Tokenizer}
 	defer encoder.Close()
@@ -262,17 +263,31 @@ func Run(command string) error {
 	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: pins}
-	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search, Normalizer: normalizer}
+	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search, Normalizer: normalizer, Routing: store}
 	// Rebuilds reuse stored vectors; the TEI encoder only names the pinned space and producer.
 	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Artifacts: embedding, Segment: func(ctx context.Context, org string, v content.Version) (content.Segmentation, error) {
 		return windows.Process(ctx, processing.Input{Organization: org, Version: v})
 	}}
+	// A pinned ingestion plugin segments and embeds the Corpora whose routed
+	// generation it serves, encodes their queries and derives rebuild
+	// targets of its spaces; the others keep the built-in path.
+	if pin := pins.Ingestion(); pin != nil {
+		ingestor := pluginhttp.Ingestor{Pin: pin}
+		deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
+		search.Spaces = ingestor
+		processor.Retrieval, processor.Enrichment = search, search
+		processor.Plugin = deriver
+		rebuilder.Plugin = deriver
+	}
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		// The PostgreSQL part runs first and alone needs no other dependency;
 		// rerunning migrate completes the S3, Weaviate and tokenizer steps.
-		if err = BootstrapDatabase(ctx, pool); err != nil {
+		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) {
+				return err
+			}
 			return errors.New("migration failed; check database connectivity and schema")
 		}
 		for {
@@ -332,6 +347,15 @@ func Run(command string) error {
 	if err = seedPluginRegistry(ctx, pluginRegistry, pins); err != nil {
 		return err
 	}
+	// The registry records each space's owner and this deployment's roles; a
+	// space claimed by another owner, or changed under the same version,
+	// refuses startup.
+	register, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err = store.RegisterSpaces(register, DeploymentSpaces(pins))
+	cancel()
+	if err != nil {
+		return fmt.Errorf("vector space registry: %w", err)
+	}
 	// Load the tokenizer before serving so the first search does not pay for it.
 	warm, cancel := context.WithTimeout(ctx, 15*time.Second)
 	if _, err = encoder.Encode(warm, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
@@ -378,7 +402,7 @@ func Run(command string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{ContentStore: store}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators read the plugin registry (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Push deliveries are relayed by the API, which the source reaches.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -427,6 +428,13 @@ func (r *run) credentialsCheck(runs []connectorRun) {
 		r.add(check, started)
 		return
 	}
+	r.findLeaks(&check, secrets, "a fixture credential value")
+	r.add(check, started)
+}
+
+// findLeaks looks for each secret in every answer the runner saw and, when it
+// launched the plugin, in the plugin's output: the credential-leak rule.
+func (r *run) findLeaks(check *Check, secrets map[string]bool, what string) {
 	sources := map[string][]byte{}
 	for i, body := range r.seen {
 		sources[fmt.Sprintf("answer %d", i+1)] = body
@@ -445,11 +453,33 @@ func (r *run) credentialsCheck(runs []connectorRun) {
 		for _, name := range names {
 			if plugins.ContainsSecret(sources[name], []string{secret}) {
 				check.Issues = append(check.Issues, plugins.Issue{Code: CodeCredentialLeak,
-					Message: fmt.Sprintf("a fixture credential value (%d characters) appears in %s; never echo, log or return a credential", len(secret), name)})
+					Message: fmt.Sprintf("%s (%d characters) appears in %s; never echo, log or return a credential", what, len(secret), name)})
 				break
 			}
 		}
 	}
+}
+
+// secretsCheck applies the credential-leak rule to the plugin's declared
+// secrets: the value of each one the runner's environment sets (at least
+// MinSecretLength characters), which the launched plugin inherits, must never
+// appear in an answer or in the plugin's output.
+func (r *run) secretsCheck(contribution string) {
+	started := time.Now()
+	check := Check{ID: CheckCredentials, Contribution: contribution,
+		Title: "no declared secret value appears in a response, an error envelope or the plugin's output"}
+	secrets := map[string]bool{}
+	for _, s := range r.m.Secrets {
+		if value := os.Getenv(s.Name); len(value) >= plugins.MinSecretLength {
+			secrets[value] = true
+		}
+	}
+	if len(secrets) == 0 {
+		check.Status, check.Note = Skip, fmt.Sprintf("no declared secret is set in the environment with at least %d characters", plugins.MinSecretLength)
+		r.add(check, started)
+		return
+	}
+	r.findLeaks(&check, secrets, "a declared secret value")
 	r.add(check, started)
 }
 

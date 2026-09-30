@@ -82,6 +82,7 @@ excluded = [
 "docs/keyword-alerts.md" = { audience = "functional", kind = "guide", summary = "write alert queries and set up metadata filters" }
 "docs/plugins/run-a-connector-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "pin a connector plugin and read the health it reports" }
 "docs/plugins/write-a-normalizer.md" = { audience = "plugin-author", kind = "guide", summary = "from `quivr plugin init` to a searchable, observable Record" }
+"docs/plugins/write-an-ingestion-plugin.md" = { audience = "plugin-author", kind = "guide", summary = "decide how articles are cut and embedded, and move a Corpus onto it" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
 "docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
@@ -97,7 +98,7 @@ excluded = [
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources and live feed" }
-"sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify a source collector in Go" }
+"sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify a source collector or an ingestion plugin in Go" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run a Python normalizer" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
 "third_party/README.md" = { audience = "contributor", kind = "index", summary = "dependency notices and inventory" }
@@ -126,12 +127,13 @@ excluded = [
 "docs/keyword-alerts.md" = 155
 "docs/plugins/run-a-connector-plugin.md" = 84
 "docs/plugins/write-a-normalizer.md" = 360
+"docs/plugins/write-an-ingestion-plugin.md" = 118
 "docs/runnable-guides.md" = 85
 "docs/what-quivr-can-do.md" = 60
 "plugins/pdf-text/README.md" = 120
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 108
-"sdks/go/README.md" = 165
+"sdks/go/README.md" = 180
 "sdks/python/README.md" = 125
 "tests/acceptance/README.md" = 50

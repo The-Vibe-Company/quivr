@@ -6,8 +6,9 @@ Plugin API 0.3), so a source collector is one Go type. The core keeps the
 schedules, checkpoints, credentials and health; your plugin only fetches pages
 from the source. It depends only on `gopkg.in/yaml.v3` and
 `santhosh-tekuri/jsonschema/v6`, never on Quivr's engine packages. Go 1.24 or
-later. This SDK serves connectors only; write normalizers and alert rules with
-the [Python SDK](../python/README.md).
+later. It also serves the ingestion Contribution (Plugin API 0.6,
+[below](#an-ingestion-plugin)); write normalizers and alert rules with the
+[Python SDK](../python/README.md).
 
 ```bash
 go get github.com/The-Vibe-Company/quivr-v2/sdks/go
@@ -74,6 +75,18 @@ func main() {
 	}
 }
 ```
+
+## An ingestion plugin
+
+Declare `contributions.ingestion` with the vector spaces the plugin owns and
+register a type with two methods, `SegmentAndEmbed` (segments of the Version's
+text Parts, each with a vector per requested space) and `EmbedQuery`, through
+`plugin.Ingestion(impl)`. The SDK refuses undeclared spaces and checks offsets,
+dimensions and `max_segments` before answering; a `RetryableIngestError` delays
+the Version, a `TerminalIngestError` blocks it.
+[`examples/hash-embedder`](examples/hash-embedder/) is certified in CI, and
+[Write an ingestion plugin](../../docs/plugins/write-an-ingestion-plugin.md)
+covers pinning it.
 
 ## What the SDK does
 

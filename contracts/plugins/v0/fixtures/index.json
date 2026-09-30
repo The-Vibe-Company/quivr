@@ -1,5 +1,5 @@
 {
-  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request) or the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) reports.",
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request), the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) or the engine ingestion output validation (segment_and_embed and embed_query answers, judged the same way) reports.",
   "cases": [
     {
       "file": "manifests/valid/full.yaml",
@@ -1353,6 +1353,395 @@
       "valid": false,
       "schema_valid": false,
       "description": "A receive case has a text body or a base64 body, not both."
+    },
+    {
+      "file": "manifests/valid/ingestion.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Two vector spaces of an ingestion plugin (Plugin API 0.6)."
+    },
+    {
+      "file": "manifests/invalid/ingestion-foreign-space.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "foreign_space"
+      ],
+      "description": "A space id must be the plugin id or start with it."
+    },
+    {
+      "file": "manifests/invalid/ingestion-plugin-api-0.5.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "The ingestion Contribution exists since Plugin API 0.6."
+    },
+    {
+      "file": "manifests/invalid/ingestion-bad-space.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Zero dimensions, an unknown metric and an unknown modality."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A titled Version to embed in two spaces."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-body-only.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A Version without a title Part, one space."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-no-spaces.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At least one space is requested."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-no-parts.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At least one Part is sent."
+    },
+    {
+      "file": "requests/ingestion/embed-query.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Encode a text query in one space."
+    },
+    {
+      "file": "requests/ingestion/embed-query-image.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Plugin API 0.6 queries are text only."
+    },
+    {
+      "file": "requests/ingestion/embed-query-missing-space.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The space is required."
+    },
+    {
+      "file": "responses/ingestion/valid.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Two segments, a vector per requested space, lexical text and provenance."
+    },
+    {
+      "file": "responses/ingestion/title-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An empty segment stands for the title alone when the request has a title Part."
+    },
+    {
+      "file": "responses/ingestion/title-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "empty_segment",
+        "unrequested_space"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed-body-only.json",
+      "description": "Without a title Part an empty segment is refused; the large space was not requested."
+    },
+    {
+      "file": "responses/ingestion/unknown-part-key.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unknown_part_key"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A segment cut from a Part the request does not carry."
+    },
+    {
+      "file": "responses/ingestion/offset-out-of-range.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "offset_out_of_range"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "The end is past the Part's last code point."
+    },
+    {
+      "file": "responses/ingestion/start-after-end.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "offset_out_of_range"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "start > end."
+    },
+    {
+      "file": "responses/ingestion/duplicate-segment.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_segment"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "The same Part and offsets twice."
+    },
+    {
+      "file": "responses/ingestion/too-many-segments.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_segments"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Five segments; the manifest declares max_segments 4."
+    },
+    {
+      "file": "responses/ingestion/missing-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "missing_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A requested space without a vector."
+    },
+    {
+      "file": "responses/ingestion/unrequested-space.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unrequested_space"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A vector for a space the request does not ask for."
+    },
+    {
+      "file": "responses/ingestion/dimension-mismatch.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Two numbers in a six-dimension space."
+    },
+    {
+      "file": "responses/ingestion/zero-cosine-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An all-zero vector has no direction under the cosine metric."
+    },
+    {
+      "file": "responses/ingestion/zero-dot-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An all-zero vector is allowed under the dot metric."
+    },
+    {
+      "file": "responses/ingestion/float32-overflow.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "1e39 does not fit a 32-bit float."
+    },
+    {
+      "file": "responses/ingestion/lexical-text-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "lexical_text_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "16385 code points of lexical text."
+    },
+    {
+      "file": "responses/ingestion/lexical-text-at-limit.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "16384 code points, counted as code points, not bytes."
+    },
+    {
+      "file": "responses/ingestion/nul-lexical-text.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_lexical_text"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A NUL character in the lexical text."
+    },
+    {
+      "file": "responses/ingestion/provenance-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "provenance_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Provenance larger than 4 KiB."
+    },
+    {
+      "file": "responses/ingestion/unknown-field.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Unknown fields are refused."
+    },
+    {
+      "file": "responses/ingestion/no-segments.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An answer has at least one segment."
+    },
+    {
+      "file": "responses/ingestion/string-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A vector is an array of numbers."
+    },
+    {
+      "file": "responses/ingestion/embed-query-valid.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "One vector of the space's four dimensions."
+    },
+    {
+      "file": "responses/ingestion/embed-query-dimension-mismatch.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "Three numbers in a four-dimension space."
+    },
+    {
+      "file": "responses/ingestion/embed-query-extra.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "Unknown fields are refused."
+    },
+    {
+      "file": "ingestion/article.json",
+      "schema": "ingestion-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The normative article every ingestion plugin is certified with."
     }
   ]
 }

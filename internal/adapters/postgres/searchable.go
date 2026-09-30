@@ -11,10 +11,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// BootstrapGeneration creates the default generation of a fresh install. It is
-// source-namespace projected; an existing default keeps its recorded state.
+// BootstrapGeneration creates the default generation of a fresh install with
+// the registry's served and evaluation spaces (spaceID alone when nothing is
+// registered). It is source-namespace and space projected. An install that
+// already has an active default keeps it as recorded.
 func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected) VALUES($1,$2,$3,true,$4,true) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true
+WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
 
@@ -22,8 +26,12 @@ func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, space
 func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
 	var cfg []byte
-	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &cfg)
+	var spaces []byte
+	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg)
 	if err != nil {
+		return g, err
+	}
+	if g.Spaces, err = scanSpaces(spaces); err != nil {
 		return g, err
 	}
 	g.Fields, err = retrievalFields(cfg)
@@ -80,6 +88,39 @@ func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result c
 	}
 	return tx.Commit(ctx)
 }
+
+// StoredSegmentation reads a Version's segmentation of one recipe, its
+// segments in order.
+func (s ContentStore) StoredSegmentation(ctx context.Context, org, versionID, recipe string) (content.StoredSegmentation, error) {
+	var out content.StoredSegmentation
+	err := s.Pool.QueryRow(ctx, `SELECT id,digest,provenance FROM segmentations WHERE organization=$1 AND version_id=$2 AND recipe=$3`, org, versionID, recipe).Scan(&out.ID, &out.Digest, &out.Provenance)
+	if err != nil {
+		return out, notFound(err)
+	}
+	if string(out.Provenance) == "{}" {
+		out.Provenance = nil
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT id,part_key,start_offset,end_offset,derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 ORDER BY (derivation->>'ordinal')::integer`, org, out.ID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p content.StoredSegment
+		var derivation []byte
+		if err = rows.Scan(&p.ID, &p.PartKey, &p.Start, &p.End, &derivation); err != nil {
+			return out, err
+		}
+		if err = json.Unmarshal(derivation, &p.Derivation); err != nil {
+			return out, err
+		}
+		out.Segments = append(out.Segments, p)
+	}
+	return out, rows.Err()
+}
+
+var _ content.SegmentationStore = ContentStore{}
+
 func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code string, quarantined bool) error {
 	if !quarantined {
 		_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, org, id, state, code)

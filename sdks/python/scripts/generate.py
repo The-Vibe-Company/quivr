@@ -47,6 +47,11 @@ FILES = {
     "connector-upload-attachment-response.schema.json": "ConnectorUploadAttachmentResponse",
     "connector-receive-request.schema.json": "ConnectorReceiveRequest",
     "connector-receive-response.schema.json": "ConnectorReceiveResponse",
+    "ingestion-segment-and-embed-request.schema.json": "SegmentAndEmbedRequest",
+    "ingestion-segment-and-embed-response.schema.json": "SegmentAndEmbedResponse",
+    "ingestion-embed-query-request.schema.json": "EmbedQueryRequest",
+    "ingestion-embed-query-response.schema.json": "EmbedQueryResponse",
+    "ingestion-fixture.schema.json": "IngestionFixture",
 }
 
 # Readable names for inline object schemas, keyed by "<file>#<JSON pointer>".

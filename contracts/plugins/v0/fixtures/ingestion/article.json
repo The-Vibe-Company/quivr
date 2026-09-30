@@ -1,0 +1,22 @@
+{
+  "description": "Normative ingestion fixture: a titled article of two paragraphs. The Contract Runner sends it to every ingestion plugin.",
+  "ingestion": {
+    "parts": [
+      {
+        "key": "title",
+        "role": "title",
+        "text": "Harbour strike enters its second day"
+      },
+      {
+        "key": "body",
+        "role": "body",
+        "text": "Dockers stopped work at dawn on Monday and the port stayed closed.\n\nUnion leaders said talks with the port authority would resume on Wednesday, while ships queued offshore."
+      }
+    ],
+    "language": "en",
+    "queries": [
+      "port closed by a strike",
+      "talks resume"
+    ]
+  }
+}

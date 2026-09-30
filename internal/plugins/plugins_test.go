@@ -110,6 +110,8 @@ func TestNormativeFixtures(t *testing.T) {
 				issues = plugins.CheckReceiveOutput(context.Background(), raw, report.Manifest)
 			case "connector-upload-attachment-response.schema.json":
 				issues = plugins.CheckUploadAnswer(raw)
+			case "ingestion-segment-and-embed-response.schema.json", "ingestion-embed-query-response.schema.json":
+				issues = checkIngestionFixture(t, c, raw)
 			default:
 				issues = plugins.ValidateDocument(c.Schema, raw)
 			}
@@ -174,7 +176,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 	if report.ManifestDigest != "sha256:"+hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest %q", report.ManifestDigest)
 	}
-	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.5.0" {
+	if report.EngineVersion != plugins.EngineVersion || report.PluginAPIVersion != plugins.PluginAPIVersion || plugins.PluginAPIVersion != "0.6.0" {
 		t.Fatalf("versions %q %q", report.EngineVersion, report.PluginAPIVersion)
 	}
 	n := report.Manifest.Contributions.Normalizer
@@ -297,6 +299,35 @@ func TestUnparsableEngineVersionIsNeverCompatible(t *testing.T) {
 	if report.Valid || codes(report.Errors)[0] != plugins.CodeIncompatibleEngine || report.Compatibility.Engine.Compatible {
 		t.Fatalf("report %+v", report)
 	}
+}
+
+// checkIngestionFixture judges a segment_and_embed or embed_query answer
+// against the request (Parts, spaces) and the manifest (spaces, limits) it
+// names.
+func checkIngestionFixture(t *testing.T, c fixtureCase, raw []byte) []plugins.Issue {
+	t.Helper()
+	request, err := os.ReadFile(filepath.Join(fixtures, c.Request))
+	if err != nil {
+		t.Fatalf("ingestion answers name their request: %v", err)
+	}
+	report := plugins.Inspect(filepath.Join(fixtures, c.Manifest))
+	if report.Manifest == nil {
+		t.Fatalf("ingestion answers name a valid manifest: %+v", report.Errors)
+	}
+	if c.Schema == "ingestion-embed-query-response.schema.json" {
+		var query struct {
+			Space string `json:"space"`
+		}
+		if err := json.Unmarshal(request, &query); err != nil {
+			t.Fatal(err)
+		}
+		return plugins.CheckEmbedQueryOutput(raw, query.Space, report.Manifest)
+	}
+	view, err := plugins.ViewIngestionRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plugins.CheckSegmentAndEmbedOutput(raw, view, report.Manifest)
 }
 
 // checkConnectorFixture judges a connector fetch response fixture against the

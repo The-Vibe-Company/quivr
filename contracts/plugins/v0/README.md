@@ -1,11 +1,12 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.5.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.6.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
-connector attachments, and `0.5.0` the connector push mode (`receive`). JSON Schemas in this
+connector attachments, `0.5.0` the connector push mode (`receive`), and
+`0.6.0` the `ingestion` Contribution. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -23,10 +24,13 @@ and the glossary in [CONTEXT.md](../../../CONTEXT.md).
 | `connector-fetch-request.schema.json`, `connector-fetch-response.schema.json` | `POST /v0/contributions/connector/fetch` request and 200 response (since 0.3) |
 | `connector-check-credential-request.schema.json`, `connector-check-credential-response.schema.json` | `POST /v0/contributions/connector/check_credential` request and 200 response (since 0.3) |
 | `connector-receive-request.schema.json`, `connector-receive-response.schema.json` | `POST /v0/contributions/connector/receive` request and 200 response (since 0.5) |
+| `ingestion-segment-and-embed-request.schema.json`, `ingestion-segment-and-embed-response.schema.json` | `POST /v0/contributions/ingestion/segment_and_embed` request and 200 response (since 0.6) |
+| `ingestion-embed-query-request.schema.json`, `ingestion-embed-query-response.schema.json` | `POST /v0/contributions/ingestion/embed_query` request and 200 response (since 0.6) |
 | `error.schema.json` | Body of every non-2xx response |
 | `plugin-fixture.schema.json` | Invocation fixture: a local test input that tools turn into a normalizer request |
 | `subscription-fixture.schema.json` | Subscription fixture: a local test input that tools turn into subscription requests (since 0.2) |
 | `connector-fixture.schema.json` | Connector fixture: a local test input that tools turn into connector requests (since 0.3) |
+| `ingestion-fixture.schema.json` | Ingestion fixture: a local test input that tools turn into ingestion requests (since 0.6) |
 | `reports/contract-report.schema.json` | JSON report of `quivr plugin test --report` (tooling, not protocol) |
 
 The Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes
@@ -42,13 +46,14 @@ equivalent copies under other names out of both contracts.
 
 ## Contributions
 
-Plugin API 0.5 accepts three Contributions, and a manifest declares at least one:
+Plugin API 0.6 accepts four Contributions, and a manifest declares at least one:
 
 | Contribution | Since | Purpose |
 | --- | --- | --- |
 | **`normalizer`** | 0.1 | Turn one input Blob into the Parts, Relations and extensions of a Record Version |
 | **`subscription`** | 0.2 | An alert rule: decide whether one Record Version matches each Saved Query expression of a batch ([below](#subscription-contribution)) |
 | **`connector`** | 0.3 | A source collector: fetch pages of new or changed items after an opaque checkpoint ([below](#connector-contribution)) |
+| **`ingestion`** | 0.6 | Cut a Record Version into segments, embed them in the vector spaces the plugin owns, and encode queries into those spaces ([below](#ingestion-contribution)) |
 
 The names `enricher`, `validator`, `projector` and `retriever`
 are **reserved**. A manifest that declares them is rejected
@@ -57,9 +62,9 @@ are **reserved**. A manifest that declares them is rejected
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.5.0` and still serves every `0.1`, `0.2`, `0.3` and `0.4` plugin unchanged: a
+implements `0.6.0` and still serves every `0.1` to `0.5` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0` or `0.5.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0` or `0.6.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
@@ -90,6 +95,8 @@ version.
 | `POST /v0/contributions/connector/describe_attachment` | 200 size and SHA-256, or a skip | Describe one attachment's bytes (since 0.4, with `attachments`) |
 | `POST /v0/contributions/connector/upload_attachment` | 200 `{"status":"uploaded"}` | Upload one attachment to a core grant (since 0.4, with `attachments`) |
 | `POST /v0/contributions/connector/receive` | 200 verdict and answer | Verify one relayed delivery and return its items (since 0.5, for a push kind) |
+| `POST /v0/contributions/ingestion/segment_and_embed` | 200 segments with their vectors | Segment and embed one Record Version (since 0.6) |
+| `POST /v0/contributions/ingestion/embed_query` | 200 `{"vector"}` | Encode one query into one space (since 0.6) |
 
 - **Errors.** Every non-2xx response carries the error envelope
   `{code, message, retryable}`. `retryable: true` asks the engine to retry
@@ -122,6 +129,9 @@ version.
 | `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
+| `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`; the id is the plugin id or starts with `<id>.` |
+| `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
+| `contributions.ingestion.limits` | `max_segments` per Version (default 256, at most 1024) and `max_response_bytes` (default and cap 16 MiB) |
 | `configuration.schema` | JSON Schema 2020-12 for installer configuration |
 | `secrets[]` | Secret names (`^[A-Z][A-Z0-9_]*$`), description, `required` (default true). Values never appear in the manifest |
 | `extensions` | Owned extension namespaces: namespace, then schema version, then JSON Schema 2020-12 |
@@ -507,6 +517,87 @@ active since before it started, still creates new Record Versions reports
 holds back items the source may still be delivering. Only a plugin with a push
 kind reports a push status (`invalid_push_status`).
 
+## Ingestion Contribution
+
+Segmentation and embedding (since Plugin API 0.6). The plugin cuts one Record
+Version's text into segments and embeds each segment in the vector spaces it
+owns; it also encodes queries into those spaces, so a query vector always comes
+from the model that made the document vectors. The core keeps everything else:
+the vector space registry, Weaviate and its named vectors, projection
+generations and rebuilds, authorization and withdrawal. Write one with the
+[Go SDK](../../../sdks/go/README.md) and pin it as described in
+[Write an ingestion plugin](../../../docs/plugins/write-an-ingestion-plugin.md).
+
+**Spaces.** `contributions.ingestion.spaces` declares each space by id: the
+plugin id or an id starting with `<plugin id>.` (`foreign_space` otherwise),
+so a space has exactly one owner. A space's identity is its id and `version`
+together (`<id>@<version>`, as search hits and the registry report it); bump
+the version whenever the vectors change. `model`, `dimensions`, `metric`
+(`cosine`, `dot` or `l2`) and the modalities it `indexes` and accepts as
+`query_modalities` (only `text` in 0.6) describe it. At startup the core
+registers the enabled spaces and refuses one registered under another owner
+(`space_owner_conflict`) or with another model, dimensions or metric under the
+same version (`space_changed`).
+
+**`segment_and_embed`** (`ingestion-segment-and-embed-request.schema.json`)
+carries the usual envelope and idempotency key, the Record Version identity,
+an optional `language` hint, the Version's text `parts` (`key`, `role`,
+`text`, in Manifest order) and the `spaces` to embed, the ones the deployment
+enables. The answer (`ingestion-segment-and-embed-response.schema.json`) lists
+`segments` in reading order: `part_key`, `start` and `end` in Unicode code
+points, `vectors` with exactly one vector per requested space, and optionally
+`lexical_text` (text the core indexes in a separate keyword field, while
+excerpts keep the source text) and `provenance` (stored, never interpreted).
+The same idempotency key must yield the same answer: rebuilds reuse stored
+segments and vectors, and a different answer for the same Version is refused.
+
+**`embed_query`** (`ingestion-embed-query-request.schema.json`) carries the
+`space` and a `query` (`modality: text`, `text`) and answers `{"vector"}`
+within `query_timeout_ms`, which a search waits for.
+
+**Errors.** Unavailability or a `retryable: true` envelope delays the Version,
+retried with backoff; a terminal envelope, or an answer the checks below
+refuse, blocks it as `ingestion_refused`. For `embed_query`, a terminal
+envelope refuses the search (422) and anything else makes it unavailable
+(503).
+
+`CheckSegmentAndEmbedOutput` and `CheckEmbedQueryOutput` in `internal/plugins`
+judge every answer for the engine and the Contract Runner:
+
+| Rule | Code |
+| --- | --- |
+| Response within `max_response_bytes` (default and cap 16 MiB; embed_query 1 MiB) | `response_too_large` |
+| A Part of the request | `unknown_part_key` |
+| `0 <= start <= end <=` the Part's length | `offset_out_of_range` |
+| `start = end` only when the request has a Part with the role `title` | `empty_segment` |
+| Each Part and offsets once; at most `max_segments` | `duplicate_segment`, `too_many_segments` |
+| One vector per requested space, none other | `missing_vector`, `unrequested_space` |
+| The space's `dimensions`; finite as 32-bit floats; not all zeros under `cosine` | `dimension_mismatch`, `invalid_vector` |
+| Lexical text without NUL, at most 16384 code points | `invalid_lexical_text`, `lexical_text_too_large` |
+| Provenance without NUL, at most 4 KiB | `invalid_provenance`, `provenance_too_large` |
+
+**Deployment.** A pin enables spaces with `spaces: {"<id>": "served" |
+"evaluation"}` (absent: the only declared space, served); exactly one is
+served, and a deployment pins one ingestion plugin (`ingestion_conflict`). A
+projection generation carries the spaces enabled when it was built, served
+first, each as a named vector. A Corpus goes through the plugin once its
+routed generation is served by one of the plugin's spaces; a Corpus built
+before keeps its path until it is rebuilt, and the rebuild calls the plugin
+only for Versions without stored vectors in the new spaces.
+`GET /v0/corpora/{corpus_id}/vector-spaces` lists a Corpus's spaces with their
+owner, role and coverage.
+
+**Ingestion fixtures** (`ingestion-fixture.schema.json`, a file with a
+top-level `ingestion` property) hold the `parts`, an optional `language`,
+`configuration`, `spaces` (default: every declared space) and `queries`
+(default: the first 200 code points of the first non-empty Part), and what to
+`expect`: the exact `segments` and whether every segment carries
+`lexical_text`. Ids derive from the first 16 hex digits of the SHA-256 of the
+fixture bytes (`dev-record-…`, `dev-version-…`), with Corpus `dev-corpus`,
+Organization `dev-organization` and idempotency key `dev:<sha256>`.
+`fixtures/ingestion/article.json` is the normative fixture every ingestion
+plugin is certified with.
+
 ## Normative fixtures
 
 `fixtures/index.json` lists every fixture with its schema and two outcomes.
@@ -586,6 +677,7 @@ are normative examples. `quivr plugin dev` does not replay connector fixtures;
 go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/full.yaml
 go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/subscription.yaml
 go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/connector.yaml
+go run ./cmd/quivr plugin inspect contracts/plugins/v0/fixtures/manifests/valid/ingestion.yaml
 go run ./cmd/quivr plugin inspect --json contracts/plugins/v0/fixtures/manifests/invalid/reserved-contribution.yaml
 ```
 
@@ -668,6 +760,18 @@ When the manifest declares `connector`, it adds checks with
 | `attachments` (per fixture) | When the manifest declares `attachments`, each attachment the pages returned is described (unless its descriptor is exact), granted to the runner's loopback storage and uploaded; the stored bytes match the description (`attachment_mismatch`, `attachment_too_large`). |
 | `receive` (per case) | When a kind declares `push`: each fixture `receive` case is answered within `timeout_ms` with a verdict `CheckReceiveOutput` accepts (`invalid_verdict`) and the case's expectation (`unexpected_items`). At least one case exists (`no_fixture`). Invalid receive requests are refused like the others. |
 
+When the manifest declares `ingestion`, it adds checks with
+`"contribution": "ingestion"`:
+
+| Check | Passes when |
+| --- | --- |
+| `fixtures` | The normative `fixtures/ingestion/*.json` whose configuration the plugin accepts, plus the plugin's own ingestion fixtures, build valid requests. |
+| `invoke` (per fixture) | The answer is a 200 within `timeout_ms` that passes `CheckSegmentAndEmbedOutput` and the expected segments (`unexpected_segments`). |
+| `replay` (per fixture) | The same `idempotency_key` with a new `invocation_id` yields the same answer (`nondeterministic_output`). |
+| `embed_query` (per fixture and space) | Each fixture query is answered within `query_timeout_ms` with a vector `CheckEmbedQueryOutput` accepts, the same one twice. |
+| `invalid_request` | A non-JSON body, an unknown field, an undeclared space and the normative invalid requests in `fixtures/requests/ingestion/` are refused on both routes with a terminal error envelope. |
+| `credentials` | No value of a declared secret set in the runner's environment (8 characters or more) appears in an answer or the plugin's output (`credential_leak`). |
+
 The human report goes to stdout; the plugin's own output goes to stderr.
 `--report <file>` writes the JSON report described by
 `reports/contract-report.schema.json`. Exit codes: `0` certified, `1` not
@@ -677,6 +781,7 @@ The deliberately broken plugins in `tests/plugin-contract/` show one failure
 per rule, for every Contribution; the connector rules run one fake plugin in a
 broken mode each. CI certifies both `quivr plugin init` templates and the Go
 SDK's sample connector, and publishes their reports as the
-`plugin-contract-report`, `subscription-plugin-contract-report` and
-`go-connector-contract-report` workflow artifacts. Write a connector with the
+`plugin-contract-report`, `subscription-plugin-contract-report`,
+`go-connector-contract-report` and, for the Go SDK's sample ingestion plugin,
+`go-ingestion-contract-report` workflow artifacts. Write a connector with the
 [Go SDK](../../../sdks/go/README.md).

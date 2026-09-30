@@ -1,0 +1,52 @@
+{
+  "segments": [
+    {
+      "part_key": "body",
+      "start": 0,
+      "end": 29,
+      "vectors": {
+        "example.words.small": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "example.words.large": [
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6
+        ]
+      },
+      "lexical_text": "docker stop work dawn",
+      "score": 1
+    },
+    {
+      "part_key": "body",
+      "start": 30,
+      "end": 49,
+      "vectors": {
+        "example.words.small": [
+          0,
+          1,
+          0,
+          0
+        ],
+        "example.words.large": [
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6
+        ]
+      },
+      "provenance": {
+        "tokens": 6,
+        "template": "passage: {title}\n\n{text}"
+      }
+    }
+  ]
+}

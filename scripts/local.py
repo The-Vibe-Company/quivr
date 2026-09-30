@@ -9,6 +9,7 @@ import normalizer_plugin
 import ports
 import subscription_plugin
 import connector_plugin
+import ingestion_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
@@ -514,6 +515,9 @@ def parts():
             # test plugin is pinned to observe every failure class and the optional-route fallback.
             step('normalizer_outage',normalizer_plugin.outage),
             step('normalizer_failures',normalizer_plugin.failures),
+            # The Go SDK sample ingestion plugin pinned beside them: a Corpus rebuilt onto its named spaces is
+            # segmented, embedded and searched through it, served and evaluation spaces both covered.
+            step('ingestion_plugin',ingestion_plugin.verify),
             # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
             step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
             acceptance('pdf_normalizer','TestPDF'),

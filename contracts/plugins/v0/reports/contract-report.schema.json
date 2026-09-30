@@ -158,7 +158,8 @@
             "check_credential",
             "credentials",
             "attachments",
-            "receive"
+            "receive",
+            "embed_query"
           ]
         },
         "title": {
@@ -168,7 +169,8 @@
           "enum": [
             "normalizer",
             "subscription",
-            "connector"
+            "connector",
+            "ingestion"
           ],
           "description": "Contribution the check exercises; absent for checks of the whole plugin."
         },

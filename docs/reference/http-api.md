@@ -38,6 +38,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/corpora`](#get-v0corpora) | `listCorpora` | `corpora:read` |
 | [`GET /v0/corpora/{corpus_id}`](#get-v0corporacorpus_id) | `getCorpus` | `corpora:read` |
 | [`PUT /v0/corpora/{corpus_id}/retrieval`](#put-v0corporacorpus_idretrieval) | `configureRetrieval` | `corpora:write`, `operations:write` |
+| [`GET /v0/corpora/{corpus_id}/vector-spaces`](#get-v0corporacorpus_idvector-spaces) | `listVectorSpaces` | `corpora:read` |
 | [`POST /v0/corpora/{corpus_id}/rebuilds`](#post-v0corporacorpus_idrebuilds) | `rebuildCorpusProjection` | `projections:rebuild` |
 | [`GET /v0/changes`](#get-v0changes) | `pollChanges` | `changes:read` |
 | [`GET /v0/changes/stream`](#get-v0changesstream) | `streamChanges` | `changes:read` |
@@ -418,6 +419,25 @@ Resolve mapping and schedule a new immutable Projection Generation through a ret
 | --- | --- | --- |
 | `202` | `application/json` [`Operation`](#operation) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/corpora/{corpus_id}/vector-spaces`
+
+Operation `listVectorSpaces`. Requires `corpora:read`.
+
+The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`VectorSpaceList`](#vectorspacelist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 503 dependency unavailable. |
 
 #### `POST /v0/corpora/{corpus_id}/rebuilds`
 
@@ -4118,6 +4138,142 @@ required:
   - corpus_id
   - name
   - effective_retrieval
+```
+
+</details>
+
+### `VectorSpaceList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `projection_generation_id` | string | yes | Minimum length `1`. |
+| `segments` | integer | yes | Current segments the generation projects; a space whose coverage equals it holds a vector for every one. Minimum `0`. |
+| `items` | array of [`VectorSpace`](#vectorspace) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  projection_generation_id:
+    type: string
+    minLength: 1
+  segments:
+    type: integer
+    minimum: 0
+    description: Current segments the generation projects; a space whose coverage equals it holds a vector for every one.
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/VectorSpace'
+required:
+  - projection_generation_id
+  - segments
+  - items
+```
+
+</details>
+
+### `VectorSpace`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vector_space_id` | string | yes | The space's identity, as search hits report it. A plugin space is <name>@<version>. Minimum length `1`. |
+| `name` | string | yes | Minimum length `1`. |
+| `version` | string | yes |  |
+| `owner` | object | yes |  |
+| `owner.kind` | string | yes | One of `engine`, `plugin`. |
+| `owner.plugin_id` | string |  | Minimum length `1`. |
+| `owner.plugin_version` | string |  | Minimum length `1`. |
+| `model` | string | yes |  |
+| `dimensions` | integer | yes | Minimum `0`. |
+| `metric` | string | yes | One of `cosine`, `dot`, `l2`. |
+| `indexes` | array of string | yes |  |
+| `query_modalities` | array of string | yes |  |
+| `role` | string | yes | One of `served`, `evaluation`. |
+| `coverage` | object | yes |  |
+| `coverage.segments` | integer | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  vector_space_id:
+    type: string
+    minLength: 1
+    description: The space's identity, as search hits report it. A plugin space is <name>@<version>.
+  name:
+    type: string
+    minLength: 1
+  version:
+    type: string
+  owner:
+    type: object
+    additionalProperties: false
+    properties:
+      kind:
+        type: string
+        enum:
+          - engine
+          - plugin
+      plugin_id:
+        type: string
+        minLength: 1
+      plugin_version:
+        type: string
+        minLength: 1
+    required:
+      - kind
+  model:
+    type: string
+  dimensions:
+    type: integer
+    minimum: 0
+  metric:
+    type: string
+    enum:
+      - cosine
+      - dot
+      - l2
+  indexes:
+    type: array
+    items:
+      type: string
+  query_modalities:
+    type: array
+    items:
+      type: string
+  role:
+    type: string
+    enum:
+      - served
+      - evaluation
+  coverage:
+    type: object
+    additionalProperties: false
+    properties:
+      segments:
+        type: integer
+        minimum: 0
+    required:
+      - segments
+required:
+  - vector_space_id
+  - name
+  - version
+  - owner
+  - model
+  - dimensions
+  - metric
+  - indexes
+  - query_modalities
+  - role
+  - coverage
 ```
 
 </details>

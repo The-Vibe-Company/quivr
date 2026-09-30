@@ -60,6 +60,18 @@ _Avoid_: Source of truth, primary record
 A named and versioned embedding representation whose dimensions, distance metric, and generating model remain consistent within that space.
 _Avoid_: Universal embedding, vector column
 
+**Space Owner**:
+The single ingestion plugin, or the engine for its built-in space, that declares a vector space and alone produces its document and query vectors. A space never changes owner; vectors from another model or template are a new space version.
+_Avoid_: Shared space, embedder
+
+**Served Space**:
+The vector space a deployment answers search with; each projection generation pins one when it is built.
+_Avoid_: Default embedding, active model
+
+**Evaluation Space**:
+A vector space a deployment indexes on the same segments as its served space so the two can be compared, but never uses to answer search.
+_Avoid_: Shadow index, experimental space
+
 **Embedding Artifact**:
 A durable derived representation of a part in a vector space, retained independently of any particular search projection.
 _Avoid_: Vector index entry

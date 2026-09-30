@@ -7,9 +7,38 @@ import (
 	"math"
 )
 
+// VectorSpace is a registered vector space: ID is its identity (for a
+// plugin space, "<space id>@<space version>"), Manifest its immutable
+// description, Dimensions the vector size (0 leaves the size unchecked).
 type VectorSpace struct {
-	ID       string
-	Manifest json.RawMessage
+	ID         string
+	Manifest   json.RawMessage
+	Dimensions int
+}
+
+// MaxDimensions bounds any vector the engine stores.
+const MaxDimensions = 4096
+
+// Space roles of the registry: served spaces answer search, evaluation spaces
+// are indexed and compared but never served, retired spaces are no longer
+// written to new generations.
+const (
+	SpaceServed     = "served"
+	SpaceEvaluation = "evaluation"
+	SpaceRetired    = "retired"
+)
+
+// RegisteredSpace is one entry of the vector space registry: the space, its
+// owner (an ingestion plugin, or the engine itself when OwnerPluginID is
+// empty), its description and its role in this deployment.
+type RegisteredSpace struct {
+	VectorSpace
+	// Name and Version are the declared space id and version.
+	Name, Version                     string
+	OwnerPluginID, OwnerPluginVersion string
+	Model, Metric                     string
+	Indexes, QueryModalities          []string
+	Role                              string
 }
 type Embedding struct {
 	ID             string `json:"embedding_artifact_id"`
@@ -48,29 +77,26 @@ func (s Service) EnrichmentEligible(ctx context.Context, org, versionID string) 
 	return s.Embeddings.EnrichmentEligible(ctx, org, versionID)
 }
 
+// VectorBytes encodes a vector as little-endian float32s. Every value must be
+// finite; a space's own model checks, such as unit norm, stay with its owner.
 func VectorBytes(vector []float32) ([]byte, error) {
-	if len(vector) != 384 {
+	if len(vector) == 0 || len(vector) > MaxDimensions {
 		return nil, ErrInvalid
 	}
-	norm := 0.0
 	raw := make([]byte, 4*len(vector))
 	for i, x := range vector {
 		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
 			return nil, ErrInvalid
 		}
-		norm += float64(x) * float64(x)
 		binary.LittleEndian.PutUint32(raw[4*i:], math.Float32bits(x))
-	}
-	if math.Abs(math.Sqrt(norm)-1) > .001 {
-		return nil, ErrInvalid
 	}
 	return raw, nil
 }
 func ReadVector(raw []byte) ([]float32, error) {
-	if len(raw) != 1536 {
+	if len(raw) == 0 || len(raw)%4 != 0 || len(raw) > 4*MaxDimensions {
 		return nil, ErrInvalid
 	}
-	v := make([]float32, 384)
+	v := make([]float32, len(raw)/4)
 	for i := range v {
 		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*i:]))
 	}
@@ -111,7 +137,7 @@ func (s Service) SaveEmbedding(ctx context.Context, e Embedding, space VectorSpa
 	if err != nil {
 		return e, err
 	}
-	if e.SpaceID != space.ID || e.DerivationID == "" || e.Producer == "" {
+	if e.SpaceID != space.ID || e.DerivationID == "" || e.Producer == "" || (space.Dimensions > 0 && len(vector) != space.Dimensions) {
 		return e, ErrInvalid
 	}
 	e.Payload, err = s.Blobs.Put(ctx, e.Organization, raw)
@@ -137,6 +163,36 @@ func embeddingManifest(e Embedding) []byte {
 	return b
 }
 
+// CheckCoverage checks that vectors cover a segmentation in a generation:
+// each segment has exactly one vector in the served space, and at most one in
+// each other space the generation carries, and nothing else.
+func CheckCoverage(seg Segmentation, g Generation, data []EmbeddingData) error {
+	spaces := map[string]bool{}
+	for _, id := range g.VectorSpaces() {
+		spaces[id] = true
+	}
+	segments := map[string]bool{}
+	for _, p := range seg.Segments {
+		segments[p.ID] = true
+	}
+	seen := map[[2]string]bool{}
+	served := map[string]bool{}
+	for _, p := range data {
+		key := [2]string{p.Artifact.SegmentID, p.Artifact.SpaceID}
+		if !segments[key[0]] || !spaces[key[1]] || seen[key] {
+			return ErrInvalid
+		}
+		seen[key] = true
+		if key[1] == g.SpaceID {
+			served[key[0]] = true
+		}
+	}
+	if len(served) != len(segments) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // EmbeddingData keeps a verified float32 vector associated with its durable artifact.
 type EmbeddingData struct {
 	Artifact Embedding
@@ -152,14 +208,21 @@ func (s Service) EnrichmentProgress(ctx context.Context, org, versionID, state, 
 	}
 	return s.Embeddings.EnrichmentProgress(ctx, org, versionID, state, code)
 }
+
+// CommitEnrichment records the vectors attached to a generation: every
+// segment has one in the served space, and each other artifact is in one of
+// the generation's spaces, at most one per segment and space.
 func (s Service) CommitEnrichment(ctx context.Context, org string, seg Segmentation, g Generation, data []EmbeddingData) error {
-	if len(data) == 0 || len(data) != len(seg.Segments) || g.SpaceID == "" {
+	if len(data) == 0 || g.SpaceID == "" {
 		return ErrInvalid
+	}
+	if err := CheckCoverage(seg, g, data); err != nil {
+		return err
 	}
 	artifacts := make([]Embedding, len(data))
 	for i, p := range data {
 		e := p.Artifact
-		if e.Organization != org || e.VersionID != seg.VersionID || e.SegmentationID != seg.ID || e.SegmentID != seg.Segments[i].ID || e.SpaceID != g.SpaceID {
+		if e.Organization != org || e.VersionID != seg.VersionID || e.SegmentationID != seg.ID {
 			return ErrInvalid
 		}
 		raw, err := VectorBytes(p.Vector)

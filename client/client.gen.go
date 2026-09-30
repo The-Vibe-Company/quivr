@@ -621,6 +621,63 @@ func (e UploadUploadMethod) Valid() bool {
 	}
 }
 
+// Defines values for VectorSpaceMetric.
+const (
+	Cosine VectorSpaceMetric = "cosine"
+	Dot    VectorSpaceMetric = "dot"
+	L2     VectorSpaceMetric = "l2"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceMetric enum.
+func (e VectorSpaceMetric) Valid() bool {
+	switch e {
+	case Cosine:
+		return true
+	case Dot:
+		return true
+	case L2:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VectorSpaceOwnerKind.
+const (
+	Engine VectorSpaceOwnerKind = "engine"
+	Plugin VectorSpaceOwnerKind = "plugin"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceOwnerKind enum.
+func (e VectorSpaceOwnerKind) Valid() bool {
+	switch e {
+	case Engine:
+		return true
+	case Plugin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VectorSpaceRole.
+const (
+	Evaluation VectorSpaceRole = "evaluation"
+	Served     VectorSpaceRole = "served"
+)
+
+// Valid indicates whether the value is a known member of the VectorSpaceRole enum.
+func (e VectorSpaceRole) Valid() bool {
+	switch e {
+	case Evaluation:
+		return true
+	case Served:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookEventSchemaVersion.
 const (
 	N1 WebhookEventSchemaVersion = "1"
@@ -1643,6 +1700,47 @@ type UploadRequest struct {
 	SizeBytes int    `json:"size_bytes"`
 }
 
+// VectorSpace defines model for VectorSpace.
+type VectorSpace struct {
+	Coverage struct {
+		Segments int `json:"segments"`
+	} `json:"coverage"`
+	Dimensions int               `json:"dimensions"`
+	Indexes    []string          `json:"indexes"`
+	Metric     VectorSpaceMetric `json:"metric"`
+	Model      string            `json:"model"`
+	Name       string            `json:"name"`
+	Owner      struct {
+		Kind          VectorSpaceOwnerKind `json:"kind"`
+		PluginId      *string              `json:"plugin_id,omitempty"`
+		PluginVersion *string              `json:"plugin_version,omitempty"`
+	} `json:"owner"`
+	QueryModalities []string        `json:"query_modalities"`
+	Role            VectorSpaceRole `json:"role"`
+
+	// VectorSpaceId The space's identity, as search hits report it. A plugin space is <name>@<version>.
+	VectorSpaceId string `json:"vector_space_id"`
+	Version       string `json:"version"`
+}
+
+// VectorSpaceMetric defines model for VectorSpace.Metric.
+type VectorSpaceMetric string
+
+// VectorSpaceOwnerKind defines model for VectorSpace.Owner.Kind.
+type VectorSpaceOwnerKind string
+
+// VectorSpaceRole defines model for VectorSpace.Role.
+type VectorSpaceRole string
+
+// VectorSpaceList defines model for VectorSpaceList.
+type VectorSpaceList struct {
+	Items                  []VectorSpace `json:"items"`
+	ProjectionGenerationId string        `json:"projection_generation_id"`
+
+	// Segments Current segments the generation projects; a space whose coverage equals it holds a vector for every one.
+	Segments int `json:"segments"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// AcceptedAt When Quivr accepted the revision this Version publishes, before any processing.
@@ -2251,6 +2349,11 @@ type ClientInterface interface {
 	//
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrieval(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListVectorSpaces performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
+	//
+	// The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+	ListVectorSpaces(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetDelivery performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
 	//
@@ -2975,6 +3078,21 @@ func (c *Client) ConfigureRetrievalWithBody(ctx context.Context, corpusId string
 // Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 func (c *Client) ConfigureRetrieval(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewConfigureRetrievalRequest(c.Server, corpusId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListVectorSpaces performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
+//
+// The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+func (c *Client) ListVectorSpaces(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVectorSpacesRequest(c.Server, corpusId)
 	if err != nil {
 		return nil, err
 	}
@@ -4705,6 +4823,40 @@ func NewConfigureRetrievalRequestWithBody(server string, corpusId string, conten
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListVectorSpacesRequest constructs an http.Request for the ListVectorSpaces method
+func NewListVectorSpacesRequest(server string, corpusId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/vector-spaces", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -6463,6 +6615,13 @@ type ClientWithResponsesInterface interface {
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrievalWithResponse(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfigureRetrievalResponse, error)
 
+	// ListVectorSpacesWithResponse performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
+	//
+	// The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListVectorSpacesWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*ListVectorSpacesResponse, error)
+
 	// GetDeliveryWithResponse performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
 	//
 	// Read logical notification status and current admission view. Rights on the referenced Subscription/Corpus are still required for withdrawal-notice metadata.
@@ -7754,6 +7913,54 @@ func (r ConfigureRetrievalResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ConfigureRetrievalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListVectorSpacesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *VectorSpaceList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListVectorSpacesResponse) GetJSON200() *VectorSpaceList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListVectorSpacesResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListVectorSpacesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVectorSpacesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVectorSpacesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListVectorSpacesResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9756,6 +9963,19 @@ func (c *ClientWithResponses) ConfigureRetrievalWithResponse(ctx context.Context
 	return ParseConfigureRetrievalResponse(rsp)
 }
 
+// ListVectorSpacesWithResponse performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
+//
+// The vector spaces the Corpus's routed Projection Generation carries, the served one first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions, metric, indexed and query modalities, its role in the generation (served answers search, evaluation is indexed and compared but never served) and its coverage, the current segments that hold a vector in it. A Corpus built before a space was enabled lists only the spaces it was built with; rebuild it (rebuildCorpusProjection) to add the others.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListVectorSpacesWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*ListVectorSpacesResponse, error) {
+	rsp, err := c.ListVectorSpaces(ctx, corpusId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVectorSpacesResponse(rsp)
+}
+
 // GetDeliveryWithResponse performs a GET /v0/deliveries/{delivery_id} (the `GetDelivery` operationId) request.
 //
 // Read logical notification status and current admission view. Rights on the referenced Subscription/Corpus are still required for withdrawal-notice metadata.
@@ -11051,6 +11271,39 @@ func ParseConfigureRetrievalResponse(rsp *http.Response) (*ConfigureRetrievalRes
 			return nil, err
 		}
 		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListVectorSpacesResponse parses an HTTP response from a ListVectorSpacesWithResponse call
+func ParseListVectorSpacesResponse(rsp *http.Response) (*ListVectorSpacesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVectorSpacesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VectorSpaceList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

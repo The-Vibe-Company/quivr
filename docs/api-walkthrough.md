@@ -300,7 +300,9 @@ partial target never activates. `POST /v0/operations/{operation_id}/rerun` requi
 terminal source (otherwise `409 operation_not_terminal`) and creates a new linked
 Operation. Both take an `idempotency_key` body, return 202 and need `operations:write`;
 rerun also rechecks `projections:rebuild` and the Corpus scope. Only projection rebuild
-Operations are supported.
+Operations are supported. A rebuild uses the deployment's current vector spaces, so it
+moves a Corpus onto a newly pinned [ingestion plugin](plugins/write-an-ingestion-plugin.md);
+`GET /v0/corpora/{corpus_id}/vector-spaces` lists a Corpus's spaces and their coverage.
 
 ## Changes, catalog and monitoring
 

@@ -1,5 +1,7 @@
 // Package quivrplugin implements the Quivr Plugin Protocol v0 connector
-// Contribution (Plugin API 0.3) so that a source collector is one Go type.
+// Contribution (Plugin API 0.3) so that a source collector is one Go type,
+// and the ingestion Contribution (Plugin API 0.6) so that a segmenter and
+// embedder is one Go type.
 // See the contract in contracts/plugins/v0/README.md and the guide in
 // sdks/go/README.md.
 package quivrplugin
@@ -40,6 +42,7 @@ type Plugin struct {
 	logger    *slog.Logger
 	configSch *jsonschema.Schema
 	spool     spool
+	ingester  Ingester
 }
 
 type kind struct {
@@ -79,6 +82,9 @@ func New(path string, opts ...Option) (*Plugin, error) {
 			return nil, fmt.Errorf("configuration.schema: %w", err)
 		}
 	}
+	if m.Connector == nil {
+		return p, nil
+	}
 	for name, declared := range m.Connector.Kinds {
 		k := &kind{optional: declared.CredentialRequired != nil && !*declared.CredentialRequired}
 		if k.config, err = compileDeclared(declared.ConfigSchema); err != nil {
@@ -116,6 +122,12 @@ func (p *Plugin) MustConnector(kindName string, impl Connector) *Plugin {
 }
 
 func (p *Plugin) checkRegistered() error {
+	if p.m.Ingestion != nil && p.ingester == nil {
+		return fmt.Errorf("the manifest declares the ingestion Contribution; register an Ingester with Plugin.Ingestion")
+	}
+	if p.m.Connector == nil {
+		return nil
+	}
 	var missing []string
 	for name, k := range p.kinds {
 		if k.impl == nil {
@@ -156,9 +168,16 @@ func (p *Plugin) Handler() (http.Handler, error) {
 			"plugin_api":      p.m.pluginAPI,
 			"plugin":          map[string]string{"id": p.m.ID, "version": p.m.Version},
 			"manifest_digest": p.m.digest,
-			"contributions":   []string{"connector"},
+			"contributions":   p.contributions(),
 		})
 	})
+	if p.m.Ingestion != nil {
+		mux.HandleFunc("POST /v0/contributions/ingestion/segment_and_embed", p.serveSegmentAndEmbed)
+		mux.HandleFunc("POST /v0/contributions/ingestion/embed_query", p.serveEmbedQuery)
+	}
+	if p.m.Connector == nil {
+		return mux, nil
+	}
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
 	if p.pushes() {
@@ -169,6 +188,18 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
 	}
 	return mux, nil
+}
+
+// contributions lists the declared Contributions for discovery.
+func (p *Plugin) contributions() []string {
+	names := []string{}
+	if p.m.Connector != nil {
+		names = append(names, "connector")
+	}
+	if p.m.Ingestion != nil {
+		names = append(names, "ingestion")
+	}
+	return names
 }
 
 // Serve listens on QUIVR_PLUGIN_HOST:QUIVR_PLUGIN_PORT (default

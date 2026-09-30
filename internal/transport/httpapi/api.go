@@ -38,8 +38,10 @@ import (
 )
 
 type API struct {
-	Content        content.Service
-	Retrieval      retrieval.Service
+	Content   content.Service
+	Retrieval retrieval.Service
+	// Spaces lists a Corpus's vector spaces; nil answers 404.
+	Spaces         SpaceRegistry
 	Uploads        uploads.Service
 	Changes        changes.Service
 	Monitoring     monitoring.Service
@@ -219,6 +221,10 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.connectorRoutes(w, r, scope) {
+		return
+	}
+	if id, ok := vectorSpaceRoute(r); ok {
+		a.listVectorSpaces(w, r, scope, id)
 		return
 	}
 	if r.URL.Path == "/v0/corpora" {

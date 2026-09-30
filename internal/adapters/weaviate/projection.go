@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -27,10 +29,104 @@ var className = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
 type Store struct {
 	Endpoint string
 	Client   *http.Client
+	// LegacySpace is the built-in space, whose named vector keeps the name it
+	// had before named spaces (legacyVector), so generations built before and
+	// after them stay searchable in one query.
+	LegacySpace string
+	// vectors remembers the named vectors known to exist, by collection.
+	vectors *sync.Map
+}
+
+// legacyVector is the named vector of the built-in space and of every
+// generation built before named spaces.
+const legacyVector = "semantic_text_v1"
+
+// lexicalProperty holds an ingestion plugin's keyword-search text.
+const lexicalProperty = "lexicalText"
+
+// VectorName is the named vector a generation stores a space's vectors
+// under: legacyVector for the built-in space and for a generation built
+// before named spaces, otherwise a name derived from the space key.
+func (s *Store) VectorName(g content.Generation, space string) string {
+	if !g.SpacesProjected || space == s.LegacySpace {
+		return legacyVector
+	}
+	return "s_" + content.Hash([]byte("quivr/named-vector/v1\x00" + space))[:24]
+}
+
+// distance maps a registry metric to the Weaviate distance.
+func distance(metric string) string {
+	switch metric {
+	case "dot":
+		return "dot"
+	case "l2":
+		return "l2-squared"
+	}
+	return "cosine"
+}
+
+func vectorConfig(metric string) map[string]any {
+	return map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": distance(metric)}}
+}
+
+// ensureVectors adds the named vectors of a generation's spaces that its
+// collection lacks. Weaviate adds a named vector to an existing collection
+// in place (since 1.31), so a new space never recreates the collection.
+func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
+	if !g.SpacesProjected {
+		return nil
+	}
+	known := s.vectors
+	if known == nil {
+		known = &sync.Map{}
+	}
+	missing := false
+	for _, sp := range g.Spaces {
+		if _, ok := known.Load(g.Collection + "/" + s.VectorName(g, sp.ID)); !ok {
+			missing = true
+		}
+	}
+	if !missing {
+		return nil
+	}
+	var class map[string]any
+	if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
+		return err
+	}
+	configs, _ := class["vectorConfig"].(map[string]any)
+	if configs == nil {
+		configs = map[string]any{}
+	}
+	added := false
+	for _, sp := range g.Spaces {
+		name := s.VectorName(g, sp.ID)
+		if _, ok := configs[name]; !ok {
+			configs[name] = vectorConfig(sp.Metric)
+			added = true
+		}
+	}
+	if added {
+		class["vectorConfig"] = configs
+		// A concurrent writer may have added it first; the read below decides.
+		_, _ = s.call(ctx, "PUT", "/v1/schema/"+g.Collection, class, nil)
+		class = nil
+		if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
+			return err
+		}
+		configs, _ = class["vectorConfig"].(map[string]any)
+	}
+	for _, sp := range g.Spaces {
+		name := s.VectorName(g, sp.ID)
+		if _, ok := configs[name]; !ok {
+			return errors.New("projection named vector missing")
+		}
+		known.Store(g.Collection+"/"+name, true)
+	}
+	return nil
 }
 
 func New(endpoint string) *Store {
-	return &Store{Endpoint: strings.TrimRight(endpoint, "/"), Client: &http.Client{Timeout: 4 * time.Second}}
+	return &Store{Endpoint: strings.TrimRight(endpoint, "/"), Client: &http.Client{Timeout: 4 * time.Second}, vectors: &sync.Map{}}
 }
 func (s *Store) call(ctx context.Context, method, path string, in, out any) (int, error) {
 	var body []byte
@@ -74,15 +170,21 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	}
 	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing)
 	if err == nil {
+		present := map[string]bool{}
 		for _, p := range existing.Properties {
-			if p.Name == sourceNamespaceProperty {
-				return nil
+			present[p.Name] = true
+		}
+		// A collection created before Source Namespace filtering or named
+		// spaces gains the property; its older objects lack a value, so their
+		// generations stay unprojected until rebuilt.
+		if !present[sourceNamespaceProperty] {
+			if _, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", filterable(sourceNamespaceProperty), nil); err != nil {
+				return err
 			}
 		}
-		// A collection created before Source Namespace filtering gains the
-		// property; its older objects lack a value, so their generations stay
-		// unprojected until rebuilt.
-		_, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", filterable(sourceNamespaceProperty), nil)
+		if !present[lexicalProperty] {
+			_, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", searchable(lexicalProperty), nil)
+		}
 		return err
 	}
 	if status != 404 {
@@ -92,16 +194,21 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", sourceNamespaceProperty} {
 		properties = append(properties, filterable(name))
 	}
-	for _, name := range []string{"title", "body"} {
-		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true})
+	for _, name := range []string{"title", "body", lexicalProperty} {
+		properties = append(properties, searchable(name))
 	}
-	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{"semantic_text_v1": map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": "cosine"}}}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
+	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine")}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
 
 // sourceNamespaceProperty holds the Record's Source Namespace for filtering.
 const sourceNamespaceProperty = "sourceNamespace"
+
+// searchable declares a text property keyword search scores (BM25).
+func searchable(name string) map[string]any {
+	return map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true}
+}
 
 // filterable declares an exact-match text property that search never scores.
 func filterable(name string) map[string]any {
@@ -125,7 +232,7 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
 }
 
-var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", sourceNamespaceProperty, "body", "title"}
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", sourceNamespaceProperty, "body", "title", lexicalProperty}
 
 type storedObject struct {
 	Properties map[string]any       `json:"properties"`
@@ -182,6 +289,9 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
+		if g.SpacesProjected && p.Derivation.LexicalText != "" {
+			properties[lexicalProperty] = p.Derivation.LexicalText
+		}
 		existing, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
@@ -238,13 +348,27 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		operands = append(operands, "{operator:Or,operands:["+strings.Join(sources, ",")+"]}")
 	}
 	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
+	// Every route names the space's vectors the same way, or the query
+	// cannot rank them together.
+	target := ""
+	for _, r := range routes {
+		space := q.Space
+		if space == "" {
+			space = r.Generation.SpaceID
+		}
+		name := s.VectorName(r.Generation, space)
+		if target != "" && name != target {
+			return nil, errors.New("routes store the space under different vectors")
+		}
+		target = name
+	}
 	branch := fmt.Sprintf("bm25:{query:%s,properties:[\"title^2\",\"body\"]}", quote(q.Query))
 	vector, _ := json.Marshal(q.Vector)
 	if q.Mode == "semantic" {
-		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[\"semantic_text_v1\"]}", vector)
+		branch = fmt.Sprintf("nearVector:{vector:%s,targetVectors:[%s]}", vector, quote(target))
 	}
 	if q.Mode == "hybrid" {
-		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:0.5,fusionType:relativeScoreFusion,properties:[\"title^2\",\"body\"],targetVectors:[\"semantic_text_v1\"]}", quote(q.Query), vector)
+		branch = fmt.Sprintf("hybrid:{query:%s,vector:%s,alpha:0.5,fusionType:relativeScoreFusion,properties:[\"title^2\",\"body\"],targetVectors:[%s]}", quote(q.Query), vector, quote(target))
 	}
 	query := fmt.Sprintf("{Get{%s(%s,where:%s,limit:%d){segmentId generationId}}}", collection, branch, where, retrieval.CandidateLimit)
 	var response struct {
@@ -278,30 +402,58 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 }
 
 // PublishEmbeddings attaches vectors without updating or deleting the segment's
-// lexical anchor. For each segment it creates an enriched object beside the
-// anchor, verifies it, then removes any other enriched object of the segment.
-// Search sees the anchor throughout; retrieval deduplicates by segment.
+// lexical anchor. For each segment it creates one enriched object beside the
+// anchor carrying the segment's vector in every space of data, each under its
+// named vector, verifies it, then removes any other enriched object of the
+// segment. Search sees the anchor throughout; retrieval deduplicates by segment.
 func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid embedding projection")
 	}
+	if err := s.ensureVectors(ctx, g); err != nil {
+		return err
+	}
+	// One enriched object per segment, in the order segments first appear.
+	var order []string
+	bySegment := map[string][]content.EmbeddingData{}
 	for _, p := range data {
 		e := p.Artifact
-		if e.Organization != org || e.SpaceID != g.SpaceID {
+		if e.Organization != org || !g.Carries(e.SpaceID) {
 			return errors.New("incompatible embedding projection")
 		}
 		raw, err := content.VectorBytes(p.Vector)
 		if err != nil || content.Hash(raw) != e.Payload.SHA256 {
 			return errors.New("embedding payload mismatch")
 		}
-		id := enrichedID(org, g.ID, e.SegmentID, e.Payload.SHA256)
+		if _, ok := bySegment[e.SegmentID]; !ok {
+			order = append(order, e.SegmentID)
+		}
+		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], p)
+	}
+	for _, segment := range order {
+		vectors := bySegment[segment]
+		payload := vectors[0].Artifact.Payload.SHA256
+		if len(vectors) > 1 {
+			// Several spaces: the identity covers every payload, by space.
+			keys := make([]string, len(vectors))
+			for i, p := range vectors {
+				keys[i] = p.Artifact.SpaceID + "=" + p.Artifact.Payload.SHA256
+			}
+			sort.Strings(keys)
+			payload = content.Hash([]byte(strings.Join(keys, "\n")))
+		}
+		named := map[string]any{}
+		for _, p := range vectors {
+			named[s.VectorName(g, p.Artifact.SpaceID)] = p.Vector
+		}
+		id := enrichedID(org, g.ID, segment, payload)
 		stored, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
 		}
 		if !found {
 			// Never create an enriched object for a segment without its lexical anchor.
-			anchor, projected, err := s.object(ctx, g.Collection, objectID(org, g.ID, e.SegmentID))
+			anchor, projected, err := s.object(ctx, g.Collection, objectID(org, g.ID, segment))
 			if err != nil {
 				return err
 			}
@@ -317,17 +469,22 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			}
 			// Create-only: an object already written by a concurrent attachment is
 			// never re-indexed. A rejected or lost create is reconciled by the read below.
-			_, _ = s.call(ctx, "POST", "/v1/objects", map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": map[string]any{"semantic_text_v1": p.Vector}}, nil)
+			_, _ = s.call(ctx, "POST", "/v1/objects", map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named}, nil)
 			if stored, found, err = s.object(ctx, g.Collection, id); err != nil {
 				return err
 			}
 		}
-		recovered, err := content.VectorBytes(stored.Vectors["semantic_text_v1"])
-		if !found || err != nil || content.Hash(recovered) != e.Payload.SHA256 || stored.Properties["segmentId"] != e.SegmentID {
+		if !found || stored.Properties["segmentId"] != segment {
 			return errors.New("embedding projection verification failed")
 		}
+		for _, p := range vectors {
+			recovered, err := content.VectorBytes(stored.Vectors[s.VectorName(g, p.Artifact.SpaceID)])
+			if err != nil || content.Hash(recovered) != p.Artifact.Payload.SHA256 {
+				return errors.New("embedding projection verification failed")
+			}
+		}
 		// Cleanup runs on every attempt, so a retry after an interrupted attachment converges.
-		if err = s.removeStaleEnriched(ctx, g, org, e.SegmentID, id); err != nil {
+		if err = s.removeStaleEnriched(ctx, g, org, segment, id); err != nil {
 			return err
 		}
 	}

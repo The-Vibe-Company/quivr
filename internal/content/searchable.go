@@ -33,6 +33,11 @@ type SegmentDerivation struct {
 	ModelInput       string `json:"model_input"`
 	ModelInputSHA256 string `json:"model_input_sha256"`
 	ModelTokens      int    `json:"model_tokens"`
+	// LexicalText is the keyword-search text an ingestion plugin returned
+	// for the segment, indexed apart from the source text.
+	LexicalText string `json:"lexical_text,omitempty"`
+	// Provenance is how an ingestion plugin made the segment, stored as is.
+	Provenance json.RawMessage `json:"provenance,omitempty"`
 }
 type Segmentation struct {
 	ID, VersionID, Recipe string
@@ -48,7 +53,45 @@ type Generation struct {
 	// SourceNamespaceProjected reports that every object of the generation
 	// carries its Record's Source Namespace, so search can filter on it.
 	SourceNamespaceProjected bool
+	// Spaces are the vector spaces whose named vectors the generation's
+	// objects carry, the served one first. SpacesProjected is false for a
+	// generation built before named spaces: it serves SpaceID only and
+	// refuses a request for a named space until it is rebuilt.
+	Spaces          []GenerationSpace
+	SpacesProjected bool
 }
+
+// GenerationSpace is one vector space of a generation and the distance its
+// index uses.
+type GenerationSpace struct {
+	ID     string `json:"id"`
+	Metric string `json:"metric"`
+}
+
+// VectorSpaces lists the ids of the spaces the generation carries vectors
+// for: its projected spaces, or the served space alone for a generation built
+// before named spaces.
+func (g Generation) VectorSpaces() []string {
+	if !g.SpacesProjected || len(g.Spaces) == 0 {
+		return []string{g.SpaceID}
+	}
+	out := make([]string, len(g.Spaces))
+	for i, s := range g.Spaces {
+		out[i] = s.ID
+	}
+	return out
+}
+
+// Carries reports whether the generation's objects carry vectors of a space.
+func (g Generation) Carries(space string) bool {
+	for _, id := range g.VectorSpaces() {
+		if id == space {
+			return true
+		}
+	}
+	return false
+}
+
 type Candidate struct{ SegmentID, GenerationID string }
 type Hydrated struct {
 	RecordID, VersionID, SegmentationID string

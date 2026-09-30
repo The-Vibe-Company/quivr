@@ -216,6 +216,64 @@ func TestContractRunnerJudgesConnectors(t *testing.T) {
 	}
 }
 
+// TestContractRunnerJudgesIngestion owns the ingestion rules of the Contract
+// Runner: the well-behaved plugin in ingestion-valid is certified with every
+// ingestion check passing, and each broken mode of the same fake plugin fails
+// exactly the check that owns its rule.
+func TestContractRunnerJudgesIngestion(t *testing.T) {
+	fakeOnPath(t)
+	t.Setenv("QUIVR_TEST_EMBEDDER_KEY", "embedder-test-key-0123")
+	code, out, r := runTest(t, "ingestion-valid")
+	if code != cli.ExitOK || !r.Certified {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	passed := map[string]int{}
+	for _, c := range r.Checks {
+		if c.Status == "pass" {
+			passed[c.Contribution+"/"+c.ID]++
+		}
+	}
+	// The normative article and the plugin's own memo; two spaces for the article, one for the memo.
+	for want, n := range map[string]int{"ingestion/fixtures": 1, "ingestion/invoke": 2, "ingestion/replay": 2, "ingestion/embed_query": 3, "ingestion/credentials": 1, "/discovery": 1} {
+		if passed[want] < n {
+			t.Errorf("%d passing %s checks, want %d:\n%s", passed[want], want, n, out)
+		}
+	}
+	// Non-JSON, unknown field and undeclared space on both routes, plus the normative invalid requests.
+	if passed["ingestion/invalid_request"] < 10 {
+		t.Errorf("invalid requests probed: %d\n%s", passed["ingestion/invalid_request"], out)
+	}
+	for mode, want := range map[string]expectation{
+		"ingestion-offset":                 {Check: "invoke", Code: "offset_out_of_range"},
+		"ingestion-dimensions":             {Check: "invoke", Code: "dimension_mismatch"},
+		"ingestion-missing-vector":         {Check: "invoke", Code: "missing_vector"},
+		"ingestion-split":                  {Check: "invoke", Code: "unexpected_segments"},
+		"ingestion-nondeterministic":       {Check: "replay", Code: "nondeterministic_output"},
+		"ingestion-query-dimensions":       {Check: "embed_query", Code: "dimension_mismatch"},
+		"ingestion-query-nondeterministic": {Check: "embed_query", Code: "nondeterministic_output"},
+		"ingestion-secret-leak":            {Check: "credentials", Code: "credential_leak"},
+		"accept-invalid":                   {Check: "invalid_request", Code: "accepted_invalid_request"},
+	} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv(fakeplugin.EnvMode, mode)
+			code, out, r := runTest(t, "ingestion-valid")
+			if code != cli.ExitInvalid || r.Certified {
+				t.Fatalf("want not certified, exit %d:\n%s", code, out)
+			}
+			for _, c := range r.Checks {
+				if c.ID == want.Check && c.Contribution == "ingestion" && c.Status == "fail" {
+					for _, issue := range c.Issues {
+						if issue.Code == want.Code {
+							return
+						}
+					}
+				}
+			}
+			t.Fatalf("no failed ingestion %s check with issue %s:\n%s", want.Check, want.Code, out)
+		})
+	}
+}
+
 func TestContractRunnerReportsABrokenSubscriptionFixture(t *testing.T) {
 	fakeOnPath(t)
 	bad := filepath.Join(t.TempDir(), "broken.json")

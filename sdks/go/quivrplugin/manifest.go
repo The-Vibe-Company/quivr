@@ -16,14 +16,14 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.5.0"
+const PluginAPIVersion = "0.6.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
-// Plugin API range and the connector Contribution. The engine validates the
+// Plugin API range and the connector and ingestion Contributions. The engine validates the
 // whole manifest with `quivr plugin inspect`.
 type Manifest struct {
 	ID            string `json:"id"`
@@ -36,8 +36,33 @@ type Manifest struct {
 		Schema json.RawMessage `json:"schema"`
 	} `json:"configuration,omitempty"`
 
-	// Connector is the decoded connector Contribution, with defaults.
+	// Connector is the decoded connector Contribution, with defaults; nil
+	// when the manifest declares none.
 	Connector *ConnectorContribution `json:"-"`
+	// Ingestion is the decoded ingestion Contribution (Plugin API 0.6), with
+	// defaults; nil when the manifest declares none.
+	Ingestion *IngestionContribution `json:"-"`
+}
+
+// IngestionContribution is the ingestion Contribution of a manifest.
+type IngestionContribution struct {
+	Spaces         map[string]Space `json:"spaces"`
+	TimeoutMS      int              `json:"timeout_ms"`
+	QueryTimeoutMS int              `json:"query_timeout_ms"`
+	Limits         struct {
+		MaxSegments      int `json:"max_segments"`
+		MaxResponseBytes int `json:"max_response_bytes"`
+	} `json:"limits"`
+}
+
+// Space is one vector space the plugin declares.
+type Space struct {
+	Version         string   `json:"version"`
+	Model           string   `json:"model"`
+	Dimensions      int      `json:"dimensions"`
+	Metric          string   `json:"metric"`
+	Indexes         []string `json:"indexes"`
+	QueryModalities []string `json:"query_modalities"`
 }
 
 // ConnectorContribution is the connector Contribution of a manifest.
@@ -129,13 +154,46 @@ func loadManifest(path string) (*loadedManifest, error) {
 		return nil, err
 	}
 	for name := range m.Contributions {
-		if name != "connector" {
-			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK serves connector Contributions only", path, name)
+		if name != "connector" && name != "ingestion" {
+			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK serves connector and ingestion Contributions only", path, name)
 		}
+	}
+	api, ok, err := negotiate(m.Compatibility.PluginAPI)
+	if err != nil {
+		return nil, fmt.Errorf("%s: compatibility.plugin_api: %w", path, err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("%s: no Plugin API version this SDK serves (%s) satisfies the range %q", path, strings.Join(SupportedPluginAPIVersions, ", "), m.Compatibility.PluginAPI)
+	}
+	m.pluginAPI = api
+	if raw, ok := m.Contributions["ingestion"]; ok {
+		if compareVersions(api, "0.6.0") < 0 {
+			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.6.0, which introduced ingestion", path, m.Compatibility.PluginAPI)
+		}
+		in := &IngestionContribution{}
+		if err := json.Unmarshal(raw, in); err != nil {
+			return nil, err
+		}
+		if in.TimeoutMS == 0 {
+			in.TimeoutMS = 30000
+		}
+		if in.QueryTimeoutMS == 0 {
+			in.QueryTimeoutMS = 2000
+		}
+		if in.Limits.MaxSegments == 0 {
+			in.Limits.MaxSegments = 256
+		}
+		if in.Limits.MaxResponseBytes == 0 || in.Limits.MaxResponseBytes > EngineMaxResponseBytes {
+			in.Limits.MaxResponseBytes = EngineMaxResponseBytes
+		}
+		m.Ingestion = in
 	}
 	raw0, ok := m.Contributions["connector"]
 	if !ok {
-		return nil, fmt.Errorf("%s declares no connector Contribution", path)
+		if m.Ingestion == nil {
+			return nil, fmt.Errorf("%s declares no connector or ingestion Contribution", path)
+		}
+		return m, nil
 	}
 	m.Connector = &ConnectorContribution{}
 	if err := json.Unmarshal(raw0, m.Connector); err != nil {
@@ -166,11 +224,7 @@ func loadManifest(path string) (*loadedManifest, error) {
 			a.TimeoutMS = 120000
 		}
 	}
-	api, ok, err := negotiate(m.Compatibility.PluginAPI)
-	if err != nil {
-		return nil, fmt.Errorf("%s: compatibility.plugin_api: %w", path, err)
-	}
-	if !ok || compareVersions(api, "0.3.0") < 0 {
+	if compareVersions(api, "0.3.0") < 0 {
 		return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.3.0, which introduced connectors", path, m.Compatibility.PluginAPI)
 	}
 	if c.Attachments != nil && compareVersions(api, "0.4.0") < 0 {
@@ -181,7 +235,6 @@ func loadManifest(path string) (*loadedManifest, error) {
 			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API 0.5.0", path, name)
 		}
 	}
-	m.pluginAPI = api
 	return m, nil
 }
 

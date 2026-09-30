@@ -57,6 +57,17 @@ func (cfg Config) loadPins(command string) (*plugins.PinSet, error) {
 	return plugins.LoadPins(configs)
 }
 
+// migrationPins loads the pins for `quivr migrate`, which registers the
+// ingestion plugin's spaces. A pin migrate cannot load registers nothing:
+// api and worker refuse it at their own startup.
+func (cfg Config) migrationPins() *plugins.PinSet {
+	pins, err := cfg.loadPins("api")
+	if err != nil {
+		return nil
+	}
+	return pins
+}
+
 // evaluators installs the subscription evaluator of every pinned plugin, and
 // the fixture evaluator only where the deployment enables it for tests.
 func (cfg Config) evaluators(pins *plugins.PinSet) monitoring.Evaluators {

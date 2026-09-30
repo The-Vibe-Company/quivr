@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingestion segment_and_embed response, v0",
+  "description": "200 answer of segment_and_embed. Segments are listed in reading order; the core numbers them in that order.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "segments"
+  ],
+  "properties": {
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "part_key",
+          "start",
+          "end",
+          "vectors"
+        ],
+        "properties": {
+          "part_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Key of the request Part the segment is cut from."
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First Unicode code point of the segment in the Part text."
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Code point after the last one. start = end is an empty segment, allowed only when the request has a Part with the role title: the segment then stands for the title alone."
+          },
+          "vectors": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 8,
+            "propertyNames": {
+              "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4096,
+              "items": {
+                "type": "number"
+              },
+              "description": "One vector, exactly as many numbers as the space's dimensions. Values must be finite as 32-bit floats; under the cosine metric the vector must not be all zeros."
+            },
+            "description": "One vector per requested space, by space id."
+          },
+          "lexical_text": {
+            "type": "string",
+            "description": "Optional keyword-search text for the segment (for example lower-cased, folded or stemmed words). The core indexes it in a separate keyword field; excerpts always come from the source text. At most 16384 code points, no NUL."
+          },
+          "provenance": {
+            "type": "object",
+            "description": "Optional details of how the segment was made (token counts, the embedded text's template), at most 4 KiB once serialized. Stored with the segmentation, never interpreted."
+          }
+        }
+      }
+    }
+  }
+}

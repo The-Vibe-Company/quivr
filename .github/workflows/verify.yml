@@ -72,6 +72,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          name: go-ingestion-contract-report
+          path: .scratch/plugin-sdk/hash-embedder-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
           name: rss-contract-report
           path: .scratch/plugin-sdk/rss-contract-report.json
           include-hidden-files: true

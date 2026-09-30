@@ -307,6 +307,9 @@ func serve() error {
 	if report.Manifest.Contributions.Connector != nil {
 		connectorRoutes(mux, mode, report.Manifest, write)
 	}
+	if report.Manifest.Contributions.Ingestion != nil {
+		ingestionRoutes(mux, mode, report.Manifest, write)
+	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(os.Getenv("QUIVR_PLUGIN_HOST"), os.Getenv("QUIVR_PLUGIN_PORT")))
 	if err != nil {
 		return err

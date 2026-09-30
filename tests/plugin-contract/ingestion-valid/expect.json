@@ -1,0 +1,4 @@
+{
+  "description": "A well-behaved ingestion plugin: valid segments and vectors, deterministic, no secret echoed.",
+  "certified": true
+}

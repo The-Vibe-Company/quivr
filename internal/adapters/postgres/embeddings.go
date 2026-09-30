@@ -91,21 +91,25 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 	if !active {
 		return ErrGenerationChanged
 	}
-	if len(artifacts) != len(seg.Segments) {
+	if len(artifacts) == 0 {
 		return content.ErrInvalid
 	}
-	for i, e := range artifacts {
-		if e.Organization != org || e.SegmentID != seg.Segments[i].ID || e.SpaceID != g.SpaceID {
+	segments := map[string]bool{}
+	for _, p := range seg.Segments {
+		segments[p.ID] = true
+	}
+	for _, e := range artifacts {
+		if e.Organization != org || !segments[e.SegmentID] || !g.Carries(e.SpaceID) {
 			return content.ErrInvalid
 		}
 		var stored string
-		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, g.SpaceID).Scan(&stored); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
 			return err
 		}
 		if stored != e.ID {
 			return content.ErrConflict
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID); err != nil {
 			return err
 		}
 	}

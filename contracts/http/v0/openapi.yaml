@@ -1779,6 +1779,38 @@ paths:
       x-required-permissions:
       - content:read
       - search:query
+  /v0/corpora/{corpus_id}/vector-spaces:
+    get:
+      operationId: listVectorSpaces
+      description: The vector spaces the Corpus's routed Projection Generation carries, the served one
+        first, each with its owner (the engine, or the ingestion plugin that declares it), model, dimensions,
+        metric, indexed and query modalities, its role in the generation (served answers search, evaluation
+        is indexed and compared but never served) and its coverage, the current segments that hold a
+        vector in it. A Corpus built before a space was enabled lists only the spaces it was built with;
+        rebuild it (rebuildCorpusProjection) to add the others.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorSpaceList'
+        default:
+          description: Structured error; 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible,
+            503 dependency unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - corpora:read
   /v0/corpora/{corpus_id}/rebuilds:
     post:
       operationId: rebuildCorpusProjection
@@ -2949,6 +2981,101 @@ components:
       - corpus_id
       - name
       - effective_retrieval
+    VectorSpaceList:
+      type: object
+      additionalProperties: false
+      properties:
+        projection_generation_id:
+          type: string
+          minLength: 1
+        segments:
+          type: integer
+          minimum: 0
+          description: Current segments the generation projects; a space whose coverage equals it holds
+            a vector for every one.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/VectorSpace'
+      required:
+      - projection_generation_id
+      - segments
+      - items
+    VectorSpace:
+      type: object
+      additionalProperties: false
+      properties:
+        vector_space_id:
+          type: string
+          minLength: 1
+          description: The space's identity, as search hits report it. A plugin space is <name>@<version>.
+        name:
+          type: string
+          minLength: 1
+        version:
+          type: string
+        owner:
+          type: object
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum:
+              - engine
+              - plugin
+            plugin_id:
+              type: string
+              minLength: 1
+            plugin_version:
+              type: string
+              minLength: 1
+          required:
+          - kind
+        model:
+          type: string
+        dimensions:
+          type: integer
+          minimum: 0
+        metric:
+          type: string
+          enum:
+          - cosine
+          - dot
+          - l2
+        indexes:
+          type: array
+          items:
+            type: string
+        query_modalities:
+          type: array
+          items:
+            type: string
+        role:
+          type: string
+          enum:
+          - served
+          - evaluation
+        coverage:
+          type: object
+          additionalProperties: false
+          properties:
+            segments:
+              type: integer
+              minimum: 0
+          required:
+          - segments
+      required:
+      - vector_space_id
+      - name
+      - version
+      - owner
+      - model
+      - dimensions
+      - metric
+      - indexes
+      - query_modalities
+      - role
+      - coverage
     CorpusPage:
       type: object
       additionalProperties: false

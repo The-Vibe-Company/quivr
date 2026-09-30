@@ -15,6 +15,10 @@ const CodePluginConflict = "plugin_conflict"
 // CodeKindConflict is a connector kind declared by two pinned plugins.
 const CodeKindConflict = "kind_conflict"
 
+// CodeIngestionConflict is a second pinned ingestion plugin: Plugin API 0.6
+// deployments segment and embed through one plugin.
+const CodeIngestionConflict = "ingestion_conflict"
+
 // ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
 // deterministic test evaluator); no plugin may be pinned under them.
 var ReservedEvaluatorIDs = []string{"quivr.fixture"}
@@ -27,6 +31,7 @@ type PinSet struct {
 	normalizers map[string]*Pin
 	evaluators  map[string]*Pin
 	connectors  map[string]*Pin
+	ingestion   *Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
@@ -77,6 +82,13 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 		}
 		if pin.Manifest.Contributions.Subscription != nil {
 			set.evaluators[EvaluatorKey(id, pin.Manifest.Version)] = pin
+		}
+		if pin.Manifest.Contributions.Ingestion != nil {
+			if set.ingestion != nil {
+				issues = append(issues, Issue{Code: CodeIngestionConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("%s@%s already segments and embeds for this deployment; pin one ingestion plugin and enable several of its spaces instead", set.ingestion.Manifest.ID, set.ingestion.Manifest.Version)})
+			} else {
+				set.ingestion = pin
+			}
 		}
 		if c := pin.Manifest.Contributions.Connector; c != nil {
 			kinds := make([]string, 0, len(c.Kinds))
@@ -154,6 +166,14 @@ func (s *PinSet) Evaluators() []*Pin {
 		out = append(out, s.evaluators[k])
 	}
 	return out
+}
+
+// Ingestion returns the pinned ingestion plugin, or nil.
+func (s *PinSet) Ingestion() *Pin {
+	if s == nil {
+		return nil
+	}
+	return s.ingestion
 }
 
 // PinnedKind is one connector kind a pinned plugin provides.
