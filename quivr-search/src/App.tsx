@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, LockKey, NotePencil } from "@phosphor-icons/react";
 import { Brand } from "./components/Logo";
 import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
 import { FeedPage, type Filter } from "./components/feed/FeedPage";
 import { AlertsView } from "./components/alerts/AlertsView";
+import { AdminView } from "./components/admin/AdminView";
 import { Notice } from "./components/ui";
 import { APIError, login, session } from "./lib/search";
 import { useAlertList, useConnectorList, useFeedStream } from "./lib/workspace";
@@ -14,31 +15,35 @@ import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
 
 type Auth = "loading" | "login" | "ready" | "error";
-type View = "feed" | "alerts" | "sources";
+type View = "feed" | "alerts" | "sources" | "admin";
 export type Doc = { record: string; version: string };
 
-// Fil, Alertes and Sources; search lives in the top bar.
+// Fil, Alertes, Sources and the read-only Admin; search lives in the top bar.
 const TABS: { view: View; label: string; href: string }[] = [
   { view: "feed", label: "Fil", href: "/" },
   { view: "alerts", label: "Alertes", href: "/?view=alerts" },
   { view: "sources", label: "Sources", href: "/?view=sources" },
+  { view: "admin", label: "Admin", href: "/?view=admin" },
 ];
 const TITLES: Record<View, string> = {
   feed: "Fil",
   alerts: "Alertes",
   sources: "Sources",
+  admin: "Admin",
 };
 
 function urlState() {
   const p = new URLSearchParams(location.search);
   const view = p.get("view") || "";
   return {
-    view: (view === "alerts"
-      ? "alerts"
+    view: (view === "alerts" || view === "admin"
+      ? view
       : ["sources", "connectors"].includes(view)
         ? "sources"
         : "feed") as View,
     alert: p.get("alert"),
+    // A document's timeline on the Admin tab.
+    version: p.get("version"),
     query: p.get("q") || "",
     // "Idées proches" is on unless the address turns it off.
     near: p.get("near") !== "0" && p.get("mode") !== "lexical",
@@ -172,6 +177,7 @@ function Dashboard({
   const [near, setNear] = useState(initial.near);
   const [doc, setDoc] = useState<Doc | null>(initial.doc);
   const [alert, setAlert] = useState<string | null>(initial.alert);
+  const [version, setVersion] = useState<string | null>(initial.version);
   const [filter, setFilter] = useState<Filter>({ kind: "all" });
   const [paused, setPaused] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -194,6 +200,10 @@ function Dashboard({
   const alerts = useAlertList(onUnauthorized);
   const sources = useConnectorList(onUnauthorized);
   const reading = useReadState();
+  const titles = useMemo(
+    () => new Map(feed.items.map((item) => [item.record_id, item.title])),
+    [feed.items],
+  );
 
   const notify = useCallback((text: string) => {
     setToast({ text, at: Date.now() });
@@ -218,6 +228,7 @@ function Dashboard({
     const p = new URLSearchParams();
     if (view !== "feed") p.set("view", view);
     if (view === "alerts" && alert) p.set("alert", alert);
+    if (view === "admin" && version) p.set("version", version);
     if (view === "feed" && query) p.set("q", query);
     if (view === "feed" && query && !near) p.set("near", "0");
     if (view === "feed" && doc) {
@@ -233,7 +244,7 @@ function Dashboard({
       view === "feed" && query
         ? `${query} — Quivr Veille`
         : `${TITLES[view]} — Quivr Veille`;
-  }, [view, alert, query, near, doc]);
+  }, [view, alert, version, query, near, doc]);
 
   // "/" or Ctrl/Cmd+K puts the cursor in the search box, from any page.
   useEffect(() => {
@@ -266,9 +277,11 @@ function Dashboard({
     feed: "",
     alerts: alertCount ? String(alertCount) : "",
     sources: toCheck ? String(toCheck) : "",
+    admin: "",
   };
   const badgeLabels: Record<View, string> = {
     feed: "",
+    admin: "",
     alerts: `${alertCount} article${alertCount > 1 ? "s" : ""} attrapé${alertCount > 1 ? "s" : ""} par vos alertes`,
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
   };
@@ -438,6 +451,22 @@ function Dashboard({
           feedItems={feed.items}
           onChanged={() => void alerts.reload()}
           notify={notify}
+          onUnauthorized={onUnauthorized}
+        />
+      ) : view === "admin" ? (
+        <AdminView
+          titles={titles}
+          selected={version}
+          onSelect={setVersion}
+          onOpen={(record, target) => {
+            setVersion(null);
+            open(record, target);
+          }}
+          onAdd={() => setAdding(true)}
+          onSources={() => {
+            setOpenSource(null);
+            setView("sources");
+          }}
           onUnauthorized={onUnauthorized}
         />
       ) : (

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { feedGuard, parseSuggestions } from "./feeds.mjs";
 import { createFeed } from "./feed.mjs";
 import { alertRoutes } from "./alerts.mjs";
+import { createAdmin } from "./admin.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -54,6 +55,16 @@ async function saveState() {
   }
 }
 let feed;
+let admin;
+const feedFor = (corpus) =>
+  (feed ||= createFeed({ core, key, corpus, upstream }));
+// The Admin tab (THE-796) follows the Fil's change stream of the demo corpus.
+const adminFor = (corpus) =>
+  (admin ||= createAdmin({
+    upstream,
+    corpus,
+    follow: (watcher) => feedFor(corpus).watch(watcher),
+  }));
 const alerts = alertRoutes({
   upstream: (...args) => upstream(...args),
   jsonBody: (req) => jsonBody(req),
@@ -305,7 +316,9 @@ const server = http.createServer(async (req, res) => {
       path === "/demo/feed" ||
       path === "/demo/feed/stream" ||
       path === "/demo/alerts" ||
-      path.startsWith("/demo/alerts/")
+      path.startsWith("/demo/alerts/") ||
+      path === "/demo/admin" ||
+      path.startsWith("/demo/admin/")
     ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
@@ -319,13 +332,29 @@ const server = http.createServer(async (req, res) => {
         (path === "/demo/feed" || path === "/demo/feed/stream") &&
         req.method === "GET"
       ) {
-        feed ||= createFeed({ core, key, corpus: id, upstream });
-        if (path === "/demo/feed") send(res, 200, await feed.snapshot());
-        else await feed.subscribe(req, res);
+        if (path === "/demo/feed") send(res, 200, await feedFor(id).snapshot());
+        else await feedFor(id).subscribe(req, res);
+        return;
+      }
+      // The Admin tab, read-only: a snapshot, a live stream and one timeline.
+      if (path === "/demo/admin" && req.method === "GET") {
+        send(res, 200, await adminFor(id).snapshot());
+        return;
+      }
+      if (path === "/demo/admin/stream" && req.method === "GET") {
+        await adminFor(id).subscribe(req, res);
         return;
       }
       let response;
-      if (path.startsWith("/demo/alerts"))
+      const timeline = path.match(
+        /^\/demo\/admin\/documents\/([\w-]+)\/timeline$/,
+      );
+      const stats = path.match(/^\/demo\/admin\/stats\/([\w-]+)$/);
+      if (timeline && req.method === "GET")
+        response = await adminFor(id).timeline(timeline[1]);
+      else if (stats && req.method === "GET")
+        response = await adminFor(id).stats(stats[1], url);
+      else if (path.startsWith("/demo/alerts"))
         response = await alerts(req, path, id);
       else if (path === "/demo/feeds/suggestions" && req.method === "GET")
         response = { status: 200, data: { items: suggestions } };

@@ -12,7 +12,7 @@ make demo
 
 Open http://127.0.0.1:5183. The command builds the frontend, starts isolated real dependencies, migrates the database and serves the production bundle. First startup downloads the pinned E5 model (~958 MB). Ctrl+C stops services; texts persist across runs. `make demo-reset` deletes **only this demo's** volumes. Set `DEMO_PORT` to use another port. Optional `DEMO_PASSWORD` enables a shared demo password locally.
 
-The app is a monitoring dashboard with three tabs, **Fil**, **Alertes** and **Sources**, and a search box in the top bar (`/` or Ctrl+K). **Ajouter du texte** pastes a note: it is limited to 256 KiB, whitespace and Unicode are preserved, drafts and retry identity survive reloads within the same browser tab, and ambiguous network failures reuse the same ingestion identity.
+The app is a monitoring dashboard with four tabs, **Fil**, **Alertes**, **Sources** and **Admin**, and a search box in the top bar (`/` or Ctrl+K). **Ajouter du texte** pastes a note: it is limited to 256 KiB, whitespace and Unicode are preserved, drafts and retry identity survive reloads within the same browser tab, and ambiguous network failures reuse the same ingestion identity.
 
 ### Fil
 
@@ -64,6 +64,12 @@ as typed, or on a click for described alerts, since each article is a classifier
 lists what it caught, live, with the matched words or the score; it can be paused, resumed,
 edited, renamed and deleted. `alerts.mjs` explains how alerts are stored and read.
 
+### Admin
+
+The **Admin** tab (`?view=admin`, read-only) shows what goes through Quivr right now. A sentence says whether all is well, above documents per minute, the received-to-searchable p95, the documents waiting and the errors of the hour, and documents per hour over 24 h. The live flow lists the demo corpus's 50 latest documents with one cell per step (received, cut, searchable, vectors, alerts): its duration, or how long it has been running. A step slower than its own p95 over the day turns amber. A row opens the document's timeline, one bar per step on a shared time axis with the plugin that ran it.
+
+`admin.mjs` reads `GET /v0/admin/documents` and the timelines with the server key, refreshes on each change the Fil's stream reports (every 5 s otherwise) and relays the step rollups (`/v0/admin/stats/*`) to the sections, which share `AdminSection` and `useAdminStats`. It needs `observability:read` on a key for all Corpora; without it the tab says the view is off.
+
 ## Frontend development and checks
 
 With `make demo` running, `npm run dev --prefix quivr-search` serves Vite on 5182 and proxies to the facade on 5183. Change the proxy target in `vite.config.ts` if you changed `DEMO_PORT`. Design tokens sit at the top of `src/styles.css` and `src/dashboard.css` (the dashboard's layout); the Geist font is bundled from `src/fonts/` (SIL Open Font License, `src/fonts/OFL.txt`), so the page loads no font from another origin; loading, empty and error states come from `src/components/ui.tsx`. `tests/dashboard.spec.ts` runs the dashboard's flows against a fake engine behind the facade routes (`tests/fake-engine.ts`).
@@ -82,7 +88,7 @@ make verify-demo
 | Variable | Meaning |
 | --- | --- |
 | `QUIVR_API_URL` | Private core URL, no trailing route |
-| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab; the Veille tab needs `changes:read` |
+| `QUIVR_API_KEY` | Server-only core credential with corpus read/write, content read/write and search permissions. Add `connectors:read`, `connectors:write` and `changes:read` to enable the Sources tab; the Veille tab needs `changes:read`, the Admin tab `observability:read` |
 | `QUIVR_DEMO_CORPUS_ID` | Optional existing demo corpus; otherwise created idempotently |
 | `DEMO_PASSWORD` | Shared demo password, required on public binds |
 | `HOST`, `PORT` | Bind address/port; defaults `127.0.0.1:5183` |

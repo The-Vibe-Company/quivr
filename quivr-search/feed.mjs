@@ -136,6 +136,12 @@ const unavailable = (status) =>
 export function createFeed({ core, key, corpus, upstream }) {
   const items = new Map();
   const clients = new Set();
+  // Other views of the demo corpus (the Admin tab) told of each change as it
+  // is read, before its Record is reread, and of the stream's liveness.
+  const watchers = new Set();
+  const notify = (...args) => {
+    for (const watcher of watchers) watcher(...args);
+  };
   let cursor = null;
   let started = null;
   let live = false;
@@ -150,6 +156,7 @@ export function createFeed({ core, key, corpus, upstream }) {
     if (live === value) return;
     live = value;
     broadcast("status", { live });
+    notify("status", live);
   }
   function upsert(item) {
     items.set(item.record_id, item);
@@ -275,6 +282,7 @@ export function createFeed({ core, key, corpus, upstream }) {
           }
           if (message.event === "change") {
             const change = JSON.parse(message.data);
+            notify("change", change);
             // A Record that stays unreadable is skipped rather than
             // replayed forever, which would freeze the feed behind it.
             if (change.resource?.kind === "record")
@@ -324,6 +332,7 @@ export function createFeed({ core, key, corpus, upstream }) {
   async function resync() {
     await sync();
     broadcast("reset", {});
+    notify("reset");
   }
 
   function start() {
@@ -344,6 +353,13 @@ export function createFeed({ core, key, corpus, upstream }) {
   keepalive.unref();
 
   return {
+    /** Follows the change stream: watcher("change", event), ("status", live), ("reset"). */
+    watch(watcher) {
+      watchers.add(watcher);
+      watcher("status", live);
+      start().catch(() => {});
+      return () => watchers.delete(watcher);
+    },
     async snapshot() {
       await start();
       return {

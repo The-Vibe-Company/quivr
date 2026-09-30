@@ -140,6 +140,7 @@ mark {
 }
 .bar-search {
   flex: 1;
+  min-width: 0;
   max-width: 560px;
   margin: 0 auto;
   display: flex;
@@ -1614,19 +1615,6 @@ mark {
     max-width: none;
     width: 100%;
   }
-  .bar-add {
-    width: 32px;
-    padding: 0;
-    justify-content: center;
-  }
-  .bar-add-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
   .bar-live {
     padding: 0 10px;
     font-size: 0;
@@ -1679,6 +1667,23 @@ mark {
   }
   .form-actions .form-advanced {
     margin-left: 0;
+  }
+}
+/* Four tabs and the search share the bar: below 1000 px the add button
+   keeps only its icon. */
+@media (max-width: 999px) {
+  .bar-add {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .bar-add-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 }
 @media (max-width: 760px) {

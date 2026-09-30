@@ -65,7 +65,7 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 `observability:read`; the web app never gets the first two. Use it from inside the deployment
 (`railway ssh --service api`, port 8080) to rebuild a Corpus projection, to follow documents through
 their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
-`QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read` for the read-only admin views.
+`QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read`, which turns on the web app's read-only **Admin** tab (live flow of documents, timelines, throughput).
 
 ## Ingestion plugin and the rebuild after THE-777
 

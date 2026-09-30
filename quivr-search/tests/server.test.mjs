@@ -652,7 +652,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   );
 });
 
-test("the Veille feed routes need the demo session", async (t) => {
+test("the Veille feed and Admin routes need the demo session", async (t) => {
   const seen = [];
   const upstream = http.createServer((req, res) => {
     seen.push(req.url);
@@ -668,12 +668,19 @@ test("the Veille feed routes need the demo session", async (t) => {
   const base = await startDemo(t, upstream.address().port, {
     DEMO_PASSWORD: "fixture-demo-password",
   });
-  for (const route of ["/demo/feed", "/demo/feed/stream"])
+  for (const route of [
+    "/demo/feed",
+    "/demo/feed/stream",
+    "/demo/admin",
+    "/demo/admin/stream",
+    "/demo/admin/documents/v/timeline",
+    "/demo/admin/stats/steps",
+  ])
     assert.equal((await fetch(base + route)).status, 401, route);
   assert.deepEqual(seen, [], "nothing reaches the core without a session");
 });
 
-test("the Veille feed explains a key without change-feed access", async (t) => {
+test("the Veille feed and the Admin tab explain a key without access", async (t) => {
   const upstream = http.createServer((req, res) => {
     res.writeHead(403, { "Content-Type": "application/json" });
     res.end(
@@ -694,4 +701,142 @@ test("the Veille feed explains a key without change-feed access", async (t) => {
   const response = await fetch(base + "/demo/feed");
   assert.equal(response.status, 403);
   assert.match((await response.json()).message, /changements/);
+  // The Admin tab says which right its key lacks.
+  const admin = await fetch(base + "/demo/admin");
+  assert.equal(admin.status, 403);
+  assert.match((await admin.json()).message, /observability:read/);
+});
+
+test("the Admin tab relays the demo corpus's documents live, fences timelines and stays read-only", async (t) => {
+  const now = Date.now();
+  const at = (ms) => new Date(now - ms).toISOString();
+  const docs = [
+    {
+      version_id: "v_ready", record_id: "r1", corpus_id: "demo", source_namespace: "wire", record_key: "k1",
+      title: "Ready", state: "retrieval_ready", is_current: true,
+      steps: { accepted_at: at(9000), materialized_at: at(8900), segmented_at: at(8800), retrieval_ready_at: at(8700) },
+    },
+    {
+      version_id: "v_other", record_id: "r2", corpus_id: "private", source_namespace: "wire", record_key: "k2",
+      state: "received", is_current: true, steps: { accepted_at: at(5000) },
+    },
+  ];
+  const seen = [];
+  let stream;
+  const streamOpened = Promise.withResolvers();
+  const upstream = http.createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization });
+    const url = new URL(req.url, "http://x");
+    const json = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    if (url.pathname === "/v0/changes/stream") {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(": resumed\n\n");
+      stream = res;
+      streamOpened.resolve();
+      return;
+    }
+    if (url.pathname === "/v0/changes")
+      return json(200, { items: [], next_cursor: "c0", has_more: false });
+    if (url.pathname === "/v0/records") return json(200, { items: [] });
+    // The scan's second page is refused: the first one is kept.
+    if (url.pathname === "/v0/admin/documents")
+      return url.searchParams.get("page_cursor")
+        ? json(422, { code: "invalid_cursor" })
+        : json(200, { items: docs, next_page_cursor: "p2" });
+    if (url.pathname === "/v0/admin/stats/steps")
+      return json(200, {
+        window: url.searchParams.get("window"), resolution_seconds: 900, from: at(3_600_000), to: at(0),
+        items: [{ step: "accepted_to_searchable", summary: { count: 120, errors: 0, p95_ms: 1500 }, points: [] }],
+      });
+    const timeline = url.pathname.match(/^\/v0\/admin\/documents\/(\w+)\/timeline$/);
+    if (timeline) {
+      const doc = docs.find((d) => d.version_id === timeline[1]);
+      return doc
+        ? json(200, { document: doc, steps: [{ step: "accepted", at: doc.steps.accepted_at }] })
+        : json(404, { code: "not_found" });
+    }
+    if (url.pathname === "/v0/admin/stats/plugins")
+      return json(200, {
+        window: url.searchParams.get("window"), resolution_seconds: 900, from: at(0), to: at(0), items: [],
+      });
+    json(404, { code: "not_found" });
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+
+  const snapshot = await (await fetch(base + "/demo/admin")).json();
+  assert.deepEqual(snapshot.documents.map((d) => d.version_id), ["v_ready"], "only the demo corpus");
+  assert.deepEqual(
+    snapshot.documents[0].flow.map((c) => c.state),
+    ["done", "done", "done", "run", "run"],
+  );
+  assert.equal(snapshot.stats.hours_of, "searchable", "the engine's step rollups count");
+  assert.equal(snapshot.stats.per_minute, 2);
+  assert.equal(snapshot.stats.searchable_p95_ms, 1500);
+
+  // Live: a change in the demo corpus pushes the new document to the stream.
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const live = await fetch(base + "/demo/admin/stream", { signal: controller.signal });
+  assert.equal(live.status, 200);
+  const reader = live.body.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  const until = async (pattern) => {
+    while (!pattern.test(received)) {
+      const { value, done } = await reader.read();
+      assert.ok(!done, "stream closed");
+      received += decoder.decode(value, { stream: true });
+    }
+  };
+  await streamOpened.promise;
+  docs.unshift({
+    version_id: "v_new", record_id: "r3", corpus_id: "demo", source_namespace: "web-demo", record_key: "k3",
+    state: "received", is_current: true, steps: { accepted_at: at(0) },
+  });
+  stream.write(
+    `id: c1\nevent: change\ndata: ${JSON.stringify({
+      event_id: "c1", type: "record.accepted", schema_version: "1", occurred_at: at(0),
+      resource: { kind: "record", id: "r3" }, cursor: "c1",
+    })}\n\n`,
+  );
+  await until(/event: documents\ndata: [^\n]*"v_new"/);
+  // The next step of that document is sent alone: only what changed.
+  received = "";
+  docs[0].steps.materialized_at = at(0);
+  stream.write(
+    `id: c2\nevent: change\ndata: ${JSON.stringify({
+      event_id: "c2", type: "record.materialized", schema_version: "1", occurred_at: at(0),
+      resource: { kind: "record", id: "r3" }, cursor: "c2",
+    })}\n\n`,
+  );
+  await until(/event: documents\ndata: [^\n]*"materialized_at"[^\n]*\n/);
+  assert.doesNotMatch(received, /"v_ready"/);
+
+  // Timelines and rollups: fenced, relayed, never written.
+  assert.equal((await fetch(base + "/demo/admin/documents/v_ready/timeline")).status, 200);
+  for (const id of ["v_other", "v_unknown"])
+    assert.equal((await fetch(base + `/demo/admin/documents/${id}/timeline`)).status, 404, id);
+  const plugins = await fetch(base + "/demo/admin/stats/plugins?window=24h");
+  assert.equal((await plugins.json()).window, "24h");
+  assert.equal((await fetch(base + "/demo/admin/stats/plugins?window=1y")).status, 422);
+  assert.equal((await fetch(base + "/demo/admin/stats/anything")).status, 404);
+  const post = await fetch(base + "/demo/admin/stats/plugins", {
+    method: "POST",
+    headers: { Origin: base, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(post.status, 404);
+  assert.ok(seen.every((r) => r.method === "GET"), "the Admin tab never writes to the core");
+  assert.ok(seen.every((r) => r.auth === "Bearer fixture-server-key"));
+  assert.ok(!received.includes("fixture-server-key"));
+  assert.ok(!JSON.stringify(snapshot).includes("fixture-server-key"));
 });

@@ -111,8 +111,9 @@ class Stack:
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
             # The browser demo (scripts/demo.py) owns org_d: its connectors keep polling without touching acceptance Organizations.
-            # Its keyword alerts (THE-734) need the monitoring rights and org_d's destination below.
-            s['demo']:scope('org_d',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*']),
+            # Its keyword alerts (THE-734) need the monitoring rights and org_d's destination below;
+            # its read-only Admin tab (THE-796) needs observability:read.
+            s['demo']:scope('org_d',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write','observability:read'],['*']),
             # Change-journal prune acceptance owns org_r, the only Organization the harness prunes.
             s['retention']:scope('org_r',['corpora:read','corpora:write','content:read','content:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
