@@ -1,0 +1,72 @@
+.agents/skills/documentation-writer/SKILL.md
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-45
+.agents/skills/audit-tests-dev/SOURCE.md
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-14
+.agents/skills/humanizer/LICENSE
+  s_54b80c92daa9cb::t_32c84982e40d35 1-21
+.agents/skills/writing-docs/PAGE-TYPES.md
+  s_54b80c92daa9cb::t_4a832dd169743e 1-89
+.agents/skills/writing-docs/SKILL.md
+  s_54b80c92daa9cb::t_4a832dd169743e 1-39
+skills-lock.json
+  s_54b80c92daa9cb::t_4a832dd169743e 10-18,43-50,87-94,107-114
+.agents/skills/coordinate-fleet/SKILL.md
+  s_54b80c92daa9cb::t_8343ab7a1f65d0 1-31
+.agents/skills/audit-tests-dev/CAMPAIGN.md
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-115
+.agents/skills/coordinate-fleet/WORKER-BRIEF.md
+  s_54b80c92daa9cb::t_96f87886527b0a 1-37
+.agents/skills/writing-docs/STYLE.md
+  s_54b80c92daa9cb::t_4a832dd169743e 1-58
+.agents/skills/coordinate-fleet/MERGE.md
+  s_54b80c92daa9cb::t_4cef070f3f3238 1-25
+.agents/skills/coordinate-fleet/OPERATIONS.md
+  s_54b80c92daa9cb::t_7fc7cd5953b4fb 1-19
+.agents/skills/audit-tests-dev/SKILL.md
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-181
+.agents/skills/humanizer/README.md
+  s_54b80c92daa9cb::t_32c84982e40d35 1-206
+.agents/skills/mintlify/SKILL.md
+  s_54b80c92daa9cb::t_214f2c319424b1 1-2,4,6,9-10,12,14,16,18,20,22,24,26,28,30,35,66-67,70-72,74-79,81,83,90,104,106,108,110,112,114,116,126,128,133,139,141,145,147,153,155,157,159,161,163,174,181,183,193,258,260,282,284-285,287,289,326
+  s_54b80c92daa9cb::t_4a832dd169743e 3,5,7-8,11,13,15,17,19,21,23,25,27,29,31-34,36-65,68-69,73,80,82,84-89,91-103,105,107,109,111,113,115,117-125,127,129-132,134-138,140,142-144,146,148-152,154,156,158,160,162,164-173,175-180,182,184-192,194-257,259,261-281,283,286,288,290-325,327-330
+docs/agents/fleet-workflow.md
+  s_54b80c92daa9cb::t_126f426722bf09 8
+.agents/skills/audit-tests-dev/LICENSE
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-24
+.agents/skills/humanizer/SKILL.md
+  s_54b80c92daa9cb::t_32c84982e40d35 1-397
+.agents/skills/documentation-writer/LICENSE
+  s_54b80c92daa9cb::t_fbcb166399f18a 1-21
+.agents/skills/mintlify/LICENSE
+  s_54b80c92daa9cb::t_214f2c319424b1 1-21
+docs-site/agents/fleet-workflow.mdx
+  s_54b80c92daa9cb::t_126f426722bf09 11
+.claude/skills/audit-tests-dev
+  s_54b80c92daa9cb::t_2b8d486be7a02f 1
+.claude/skills/coordinate-fleet
+  s_54b80c92daa9cb::t_b08d43d46d666f 1
+.claude/skills/documentation-writer
+  s_54b80c92daa9cb::t_7a62875f36eeb5 1
+.claude/skills/humanizer
+  s_54b80c92daa9cb::t_acad9fa02b0041 1
+.claude/skills/mintlify
+  s_54b80c92daa9cb::t_6fa24da94b36b1 1
+.claude/skills/writing-docs
+  s_54b80c92daa9cb::t_f7774985db06a5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b176129e891b3be0820accab13c964fc95f97946",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
