@@ -90,6 +90,11 @@ internal/retrieval/retrieval_test.go
   s_54b80c92daa9cb::t_cb245d545d8558 43
   s_54b80c92daa9cb::t_6fd8c9c0a98fe2 193-194
   s_54b80c92daa9cb::t_44bc2617e6e3af 17-19,22-23,40,52-53,164-192
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_7b564b32b0a0f8 248-249
+  s_54b80c92daa9cb::t_6f1e3b07afca1f 270-271
+quivr-search/README.md
+  s_54b80c92daa9cb::t_7b564b32b0a0f8 21
 ---
 {
   "schema_version": "authorship/3.0.0",
