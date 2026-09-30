@@ -13,6 +13,7 @@ quivr-search/src/dashboard.css
   s_54b80c92daa9cb::t_1ce9e80ccf1fab 912-940
 quivr-search/feed.mjs
   s_54b80c92daa9cb::t_f9e9d3c0138ab4 194-199
+  s_54b80c92daa9cb::t_0ca96c00c7593a 188-189,192-193
 quivr-search/tests/server.test.mjs
   s_54b80c92daa9cb::t_f9e9d3c0138ab4 616
   s_54b80c92daa9cb::t_ffa9a076a2053d 618-626
