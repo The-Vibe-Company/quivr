@@ -1,0 +1,23 @@
+plugins/m365-mail/fakegraph_test.go
+  s_54b80c92daa9cb::t_8195974bd1e622 38-39,171-175
+plugins/m365-mail/mail_test.go
+  s_54b80c92daa9cb::t_b8c47b7521c1f1 270-275
+  s_54b80c92daa9cb::t_0633702464a14a 17-18,20,250-269
+  s_54b80c92daa9cb::t_766b39f7bb0597 276-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "45b9984fede10ff4cedb476a48a9f845ee2c4adb",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
