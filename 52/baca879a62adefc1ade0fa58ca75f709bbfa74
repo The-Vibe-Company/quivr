@@ -1,0 +1,145 @@
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_c6a78a1d9524de 173-174
+internal/adapters/pluginhttp/retrieval.go
+  s_54b80c92daa9cb::t_185e8508a8987f 1-56
+contracts/plugins/v0/fixtures/manifests/invalid/retrieval-bad-limits.yaml
+  s_54b80c92daa9cb::t_667675135dc473 1-22
+contracts/plugins/v0/fixtures/responses/retrieval/dimension-mismatch.json
+  s_54b80c92daa9cb::t_667675135dc473 1-13
+contracts/plugins/v0/fixtures/responses/retrieval/bm25-with-space.json
+  s_54b80c92daa9cb::t_667675135dc473 1-11
+contracts/plugins/v0/fixtures/responses/retrieval/candidate-limit.json
+  s_54b80c92daa9cb::t_667675135dc473 1-10
+contracts/plugins/v0/fixtures/responses/retrieval/requests.json
+  s_54b80c92daa9cb::t_667675135dc473 1-16
+internal/adapters/weaviate/projection.go
+  s_54b80c92daa9cb::t_205cb090755c82 14,366-379,385,387-391,397-400,421-428
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_67213c65a268ab 795,828,860,865-922
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_667675135dc473 2,1745-1992
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_6e72160be70a36 78,1152,1161-1174,5996,6009,6042-6044,6093,6116-6259,6322,6364-6368,6402,6433,6466,6472-6511,6526-6527
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_6e72160be70a36 119,127,171-172
+internal/app/run.go
+  s_54b80c92daa9cb::t_111a293712e503 282-287
+contracts/plugins/v0/fixtures/responses/retrieval/filter-outside-scope.json
+  s_54b80c92daa9cb::t_667675135dc473 1-15
+contracts/plugins/v0/fixtures/responses/retrieval/requests-and-ranking.json
+  s_54b80c92daa9cb::t_667675135dc473 1-13
+internal/online/search.go
+  s_54b80c92daa9cb::t_8b49d2bd1a7a2b 14,41,77
+contracts/plugins/v0/fixtures/responses/retrieval/ranking.json
+  s_54b80c92daa9cb::t_667675135dc473 1-18
+contracts/plugins/v0/fixtures/manifests/invalid/retrieval-no-default.yaml
+  s_54b80c92daa9cb::t_667675135dc473 1-18
+contracts/plugins/v0/fixtures/responses/retrieval/unknown-space.json
+  s_54b80c92daa9cb::t_667675135dc473 1-10
+contracts/contracts.go
+  s_54b80c92daa9cb::t_86d3df76ee2e3c 22
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_67213c65a268ab 1758-1759
+  s_54b80c92daa9cb::t_bdf66c7dd24804 1775-1778,1786-1805,3928-3933,3984-4059,4121-4125,4164-4165
+  s_54b80c92daa9cb::t_85f5f4da7859fe 1757
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_40ea5c02c7fb1d 127
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_06eb901515d544 12,17-24,36-39,78-105,107,109-113,115-116,159-164,185,192-193,198-202,256-258,316
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_8e863c50c73e10 3,45,59-61,538-628
+contracts/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_c6a78a1d9524de 48-49
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-1.json
+  s_54b80c92daa9cb::t_667675135dc473 1-47
+contracts/plugins/v0/fixtures/responses/retrieval/unserved-candidate.json
+  s_54b80c92daa9cb::t_667675135dc473 1-10
+contracts/plugins/v0/fixtures/retrieval/newsroom.json
+  s_54b80c92daa9cb::t_667675135dc473 1-33
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_205cb090755c82 95-100
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_85f5f4da7859fe 525,527-528,531-532,534,536,543,545-547,550-551,553,555,557,644-645,651,653,1505-1516,1519,1525-1549,1555-1561,1571,1573-1583,2287-2289,3551-3564,4082,5783-5820,6463-6465,7746-7762,7767-7768
+  s_54b80c92daa9cb::t_001fa391724eff 7763-7766,7769
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-hits.json
+  s_54b80c92daa9cb::t_667675135dc473 1-18
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_c9f813550e470b 22,28,33-37,140,159-161,454-467,505
+internal/plugins/pins.go
+  s_54b80c92daa9cb::t_40ea5c02c7fb1d 22-25,39,98-104,191-196
+  s_54b80c92daa9cb::t_0e56bd935074f6 197-198
+contracts/plugins/v0/fixtures/manifests/invalid/retrieval-plugin-api-0.6.yaml
+  s_54b80c92daa9cb::t_667675135dc473 1-22
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_1f5e7f8261390d 144-146,181-183,215-217
+internal/transport/httpapi/search.go
+  s_54b80c92daa9cb::t_6ee39afb02f45a 28,33,46-47,50-53,61,63-66,70-89
+  s_54b80c92daa9cb::t_102f70a04d614e 90
+internal/plugins/retrieval.go
+  s_54b80c92daa9cb::t_a57b3595084a7f 1-479
+contracts/plugins/v0/fixtures/responses/retrieval/duplicate-hit.json
+  s_54b80c92daa9cb::t_667675135dc473 1-14
+contracts/plugins/v0/fixtures/responses/retrieval/ranking-empty.json
+  s_54b80c92daa9cb::t_667675135dc473 1-5
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-4.json
+  s_54b80c92daa9cb::t_667675135dc473 1-47
+contracts/plugins/v0/fixtures/manifests/valid/retrieval.yaml
+  s_54b80c92daa9cb::t_667675135dc473 1-22
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_6e72160be70a36 119,137
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_304adebfe01b68 77
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_6e72160be70a36 79,88
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_c6a78a1d9524de 4,9,49,65,67
+contracts/plugins/v0/fixtures/requests/retrieval/search-missing-spaces.json
+  s_54b80c92daa9cb::t_667675135dc473 1-23
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_cd9b8ecb7b2b31 1-201,203-402
+  s_54b80c92daa9cb::t_d15c4dc416b538 202
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-2.json
+  s_54b80c92daa9cb::t_667675135dc473 1-112
+contracts/plugins/v0/fixtures/responses/retrieval/near-vector-without-query.json
+  s_54b80c92daa9cb::t_667675135dc473 1-9
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-requests.json
+  s_54b80c92daa9cb::t_667675135dc473 1-22
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-rounds.json
+  s_54b80c92daa9cb::t_667675135dc473 1-10
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_6ee39afb02f45a 211-214
+  s_54b80c92daa9cb::t_8e863c50c73e10 194-199
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_1c42735bd36c8f 181
+  s_54b80c92daa9cb::t_86d3df76ee2e3c 115-116,335-351
+  s_54b80c92daa9cb::t_3469a07f0b40f1 352-353
+client/client.gen.go
+  s_54b80c92daa9cb::t_85f5f4da7859fe 525,527-528,531-532,534,536,543,545-547,550-551,553,555,557,644-645,651,653,1505-1516,1519,1525-1549,1555-1561,1571,1573-1583,2559,2565,2568-2572,3602,3618,3631-3645,5861-5887,6913,6921,6924-6930,9067-9114,10496,10510,10519-10531,12163-12178,12191,12194
+  s_54b80c92daa9cb::t_563ce757321ac6 12179-12190,12192-12193,12195
+internal/transport/httpapi/spaces.go
+  s_54b80c92daa9cb::t_8b49d2bd1a7a2b 61,63
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_185e8508a8987f 519-524
+contracts/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_6446a72afde951 1-145
+contracts/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_1c429e45b44fa1 1-523
+contracts/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_9b778bc5dbbfc9 1-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52baca879a62adefc1ade0fa58ca75f709bbfa74",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
