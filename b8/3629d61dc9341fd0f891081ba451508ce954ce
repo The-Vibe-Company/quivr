@@ -1,0 +1,73 @@
+quivr-search/src/lib/alerts.ts
+  s_54b80c92daa9cb::t_9f5d26936017a2 85-95
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_f3cccfe4bfbfef 1142-1149
+internal/adapters/postgres/monitoring.go
+  s_54b80c92daa9cb::t_9b8bb401a9ec11 211-243,528-549,551,553
+  s_54b80c92daa9cb::t_0df124577c54d4 550,552,554
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_9b8bb401a9ec11 26,63-64,89,133-139,169-175,193-196
+  s_54b80c92daa9cb::t_3d968e4ec64bc4 197-198
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_1c23756bc39a17 330-340,352
+  s_54b80c92daa9cb::t_87e94ed9e3061b 81-98
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_87e94ed9e3061b 69-82,458-461
+client/client.gen.go
+  s_54b80c92daa9cb::t_d4e804971993ca 1263-1268,1331,1462,1650-1652,1671-1673,2221-2232,2320-2331,3120-3151,3389-3420,5104-5150,5568-5614,6191-6204,6310-6323,7978-8025,8458-8505,9370-9395,9591-9616,10802-10834,11132-11140,11143,11160,11163
+  s_54b80c92daa9cb::t_2bf7d4b65aa6ad 11141-11142,11144-11159,11161-11162,11164
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_d4e804971993ca 49,58,589-609,771-791,3883-3921,4253,4293,4523,4572
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_13b6fc0daf17dd 124-134,138-139,322,384-403,412-415
+  s_54b80c92daa9cb::t_d3e9d4f5cbdb12 416-433
+  s_54b80c92daa9cb::t_21f84c421690c3 135-137
+  s_54b80c92daa9cb::t_8d3eb17fde62bd 434-435
+quivr-search/src/components/alerts/AlertForm.tsx
+  s_54b80c92daa9cb::t_9f5d26936017a2 142-146
+internal/adapters/postgres/monitoring_rename_test.go
+  s_54b80c92daa9cb::t_674b31737c6cd7 1-72
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_d4e804971993ca 1263-1268,1331,1462,1650-1652,1671-1673,1984-1986,2014-2016,3073-3098,3351-3376,3649,3658,5058-5097,5454-5493,5796-5798,5826-5828,6854-6886,7160-7185,7190-7191
+  s_54b80c92daa9cb::t_2c6b1c76ac10ed 7186-7189,7192
+quivr-search/tests/alerts.test.mjs
+  s_54b80c92daa9cb::t_f36d695c183a2f 103-113,136,145-153,287-339
+  s_54b80c92daa9cb::t_7b341a0176bac3 340-341
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_97f995ccde2e7f 222-223,227
+  s_54b80c92daa9cb::t_9f5d26936017a2 210,217-218,228-229
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_5c2cf0021fd2ed 77-78
+README.md
+  s_54b80c92daa9cb::t_40c84556acbffe 99-100
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_9f5d26936017a2 317-320
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_9b8bb401a9ec11 104
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_5d316cc17bf779 841,1171
+  s_54b80c92daa9cb::t_f3cccfe4bfbfef 837-840,842-873,1167-1170,1172-1204,2749-2762,2949-2950,3064-3065
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_9b8bb401a9ec11 179-181,198-200,326-338,540-551
+  s_54b80c92daa9cb::t_8834815d0aed28 552
+quivr-search/README.md
+  s_54b80c92daa9cb::t_85ce596b4ca4ac 62
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_1ec65bc4a11d8e 322-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b83629d61dc9341fd0f891081ba451508ce954ce",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
