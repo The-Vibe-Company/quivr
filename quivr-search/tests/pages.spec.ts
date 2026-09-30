@@ -62,3 +62,63 @@ test("chaque page annonce sa panne de la même façon et s’en remet, sur mobil
     ),
   ).toBe(true);
 });
+
+// The design's Geist font comes from the demo itself: the facade's policy
+// allows no other font origin, and the text renders in it on a phone and on
+// a desktop screen.
+test("le texte s’affiche en Geist, servi par la démo", async ({
+  page,
+  baseURL,
+}) => {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { cspViolations: string[] }).cspViolations = seen;
+    document.addEventListener("securitypolicyviolation", (e) =>
+      seen.push(`${e.violatedDirective} ${e.blockedURI}`),
+    );
+  });
+  const fonts: { url: string; type?: string }[] = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "font")
+      fonts.push({
+        url: response.url(),
+        type: response.headers()["content-type"],
+      });
+  });
+  for (const size of [
+    { width: 375, height: 812 },
+    { width: 1440, height: 900 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto("/");
+    await expect(
+      page.getByRole("navigation", { name: "Sections" }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          await document.fonts.ready;
+          return [...document.fonts].some(
+            (face) =>
+              face.family.replace(/"/g, "") === "Geist" &&
+              face.status === "loaded",
+          );
+        }),
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(() => getComputedStyle(document.body).fontFamily),
+    ).toMatch(/^"?Geist"?,/);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { cspViolations: string[] }).cspViolations,
+      ),
+    ).toEqual([]);
+  }
+  const origin = new URL(baseURL!).origin;
+  expect(fonts.length).toBeGreaterThan(0);
+  for (const font of fonts) {
+    expect(new URL(font.url).origin, font.url).toBe(origin);
+    expect(font.type, font.url).toBe("font/woff2");
+  }
+});

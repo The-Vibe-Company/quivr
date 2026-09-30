@@ -1,7 +1,17 @@
+/* Geist, served by the demo itself (the CSP allows no other font origin).
+   One variable file covers every weight used here; licence in fonts/OFL.txt. */
+@font-face {
+  font-family: Geist;
+  src: url("./fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Design tokens: every page of the demo draws its colours, spacing, type,
    radii and motion from here, so the four tabs read as one app. */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light dark;
   /* Colour */
   --bg: #fff;
