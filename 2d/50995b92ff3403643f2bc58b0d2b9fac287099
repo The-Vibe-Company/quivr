@@ -16,6 +16,7 @@ internal/adapters/pluginhttp/ingestion_test.go
   s_54b80c92daa9cb::t_198d220835eb05 18,124,188-190,195-216
   s_54b80c92daa9cb::t_b2b79d8bcf86e7 7,191-194
   s_54b80c92daa9cb::t_1ad728e476c404 217
+  s_54b80c92daa9cb::t_0d52fb59bc7653 187
 internal/adapters/postgres/embeddings_test.go
   s_54b80c92daa9cb::t_3f0d5bfbbffcef 14
   s_54b80c92daa9cb::t_3b3ce8d0e4f07a 142-160
