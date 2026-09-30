@@ -173,7 +173,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
   JSON logs link request, Receipt, Record and Version IDs
   ([harness](docs/quivr-v2-local-harness.md)).
-- **Retrieval measurement** with a frozen workload (`make measure`).
+- **Retrieval measurement** with a frozen workload (`make measure`), and **search
+  quality** on public French and English evaluation sets or a private set, nightly
+  (`make eval`, [guide](docs/agents/evaluation.md)).
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.

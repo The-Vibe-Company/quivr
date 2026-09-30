@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure docs start-pages denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure eval docs start-pages denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -23,11 +23,16 @@ test:
 	$(GO) vet ./...
 	$(GO) test ./...
 	python3 -m unittest discover -s scripts -p 'test_*.py'
+	python3 -m unittest discover -s scripts/eval -p 'test_*.py'
 	GO=$(GO) bash scripts/plugin_sdk.sh
 	GO=$(GO) bash scripts/plugin_sdk_go.sh
 # Explicit retrieval measurement (THE-661); not part of verify.
 measure:
 	GO=$(GO) python3 scripts/measure.py
+# Search quality on public evaluation sets (THE-775, docs/agents/evaluation.md); not part of verify.
+# Needs scripts/eval/requirements.txt. make eval [args='--sets scifact --baseline <report.json>']
+eval:
+	GO=$(GO) python3 scripts/eval/run.py $(args)
 generate:
 	GO=$(GO) bash scripts/contracts.sh generate
 contracts:

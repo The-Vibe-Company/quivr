@@ -30,7 +30,7 @@ with a test that fails on the old code for the reason of the bug.
 | Adapter | `make adapter-postgres` | SQL and storage behaviour on real PostgreSQL | The whole suite in about a minute |
 | Acceptance | `tests/acceptance` on the local stack | User journeys, cross-component contracts, outage and recovery | 10 s per test |
 | Browser | Playwright in `quivr-search/tests` | The demo's critical paths | 15 s per spec |
-| Measurement | `make measure`, nightly | Relevance, latency and cost numbers | Outside the pull-request path |
+| Measurement | `make measure`, `make eval`, nightly | Relevance, latency and cost numbers | Outside the pull-request path |
 
 Choose the lowest level that can see the behaviour. Acceptance tests talk to the
 public API only; their rules are in `tests/acceptance/README.md`. A measurement

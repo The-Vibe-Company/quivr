@@ -13,6 +13,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Repository instructions](../../AGENTS.md): rules every contributor and coding agent follows in this repository
 - [Documentation conventions](../agents/documentation.md): living and dated documents, the inventory, budgets and when docs may change
 - [Domain documentation](../agents/domain.md): how the domain documentation is laid out
+- [Measure search quality](../agents/evaluation.md): measure how well search ranks results on public and private evaluation sets
 - [Agent fleet workflow](../agents/fleet-workflow.md): how parallel agents claim, plan and ship tickets
 - [Issue tracker: Linear](../agents/issue-tracker.md): how specs and tickets are written and tracked
 - [Testing standard](../agents/testing.md): what a good test looks like here

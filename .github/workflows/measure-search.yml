@@ -1,0 +1,79 @@
+name: Search quality
+# Measurement lane (THE-775, docs/agents/evaluation.md): scores search on the public evaluation
+# sets, and on a private set when the EVAL_SET_URL and EVAL_SET_SHA256 secrets are set. Nightly and
+# on demand, never on pull requests: scores are findings without a threshold, and only harness or
+# dependency errors fail the job. Each run is compared with the latest successful run on main,
+# or with the run given as baseline_run_id.
+on:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+    inputs:
+      sets:
+        description: Public sets, comma-separated (scripts/eval/public_sets.py)
+        default: miracl-fr,mldr-fr,scifact
+      baseline_run_id:
+        description: Search quality run ID to compare with; empty for the latest successful run on main
+        default: ''
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: search-quality-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  search-quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/eval/requirements.txt
+      # Downloads are pinned by sha256 and checked on every reuse; the cache only saves bandwidth.
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/eval/cache
+          key: eval-sets-${{ hashFiles('scripts/eval/public_sets.py', 'internal/processing/profile.json') }}
+      - run: python3 -m pip install -q -r scripts/eval/requirements.txt
+      - run: python3 -m unittest discover -s scripts/eval -p 'test_*.py'
+      - name: Find the baseline run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.baseline_run_id }}
+        run: |
+          id="$RUN_ID"
+          if [ -z "$id" ]; then
+            id=$(gh run list --workflow measure-search.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          fi
+          if [ -n "$id" ] && gh run download "$id" --name search-quality --dir .scratch/eval/baseline; then
+            echo "BASELINE=$(find .scratch/eval/baseline -name report.json | head -n 1)" >> "$GITHUB_ENV"
+          else
+            echo "No baseline run to compare with."
+          fi
+      - name: Measure
+        env:
+          SETS: ${{ inputs.sets || 'miracl-fr,mldr-fr,scifact' }}
+          QUIVR_EVAL_SET: ${{ secrets.EVAL_SET_URL }}
+          QUIVR_EVAL_SET_SHA256: ${{ secrets.EVAL_SET_SHA256 }}
+          QUIVR_EVAL_SET_AUTHORIZATION: ${{ secrets.EVAL_SET_AUTHORIZATION }}
+        run: make eval args="--sets $SETS --out .scratch/eval/out ${BASELINE:+--baseline $BASELINE}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-quality
+          include-hidden-files: true
+          path: |
+            .scratch/eval/out/report.json
+            .scratch/eval/out/report.md
+            .scratch/quivr-eval-*/*.log
+            .scratch/quivr-eval-*/readiness.json
+            .scratch/quivr-eval-*/services.json
+          if-no-files-found: warn
+      - if: always()
+        run: cat .scratch/eval/out/report.md >> "$GITHUB_STEP_SUMMARY" || true

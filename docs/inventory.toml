@@ -64,6 +64,7 @@ excluded = [
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
+"docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
@@ -108,6 +109,7 @@ excluded = [
 "deploy/railway/README.md" = 201
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
+"docs/agents/evaluation.md" = 92
 "docs/agents/fleet-workflow.md" = 65
 "docs/agents/issue-tracker.md" = 110
 "docs/agents/testing.md" = 85
