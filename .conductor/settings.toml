@@ -1,0 +1,5 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+# Commands a fresh workspace runs once: install dependencies, copy env files.
+setup = "true"
