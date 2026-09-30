@@ -1,0 +1,54 @@
+scripts/test_mintlify.py
+  s_54b80c92daa9cb::t_4156e3ef600df2 92,95-101
+  s_54b80c92daa9cb::t_95e69894546e8a 1-11,15-91,93-94,102-105
+  s_54b80c92daa9cb::t_55c8534bf27222 12-14
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_88ac21893965ca 38
+  s_54b80c92daa9cb::t_6b0438f546a3ab 3
+  s_54b80c92daa9cb::t_8cb9ff61b38531 26-27
+Makefile
+  s_54b80c92daa9cb::t_340c1e743eef05 2,41-42,48-61
+README.md
+  s_54b80c92daa9cb::t_32853e85743d76 167
+scripts/docs.py
+  s_54b80c92daa9cb::t_5cc300f538fc5a 19-20,26,55-56,610-631,661
+scripts/mintlify_site.py
+  s_54b80c92daa9cb::t_bfbc5717a2928e 382-384,387
+  s_54b80c92daa9cb::t_9605b74199d20a 47,257
+  s_54b80c92daa9cb::t_5bbaeef96ecec0 330-331,335-381,390-396
+  s_54b80c92daa9cb::t_43aec0be4f7363 401-404
+  s_54b80c92daa9cb::t_bf98aa396864a0 53,55,290-292,299
+  s_54b80c92daa9cb::t_6994853a6a6543 311-324,326-329,332-334,385-386,388-389
+  s_54b80c92daa9cb::t_63f8d69d47b0d6 325
+  s_54b80c92daa9cb::t_32853e85743d76 45-46,260-268,289,297-298,300-305
+  s_54b80c92daa9cb::t_7966743edb72fe 410-423,427
+  s_54b80c92daa9cb::t_4b108ec93fd3fb 1-44,48-52,54,56-131,134-187,189-256,258-259,269-288,293-296,306-310,397-400,405-409,424-426,428-471
+  s_54b80c92daa9cb::t_581946e13605b6 132-133,188
+.github/workflows/docs-site.yml
+  s_54b80c92daa9cb::t_f1c68fe90198e3 1-82
+docs/inventory.toml
+  s_54b80c92daa9cb::t_82581440abafef 15-17
+docs/docs.json
+  s_54b80c92daa9cb::t_71fdc7d9f0c71a 1-11,124-140
+  s_54b80c92daa9cb::t_ae477c24ac04f0 20,39-40,73-74
+  s_54b80c92daa9cb::t_c2be2fe8fa7328 12-19,21-38,41-72,75-123
+scripts/mintlify_nav.py
+  s_54b80c92daa9cb::t_325a8395681ccf 1-4,7-60,66-68,70-121
+  s_54b80c92daa9cb::t_ae477c24ac04f0 5-6,61-65,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e122780e1b4aa8675904cd99a03caec9dc0318e8",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
