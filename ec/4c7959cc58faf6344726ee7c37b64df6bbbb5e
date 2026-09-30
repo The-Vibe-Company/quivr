@@ -28,6 +28,8 @@ docs/described-alerts.md
   s_54b80c92daa9cb::t_dbe5fa7e7ddfd6 63-69
 quivr-search/src/components/alerts/AlertForm.tsx
   s_54b80c92daa9cb::t_691a5db4a99992 80-84,109-113,404
+quivr-search/README.md
+  s_54b80c92daa9cb::t_6869236edcea32 61
 ---
 {
   "schema_version": "authorship/3.0.0",
