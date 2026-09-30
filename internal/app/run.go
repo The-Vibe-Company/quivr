@@ -103,6 +103,10 @@ type Config struct {
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
 	ProjectionPurgeGrace string `json:"projection_purge_grace"`
+	// MigrationWait is how long the worker waits at startup for migrations
+	// the api has not applied yet before it exits (Go duration, default 5m;
+	// 0s exits at once; worker only).
+	MigrationWait string `json:"migration_wait"`
 	// Observability configures the plugin call, search and step counters
 	// (THE-795): record_query_text (default false) also counts searches by
 	// their normalized text, which then stays in PostgreSQL for 7 days, and
@@ -274,6 +278,15 @@ func Run(command string) error {
 			return errors.New("projection_purge_grace must be a positive duration")
 		}
 	}
+	schemaStartup := schemaWait{First: 250 * time.Millisecond, Max: 5 * time.Second}
+	if command == "worker" {
+		schemaStartup.Limit = defaultMigrationWait
+		if cfg.MigrationWait != "" {
+			if schemaStartup.Limit, err = time.ParseDuration(cfg.MigrationWait); err != nil || schemaStartup.Limit < 0 {
+				return errors.New("migration_wait must be a Go duration, 0s or more")
+			}
+		}
+	}
 	if _, ok := cfg.Observability.Interval(); !ok {
 		return errors.New("observability.flush_interval must be a positive Go duration")
 	}
@@ -377,12 +390,12 @@ func Run(command string) error {
 		}
 		return err
 	}
-	startup, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = schemaReady(startup)
-	cancel()
-	if err != nil {
-		slog.Error("schema readiness failed", "error", err)
-		return errors.New("database/schema unavailable; run migrate")
+	// The api migrates before it serves; a worker started first waits for it.
+	if err = awaitSchema(ctx, schemaReady, schemaStartup); err != nil {
+		if ctx.Err() != nil {
+			return nil // stopped while waiting
+		}
+		return err
 	}
 	// The registry checks registered plugins with the Contract Runner (api)
 	// and records activations with the spaces they register, refusing one

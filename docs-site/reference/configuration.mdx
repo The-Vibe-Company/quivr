@@ -32,6 +32,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
 | `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
 | `backfill` | no | How backfills run and when their cost needs a confirmation. See [Backfill](#backfill). |
+| `migration_wait` | no | How long a worker that starts before the api has applied its migrations waits for them, unready, before it exits. `0s` exits at once. Worker only. Default `5m`. |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
 | `connector_fixtures` | no | `true` enables the deterministic `fixture` connector kind. Local and CI stacks only. |

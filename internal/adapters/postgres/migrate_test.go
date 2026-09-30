@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"testing"
@@ -153,7 +154,25 @@ func TestSchemaReadyRequiresEveryEmbeddedMigration(t *testing.T) {
 	if _, err = pool.Exec(ctx, "DELETE FROM schema_migrations WHERE name=$1", latest); err != nil {
 		t.Fatal(err)
 	}
-	if err = postgres.SchemaReady(ctx, pool); err == nil || !regexp.MustCompile(regexp.QuoteMeta(latest)).MatchString(err.Error()) {
-		t.Fatalf("want readiness error naming %s, got %v", latest, err)
+	// Only pending migrations: running migrate completes it, so a worker waits.
+	if err = postgres.SchemaReady(ctx, pool); err == nil || !errors.Is(err, postgres.ErrMigrationsPending) || !regexp.MustCompile(regexp.QuoteMeta(latest)).MatchString(err.Error()) {
+		t.Fatalf("want a pending-migrations error naming %s, got %v", latest, err)
+	}
+	// A later migration this binary does not embed is applied: the schema is
+	// newer than the binary, and waiting would never apply the missing one.
+	const later = "99991231T2359Z_from_a_newer_binary.sql"
+	if _, err = pool.Exec(ctx, "INSERT INTO schema_migrations VALUES($1)", later); err != nil {
+		t.Fatal(err)
+	}
+	if err = postgres.SchemaReady(ctx, pool); !errors.Is(err, postgres.ErrSchemaNewer) || errors.Is(err, postgres.ErrMigrationsPending) {
+		t.Fatalf("want a newer-schema error, got %v", err)
+	}
+	// With nothing pending, a newer schema stays ready, so the previous binary
+	// still starts after a forward migration.
+	if _, err = pool.Exec(ctx, "INSERT INTO schema_migrations VALUES($1)", latest); err != nil {
+		t.Fatal(err)
+	}
+	if err = postgres.SchemaReady(ctx, pool); err != nil {
+		t.Fatalf("newer schema with nothing pending not ready: %v", err)
 	}
 }
