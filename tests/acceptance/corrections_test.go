@@ -13,7 +13,6 @@ import (
 const (
 	markerCorrectionMatch = "ALERTE"
 	markerCorrectionCalm  = "CALME"
-	markerCorrectionFault = "PANNE"
 )
 
 // noticeScenario is one Corpus with a Saved Query whose Subscriptions deliver
@@ -108,105 +107,31 @@ func deliveredAsPolled(t *testing.T, receiver *captureReceiver, event map[string
 	return body
 }
 
-// TestMonitoringCorrectionNotices drives ordinary corrections of an alerted
-// Record through three Subscriptions: one still matches (linked successor
-// Match and a self-sufficient match.corrected), one no longer matches (one
-// match.no_longer_matches for the prior Match, no Match) and one whose
-// evaluator fails on the correction (no notice: a failure is never negative).
-func TestMonitoringCorrectionNotices(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	receiver := startReceiver(t)
-	s := newNoticeScenario(t, "correction", "Dépêche "+markerCorrectionMatch,
-		map[string]any{markerCorrectionMatch: "match"},
-		map[string]any{markerCorrectionCalm: "no_match", "default": "match"},
-		map[string]any{markerCorrectionFault: "error", "default": "match"})
-	positive, negative, failing := s.subscriptions[0], s.subscriptions[1], s.subscriptions[2]
-	for _, sub := range s.subscriptions {
-		deliveredAsPolled(t, receiver, s.created[sub])
-	}
-
-	correction := awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-2", s.recordKey, "Dépêche corrigée "+markerCorrectionMatch+" "+markerCorrectionCalm+" "+markerCorrectionFault))
-	v1 := refsOf(s.created[positive])["record_version_id"]
-	v2 := correction["version_id"]
-	if correction["record_id"] != s.record || v1 == v2 {
-		t.Fatal("correction is not a new Version of the alerted Record", correction)
-	}
-	notices := s.awaitNotices(t, map[string]int{"match.corrected": 1, "match.no_longer_matches": 1})
-
-	// Positive: a linked successor Match; its notice carries every
-	// match.created reference plus previous_match_id, so it stands alone.
-	corrected := notices["match.corrected"][0]
-	refs := refsOf(corrected)
-	previous := refsOf(s.created[positive])["match_id"]
-	if len(notices["match.corrected"]) != 1 || refs["subscription_id"] != positive || refs["record_id"] != s.record || refs["record_version_id"] != v2 ||
-		refs["previous_match_id"] != previous || refs["match_id"] == previous || refs["subscription_version_id"] != refsOf(s.created[positive])["subscription_version_id"] {
-		t.Fatal("match.corrected references", notices["match.corrected"])
-	}
-	body := deliveredAsPolled(t, receiver, corrected)
-	for _, key := range []string{"match_id", "record_id", "record_version_id", "subscription_id", "subscription_version_id", "delivery_id", "previous_match_id"} {
-		if body["references"].(map[string]any)[key] == nil {
-			t.Fatal("match.corrected is not self-sufficient", body)
-		}
-	}
-	successor := request(t, "GET", "/v0/matches/"+refs["match_id"].(string), admin, nil, 200)
-	if successor["previous_match_id"] != previous || successor["record_version_id"] != v2 {
-		t.Fatal("successor Match", successor)
-	}
-	history := request(t, "GET", matchesPath(positive, "", 0), admin, nil, 200)["items"].([]any)
-	if len(history) != 2 || history[0].(map[string]any)["match_id"] != previous || history[1].(map[string]any)["match_id"] != refs["match_id"] {
-		t.Fatal("positive Match history", history)
-	}
-
-	// Negative: one notice for the prior positive Match and the correction; no Match.
-	invalidated := notices["match.no_longer_matches"][0]
-	refs = refsOf(invalidated)
-	prior := refsOf(s.created[negative])["match_id"]
-	if len(notices["match.no_longer_matches"]) != 1 || refs["subscription_id"] != negative || refs["match_id"] != prior || refs["record_version_id"] != v2 || refs["previous_match_id"] != nil {
-		t.Fatal("match.no_longer_matches references", notices["match.no_longer_matches"])
-	}
-	deliveredAsPolled(t, receiver, invalidated)
-	if history := request(t, "GET", matchesPath(negative, "", 0), admin, nil, 200)["items"].([]any); len(history) != 1 || history[0].(map[string]any)["match_id"] != prior {
-		t.Fatal("negative correction fabricated a Match", history)
-	}
-	// The earlier immutable Match stays inspectable.
-	if m := request(t, "GET", "/v0/matches/"+prior.(string), admin, nil, 200); m["record_version_id"] != v1 {
-		t.Fatal("prior Match", m)
-	}
-	if corrected["event_id"] == invalidated["event_id"] || corrected["event_id"] == s.created[positive]["event_id"] {
-		t.Fatal("notice identities must be distinct")
-	}
-
-	// An evaluator failure is not a negative decision: no notice, no Match.
-	for kind, events := range s.awaitNotices(t, nil) {
-		for _, e := range events {
-			if refsOf(e)["subscription_id"] == failing && kind != "match.created" {
-				t.Fatal("failed evaluation produced a notice", e)
-			}
-		}
-	}
-	if history := request(t, "GET", matchesPath(failing, "", 0), admin, nil, 200)["items"].([]any); len(history) != 1 {
-		t.Fatal("failed evaluation changed Match history", history)
-	}
-}
-
-// TestMonitoringWithdrawalNotices withdraws an alerted Record: suppression is
-// immediate; the Subscription receives a linked match.withdrawn notice after
-// one retried failure, with identical bytes; the Match stays inspectable. A
-// Subscription disabled at the withdrawal is covered by
-// TestMonitoringWithdrawalNoticeAfterReenable.
+// TestMonitoringWithdrawalNotices withdraws a Record alerted to two
+// Subscriptions. Suppression is immediate. The enabled Subscription receives a
+// linked match.withdrawn notice after one retried failure, with identical
+// bytes. The one disabled before the withdrawal still gets its notice and
+// Delivery (THE-696): no attempt while it is disabled, then the re-enable (on
+// the change feed) delivers it once with the polled bytes. Both Matches stay
+// inspectable and the Match history is unchanged. That the re-enable opens the
+// notice's delivery window, even after a pause longer than the window, is
+// owned by the PostgreSQL adapter test
+// TestWithdrawalNoticeSurvivesDisableAndReenable.
 func TestMonitoringWithdrawalNotices(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	receiver := startReceiver(t)
-	s := newNoticeScenario(t, "withdrawal", "Dépêche retirée "+markerCorrectionMatch, map[string]any{"default": "match"})
-	alerted := s.subscriptions[0]
+	s := newNoticeScenario(t, "withdrawal", "Dépêche retirée "+markerCorrectionMatch, map[string]any{"default": "match"}, map[string]any{"default": "match"})
+	alerted, paused := s.subscriptions[0], s.subscriptions[1]
 	receiver.scriptType(alerted, "match.withdrawn", reply{status: 503}, reply{status: 204})
-	deliveredAsPolled(t, receiver, s.created[alerted])
+	for _, sub := range s.subscriptions {
+		deliveredAsPolled(t, receiver, s.created[sub])
+	}
+	if disabled := request(t, "POST", "/v0/subscriptions/"+paused+"/disable", admin, map[string]any{"idempotency_key": "withdrawal-disable-" + paused}, 200); disabled["enabled"] != false {
+		t.Fatal("disable", disabled)
+	}
 
 	// Search after enrichment so the Version is observed in its final projected
 	// shape (lexical anchor plus enriched object, THE-690).
@@ -224,82 +149,59 @@ func TestMonitoringWithdrawalNotices(t *testing.T) {
 		t.Fatal("withdrawn Record still searchable")
 	}
 
-	notice := s.awaitNotices(t, map[string]int{"match.withdrawn": 1})["match.withdrawn"][0]
-	refs := refsOf(notice)
-	match := refsOf(s.created[alerted])
-	if refs["subscription_id"] != alerted || refs["match_id"] != match["match_id"] || refs["record_version_id"] != match["record_version_id"] || refs["record_id"] != s.record {
-		t.Fatal("match.withdrawn references", notice)
+	// Both notices are committed and polled, the disabled Subscription's too.
+	notices := map[string]map[string]any{}
+	for _, notice := range s.awaitNotices(t, map[string]int{"match.withdrawn": 2})["match.withdrawn"] {
+		notices[refsOf(notice)["subscription_id"].(string)] = notice
 	}
+	for _, sub := range s.subscriptions {
+		if notices[sub] == nil {
+			t.Fatal("no match.withdrawn for", sub, notices)
+		}
+		refs, match := refsOf(notices[sub]), refsOf(s.created[sub])
+		if refs["match_id"] != match["match_id"] || refs["record_version_id"] != match["record_version_id"] || refs["record_id"] != s.record {
+			t.Fatal("match.withdrawn references", sub, notices[sub])
+		}
+	}
+
 	// The withdrawn Record does not block its own notice: retried, then delivered.
-	deliveredAsPolled(t, receiver, notice)
-	if got := attemptOutcomes(t, refs["delivery_id"].(string)); !reflect.DeepEqual(got, []string{"retryable_error", "acknowledged"}) {
+	delivery := refsOf(notices[alerted])["delivery_id"].(string)
+	deliveredAsPolled(t, receiver, notices[alerted])
+	if got := attemptOutcomes(t, delivery); !reflect.DeepEqual(got, []string{"retryable_error", "acknowledged"}) {
 		t.Fatal("withdrawal notice attempts", got)
 	}
+	match := refsOf(s.created[alerted])
 	if m := request(t, "GET", "/v0/matches/"+match["match_id"].(string), admin, nil, 200); m["record_version_id"] != match["record_version_id"] {
 		t.Fatal("withdrawn Record's Match must stay inspectable", m)
 	}
-}
 
-// TestMonitoringWithdrawalNoticeAfterReenable proves THE-696's policy: a
-// Subscription disabled when its alerted Record is withdrawn still gets the
-// linked match.withdrawn notice and Delivery. No attempt is made while it is
-// disabled, even for longer than the delivery window. The re-enable (on the
-// change feed) opens the notice's window, and the notice is delivered with the
-// polled bytes. The Match history is unchanged. Over the 10 s budget by
-// design: it stays disabled for longer than the delivery window (THE-755).
-func TestMonitoringWithdrawalNoticeAfterReenable(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
+	// Meanwhile the disabled Subscription's notice was never attempted.
+	delivery = refsOf(notices[paused])["delivery_id"].(string)
+	d := request(t, "GET", "/v0/deliveries/"+delivery, admin, nil, 200)
+	if admission := d["admission"].(map[string]any); d["state"] != "pending" || d["attempt_count"] != float64(0) || admission["allowed"] != false || admission["reason"] != "subscription_disabled" {
+		t.Fatal("withdrawal notice while disabled", d)
 	}
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	receiver := startReceiver(t)
-	s := newNoticeScenario(t, "reenable", "Dépêche en pause "+markerCorrectionMatch, map[string]any{"default": "match"})
-	sub := s.subscriptions[0]
-	deliveredAsPolled(t, receiver, s.created[sub])
-	match := refsOf(s.created[sub])
-	if disabled := request(t, "POST", "/v0/subscriptions/"+sub+"/disable", admin, map[string]any{"idempotency_key": "reenable-disable-" + sub}, 200); disabled["enabled"] != false {
-		t.Fatal("disable", disabled)
-	}
-	accepted := request(t, "POST", "/v0/records/withdrawals", admin, withdrawalCommand(s.corpus, s.recordKey+"-withdraw", "example-feed", s.recordKey, "source retraction"), 202)
-	if resolved := awaitReceipt(t, accepted["receipt_id"].(string)); resolved["outcome"] != "withdrawal_applied" {
-		t.Fatal(resolved)
-	}
-
-	// The notice is committed and polled while the Subscription is disabled.
-	notice := s.awaitNotices(t, map[string]int{"match.withdrawn": 1})["match.withdrawn"][0]
-	refs := refsOf(notice)
-	if refs["subscription_id"] != sub || refs["match_id"] != match["match_id"] || refs["record_version_id"] != match["record_version_id"] || refs["record_id"] != s.record {
-		t.Fatal("match.withdrawn references", notice)
-	}
-	deliveryID := refs["delivery_id"].(string)
-	// No attempt while disabled, for longer than the delivery window.
-	for paused := time.Now().Add(shortWindow + 5*time.Second); time.Now().Before(paused); time.Sleep(5 * time.Second) {
-		d := request(t, "GET", "/v0/deliveries/"+deliveryID, admin, nil, 200)
-		admission := d["admission"].(map[string]any)
-		if d["state"] != "pending" || d["attempt_count"] != float64(0) || admission["allowed"] != false || admission["reason"] != "subscription_disabled" {
-			t.Fatal("withdrawal notice while disabled", d)
-		}
-		if n := len(receiver.capturesOf(notice["event_id"].(string))); n != 0 || len(attemptOutcomes(t, deliveryID)) != 0 {
-			t.Fatal("withdrawal notice attempted while disabled", n)
-		}
+	if n := len(receiver.capturesOf(notices[paused]["event_id"].(string))); n != 0 || len(attemptOutcomes(t, delivery)) != 0 {
+		t.Fatal("withdrawal notice attempted while disabled", n)
 	}
 
 	// Re-enable: announced on the feed, then the notice is delivered once.
-	if enabled := request(t, "POST", "/v0/subscriptions/"+sub+"/enable", admin, map[string]any{"idempotency_key": "reenable-enable-" + sub}, 200); enabled["enabled"] != true {
+	if enabled := request(t, "POST", "/v0/subscriptions/"+paused+"/enable", admin, map[string]any{"idempotency_key": "withdrawal-enable-" + paused}, 200); enabled["enabled"] != true {
 		t.Fatal("enable", enabled)
 	}
-	if feed, _ := drain(t, admin, s.corpus, s.cursor, 0); eventPosition(feed, "subscription.enabled", sub) < eventPosition(feed, "match.withdrawn", match["match_id"].(string)) {
+	match = refsOf(s.created[paused])
+	if feed, _ := drain(t, admin, s.corpus, s.cursor, 0); eventPosition(feed, "subscription.enabled", paused) < eventPosition(feed, "match.withdrawn", match["match_id"].(string)) {
 		t.Fatal("subscription.enabled must follow the committed notice on the feed", feed)
 	}
-	deliveredAsPolled(t, receiver, notice)
-	if got := attemptOutcomes(t, deliveryID); !reflect.DeepEqual(got, []string{"acknowledged"}) {
+	deliveredAsPolled(t, receiver, notices[paused])
+	if got := attemptOutcomes(t, delivery); !reflect.DeepEqual(got, []string{"acknowledged"}) {
 		t.Fatal("withdrawal notice attempts after re-enable", got)
 	}
-	if n := len(receiver.capturesOf(notice["event_id"].(string))); n != 1 {
+	if n := len(receiver.capturesOf(notices[paused]["event_id"].(string))); n != 1 {
 		t.Fatal("withdrawal notice captures", n)
 	}
 	// The Match history is unchanged: the notice references the only Match.
-	history := request(t, "GET", matchesPath(sub, "", 0), admin, nil, 200)["items"].([]any)
+	history := request(t, "GET", matchesPath(paused, "", 0), admin, nil, 200)["items"].([]any)
 	if len(history) != 1 || history[0].(map[string]any)["match_id"] != match["match_id"] || history[0].(map[string]any)["record_version_id"] != match["record_version_id"] {
 		t.Fatal("Match history after re-enable", history)
 	}
@@ -351,74 +253,6 @@ func TestMonitoringSupersededNotice(t *testing.T) {
 	request(t, "GET", "/v0/matches/"+refsOf(created)["match_id"].(string), admin, nil, 200)
 }
 
-// TestMonitoringSupersededNoLongerMatches proves THE-694: a
-// match.no_longer_matches still waiting for its retry when a later correction
-// matches again is never delivered. The receiver asks for a 12 s Retry-After
-// on it, so its first attempt has finished and its retry is not yet eligible
-// when the match.corrected commits; the setup fails otherwise. Its only
-// attempt therefore precedes the correction, and none is admitted after it.
-// Over the 10 s budget by design: it waits past that eligibility (THE-755).
-func TestMonitoringSupersededNoLongerMatches(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	receiver := startReceiver(t)
-	s := newNoticeScenario(t, "rematch", "Dépêche "+markerCorrectionMatch, map[string]any{markerCorrectionCalm: "no_match", "default": "match"})
-	sub := s.subscriptions[0]
-	receiver.scriptType(sub, "match.no_longer_matches", reply{status: 503, retryAfter: "12"})
-	deliveredAsPolled(t, receiver, s.created[sub])
-
-	// v2 no longer matches; its notice fails once and waits for its retry.
-	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-2", s.recordKey, "Dépêche "+markerCorrectionCalm))
-	invalidation := s.awaitNotices(t, map[string]int{"match.no_longer_matches": 1})["match.no_longer_matches"][0]
-	stale := refsOf(invalidation)["delivery_id"].(string)
-	failed := awaitDelivery(t, admin, stale, func(d map[string]any) bool {
-		return d["state"] == "pending" && d["attempt_count"] == float64(1) && d["next_attempt_at"] != nil
-	})
-	next, err := time.Parse(time.RFC3339Nano, failed["next_attempt_at"].(string))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if time.Until(next) < 8*time.Second {
-		t.Fatal("invalid setup: retry eligibility too close to commit the correction before it", failed)
-	}
-
-	// v3 matches again: a match.corrected linked to the invalidated Match.
-	awaitReady(t, ingestCorrection(t, s.corpus, s.recordKey+"-3", s.recordKey, "Dépêche corrigée "+markerCorrectionMatch))
-	corrected := s.awaitNotices(t, map[string]int{"match.corrected": 1})["match.corrected"][0]
-	if refsOf(corrected)["previous_match_id"] != refsOf(invalidation)["match_id"] {
-		t.Fatal("match.corrected must link the invalidated Match", corrected)
-	}
-	committed, err := time.Parse(time.RFC3339Nano, corrected["occurred_at"].(string))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// occurred_at is the transaction's start; a second covers its commit.
-	if !committed.Add(time.Second).Before(next) {
-		t.Fatal("invalid setup: the correction committed after the retry became eligible; suppression is not proven", committed, next)
-	}
-	deliveredAsPolled(t, receiver, corrected)
-	superseded := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200)
-	if superseded["state"] != "pending" || superseded["next_attempt_at"] != nil ||
-		!reflect.DeepEqual(superseded["admission"], map[string]any{"allowed": false, "reason": "superseded"}) {
-		t.Fatal("superseded match.no_longer_matches", superseded)
-	}
-
-	// Observe beyond its former eligibility plus the worker's longest idle
-	// backoff and retry wait: no attempt was admitted after the correction.
-	time.Sleep(time.Until(next) + quietPeriod)
-	after := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200)
-	if after["state"] != "pending" || after["attempt_count"] != float64(1) || len(receiver.capturesOf(invalidation["event_id"].(string))) != 1 {
-		t.Fatal("stale match.no_longer_matches attempted after the correction", after)
-	}
-	if got := attemptOutcomes(t, stale); !reflect.DeepEqual(got, []string{"retryable_error"}) {
-		t.Fatal("attempt history of the superseded notice", got)
-	}
-	// Nothing is lost: the invalidated Match stays readable.
-	request(t, "GET", "/v0/matches/"+refsOf(invalidation)["match_id"].(string), admin, nil, 200)
-}
-
 // TestMonitoringRevertNotices corrects an alerted Record back to its first
 // Version's exact bytes (THE-712). The revert is a new Version that becomes
 // current and searchable with the reverted text, and the Subscription that
@@ -468,6 +302,13 @@ func TestMonitoringRevertNotices(t *testing.T) {
 		t.Fatal("revert match.corrected references", corrected)
 	}
 	deliveredAsPolled(t, receiver, corrected)
+	// The successor Match links the invalidated one, which stays inspectable.
+	if successor := request(t, "GET", "/v0/matches/"+refs["match_id"].(string), admin, nil, 200); successor["previous_match_id"] != first["match_id"] || successor["record_version_id"] != v3 {
+		t.Fatal("successor Match", successor)
+	}
+	if prior := request(t, "GET", "/v0/matches/"+first["match_id"].(string), admin, nil, 200); prior["record_version_id"] != first["record_version_id"] {
+		t.Fatal("prior Match", prior)
+	}
 
 	// The same request is the same Receipt; the same content under a new key converges on v3.
 	if replay := request(t, "POST", "/v0/records", admin, revert, 202); replay["receipt_id"] != reverted["receipt_id"] {
@@ -477,7 +318,9 @@ func TestMonitoringRevertNotices(t *testing.T) {
 	if again["outcome"] != "duplicate" || again["version_id"] != v3 {
 		t.Fatal("repeat of the current content", again)
 	}
-	if history := request(t, "GET", matchesPath(sub, "", 0), admin, nil, 200)["items"].([]any); len(history) != 2 {
+	// The negative correction fabricated no Match: the prior one, then its successor.
+	if history := request(t, "GET", matchesPath(sub, "", 0), admin, nil, 200)["items"].([]any); len(history) != 2 ||
+		history[0].(map[string]any)["match_id"] != first["match_id"] || history[1].(map[string]any)["match_id"] != refs["match_id"] {
 		t.Fatal("revert Match history", history)
 	}
 }

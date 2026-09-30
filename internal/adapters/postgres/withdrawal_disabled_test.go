@@ -42,7 +42,9 @@ func TestWithdrawalNoticeSurvivesDisableAndReenable(t *testing.T) {
 		t.Fatal("fan-out did not settle")
 	}
 	// admitAll claims every due delivery of the Organization once and returns
-	// the admission refusal by Delivery ("" when an attempt was admitted).
+	// the admission refusal by Delivery ("" when an attempt was admitted),
+	// keeping each admitted attempt in attempts.
+	attempts := map[string]monitoring.AdmittedAttempt{}
 	admitAll := func() map[string]string {
 		t.Helper()
 		out := map[string]string{}
@@ -54,9 +56,11 @@ func TestWithdrawalNoticeSurvivesDisableAndReenable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, out[w.DeliveryID], err = ds.Admit(ctx, w, time.Hour, configured); err != nil {
+			var a monitoring.AdmittedAttempt
+			if a, out[w.DeliveryID], err = ds.Admit(ctx, w, time.Hour, configured); err != nil {
 				t.Fatal(err)
 			}
+			attempts[w.DeliveryID] = a
 		}
 	}
 	withdrawals := func() []monitoring.Intent {
@@ -189,6 +193,14 @@ func TestWithdrawalNoticeSurvivesDisableAndReenable(t *testing.T) {
 	}
 	if withdrawn, _ = f.noticeOf(f.matchOf(sub, v1), monitoring.NoticeWithdrawn); withdrawn.State != "delivering" || withdrawn.AttemptCount != 1 {
 		t.Fatalf("withdrawal notice after re-enable: %s, %d attempts", withdrawn.State, withdrawn.AttemptCount)
+	}
+	// Its window is one window from the re-enable: a failed attempt's retry is
+	// capped there, not left open-ended.
+	if err = ds.Record(ctx, attempts[withdrawn.ID], monitoring.AttemptOutcome{Outcome: monitoring.AttemptRetryableError, HTTPStatus: 503}, monitoring.Retry{Delay: 2 * time.Hour, Window: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn, _ = f.noticeOf(f.matchOf(sub, v1), monitoring.NoticeWithdrawn); withdrawn.State != "pending" || withdrawn.NextAttemptAt == nil || withdrawn.NextAttemptAt.After(time.Now().Add(90*time.Minute)) {
+		t.Fatalf("retry of the re-enabled withdrawal notice: %s, next %v", withdrawn.State, withdrawn.NextAttemptAt)
 	}
 
 	// Later disable/enable cycles, retries and a repeated withdrawal commit no second notice.
