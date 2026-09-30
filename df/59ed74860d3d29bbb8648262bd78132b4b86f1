@@ -1,0 +1,69 @@
+internal/app/run.go
+  s_54b80c92daa9cb::t_7e49e2526c8c08 13,112-117,235-238,446-449,512-513,593
+internal/backfill/run_test.go
+  s_54b80c92daa9cb::t_241b680a5c8264 34,36
+  s_54b80c92daa9cb::t_9e4f65191cb2bb 1-33,35,37-195
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_7ffd4f89b45a8f 1123,1126
+  s_54b80c92daa9cb::t_8a28e139b01cda 75-95,383,398-399,1114-1122,1124-1125,1127-1165,1709,1711-1718,1731-1745,2482-2503,2680-2682,2689-2691,2719-2721,2725-2727,2978-2980,3011-3013,3104-3106,3110-3112,3204-3217,3457-3482,4457-4482,4509-4534,5362-5363,5400-5401,5418-5478,5877-5916,7139-7178,7219-7258,8325-8327,8358-8360,8451-8453,8457-8459,8581-8611,8878-8910,9749-9781,9815-9846
+  s_54b80c92daa9cb::t_26f79127f602b5 9847
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_230d2e2d9593e3 675-677,679-746,1963-1979,1981-2058,3104,3132-3133,3142-3146,3153,3585-3657,3659-3669,3672-3673,3675-3757
+  s_54b80c92daa9cb::t_efc2201317d6d8 3670,3674
+  s_54b80c92daa9cb::t_8a28e139b01cda 678,1980
+  s_54b80c92daa9cb::t_3e16126548a46d 3658,3671
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_1db7385587fbf4 18
+internal/orchestration/temporal/rebuild.go
+  s_54b80c92daa9cb::t_f251b726613060 101-105
+internal/processing/fill_test.go
+  s_54b80c92daa9cb::t_2050c84c917602 1-101
+internal/backfill/backfill_test.go
+  s_54b80c92daa9cb::t_2200882eeb9b46 1-160
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_f251b726613060 319-320
+internal/transport/httpapi/backfills.go
+  s_54b80c92daa9cb::t_eead7cc03c83a5 1-92,94-118,120-163
+  s_54b80c92daa9cb::t_4f6869cc023598 93,119
+internal/transport/httpapi/operations_test.go
+  s_54b80c92daa9cb::t_24407aed0fb737 52-61
+  s_54b80c92daa9cb::t_9b765cc54cdc1b 77,86,193,200-206,231-233
+internal/operations/operations.go
+  s_54b80c92daa9cb::t_efc2201317d6d8 140-142
+  s_54b80c92daa9cb::t_f251b726613060 149
+internal/app/backfill.go
+  s_54b80c92daa9cb::t_be9db55347d52c 1-6,8-37,40-146
+  s_54b80c92daa9cb::t_5ad3348abee76f 7,38-39
+internal/transport/httpapi/operations.go
+  s_54b80c92daa9cb::t_643ddd232083c9 35,41,108-110,127-128,130-134
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_f251b726613060 10,123-125,134-138,201-212,218-220,224,259-261
+client/client.gen.go
+  s_54b80c92daa9cb::t_7ffd4f89b45a8f 1123,1126
+  s_54b80c92daa9cb::t_8a28e139b01cda 75-95,383,398-399,1114-1122,1124-1125,1127-1165,1709,1711-1718,1731-1745,2482-2503,2680-2682,2689-2691,2719-2721,2725-2727,3049-3060,3125-3136,3350-3361,3374-3385,3634-3665,3850-3881,4485-4516,4549-4580,5258-5297,5688-5734,7181-7182,7189,7192-7193,7208,7228-7326,8530-8543,8628-8641,8915-8928,8943-8956,9259-9320,9808-9855,11268-11315,11364-11411,12708-12733,12890-12915,13423-13448,13475-13500,14060-14112,14456-14488,15451-15483,15506-15528,15530-15536,15538
+  s_54b80c92daa9cb::t_8d5c2a6569a3a0 15529,15537
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_7ffd4f89b45a8f 37-38,83-84,363-404,1282-1318,3427,3433,3440,3508,3536-3537,3544,3551,4350-4603,4605
+  s_54b80c92daa9cb::t_1bcb9b984b4969 4604,4606
+internal/orchestration/temporal/backfill.go
+  s_54b80c92daa9cb::t_d43ea9b463fb62 1-75
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_643ddd232083c9 13,82-87,151-159,260,262
+  s_54b80c92daa9cb::t_754e436aebabd3 261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "df59ed74860d3d29bbb8648262bd78132b4b86f1",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
