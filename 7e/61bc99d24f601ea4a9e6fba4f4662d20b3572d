@@ -1,0 +1,71 @@
+internal/transport/httpapi/connectors_test.go
+  s_54b80c92daa9cb::t_58807d699f5339 96-102,334-365
+  s_54b80c92daa9cb::t_f387403c90ed19 366
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_54b80c92daa9cb::t_b7f4cec583b5e9 14,31-32,245-266,411
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_fdd43ae2e3dacc 869-876,1617-1619,1912-1914,2405-2430,3637,4110-4149,5654-5656,6111-6136,6141-6142
+  s_54b80c92daa9cb::t_49a4f9e6e615c1 6137-6140,6143
+client/client.gen.go
+  s_54b80c92daa9cb::t_fdd43ae2e3dacc 869-876,1617-1619,2026-2037,2573-2604,4009-4055,5859-5872,6759-6806,8772-8797,9848-9867,9871-9873,9876,9879
+  s_54b80c92daa9cb::t_9639f76f55a9f3 9868-9870,9874-9875,9877-9878,9880
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_f5370db90a52bf 200,202
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_d5a5199f7485a2 380
+  s_54b80c92daa9cb::t_c1f78b2dcf59b3 375-379,381-382
+internal/adapters/postgres/connectors_test.go
+  s_54b80c92daa9cb::t_ca65c387e1565c 321-388
+docs/connectors/README.md
+  s_54b80c92daa9cb::t_fff489a1027685 93-94,99
+  s_54b80c92daa9cb::t_3db0121f2e0c6b 95-98,174
+README.md
+  s_54b80c92daa9cb::t_fff489a1027685 149-150,155
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_4d4890250056e9 163,218-228
+docs/inventory.toml
+  s_54b80c92daa9cb::t_654a5ac3b9e218 117,132
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_170eadc4ece406 109-113,329-355
+  s_54b80c92daa9cb::t_2ff788a0474a7b 356
+migrations/20260930T0443Z_connector_run_requests.sql
+  s_54b80c92daa9cb::t_e4c7ff83c688ce 1-7
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_68b81e9af7450a 1533-1571,2293-2306
+internal/connectors/service_test.go
+  s_54b80c92daa9cb::t_58807d699f5339 55-58
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_170eadc4ece406 312-318,320-329,578-579
+  s_54b80c92daa9cb::t_a0079dea7dbefd 319
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_b7f4cec583b5e9 172
+quivr-search/src/lib/connectors.ts
+  s_54b80c92daa9cb::t_f5370db90a52bf 137-142
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_fff489a1027685 426-431
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_fdd43ae2e3dacc 67,953-973,2966-2988
+  s_54b80c92daa9cb::t_93b06e8f5675f7 2989-2992
+quivr-search/README.md
+  s_54b80c92daa9cb::t_3db0121f2e0c6b 42-43
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_c1f78b2dcf59b3 285-288
+quivr-search/src/components/connectors/SourceList.tsx
+  s_54b80c92daa9cb::t_3d247091b28a99 2,82,92,107,123,133,138-139,150-152,197-209,332-343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7e61bc99d24f601ea4a9e6fba4f4662d20b3572d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
