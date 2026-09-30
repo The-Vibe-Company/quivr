@@ -1,0 +1,31 @@
+client/client.gen.go
+  s_54b80c92daa9cb::t_5da3fd0c266b7b 1564
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_f68df8fd0e6a5b 3916-3919
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_30d16fe4c1c0db 4164-4166
+docs-site/plugins/core-ingest/index.mdx
+  s_54b80c92daa9cb::t_3f897c4f0ecd8f 19
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_adc9bcd6176d1a 5909,5940
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_a79e5a6dc7f8c2 5994,6026
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_1520d97cb42fd2 1564
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2dc0209da030bcf7214c85207ac69e9daa54d166",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
