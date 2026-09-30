@@ -10,7 +10,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 const ProfileVersion = "balanced.e5-token-windows.v1"
@@ -141,9 +140,6 @@ type Projection interface {
 	PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error
 	Search(context.Context, []Route, corpus.Scope, Request) ([]content.Candidate, error)
 }
-type QueryNormalizer interface {
-	NormalizeQuery(context.Context, string) (string, error)
-}
 type QueryEmbedder interface {
 	Embed(context.Context, string) ([]float32, error)
 	Space() content.VectorSpace
@@ -157,12 +153,10 @@ type QueryEncoder interface {
 	EncodeQuery(ctx context.Context, org, space, query string) ([]float32, error)
 }
 type Service struct {
-	// Embedder encodes queries into the built-in space, after QueryNormalizer.
-	Embedder        QueryEmbedder
-	QueryNormalizer QueryNormalizer
-	// QueryTokens is the built-in profile's query token limit, which
-	// QueryNormalizer enforces; it names the limit in ErrQueryTooLong.
-	QueryTokens int
+	// Embedder encodes queries into the legacy E5 space that generations
+	// built before the core.ingest plugin (THE-777) still serve, until their
+	// Corpus is rebuilt.
+	Embedder QueryEmbedder
 	// Spaces encodes queries into plugin-owned spaces; nil when no ingestion
 	// plugin is pinned.
 	Spaces QueryEncoder
@@ -275,17 +269,6 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if err != nil {
 		return out, ErrUnsupported
 	}
-	if builtin {
-		// The text is valid, bounded and not empty, so the built-in
-		// normalizer can refuse it only for its token bound.
-		normalized, err = s.QueryNormalizer.NormalizeQuery(ctx, normalized)
-		if errors.Is(err, content.ErrInvalid) {
-			return out, publicerr.WithDetail(ErrQueryTooLong, "query exceeds %d tokens, the limit of profile %s", s.QueryTokens, q.Profile)
-		}
-		if err != nil {
-			return out, ErrUnavailable
-		}
-	}
 	q.Query = normalized
 	out.ProfileVersion = ProfileVersion
 	if q.Mode != "lexical" {
@@ -335,9 +318,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	return out, nil
 }
 
-// normalizeQuery prepares a query for a plugin-owned space: valid text of at
-// most MaxQueryCodepoints, line breaks as LF, trimmed, not empty. The plugin
-// applies its own template and length limits.
+// normalizeQuery prepares a query: valid text of at most MaxQueryCodepoints,
+// line breaks as LF, trimmed, not empty. The space's owner applies its own
+// template and length limits.
 func normalizeQuery(q string) (string, error) {
 	if !content.ValidText(q) || utf8.RuneCountInString(q) > MaxQueryCodepoints {
 		return "", content.ErrInvalid

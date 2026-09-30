@@ -9,10 +9,11 @@ import (
 )
 
 // DeploymentSpaces are the vector spaces this deployment registers: the
-// enabled spaces of the pinned ingestion plugin with their roles, or the
-// built-in E5 space served when no ingestion plugin is pinned. A registered
-// space the list leaves out is retired: generations built later no longer
-// carry it, while generations that serve it keep serving it until rebuilt.
+// enabled spaces of the pinned ingestion plugin with their roles. Without
+// one (a bare `quivr migrate`), it is the legacy E5 space the engine served
+// itself before the core.ingest plugin (THE-777). A registered space the
+// list leaves out is retired: generations built later no longer carry it,
+// while generations that serve it keep serving it until rebuilt.
 func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
 	if pin := pins.Ingestion(); pin != nil {
 		out := []content.RegisteredSpace{}
@@ -28,8 +29,9 @@ func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
 	return []content.RegisteredSpace{BuiltinSpace()}
 }
 
-// BuiltinSpace is the registry entry of the built-in E5 space, owned by the
-// engine.
+// BuiltinSpace is the registry entry of the legacy E5 space, owned by the
+// engine: generations built before the core.ingest plugin serve it until
+// their Corpus is rebuilt.
 func BuiltinSpace() content.RegisteredSpace {
 	space := tei.Space()
 	var m struct {

@@ -19,7 +19,7 @@ starts with it:
 ```yaml
 id: acme.embedder
 version: 0.1.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.6.0 <0.7.0"}
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.8.0 <0.9.0"}
 contributions:
   ingestion:
     spaces:
@@ -55,7 +55,10 @@ With the [Go SDK](/sdks/go), one type answers both operations:
 - `EmbedQuery` returns the vector of one query in one space.
 
 Both must be deterministic: rebuilds reuse the stored segments and vectors, and
-a different answer for the same Version is refused. Return a retryable error
+a different answer for the same Version is refused. With Plugin API 0.8 a
+request may name no space: Quivr asks for the segments alone when a Version
+arrives, so it is searchable by keyword even while your embedding backend is
+down, then for the vectors. Return the same segments both times. Return a retryable error
 when a backend is down, a terminal one for content you can never handle.
 `sdks/go/examples/hash-embedder` is a complete example with two spaces.
 
@@ -112,5 +115,6 @@ owner and role, and how many segments hold a vector in each.
 | --- | --- |
 | The plugin is down or answers a retryable error | The Version waits and is retried with backoff; search on a plugin space answers 503 |
 | The plugin answers a terminal error, or segments or vectors the checks refuse | The Version is blocked as `ingestion_refused`; a rebuild fails with `ingestion_refused` |
+| The segments with vectors differ from the segments first returned alone | The Version's enrichment is blocked as `derivation_conflict` |
 | `embed_query` answers a terminal error | The search is refused with 422 `unsupported_search` |
 | The plugin is unpinned while Corpora use its spaces | Their new Versions wait, and semantic search on them answers 422, until it is pinned again or they are rebuilt |

@@ -87,7 +87,7 @@ func TestSearchEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 			p := &fakeProjection{}
 			calls := 0
 			encoder := &pluginEncoder{err: c.encodeErr}
-			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, QueryNormalizer: fakeNormalizer{}, Routing: routing, Projection: p, Spaces: encoder,
+			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, Routing: routing, Projection: p, Spaces: encoder,
 				Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}}}
 			if c.noPlugin {
 				s.Spaces = nil

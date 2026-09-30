@@ -9,7 +9,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -42,8 +41,9 @@ import (
 )
 
 type Config struct {
+	// TEIURL encodes queries for generations built before the core.ingest
+	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
 	TEIURL          string                  `json:"tei_url"`
-	Tokenizer       tokenizer.Config        `json:"tokenizer"`
 	WeaviateURL     string                  `json:"weaviate_url"`
 	TemporalAddress string                  `json:"temporal_address"`
 	S3              s3store.Config          `json:"s3"`
@@ -236,6 +236,11 @@ func Run(command string) error {
 	if cfg.ProbeListen == "" {
 		cfg.ProbeListen = "127.0.0.1:8081"
 	}
+	// The engine segments and embeds nothing itself (THE-777): api and worker
+	// need a pinned ingestion plugin, normally the first-party core.ingest.
+	if command != "migrate" && pins.Ingestion() == nil {
+		return errors.New("no ingestion plugin pinned: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -255,22 +260,14 @@ func Run(command string) error {
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	projection.LegacySpace = tei.Space().ID
-	// One long-lived pinned tokenizer per process; a process per call cost ~850 ms per search (THE-675).
-	encoder := &tokenizer.Server{Config: cfg.Tokenizer}
-	defer encoder.Close()
-	windows := processing.TokenWindows{Tokenizer: encoder}
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
-	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents, QueryNormalizer: windows, QueryTokens: processing.Parameters.QueryTokens}
+	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: pins}
-	processor := processing.Service{Content: contents, Processor: windows, Retrieval: search, Embedder: embedding, Enrichment: search, Normalizer: normalizer, Routing: store}
-	// Rebuilds reuse stored vectors; the TEI encoder only names the pinned space and producer.
-	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Artifacts: embedding, Segment: func(ctx context.Context, org string, v content.Version) (content.Segmentation, error) {
-		return windows.Process(ctx, processing.Input{Organization: org, Version: v})
-	}}
-	// A pinned ingestion plugin segments and embeds the Corpora whose routed
-	// generation it serves, encodes their queries and derives rebuild
-	// targets of its spaces; the others keep the built-in path.
+	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
+	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Routing: store}
+	// The pinned ingestion plugin segments and embeds every Version, encodes
+	// the queries of its spaces and derives rebuild targets.
 	if pin := pins.Ingestion(); pin != nil {
 		ingestor := pluginhttp.Ingestor{Pin: pin}
 		deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
@@ -289,7 +286,7 @@ func Run(command string) error {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		// The PostgreSQL part runs first and alone needs no other dependency;
-		// rerunning migrate completes the S3, Weaviate and tokenizer steps.
+		// rerunning migrate completes the S3 and Weaviate steps.
 		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
 			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) {
 				return err
@@ -315,9 +312,6 @@ func Run(command string) error {
 				return errors.New("projection bootstrap deadline exceeded")
 			case <-time.After(200 * time.Millisecond):
 			}
-		}
-		if _, err = encoder.Encode(ctx, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
-			return errors.New("tokenizer preparation required")
 		}
 		slog.Info("migrations complete")
 		return nil
@@ -362,12 +356,6 @@ func Run(command string) error {
 	if err != nil {
 		return fmt.Errorf("vector space registry: %w", err)
 	}
-	// Load the tokenizer before serving so the first search does not pay for it.
-	warm, cancel := context.WithTimeout(ctx, 15*time.Second)
-	if _, err = encoder.Encode(warm, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
-		slog.Warn("tokenizer warm-up failed; it will be retried on use")
-	}
-	cancel()
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	probes.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {

@@ -38,7 +38,8 @@ flowchart LR
     temporal --> worker[Go worker]
     worker -->|canonical bytes, artifacts| s3[(S3-compatible storage)]
     worker -->|segments| weaviate[(Weaviate<br/>lexical + vector)]
-    worker -->|passages| tei[TEI · E5 embeddings]
+    worker -->|text parts| ingest[core.ingest plugin]
+    ingest -->|passages| tei[TEI · E5 embeddings]
     api -->|search, rehydrate, recheck| weaviate
     api -->|changes: polling / SSE| client
 ```
@@ -239,7 +240,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   optional keyword text, and encodes queries for its spaces. A Corpus moves onto it
   with a rebuild; `GET /v0/corpora/{id}/vector-spaces` shows each space's owner, role
   and coverage ([Write an ingestion plugin](docs/plugins/write-an-ingestion-plugin.md)).
-  The built-in E5 path stays the default.
+  The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
+  E5) is pinned by default; the engine segments and embeds nothing itself.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
   pinned plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them

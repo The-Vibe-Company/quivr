@@ -2,16 +2,15 @@ name: Adapter measurements
 # Measurements that report numbers without a pass/fail threshold stay out of the
 # pull-request path (docs/agents/testing.md). They run nightly, on demand, and on
 # pull requests that change what they measure. Only harness or dependency errors
-# fail this job. Today: the per-search tokenizer cost (TestTokenizerQueryCost, THE-675).
+# fail this job. Today: the per-search tokenizer cost in the core.ingest plugin
+# (TestTokenizerQueryCost, THE-675, THE-777).
 on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
   pull_request:
     paths:
-      - internal/adapters/tokenizer/**
-      - internal/processing/profile.json
-      - scripts/token_offsets.py
+      - plugins/core-ingest/**
       - scripts/prepare_tokenizer.py
       - third_party/tokenizer/**
       - .github/workflows/measure-adapters.yml
@@ -36,11 +35,11 @@ jobs:
       - run: |
           mkdir -p .scratch/measure-adapters
           # pip may print to stdout while preparing, so the config is written by Python itself.
-          python3 -c 'import json,sys;sys.path.insert(0,"scripts");from prepare_tokenizer import prepare;json.dump({"tokenizer":prepare()},open(".scratch/measure-adapters/config.json","w"))'
-      - run: set -o pipefail; go test -count=1 -v -run '^TestTokenizerQueryCost$' ./internal/adapters/tokenizer | tee .scratch/measure-adapters/tokenizer-cost.log
+          python3 -c 'import json,sys;sys.path.insert(0,"scripts");from prepare_tokenizer import prepare;json.dump({"tei_url":"","tokenizer":prepare()},open(".scratch/measure-adapters/config.json","w"))'
+      - run: set -o pipefail; cd plugins/core-ingest && go test -count=1 -v -run '^TestTokenizerQueryCost$' . | tee ../../.scratch/measure-adapters/tokenizer-cost.log
         env:
           QUIVR_MEASURE: '1'
-          QUIVR_ADAPTER_CONFIG: ${{ github.workspace }}/.scratch/measure-adapters/config.json
+          QUIVR_CORE_INGEST_CONFIG: ${{ github.workspace }}/.scratch/measure-adapters/config.json
       - if: always()
         run: |
-          { echo '## Tokenizer query cost'; echo '```'; grep 'THE-675' .scratch/measure-adapters/tokenizer-cost.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '## Tokenizer query cost'; echo '```'; grep 'THE-777' .scratch/measure-adapters/tokenizer-cost.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

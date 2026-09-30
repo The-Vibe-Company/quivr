@@ -1,4 +1,4 @@
-package tokenizer
+package main
 
 import (
 	"bufio"
@@ -11,14 +11,13 @@ import (
 	"os/exec"
 	"sync"
 	"time"
-
-	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 )
 
-// serverSource encodes exactly like scripts/token_offsets.py but loads the pinned
-// tokenizer once. It is pinned by the build; parity tests hold it to the reference.
+// serverSource is the pinned Hugging Face tokenizer helper: it checks the
+// tokenizers version and the tokenizer.json digest, loads it once and answers
+// one JSON request per line. Parity with the engine is held by parity_test.go.
 //
-//go:embed server.py
+//go:embed tokenizer.py
 var serverSource string
 
 var errUnavailable = errors.New("tokenizer unavailable")
@@ -33,7 +32,7 @@ const (
 // was started per call. A failed or timed-out process is replaced on the next call.
 // Use a pointer; the zero value with a Config is ready to use.
 type Server struct {
-	Config Config
+	Config TokenizerConfig
 
 	// Overridable by tests.
 	source      string
@@ -54,7 +53,7 @@ type serverProcess struct {
 }
 
 type exchangeResult struct {
-	encodings []processing.Encoding
+	encodings []Encoding
 	err       error
 }
 
@@ -73,13 +72,9 @@ func (s *Server) init() {
 	})
 }
 
-func (s *Server) Encode(ctx context.Context, input []processing.TokenInput) ([]processing.Encoding, error) {
+func (s *Server) Encode(ctx context.Context, input []TokenInput) ([]Encoding, error) {
 	b, err := request(input)
 	if err != nil {
-		return nil, err
-	}
-	// Keep failing closed when the configuration does not name the pinned reference.
-	if _, err = pinnedScript(s.Config); err != nil {
 		return nil, err
 	}
 	s.init()
@@ -105,7 +100,7 @@ func (s *Server) Encode(ctx context.Context, input []processing.TokenInput) ([]p
 }
 
 // exchange runs while holding the slot.
-func (s *Server) exchange(b []byte, items int) ([]processing.Encoding, error) {
+func (s *Server) exchange(b []byte, items int) ([]Encoding, error) {
 	if s.closed {
 		return nil, errUnavailable
 	}
@@ -126,7 +121,7 @@ func (s *Server) exchange(b []byte, items int) ([]processing.Encoding, error) {
 	if bytes.Equal(line, []byte("null")) {
 		return nil, errUnavailable
 	}
-	var encodings []processing.Encoding
+	var encodings []Encoding
 	if err = json.Unmarshal(line, &encodings); err != nil || len(encodings) != items {
 		s.stop()
 		return nil, errors.New("invalid tokenizer response")
@@ -211,4 +206,33 @@ func (s *Server) Close() {
 	defer func() { <-s.slot }()
 	s.closed = true
 	s.stop()
+}
+
+// TokenizerConfig names the Python interpreter that has the pinned tokenizers
+// package and the pinned tokenizer.json (scripts/prepare_tokenizer.py).
+type TokenizerConfig struct {
+	Python string `json:"python"`
+	Model  string `json:"model"`
+}
+
+// request applies the batch limits of the recipe.
+func request(input []TokenInput) ([]byte, error) {
+	if len(input) > 512 {
+		return nil, ErrUnsupported
+	}
+	b, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > Parameters.MaxSerializedBatchBytes {
+		return nil, ErrUnsupported
+	}
+	rawBytes := 0
+	for _, item := range input {
+		rawBytes += len(item.Text)
+	}
+	if rawBytes > Parameters.MaxModelBatchBytes {
+		return nil, ErrUnsupported
+	}
+	return b, nil
 }

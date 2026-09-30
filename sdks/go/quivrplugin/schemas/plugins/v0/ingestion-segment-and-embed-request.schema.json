@@ -97,13 +97,13 @@
     },
     "spaces": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 8,
       "uniqueItems": true,
       "items": {
         "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
       },
-      "description": "The declared spaces this deployment enables. Every segment carries exactly one vector for each of them."
+      "description": "The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same."
     }
   }
 }

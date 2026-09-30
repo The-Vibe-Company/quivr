@@ -64,6 +64,15 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 which the web app never gets. Use it from inside the deployment (`railway ssh --service api`,
 port 8080) to rebuild a Corpus projection or to read the plugin registry (`GET /v0/admin/plugins`).
 
+## Ingestion plugin and the rebuild after THE-777 {#ingestion-plugin-and-the-rebuild-after-the-777}
+
+api and worker run the core.ingest plugin (`127.0.0.1:9950`, `CONNECTORS` in
+`core-entrypoint.py`), which segments and embeds with TEI. After the first deploy with it,
+rebuild each Corpus once with the operator key: `POST /v0/corpora/{corpus_id}/rebuilds`
+with an `idempotency_key`, then poll the Operation. Until then search keeps working in
+every mode and new articles are searchable by keyword at once; their vectors attach at the
+rebuild, which re-embeds with the same model, so results do not change.
+
 ## Connectors in the web app (optional) {#connectors-in-the-web-app-optional}
 
 The web app has a **Sources** view (THE-679, THE-732). By default the demo key cannot use

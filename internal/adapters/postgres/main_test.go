@@ -15,8 +15,9 @@ import (
 
 // TestMain prepares the database named by QUIVR_ADAPTER_CONFIG with the
 // PostgreSQL part of `quivr migrate`, so the suite runs on a bare database
-// (make adapter-postgres). Inside make verify the database is already
-// migrated and this rerun changes nothing.
+// (make adapter-postgres). Inside make verify the stack's `quivr migrate`
+// already prepared it and registered the pinned plugin's vector spaces, which
+// this leaves as they are.
 func TestMain(m *testing.M) {
 	// Lets this test binary serve as the controllable fake plugin process
 	// (normalization_failures_test.go); that process never touches the database.
@@ -53,5 +54,9 @@ func bootstrap(path string) error {
 		return err
 	}
 	defer pool.Close()
+	var served int
+	if pool.QueryRow(ctx, `SELECT count(*) FROM vector_spaces WHERE role='served'`).Scan(&served) == nil && served > 0 {
+		return nil
+	}
 	return app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil))
 }

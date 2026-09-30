@@ -184,6 +184,19 @@ func (r *IngestionRun) WithInvocation(suffix string) []byte {
 	return body
 }
 
+// SegmentsOnlyRequest is the segment_and_embed request with no space (Plugin
+// API 0.8), under its own invocation id and idempotency key: the segments
+// alone, which must be the ones the full request returns.
+func (r *IngestionRun) SegmentsOnlyRequest() []byte {
+	var request map[string]any
+	_ = json.Unmarshal(r.Request, &request)
+	request["invocation_id"] = "dev-invocation-" + r.short + "-segments"
+	request["idempotency_key"] = "dev:" + r.digest + ":segments"
+	request["spaces"] = []string{}
+	body, _ := json.Marshal(request)
+	return body
+}
+
 // QueryRequest is the development embed_query request of one query in one
 // space; suffix makes the invocation id unique.
 func (r *IngestionRun) QueryRequest(space, text, suffix string) []byte {

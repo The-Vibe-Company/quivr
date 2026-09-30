@@ -1,0 +1,1376 @@
+{
+ "note": "Inputs of the core.ingest parity fixtures (THE-777). A part or query is a text, or a repeat list of [text, count] pairs concatenated.",
+ "documents": [
+  {
+   "id": "relevance-fr-flood",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Crue de la Somme à Amiens"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-museum",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Le musée de Lyon prolonge son exposition Monet"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-port",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Grève de vingt-quatre heures au port de Marseille"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-solar",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Nantes équipe dix-huit écoles de panneaux solaires"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-fishing",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "La Bretagne réduit le quota de sardines"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-vaccine",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Essai vaccinal respiratoire lancé à Lille"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-satellite",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Un satellite toulousain surveillera le méthane"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-avalanche",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Risque d'avalanche relevé en Savoie"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-election",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Participation municipale en hausse à Rouen"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-maritime",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Le musée maritime de Bordeaux rouvre"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-wind",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Feu vert pour soixante-deux éoliennes en Normandie"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois."
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-train",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Signalisation remplacée près de Dijon"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-flood",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "River Ouse flooding closes York footbridges"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-museum",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Bristol sculpture show adds late openings"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-port",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Liverpool dock workers call a 48-hour strike"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-solar",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Leeds installs solar panels on twelve schools"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-fishing",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Cornwall sets a lower mackerel catch limit"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-vaccine",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Oxford begins a dengue vaccine trial"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-satellite",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Glasgow satellite tracks wildfire smoke"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-avalanche",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Cairngorm avalanche warning raised"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-election",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Norwich council election turnout reaches 64 percent"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-museum2",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Manchester industry museum reopens"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-wind",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "North Sea project wins consent for eighty turbines"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter."
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-train",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Birmingham signalling upgrade halts Sunday trains"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning."
+    }
+   ]
+  },
+  {
+   "id": "long-text",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Première ligne conservée comme corps.\n\n",
+       1
+      ],
+      [
+       "La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\n",
+       80
+      ],
+      [
+       "La constellation finale clôt ce texte.\n",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "exact-384",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Paris ",
+       383
+      ],
+      [
+       "Paris",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "overlap-385",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Paris ",
+       384
+      ],
+      [
+       "Paris",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "paragraph-unicode",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Paris ",
+       299
+      ],
+      [
+       "Paris\n\n",
+       1
+      ],
+      [
+       "Paris ",
+       199
+      ],
+      [
+       "Paris 🌞 é\r\n",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "title-cap-hard-cuts",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "x",
+       5000
+      ]
+     ]
+    },
+    {
+     "key": "title",
+     "role": "title",
+     "repeat": [
+      [
+       " \n",
+       1
+      ],
+      [
+       "Paris ",
+       64
+      ],
+      [
+       "Paris\n ",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "title-only",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "text": ""
+    },
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Titre 🌞"
+    }
+   ]
+  },
+  {
+   "id": "title-shared-offsets",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Body"
+    },
+    {
+     "key": "title",
+     "role": "title",
+     "repeat": [
+      [
+       "Paris ",
+       63
+      ],
+      [
+       "星 fin",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "refuse-assembled-title-batch",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Paris ",
+       19999
+      ],
+      [
+       "Paris",
+       1
+      ]
+     ]
+    },
+    {
+     "key": "title",
+     "role": "title",
+     "repeat": [
+      [
+       "Paris",
+       1
+      ],
+      [
+       " ",
+       100000
+      ],
+      [
+       "Paris",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "refuse-source-bytes",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "x",
+       262145
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "refuse-whitespace-excerpt",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       " ",
+       4097
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "refuse-nul",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "text": "invalid\u0000source"
+    }
+   ]
+  },
+  {
+   "id": "refuse-two-titles",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Un"
+    },
+    {
+     "key": "title2",
+     "role": "title",
+     "text": "Deux"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Corps."
+    }
+   ]
+  },
+  {
+   "id": "preserved-parts",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "text": "Corps du manifeste."
+    },
+    {
+     "key": "caption",
+     "role": "caption",
+     "text": "légende non indexée"
+    }
+   ]
+  },
+  {
+   "id": "refuse-no-text",
+   "parts": [
+    {
+     "key": "caption",
+     "role": "caption",
+     "text": "légende seule"
+    }
+   ]
+  },
+  {
+   "id": "two-bodies",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Deux corps"
+    },
+    {
+     "key": "lead",
+     "role": "body",
+     "text": "Le chapeau du texte."
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Les marins attendent la marée. ",
+       200
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "separators-and-spaces",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": " Titre espacé\t"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "Ligne\u001cun deux trois.\r\r",
+       60
+      ],
+      [
+       "« Citation finale. » ",
+       80
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "news-paragraphs",
+   "parts": [
+    {
+     "key": "title",
+     "role": "title",
+     "text": "Crue de la Somme à Amiens"
+    },
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ],
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ],
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ],
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ],
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ],
+      [
+       "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » ",
+       1
+      ],
+      [
+       "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » ",
+       1
+      ],
+      [
+       "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » ",
+       1
+      ],
+      [
+       "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » ",
+       1
+      ],
+      [
+       "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » ",
+       1
+      ],
+      [
+       "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » ",
+       1
+      ],
+      [
+       "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » ",
+       1
+      ],
+      [
+       "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » ",
+       1
+      ],
+      [
+       "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » ",
+       1
+      ],
+      [
+       "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » ",
+       1
+      ],
+      [
+       "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » ",
+       1
+      ],
+      [
+       "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » ",
+       1
+      ],
+      [
+       "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » ",
+       1
+      ],
+      [
+       "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » ",
+       1
+      ],
+      [
+       "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » ",
+       1
+      ],
+      [
+       "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » ",
+       1
+      ],
+      [
+       "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » ",
+       1
+      ],
+      [
+       "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » ",
+       1
+      ],
+      [
+       "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » ",
+       1
+      ],
+      [
+       "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » ",
+       1
+      ],
+      [
+       "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » ",
+       1
+      ],
+      [
+       "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » ",
+       1
+      ],
+      [
+       "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » ",
+       1
+      ],
+      [
+       "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » ",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "long-word-hard-end",
+   "parts": [
+    {
+     "key": "body",
+     "role": "body",
+     "repeat": [
+      [
+       "a",
+       3000
+      ],
+      [
+       " ",
+       1
+      ],
+      [
+       "b",
+       3000
+      ]
+     ]
+    }
+   ]
+  }
+ ],
+ "queries": [
+  "Quelles routes sont fermées après la crue à Amiens ?",
+  "Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ?",
+  "Les ferries corses sont-ils touchés par la grève du port de Marseille ?",
+  "Quelle production solaire annuelle Nantes attend-elle de ses écoles ?",
+  "De combien baisse le quota breton de sardines ?",
+  "Combien de volontaires participent à l'essai vaccinal de Lille ?",
+  "How often will the Toulouse satellite map industrial methane emissions?",
+  "At what altitude does the avalanche warning in Savoie apply?",
+  "What was voter turnout in Rouen at 5 p.m.?",
+  "How many restored objects are shown when Bordeaux's maritime museum reopens?",
+  "How many homes should the Normandy offshore wind farm supply?",
+  "When will buses replace trains between Dijon and Dole?",
+  "How many York footbridges closed because of the River Ouse flood?",
+  "On how many October Fridays will Bristol's sculpture show open late?",
+  "Will Belfast passenger sailings run during the Liverpool port strike?",
+  "How much electricity should the Leeds school roofs generate annually?",
+  "By what percentage does Cornwall's mackerel quota fall?",
+  "How many adults will join Oxford's dengue vaccine trial?",
+  "À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ?",
+  "Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ?",
+  "Quel est le taux de participation à Norwich à 18 heures ?",
+  "Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ?",
+  "Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ?",
+  "Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ?",
+  {
+   "repeat": [
+    [
+     " \r\n",
+     1
+    ],
+    [
+     "Paris ",
+     255
+    ],
+    [
+     "Paris\r ",
+     1
+    ]
+   ]
+  },
+  {
+   "repeat": [
+    [
+     "Paris ",
+     256
+    ],
+    [
+     "Paris",
+     1
+    ]
+   ]
+  },
+  "ferries\r\nCorse",
+  "Paris 🌞 étoiles",
+  "   ",
+  {
+   "repeat": [
+    [
+     "é",
+     8193
+    ]
+   ]
+  }
+ ]
+}

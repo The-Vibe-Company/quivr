@@ -14,9 +14,10 @@ tests/acceptance/collector_plugin_test.go talk to the public API only:
 
 Afterwards the process logs are scanned for the sample's test token.
 
-First-party Go connector plugins (``FIRST_PARTY``) are different: every stack
+First-party Go plugins (``FIRST_PARTY``) are different: every stack
 (`make dev`, `make verify`, the browser demo) pins them by default, because
-their kinds are real sources. Each row names a module under plugins/<id>,
+their kinds are real sources, and because the engine segments and embeds
+nothing itself: core.ingest is its ingestion plugin (THE-777). Each row names a module under plugins/<id>,
 built with ``go build`` into the stack directory whenever the stack starts
 (the Go build cache makes it quick) and run on its own allocated port.
 ``QUIVR_<ID>=off make dev`` (the id in upper case, ``-`` as ``_``, for example
@@ -27,6 +28,7 @@ them. The Railway image pins the same plugins (deploy/railway/core-entrypoint.py
 import json, os, pathlib, signal, subprocess, time, urllib.request
 
 import ports
+from prepare_tokenizer import prepare as prepare_tokenizer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / 'sdks' / 'go' / 'examples' / 'static-source'
@@ -48,6 +50,9 @@ FIRST_PARTY = [
     # Microsoft 365 mail, pinned to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
     {'id': 'm365-mail', 'configuration': lambda stack: {'login_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}",
                                                          'graph_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}/v1.0"}},
+    # Token windows and E5 embeddings through the stack's TEI and the pinned tokenizer. The api and
+    # the worker refuse to start without an ingestion plugin; scripts/ingestion_plugin.py swaps it.
+    {'id': 'core-ingest', 'configuration': lambda stack: {'tei_url': stack.state['tei_url'], 'tokenizer': prepare_tokenizer()}},
 ]
 
 
@@ -92,7 +97,7 @@ def first_party_manifest(row):
 
 
 def first_party_pins(stack):
-    """The `plugins` entries of QUIVR_CONFIG for the first-party connector plugins."""
+    """The `plugins` entries of QUIVR_CONFIG for the first-party Go plugins."""
     return [{'manifest': str(first_party_manifest(row)), 'endpoint': f"http://127.0.0.1:{first_party_port(stack, row)}",
              'configuration': row['configuration'](stack)} for row in first_party(stack)]
 

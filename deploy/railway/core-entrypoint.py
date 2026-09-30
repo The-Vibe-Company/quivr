@@ -30,12 +30,19 @@ PLUGINS = [
 # kind would fail it with unsupported_connector_kind. ``configuration`` is the pin
 # configuration (default {}); the private-address refusal stays on. ``push`` plugins
 # also run beside the API, which relays the webhook deliveries of their kinds to them
-# (the instance webhook addresses need QUIVR_PUBLIC_URL).
+# (the instance webhook addresses need QUIVR_PUBLIC_URL). The core.ingest
+# ingestion plugin segments and embeds every Version for the worker and encodes
+# queries for the API, so both run it (``api``); ``configuration`` may be a
+# function of the runtime variables.
+TOKENIZER = {'python': '/app/.scratch/tokenizer/venv/bin/python', 'model': '/app/.scratch/tokenizer/tokenizer.json'}
 CONNECTORS = [
     {'id': 'rss', 'port': 9920},
     {'id': 'x-list', 'port': 9930, 'push': True},
     # Microsoft 365 mail on the public cloud endpoints (the plugin's defaults).
     {'id': 'm365-mail', 'port': 9940},
+    # Token windows and E5 embeddings through the deployment's TEI (plugins/core-ingest).
+    {'id': 'core-ingest', 'port': 9950, 'api': True,
+     'configuration': lambda env: {'tei_url': env['TEI_URL'], 'tokenizer': TOKENIZER}},
 ]
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
@@ -73,9 +80,12 @@ def plugin_pins(env):
     return pins
 
 
-def connector_pins():
+def connector_pins(env):
+    def configuration(c):
+        value = c.get('configuration', {})
+        return value(env) if callable(value) else value
     return [{'manifest': str(PLUGIN_ROOT / c['id'] / 'quivr-plugin.yaml'), 'endpoint': f"http://127.0.0.1:{c['port']}",
-             'configuration': c.get('configuration', {})} for c in CONNECTORS]
+             'configuration': configuration(c)} for c in CONNECTORS]
 
 
 def build_config(env):
@@ -97,10 +107,8 @@ def build_config(env):
         'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
         'temporal_address': env['TEMPORAL_ADDRESS'],
         'weaviate_url': env['WEAVIATE_URL'],
+        # Encodes queries for generations built before core.ingest, until each Corpus is rebuilt.
         'tei_url': env['TEI_URL'],
-        'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
-                      'script': '/app/scripts/token_offsets.py',
-                      'model': '/app/.scratch/tokenizer/tokenizer.json'},
         's3': {'endpoint': env['S3_ENDPOINT'], 'access_key': env['S3_ACCESS_KEY'],
                'secret_key': env['S3_SECRET_KEY'], 'bucket': 'quivr-content'},
         'keys': {key: {'organization': 'quivr-demo',
@@ -116,7 +124,7 @@ def build_config(env):
                                     'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
                                                 'plugins:admin']}
     if CONNECTORS:
-        config['plugins'] = connector_pins()
+        config['plugins'] = connector_pins(env)
     if plugins_enabled(env):
         config['plugins'] = config.get('plugins', []) + plugin_pins(env)
         config['destinations'] = {DESTINATION_ID: {'organization': 'quivr-demo', 'url': SINK_URL,
@@ -133,7 +141,8 @@ def build_config(env):
 
 def sidecar_commands(env, role='worker'):
     """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
-    plugin, the API only the connector plugins it relays push deliveries to and the
+    plugin, the API only the connector plugins it relays push deliveries to, the
+    ingestion plugin it encodes queries with, and the
     subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts:
     TYPESAFE_API_KEY), never the core's.
@@ -142,7 +151,7 @@ def sidecar_commands(env, role='worker'):
     """
     commands = []
     for connector in CONNECTORS:
-        if role == 'api' and not connector.get('push'):
+        if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
         directory = PLUGIN_ROOT / connector['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
@@ -218,7 +227,8 @@ def main():
     if mode == 'api':
         subprocess.run(['quivr', 'migrate'], check=True)
     # The worker calls every plugin, and the API the push connector plugins it relays
-    # webhook deliveries to, so each runs those beside itself.
+    # webhook deliveries to and the ingestion plugin it encodes queries with, so each
+    # runs those beside itself.
     sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
     if sidecars:
         sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, None)]))

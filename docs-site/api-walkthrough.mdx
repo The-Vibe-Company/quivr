@@ -198,7 +198,7 @@ Limits and configuration are in the [plugin README](/plugins/pdf-text#limits).
 
 ## Processing: segmentation and embeddings {#processing-segmentation-and-embeddings}
 
-Text Parts go through `quivr.normalized-text.token-windows.v1`, using the pinned E5
+Text Parts go through the [core.ingest plugin](/plugins/core-ingest), using the pinned E5
 tokenizer and Hugging Face Tokenizers 0.23.2: 384-token windows, 48 tokens of overlap
 (up to 56 to step back to a word start), preferring paragraph, line, sentence and
 then space boundaries. Excerpts are exact slices of the Part; no first line is turned
@@ -208,14 +208,15 @@ tokens while its lexical text stays complete.
 
 Preparation installs the verified wheel and downloads the pinned E5 snapshot (weights
 and ONNX export, about 940 MB, plus tokenizer and configuration). Token offsets and
-counts come from a local, offline Python subprocess; the recipe and its checks are in
-Go. See tokenizer provenance (`third_party/tokenizer/NOTICE.md`).
+counts come from an offline Python helper the plugin loads once; the recipe is in Go.
+See tokenizer provenance (`third_party/tokenizer/NOTICE.md`).
 
-Processing limits: 256 KiB of UTF-8 per processing input, 64 Parts, 256 segments,
-4,096 code points per excerpt, 512 tokens per assembled model input, and 2 MiB of text
-/ 4 MiB of JSON per assembled batch. Exceeding a limit, or a NUL character, keeps the
-accepted content readable but blocks processing with `segmentation_limit` and a
-`quarantined` availability; no partial result is published as successful.
+Processing limits of core.ingest: 256 KiB of UTF-8 per processing input, 64 Parts, 256
+segments, 4,096 code points per excerpt, 512 tokens per assembled model input, and 2 MiB
+of text / 4 MiB of JSON per assembled batch. Exceeding a limit, or a NUL character,
+keeps the accepted content readable, but the plugin refuses it (`segmentation_limit` in
+the worker log) and processing is blocked with `ingestion_refused` and a `quarantined`
+availability; no partial result is published as successful.
 
 After a verified publication to Weaviate, the lexical coverage, the promotion of the
 desired revision and its event are committed atomically. A failure leaves the
@@ -241,10 +242,9 @@ search. See E5 provenance (`third_party/e5/NOTICE.md`).
   (`balanced` is its deprecated name until engine 0.2.0), 10 results; 50 maximum. `GET /v0/search/profiles`
   lists profiles; others return `422 unsupported_profile`. A pinned
   [retrieval plugin](/plugins/write-a-retrieval-plugin) ranks under its own profiles.
-- The built-in `default` profile (version `balanced.e5-token-windows.v1`) accepts non-empty queries of at
-  most 256 tokens (8,192 code points on the wire), without truncation; a longer query is
-  `422 query_too_long`, whose message names the limit. CRLF/CR become
-  LF and surrounding whitespace is trimmed; case, accents and language are kept.
+- Queries: non-empty, at most 8,192 code points, and for semantic and hybrid at most 256
+  model tokens, never truncated (`422 query_too_long` names the limit). CRLF/CR become LF,
+  surrounding whitespace is trimmed; case, accents and language are kept.
 - Hybrid uses alpha 0.5, relative score fusion and title/body weights of 2/1.
 - Every requested Corpus must be authorized. PostgreSQL selects the logical
   generation and physical routing; rehydration re-reads the S3 bytes, validates

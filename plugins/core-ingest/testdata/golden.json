@@ -1,0 +1,2334 @@
+{
+ "note": "Captured from the engine's built-in segmentation and TEI embedding before THE-777 moved them into core.ingest. vector_sha256 is the SHA-256 of the float32 little-endian vector.",
+ "engine_recipe": "quivr.normalized-text.token-windows.v1:2ba734be6cee9251bef15f1e66071541001f5d61a5f00b6109ba7512afa98723",
+ "profile": {
+  "recipe": "quivr.normalized-text.token-windows.v1",
+  "model_repository": "intfloat/multilingual-e5-small",
+  "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+  "tokenizer_sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+  "implementation": "huggingface/tokenizers",
+  "implementation_version": "0.23.2",
+  "body_tokens": 384,
+  "overlap_tokens": 48,
+  "overlap_backtrack": 8,
+  "minimum_boundary_tokens": 256,
+  "title_tokens": 64,
+  "query_tokens": 256,
+  "model_tokens": 512,
+  "source_policy": "exact UTF-8, no NUL; no source normalization or truncation",
+  "document_template": "passage: {trim(title[:64 tokens])}\\n\\n{trim(body)}; omit absent title",
+  "query_template": "query: {trim(CRLF/CR to LF(query))}",
+  "max_source_bytes": 262144,
+  "max_segments": 256,
+  "max_excerpt_codepoints": 4096,
+  "tokenizer_script_sha256": "fb9fcfe0ca643fc8c8d53073c5a3ccc7dc64255433cfcff20d29145ea2072a85",
+  "max_model_batch_bytes": 2097152,
+  "max_serialized_batch_bytes": 4194304,
+  "max_parts": 64,
+  "max_query_codepoints": 8192
+ },
+ "cpu": "AMD EPYC 7763 64-Core Processor",
+ "documents": [
+  {
+   "id": "relevance-fr-flood",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 121,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 127,
+      "token_start": 0,
+      "token_end": 28,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "fbc53b21f164c78f8946b53b77c842f2b0b9df71f8983b54bfebbd668f642598",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nLa préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.",
+      "model_input_sha256": "f51df280c06f239be738ae515ce4d35de18aee2463870aab24dcc5cb07524833",
+      "model_tokens": 41
+     },
+     "vector_sha256": "dd1f5e9c3ed8c059abf5ee76f65f03e245b5267a7d4bbc820eb933b6c391ba47"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-museum",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 104,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 107,
+      "token_start": 0,
+      "token_end": 18,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "28177e2abd6e249fe528b53de9b9ce47ae2c5d212cabc9a921c4a80455e3f507",
+      "full_title_sha256": "e5674cd2a56c3fd68bcc2499d8676c75a5c5f80a799722cd91d6b13bd3ef4f40",
+      "title_used_sha256": "e5674cd2a56c3fd68bcc2499d8676c75a5c5f80a799722cd91d6b13bd3ef4f40",
+      "title_tokens": 10,
+      "title_truncated": false,
+      "model_input": "passage: Le musée de Lyon prolonge son exposition Monet\n\nL'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.",
+      "model_input_sha256": "afd5c1abeb49a556710e85d926fa3374b9746e8d73c87b1cbe3506532899de98",
+      "model_tokens": 32
+     },
+     "vector_sha256": "52246474ff45479625d807fc5e3d1a5e3690b290742003272418f25ab0f322ef"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-port",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 111,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 114,
+      "token_start": 0,
+      "token_end": 26,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "2c7d2852f932b02b0272c5f0a4ec0d5b1443169e578cb49e3123372ff099349c",
+      "full_title_sha256": "6e67985d6808b4241f16dc0ca35a8c328fa6e6574a15b66b9832514ea163b806",
+      "title_used_sha256": "6e67985d6808b4241f16dc0ca35a8c328fa6e6574a15b66b9832514ea163b806",
+      "title_tokens": 14,
+      "title_truncated": false,
+      "model_input": "passage: Grève de vingt-quatre heures au port de Marseille\n\nLes terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "71b8964f243cc0bfed7edf0c9ad99280035a83c75575cbc183554e8f3b15972b",
+      "model_tokens": 44
+     },
+     "vector_sha256": "f9dea0ab9333be23c47ce896743d6d4f2a64dc666690a8f4077bdca641c00aa1"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-solar",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 108,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 109,
+      "token_start": 0,
+      "token_end": 23,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "4292e7e98aa0bd7100e9c34fd311dc607867e41b15e089f388ae80e7feff652f",
+      "full_title_sha256": "8fe7d12a61b306c8e8ddb35ce5f9349f09261d0f0440928ea32401a143ab5144",
+      "title_used_sha256": "8fe7d12a61b306c8e8ddb35ce5f9349f09261d0f0440928ea32401a143ab5144",
+      "title_tokens": 14,
+      "title_truncated": false,
+      "model_input": "passage: Nantes équipe dix-huit écoles de panneaux solaires\n\nLa ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.",
+      "model_input_sha256": "9f7699ff83ba563825094120f3d2a81e11eda24131d3a21c9641b07745f29cc8",
+      "model_tokens": 41
+     },
+     "vector_sha256": "2f7c371ae752bb24432a7af2542675c572766c608b1c243581cc7dcdca2c6087"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-fishing",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 101,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 103,
+      "token_start": 0,
+      "token_end": 20,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "6b655a4fab8cfb77373f8cc960fbf5c69fd4d0fce0d8ec7fccb11d4c322235e0",
+      "full_title_sha256": "7c15bbaa5c6cf05aa28950edb24f46dc127d0b8ac094f676adbcf98810f3fe79",
+      "title_used_sha256": "7c15bbaa5c6cf05aa28950edb24f46dc127d0b8ac094f676adbcf98810f3fe79",
+      "title_tokens": 10,
+      "title_truncated": false,
+      "model_input": "passage: La Bretagne réduit le quota de sardines\n\nLa limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.",
+      "model_input_sha256": "71c2f8fd2aa7b8285955f336abbf52ec4de7d3e4440f17560f1fbfb3f7a2c2d9",
+      "model_tokens": 34
+     },
+     "vector_sha256": "6ead129791058cded2f233d867d6853115b36a2f820cc9fd79665df72994fa24"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-vaccine",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 117,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 121,
+      "token_start": 0,
+      "token_end": 25,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "7d2741c1a5514469267f5c76c9ad0f1244098874b7fb9eb45019ea178cc480fb",
+      "full_title_sha256": "c0ae3beee7e55b5365d7fa702e80f88a61a3abd11b6eef7223429852d0a010ae",
+      "title_used_sha256": "c0ae3beee7e55b5365d7fa702e80f88a61a3abd11b6eef7223429852d0a010ae",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Essai vaccinal respiratoire lancé à Lille\n\nLe centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.",
+      "model_input_sha256": "ca70b6504363dcb564bc7ec904c313bd3494e324fd19a7194bea10fc8b1a8d02",
+      "model_tokens": 38
+     },
+     "vector_sha256": "847cd81bacb1fec20c5f6cedccde5fd24943623a9e3620228b72ae23046e2202"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-satellite",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 117,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 119,
+      "token_start": 0,
+      "token_end": 25,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "a5bec5dc4b9e1ff670fc3f3f2a2462d76b18cb357ab90f76570c004df6945edb",
+      "full_title_sha256": "6309524cfaf16e927d1e710a7f83b3e221c34201027ce3013b0feafc9a557b00",
+      "title_used_sha256": "6309524cfaf16e927d1e710a7f83b3e221c34201027ce3013b0feafc9a557b00",
+      "title_tokens": 14,
+      "title_truncated": false,
+      "model_input": "passage: Un satellite toulousain surveillera le méthane\n\nL'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.",
+      "model_input_sha256": "2a3338d7406d6f25c1fc2c690c6b3376000f1730a3e3f9376744d48567ef5b54",
+      "model_tokens": 43
+     },
+     "vector_sha256": "de69cb0ba453b26d68c9095002997b48eaf727686607dc254ff2c28658969e8b"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-avalanche",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 100,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 103,
+      "token_start": 0,
+      "token_end": 26,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "d4a4cb8332ba689e3d7b293f6c44ed6e5f849e43564a614985fa8f56f5bf35e4",
+      "full_title_sha256": "5ca6f0506055e3f4fa46b387f7cdff7260b7c917134884c21463fb2ea6565b07",
+      "title_used_sha256": "5ca6f0506055e3f4fa46b387f7cdff7260b7c917134884c21463fb2ea6565b07",
+      "title_tokens": 12,
+      "title_truncated": false,
+      "model_input": "passage: Risque d'avalanche relevé en Savoie\n\nLe niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.",
+      "model_input_sha256": "745ea4f99ed6fc4fb26be7bfd4e1ca967b4ef4c4a3781acecdde9268d875b17a",
+      "model_tokens": 42
+     },
+     "vector_sha256": "956d95f0519d94811694e87b7b3415ecb82e6b27b6513b0959d90ebafba7b165"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-election",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 106,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 110,
+      "token_start": 0,
+      "token_end": 26,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "05aea49c38635bdb3face12b7b5e6d42c38e8a8ea299a3606689ca4ec6a4a8c7",
+      "full_title_sha256": "206006520fa1f9620da701d6520078be16fb5a7574ba75d631567b9ec4b88fe9",
+      "title_used_sha256": "206006520fa1f9620da701d6520078be16fb5a7574ba75d631567b9ec4b88fe9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Participation municipale en hausse à Rouen\n\nÀ 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "944526032a81e611107ad2f32ca809bb5555c621178310ed404749014a43ce3f",
+      "model_tokens": 39
+     },
+     "vector_sha256": "9181c8d09860028fe07c041b75281c9b81a25c979f0462cb3587a85c0e41d4ef"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-maritime",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 114,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 118,
+      "token_start": 0,
+      "token_end": 24,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "b91f1919c74bf7822b372d876a49128fb9f1a4f2cc2947c93f586079b3e397a6",
+      "full_title_sha256": "76ef65c0eb03af6312b256d1ba7115fd92033cc7a7a40515be65b936d399b929",
+      "title_used_sha256": "76ef65c0eb03af6312b256d1ba7115fd92033cc7a7a40515be65b936d399b929",
+      "title_tokens": 8,
+      "title_truncated": false,
+      "model_input": "passage: Le musée maritime de Bordeaux rouvre\n\nAprès huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.",
+      "model_input_sha256": "ae8f5709fd0ca3befb241872022458ca42326571cc846388d903633d040d8268",
+      "model_tokens": 36
+     },
+     "vector_sha256": "249e8e042068da2445dc0505f0200602ca85397ec3b87cbf1438a95a2d199a09"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-wind",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 114,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 116,
+      "token_start": 0,
+      "token_end": 30,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "48ea007ba193ba419fcc367a18ae81985469efeb2d41c4967463be90df430c58",
+      "full_title_sha256": "7cbffa0445d7c800f2042929e54b64fda9af7e5f96f42f5c8e327a624e754216",
+      "title_used_sha256": "7cbffa0445d7c800f2042929e54b64fda9af7e5f96f42f5c8e327a624e754216",
+      "title_tokens": 17,
+      "title_truncated": false,
+      "model_input": "passage: Feu vert pour soixante-deux éoliennes en Normandie\n\nLe parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.",
+      "model_input_sha256": "c0da8c65510d16d01940657bb86466125e4912c519e1859b60edce0dce908d71",
+      "model_tokens": 51
+     },
+     "vector_sha256": "a92e5ff372b91305272d251a6ebccd28811c6182eddd0f76a99cb60890172b76"
+    }
+   ]
+  },
+  {
+   "id": "relevance-fr-train",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 115,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 116,
+      "token_start": 0,
+      "token_end": 30,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f266ecee1539c7f3a40573aa5f5d8e6d12a8df32b2e3c0e4ab4d342be5a79f03",
+      "full_title_sha256": "24362369268e06d374fa9c0bb4c7a4aa8f030936b743303b56a659d15a29b2a1",
+      "title_used_sha256": "24362369268e06d374fa9c0bb4c7a4aa8f030936b743303b56a659d15a29b2a1",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Signalisation remplacée près de Dijon\n\nAucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.",
+      "model_input_sha256": "9385929da2efecdde2de8840be5b564caabb7045eb144153040b20a657ae3bf5",
+      "model_tokens": 43
+     },
+     "vector_sha256": "53ff6ff1a2fa3b8da20757f6376d47ecebdf7a213817527213f06ad96bd6203f"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-flood",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 122,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 122,
+      "token_start": 0,
+      "token_end": 27,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "8ff465368b96599a09ed1f706a882e9195a7c25067f9cc2ab24e2513a65ccb15",
+      "full_title_sha256": "b7a400ddfde67aec85c45dea2e21fe5fc45cd0f0970b1dccd13a693cdefbc2af",
+      "title_used_sha256": "b7a400ddfde67aec85c45dea2e21fe5fc45cd0f0970b1dccd13a693cdefbc2af",
+      "title_tokens": 11,
+      "title_truncated": false,
+      "model_input": "passage: River Ouse flooding closes York footbridges\n\nThe council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.",
+      "model_input_sha256": "d271ce3ef5001c57545e82150bb6e3ae65f2a65ac90bf89339715289f3d7105a",
+      "model_tokens": 42
+     },
+     "vector_sha256": "a9339d0884d3af490b8e36beea6df57bdf9c9e8cac45996a810efa86c02c887d"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-museum",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 99,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 99,
+      "token_start": 0,
+      "token_end": 23,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "87a557c89c0a2b3572bcd27a6d1c876cd59b471005f709109deeb8d7028958d2",
+      "full_title_sha256": "c99bfa1d348b787e9940b990ab42f33ff6817f278dd58a0cafd1f7c65af1dbfb",
+      "title_used_sha256": "c99bfa1d348b787e9940b990ab42f33ff6817f278dd58a0cafd1f7c65af1dbfb",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Bristol sculpture show adds late openings\n\nThe museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.",
+      "model_input_sha256": "66d47c97311722f50daa50634b001d0792bec29a67e6a93b41355a18baccdffe",
+      "model_tokens": 36
+     },
+     "vector_sha256": "f41121b726f1494569ff039168144916cb790a71da8772a1a6c1c58ef3e873ed"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-port",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 108,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 108,
+      "token_start": 0,
+      "token_end": 22,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "4fac6eb66d69f28101ef6a5c0d7d71dd788ede8c85d47182c169edb715052444",
+      "full_title_sha256": "d31675af56f2d216709e748da424070c4033e0f4f5fc65fbedab203c915f6040",
+      "title_used_sha256": "d31675af56f2d216709e748da424070c4033e0f4f5fc65fbedab203c915f6040",
+      "title_tokens": 10,
+      "title_truncated": false,
+      "model_input": "passage: Liverpool dock workers call a 48-hour strike\n\nContainer handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "29a2b22b3dadb046292a0c66d70d6689660ea2a073680a773776813d8983e382",
+      "model_tokens": 36
+     },
+     "vector_sha256": "80f25cefd96b6edbb8bbc88a827a37421590133cd8c0b09c68ed686e0e8b013f"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-solar",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 116,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 116,
+      "token_start": 0,
+      "token_end": 29,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "da4011750e0759568873853af16a1e1ad04d0558ded0878b08a150d6e9c1c456",
+      "full_title_sha256": "fc2e1cfc770f3f72a058aa005334d8653719f8ce9afe30075d7c3c2973898a0a",
+      "title_used_sha256": "fc2e1cfc770f3f72a058aa005334d8653719f8ce9afe30075d7c3c2973898a0a",
+      "title_tokens": 12,
+      "title_truncated": false,
+      "model_input": "passage: Leeds installs solar panels on twelve schools\n\nThe council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.",
+      "model_input_sha256": "dbc74cce7be1c9669db38a6b631f4ff5321822281850ab8a7649692b07ccf2ca",
+      "model_tokens": 45
+     },
+     "vector_sha256": "3fcf833e158942e2d5f383ea0b12873ed6e3eea0184585d4ea72fbc3d83c7fe3"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-fishing",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 110,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 110,
+      "token_start": 0,
+      "token_end": 22,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "0a68e39819a7937e2ca5e9a8dfcb7cc4fc343b83cb6bcfbb1a63a41224267e44",
+      "full_title_sha256": "3305f95308e133c0c6d1451183328695088be2fa79a875c30e7ef13a54d13ea4",
+      "title_used_sha256": "3305f95308e133c0c6d1451183328695088be2fa79a875c30e7ef13a54d13ea4",
+      "title_tokens": 12,
+      "title_truncated": false,
+      "model_input": "passage: Cornwall sets a lower mackerel catch limit\n\nThe seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.",
+      "model_input_sha256": "959f71c7a03727826828eb27d499e5864fcd41abae0744fa9f4f3849b1dcebc2",
+      "model_tokens": 38
+     },
+     "vector_sha256": "98d9828750b7bba19ee3ffb9cb853bfb2a6356b31de9fa22d26049ffc70dfb9c"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-vaccine",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 96,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 96,
+      "token_start": 0,
+      "token_end": 25,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "aae58b8aaeff91e719b92fd900c7fd8b176543b951488e86c3e46dc7613439b6",
+      "full_title_sha256": "9bc9203bb4c2bb96c730473dc9522d3ef719016cdfb89cf7a295066fe93d5705",
+      "title_used_sha256": "9bc9203bb4c2bb96c730473dc9522d3ef719016cdfb89cf7a295066fe93d5705",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Oxford begins a dengue vaccine trial\n\nResearchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.",
+      "model_input_sha256": "3430c26936f83e2a41514077749c9526d78ff96214d7a3329142f5991deea3bf",
+      "model_tokens": 38
+     },
+     "vector_sha256": "880f44f9d72a8c763733881aefe1a8e3f8e62fc4267c1d15edaa0c7c72de98d1"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-satellite",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 113,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 113,
+      "token_start": 0,
+      "token_end": 23,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "486bab8d073237aad43c33adc723ff2016c7968ca64945fbec0bcb4064967d97",
+      "full_title_sha256": "b4353c35f1d4afd00668a45e29d212a13f981292b784d800a51965bb46381295",
+      "title_used_sha256": "b4353c35f1d4afd00668a45e29d212a13f981292b784d800a51965bb46381295",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Glasgow satellite tracks wildfire smoke\n\nThe sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.",
+      "model_input_sha256": "5ef549f80301b30913bb991a690e5e3a217125d739b1de6ab68291a7712337e8",
+      "model_tokens": 36
+     },
+     "vector_sha256": "a17874b24b95ed8a10b64d84cddf7d958963a9e7f72e3ae303d19d16140aa34d"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-avalanche",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 107,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 107,
+      "token_start": 0,
+      "token_end": 21,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ca1761396499c47b877ee03ad9d246fc2057e3c27ddeb2f7cfd3feeeb7bfdd0e",
+      "full_title_sha256": "fed326790fc472f73ecf7a0db7d146fe2df2700cf1cb6e4df2d4ec6f8e960aef",
+      "title_used_sha256": "fed326790fc472f73ecf7a0db7d146fe2df2700cf1cb6e4df2d4ec6f8e960aef",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Cairngorm avalanche warning raised\n\nThe hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.",
+      "model_input_sha256": "249cf7f09a6916476da8fc974a865743f17fb9ead1fcfacd79f96eec476b05b3",
+      "model_tokens": 34
+     },
+     "vector_sha256": "ad30c44bdf8cd2a2b5843029ec72d2d94aa0c1355fbcd271202d4d17811a4983"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-election",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 100,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 100,
+      "token_start": 0,
+      "token_end": 29,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "007b6ce2fbb49855eb8b9ed3507918cd95ddb7556190dcfae12872cfe75fdc16",
+      "full_title_sha256": "3f3070c84b955f1463f29c2acafd13826ce4f5d79dd98a39988a693e8b7dad89",
+      "title_used_sha256": "3f3070c84b955f1463f29c2acafd13826ce4f5d79dd98a39988a693e8b7dad89",
+      "title_tokens": 10,
+      "title_truncated": false,
+      "model_input": "passage: Norwich council election turnout reaches 64 percent\n\nThe 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "4ac7a3c522b986f727d55bce60f04e9b764d868c95644eedb065cc3da1198767",
+      "model_tokens": 43
+     },
+     "vector_sha256": "07bf6114aacf943b72408bbe85d01658d75326c22f9a948e175e225eb159d6c1"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-museum2",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 118,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 118,
+      "token_start": 0,
+      "token_end": 27,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "0a1035a610fbeb5f5891f18f73b158cdfe61c4749b18b3310519f8478b992297",
+      "full_title_sha256": "a5b745f0d8bc1a85896c311c2582330ea31f9c211bc01bf11a59e8e7a65d4a5d",
+      "title_used_sha256": "a5b745f0d8bc1a85896c311c2582330ea31f9c211bc01bf11a59e8e7a65d4a5d",
+      "title_tokens": 6,
+      "title_truncated": false,
+      "model_input": "passage: Manchester industry museum reopens\n\nA renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.",
+      "model_input_sha256": "d609841433003c3810698258f1f77c15c25f826b0ff463995e80ad252ca14e29",
+      "model_tokens": 37
+     },
+     "vector_sha256": "3d1eb18f6c279b01a451a6f68503dc0ca4a3c07c725912c59881eb1732f95764"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-wind",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 109,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 109,
+      "token_start": 0,
+      "token_end": 23,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "50ea8ee1fdfe41ea56c4e43e7f10ca5194375c4fb4e8dad10208bf5646fcda48",
+      "full_title_sha256": "9a915fa7704afd60bc6187a04d8b57b42cfba86fe82b87290ba8fcb82dba39b5",
+      "title_used_sha256": "9a915fa7704afd60bc6187a04d8b57b42cfba86fe82b87290ba8fcb82dba39b5",
+      "title_tokens": 11,
+      "title_truncated": false,
+      "model_input": "passage: North Sea project wins consent for eighty turbines\n\nThe offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.",
+      "model_input_sha256": "f3c45b82c6db5ff55fa5bb9e94c1292fc6d23d3737645f3ec2c23572b281b5a5",
+      "model_tokens": 38
+     },
+     "vector_sha256": "09d4f1f360f2e67d8f8a90968938f7efc4c4b35e348bcab5b4e413f3af37bfd0"
+    }
+   ]
+  },
+  {
+   "id": "relevance-en-train",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 121,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 121,
+      "token_start": 0,
+      "token_end": 25,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "231a591b3b38fc612f1089820f2620a9b9de50001feffc8b744309f7ee533c20",
+      "full_title_sha256": "acc2a5197e723b123d902e09adf5aa5853c48ee5702ab79e6492401c0c5df900",
+      "title_used_sha256": "acc2a5197e723b123d902e09adf5aa5853c48ee5702ab79e6492401c0c5df900",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Birmingham signalling upgrade halts Sunday trains\n\nServices between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.",
+      "model_input_sha256": "9cca3745bc66422ad1a33cffd5a9766ad62e54f672db0bbc71b19287e7a7d4fc",
+      "model_tokens": 38
+     },
+     "vector_sha256": "fc5767f79c83a124e986ae91aef7a40f881f7a0e3f568ba77da554054c4a2e56"
+    }
+   ]
+  },
+  {
+   "id": "long-text",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1314,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1391,
+      "token_start": 0,
+      "token_end": 369,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Première ligne conservée comme corps.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.",
+      "model_input_sha256": "d668f3997f9c09c92013051edde3c7a62f00a4e6518b9ce56eb755dc27f5cbcc",
+      "model_tokens": 373
+     },
+     "vector_sha256": "6353d800f3fab3405dcc8a06b9f24b8ea37233e38c127b5de411bd1d2e967fdb"
+    },
+    {
+     "part_key": "body",
+     "start": 1144,
+     "end": 2504,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 1211,
+      "utf8_end": 2651,
+      "token_start": 321,
+      "token_end": 705,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.",
+      "model_input_sha256": "93393eefb66926c460bf859cf4ea5d2fdd25bbc6e2c8622e2ba809502c53a621",
+      "model_tokens": 388
+     },
+     "vector_sha256": "34f16f507e257a8a33182a2c412b44fd0c12417a91b76f8df191d103e74810a4"
+    },
+    {
+     "part_key": "body",
+     "start": 2334,
+     "end": 3694,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 2471,
+      "utf8_end": 3911,
+      "token_start": 657,
+      "token_end": 1041,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.",
+      "model_input_sha256": "93393eefb66926c460bf859cf4ea5d2fdd25bbc6e2c8622e2ba809502c53a621",
+      "model_tokens": 388
+     },
+     "vector_sha256": "34f16f507e257a8a33182a2c412b44fd0c12417a91b76f8df191d103e74810a4"
+    },
+    {
+     "part_key": "body",
+     "start": 3524,
+     "end": 4884,
+     "derivation": {
+      "ordinal": 3,
+      "utf8_start": 3731,
+      "utf8_end": 5171,
+      "token_start": 993,
+      "token_end": 1377,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.",
+      "model_input_sha256": "93393eefb66926c460bf859cf4ea5d2fdd25bbc6e2c8622e2ba809502c53a621",
+      "model_tokens": 388
+     },
+     "vector_sha256": "34f16f507e257a8a33182a2c412b44fd0c12417a91b76f8df191d103e74810a4"
+    },
+    {
+     "part_key": "body",
+     "start": 4714,
+     "end": 6074,
+     "derivation": {
+      "ordinal": 4,
+      "utf8_start": 4991,
+      "utf8_end": 6431,
+      "token_start": 1329,
+      "token_end": 1713,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.",
+      "model_input_sha256": "93393eefb66926c460bf859cf4ea5d2fdd25bbc6e2c8622e2ba809502c53a621",
+      "model_tokens": 388
+     },
+     "vector_sha256": "34f16f507e257a8a33182a2c412b44fd0c12417a91b76f8df191d103e74810a4"
+    },
+    {
+     "part_key": "body",
+     "start": 5904,
+     "end": 6878,
+     "derivation": {
+      "ordinal": 5,
+      "utf8_start": 6251,
+      "utf8_end": 7281,
+      "token_start": 1665,
+      "token_end": 1941,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "818d32057d87942453c2420537522decf682bbf86bff6941edec8ee869a8e8f2",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: La constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation 🌌 éclaire Paris. Les étoiles restent visibles au-dessus du fleuve.\n\nLa constellation finale clôt ce texte.",
+      "model_input_sha256": "c8cd896b74ee75871f58c5b2bc2a099ae356f241973dd2d59a44d7f54f024cc0",
+      "model_tokens": 279
+     },
+     "vector_sha256": "462a4c3c81727b8a88ead1f596117005ff4d8f936b58bc0ec749a5008fede0de"
+    }
+   ]
+  },
+  {
+   "id": "exact-384",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 2303,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 2303,
+      "token_start": 0,
+      "token_end": 384,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "fb534a27b72d93f1457ba600f2f0a6ca5a0ca2b6e5a976c79cd30ea8a067239f",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris",
+      "model_input_sha256": "12c6d4560971a06856ab324de50a74dacfef031a4b2c78cb252fb911d309d533",
+      "model_tokens": 388
+     },
+     "vector_sha256": "c7e75ad00369ed0e256cede1d811168c8d6f157ca0b7b2426dcd6148b5db3c53"
+    }
+   ]
+  },
+  {
+   "id": "overlap-385",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 2304,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 2304,
+      "token_start": 0,
+      "token_end": 384,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "c75757c12529917b65ef46fe7f4c30eab76c4c77bc3dad5cac547da8c20b24e6",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris",
+      "model_input_sha256": "12c6d4560971a06856ab324de50a74dacfef031a4b2c78cb252fb911d309d533",
+      "model_tokens": 388
+     },
+     "vector_sha256": "c7e75ad00369ed0e256cede1d811168c8d6f157ca0b7b2426dcd6148b5db3c53"
+    },
+    {
+     "part_key": "body",
+     "start": 2016,
+     "end": 2309,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 2016,
+      "utf8_end": 2309,
+      "token_start": 336,
+      "token_end": 385,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "c75757c12529917b65ef46fe7f4c30eab76c4c77bc3dad5cac547da8c20b24e6",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris",
+      "model_input_sha256": "ee9dbb20f5ed833aef8ad30dc6e05c34ab11ae46d0a8987ff9ef3f3d2099c3f4",
+      "model_tokens": 53
+     },
+     "vector_sha256": "7709a580d94537be783efbd73e1f7f27b46475917b52c7c2396fbe8666c7f0c5"
+    }
+   ]
+  },
+  {
+   "id": "paragraph-unicode",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1801,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1801,
+      "token_start": 0,
+      "token_end": 300,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "050196db58922fd304633cd8fe5db3a411f750783819a9e493386d0543ffac70",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris",
+      "model_input_sha256": "7a24feaa0ae07847efbbb0a1c07835b45db4e811c85fb9dfbfcbc76d574789f5",
+      "model_tokens": 304
+     },
+     "vector_sha256": "3bb4c6bd6cd6f68cd22877298888e5bbd94ec3df18a538cca464ea43e24ff07a"
+    },
+    {
+     "part_key": "body",
+     "start": 1512,
+     "end": 3007,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 1512,
+      "utf8_end": 3011,
+      "token_start": 252,
+      "token_end": 504,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "050196db58922fd304633cd8fe5db3a411f750783819a9e493386d0543ffac70",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nParis Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris 🌞 é",
+      "model_input_sha256": "c818c7c64ff0b17d4c0fd458f60fac93b0c97913477233436be7e6372a3481aa",
+      "model_tokens": 255
+     },
+     "vector_sha256": "8dfec3ccffe5484e46b4a857add46eaab3b5fbc18753b8d1c23d52ecdaaec5e0"
+    }
+   ]
+  },
+  {
+   "id": "title-cap-hard-cuts",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1151,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1151,
+      "token_start": 0,
+      "token_end": 384,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": true,
+      "normalized_content_sha256": "c59d3c0480cc2d71d8f646e735e92da65450311eec46e81a5db8c7e6e8a92054",
+      "full_title_sha256": "717246a4087eb6c5ffa58cce6cf0fd972680eb4895e97dbe6e8ba84159ecf9fc",
+      "title_used_sha256": "eb2e8e800228d16196dbf11e90148db504e05b18db88b3658153fa68e8d55010",
+      "title_tokens": 64,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "model_input_sha256": "c3ebd4c7cb560b1b497fcf1f430d7bbd16f50027dd0fe5ad37eb28a1ea1d8d88",
+      "model_tokens": 452
+     },
+     "vector_sha256": "98bc505cdc3c27c648078930bdc3c06f229d1f4f93f222db3b2b2c917685afa7"
+    },
+    {
+     "part_key": "body",
+     "start": 983,
+     "end": 2135,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 983,
+      "utf8_end": 2135,
+      "token_start": 328,
+      "token_end": 712,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c59d3c0480cc2d71d8f646e735e92da65450311eec46e81a5db8c7e6e8a92054",
+      "full_title_sha256": "717246a4087eb6c5ffa58cce6cf0fd972680eb4895e97dbe6e8ba84159ecf9fc",
+      "title_used_sha256": "eb2e8e800228d16196dbf11e90148db504e05b18db88b3658153fa68e8d55010",
+      "title_tokens": 64,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "model_input_sha256": "067835757cf507c6592795040146ab69208677a17509037f74b290758f215f2b",
+      "model_tokens": 452
+     },
+     "vector_sha256": "7aeb9ccb493a2161840c4132a22a270545e7b0265f5c494b7cea5f1abeaec112"
+    },
+    {
+     "part_key": "body",
+     "start": 1967,
+     "end": 3119,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 1967,
+      "utf8_end": 3119,
+      "token_start": 656,
+      "token_end": 1040,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c59d3c0480cc2d71d8f646e735e92da65450311eec46e81a5db8c7e6e8a92054",
+      "full_title_sha256": "717246a4087eb6c5ffa58cce6cf0fd972680eb4895e97dbe6e8ba84159ecf9fc",
+      "title_used_sha256": "eb2e8e800228d16196dbf11e90148db504e05b18db88b3658153fa68e8d55010",
+      "title_tokens": 64,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "model_input_sha256": "067835757cf507c6592795040146ab69208677a17509037f74b290758f215f2b",
+      "model_tokens": 452
+     },
+     "vector_sha256": "7aeb9ccb493a2161840c4132a22a270545e7b0265f5c494b7cea5f1abeaec112"
+    },
+    {
+     "part_key": "body",
+     "start": 2951,
+     "end": 4103,
+     "derivation": {
+      "ordinal": 3,
+      "utf8_start": 2951,
+      "utf8_end": 4103,
+      "token_start": 984,
+      "token_end": 1368,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c59d3c0480cc2d71d8f646e735e92da65450311eec46e81a5db8c7e6e8a92054",
+      "full_title_sha256": "717246a4087eb6c5ffa58cce6cf0fd972680eb4895e97dbe6e8ba84159ecf9fc",
+      "title_used_sha256": "eb2e8e800228d16196dbf11e90148db504e05b18db88b3658153fa68e8d55010",
+      "title_tokens": 64,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "model_input_sha256": "067835757cf507c6592795040146ab69208677a17509037f74b290758f215f2b",
+      "model_tokens": 452
+     },
+     "vector_sha256": "7aeb9ccb493a2161840c4132a22a270545e7b0265f5c494b7cea5f1abeaec112"
+    },
+    {
+     "part_key": "body",
+     "start": 3935,
+     "end": 5000,
+     "derivation": {
+      "ordinal": 4,
+      "utf8_start": 3935,
+      "utf8_end": 5000,
+      "token_start": 1312,
+      "token_end": 1667,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": false,
+      "normalized_content_sha256": "c59d3c0480cc2d71d8f646e735e92da65450311eec46e81a5db8c7e6e8a92054",
+      "full_title_sha256": "717246a4087eb6c5ffa58cce6cf0fd972680eb4895e97dbe6e8ba84159ecf9fc",
+      "title_used_sha256": "eb2e8e800228d16196dbf11e90148db504e05b18db88b3658153fa68e8d55010",
+      "title_tokens": 64,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "model_input_sha256": "6d7308a29d56af022fd25e5cdadc0ba8dbfa112af17bc802ae59262e6947b0a6",
+      "model_tokens": 423
+     },
+     "vector_sha256": "3ae2e71497e7b22ce071c88ad5aad0d6fdf1a22cb3942c2a2784031644a4a52d"
+    }
+   ]
+  },
+  {
+   "id": "title-only",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 0,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 0,
+      "token_start": 0,
+      "token_end": 0,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "full_title_sha256": "e6d757bac0c5c30e4c037f786959fc347219240f7110e429e87edffbdbf7aa8f",
+      "title_used_sha256": "e6d757bac0c5c30e4c037f786959fc347219240f7110e429e87edffbdbf7aa8f",
+      "title_tokens": 4,
+      "title_truncated": false,
+      "model_input": "passage: Titre 🌞",
+      "model_input_sha256": "2fb5da63f9a28471c5f76f6fd043702a4f132628abb7babf6fd0da64ee61ab30",
+      "model_tokens": 8
+     },
+     "vector_sha256": "9856d26f8e0a855dd646a635305a5c6068ed738585db1be32595ae1487ccd247"
+    }
+   ]
+  },
+  {
+   "id": "title-shared-offsets",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 4,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 4,
+      "token_start": 0,
+      "token_end": 1,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "6ccaa6415b5ee449e3c5c716f57b4608ebe3b780f5aa6b077bc5d8eee5d961f9",
+      "full_title_sha256": "9ef3c503a70639cf87d3bfff2520fa306e79a3f37af1c169aded1a1f4000dc43",
+      "title_used_sha256": "3918052ea25d2fafe346abc2daa80a17edace34df7763962f0ed0825e6bea309",
+      "title_tokens": 63,
+      "title_truncated": true,
+      "model_input": "passage: Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris\n\nBody",
+      "model_input_sha256": "ff503ed44de0baef79f9b9de024faccaef29ae4a1a7ad44fb500eac7d8587885",
+      "model_tokens": 68
+     },
+     "vector_sha256": "98136ddd83f359251349bfe0b194f405d72924b99cae0e11d67de39d569a4866"
+    }
+   ]
+  },
+  {
+   "id": "refuse-assembled-title-batch",
+   "refused": true
+  },
+  {
+   "id": "refuse-source-bytes",
+   "refused": true
+  },
+  {
+   "id": "refuse-whitespace-excerpt",
+   "refused": true
+  },
+  {
+   "id": "refuse-nul",
+   "refused": true
+  },
+  {
+   "id": "refuse-two-titles",
+   "refused": true
+  },
+  {
+   "id": "preserved-parts",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 19,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 19,
+      "token_start": 0,
+      "token_end": 6,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "62fc83f65cc5a276d8894bef61cab18292dc3c54685bf0a01d77c4778c811d8f",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: Corps du manifeste.",
+      "model_input_sha256": "c0a1dea78e8fbe0e45fed8a4db8ae17ce194a7b0b061ca83c52221a59cc263f8",
+      "model_tokens": 10
+     },
+     "vector_sha256": "c1fa8a06c8ecde71eed3040c46f905a387203b4d9f79801bddafcf2d22d8c66d"
+    }
+   ]
+  },
+  {
+   "id": "refuse-no-text",
+   "refused": true
+  },
+  {
+   "id": "two-bodies",
+   "segments": [
+    {
+     "part_key": "lead",
+     "start": 0,
+     "end": 20,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 20,
+      "token_start": 0,
+      "token_end": 6,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "5fafafb843545edf55dff78c8d673b93400a639cacdbab3dcde1e230c4c64fa2",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nLe chapeau du texte.",
+      "model_input_sha256": "30d362ed111e6e32e3d966353f61582aa2ce8d7bebb72d6979c04b9ead69724f",
+      "model_tokens": 12
+     },
+     "vector_sha256": "b74a3f4901584fd4dfa5bb979d3abfc3dbf22b70559902c14ff08bc2b18fe33a"
+    },
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1302,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 0,
+      "utf8_end": 1344,
+      "token_start": 0,
+      "token_end": 378,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nLes marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "8589ab13b9154eb1b6ff23c56619b9630793a6dce027b7e5a88aee88e063aa54",
+      "model_tokens": 384
+     },
+     "vector_sha256": "71e7c4ed30a9698489f38ba3bbdf6ce92a5b9f018b41d5cd6d8b76f863a43162"
+    },
+    {
+     "part_key": "body",
+     "start": 1140,
+     "end": 2449,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 1176,
+      "utf8_end": 2528,
+      "token_start": 330,
+      "token_end": 711,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nmarée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "2ae1ddc7260031070c9972bf13af1413731bff8ae8f67e8bab4e75dc4e5afafd",
+      "model_tokens": 387
+     },
+     "vector_sha256": "dbfef201c4f676787fb4a63db3c66698f74d0f6210db54b248be948d6593e661"
+    },
+    {
+     "part_key": "body",
+     "start": 2287,
+     "end": 3596,
+     "derivation": {
+      "ordinal": 3,
+      "utf8_start": 2360,
+      "utf8_end": 3712,
+      "token_start": 663,
+      "token_end": 1044,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nmarée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "2ae1ddc7260031070c9972bf13af1413731bff8ae8f67e8bab4e75dc4e5afafd",
+      "model_tokens": 387
+     },
+     "vector_sha256": "dbfef201c4f676787fb4a63db3c66698f74d0f6210db54b248be948d6593e661"
+    },
+    {
+     "part_key": "body",
+     "start": 3434,
+     "end": 4743,
+     "derivation": {
+      "ordinal": 4,
+      "utf8_start": 3544,
+      "utf8_end": 4896,
+      "token_start": 996,
+      "token_end": 1377,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nmarée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "2ae1ddc7260031070c9972bf13af1413731bff8ae8f67e8bab4e75dc4e5afafd",
+      "model_tokens": 387
+     },
+     "vector_sha256": "dbfef201c4f676787fb4a63db3c66698f74d0f6210db54b248be948d6593e661"
+    },
+    {
+     "part_key": "body",
+     "start": 4581,
+     "end": 5890,
+     "derivation": {
+      "ordinal": 5,
+      "utf8_start": 4728,
+      "utf8_end": 6080,
+      "token_start": 1329,
+      "token_end": 1710,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nmarée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "2ae1ddc7260031070c9972bf13af1413731bff8ae8f67e8bab4e75dc4e5afafd",
+      "model_tokens": 387
+     },
+     "vector_sha256": "dbfef201c4f676787fb4a63db3c66698f74d0f6210db54b248be948d6593e661"
+    },
+    {
+     "part_key": "body",
+     "start": 5728,
+     "end": 6200,
+     "derivation": {
+      "ordinal": 6,
+      "utf8_start": 5912,
+      "utf8_end": 6400,
+      "token_start": 1662,
+      "token_end": 1801,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "ee72b12c408ac7f98d1808633e912798d3afff8c1cb645b1742ad5b054cba134",
+      "full_title_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_used_sha256": "f696bdfe71857cedd118e0c7b3e27354e661fb03c422f627480f04b339fd9a34",
+      "title_tokens": 2,
+      "title_truncated": false,
+      "model_input": "passage: Deux corps\n\nmarée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée. Les marins attendent la marée.",
+      "model_input_sha256": "6ba7fb82cf91cf918d71c1e40d7f432e612c10faef37d6921bdebe17a354a48a",
+      "model_tokens": 144
+     },
+     "vector_sha256": "baeaf27135c8bfa883bf1cb4e825ffd3fa0a6f54b56b56f1c08aa2878621f387"
+    }
+   ]
+  },
+  {
+   "id": "separators-and-spaces",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1320,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1500,
+      "token_start": 0,
+      "token_end": 360,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "887e223d0bdba916c6f3698f6a0ad9e2a269ac76917855ba99d5ffef0d8ab15d",
+      "full_title_sha256": "8402fed12061ec99d688b6d240c25d84d5262ae11a8a71283bfd56eb5c78ab8e",
+      "title_used_sha256": "c5165215bc06e737937a1d563b22f27969b9d0b1f073f96e4170210340779195",
+      "title_tokens": 4,
+      "title_truncated": false,
+      "model_input": "passage: Titre espacé\n\nLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.",
+      "model_input_sha256": "40512e7ff6459b2c38cb4389c96ef0445c22d7298861a1b463c0ee99958087c4",
+      "model_tokens": 368
+     },
+     "vector_sha256": "5c6bebc1970e1444e5f32bba8443af4f1e6c8b4767da5bba1d2d73fff9f8afed"
+    },
+    {
+     "part_key": "body",
+     "start": 1144,
+     "end": 2494,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 1300,
+      "utf8_end": 2785,
+      "token_start": 312,
+      "token_end": 695,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "887e223d0bdba916c6f3698f6a0ad9e2a269ac76917855ba99d5ffef0d8ab15d",
+      "full_title_sha256": "8402fed12061ec99d688b6d240c25d84d5262ae11a8a71283bfd56eb5c78ab8e",
+      "title_used_sha256": "c5165215bc06e737937a1d563b22f27969b9d0b1f073f96e4170210340779195",
+      "title_tokens": 4,
+      "title_truncated": false,
+      "model_input": "passage: Titre espacé\n\nLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\rLigne\u001cun deux\u2028trois.\r\r« Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale.",
+      "model_input_sha256": "fedb53ac9f363dab449e63d656e0e3fc2c4a482b49cc79e402c9aae189f6fd56",
+      "model_tokens": 391
+     },
+     "vector_sha256": "033bd859f4ac07856a6c3f61693cdfb8ba809560825f4c9b1a258789e8067c83"
+    },
+    {
+     "part_key": "body",
+     "start": 2326,
+     "end": 3000,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 2601,
+      "utf8_end": 3340,
+      "token_start": 647,
+      "token_end": 841,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "887e223d0bdba916c6f3698f6a0ad9e2a269ac76917855ba99d5ffef0d8ab15d",
+      "full_title_sha256": "8402fed12061ec99d688b6d240c25d84d5262ae11a8a71283bfd56eb5c78ab8e",
+      "title_used_sha256": "c5165215bc06e737937a1d563b22f27969b9d0b1f073f96e4170210340779195",
+      "title_tokens": 4,
+      "title_truncated": false,
+      "model_input": "passage: Titre espacé\n\n» « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. » « Citation finale. »",
+      "model_input_sha256": "416975a496ff005d715153318c37579dcf5edbc67ab751197da3a3ee55b87e46",
+      "model_tokens": 201
+     },
+     "vector_sha256": "5529c02927ede9bedfbc85e69d4a80110865426b90c711c5a8830667c4fefc90"
+    }
+   ]
+  },
+  {
+   "id": "news-paragraphs",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1541,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1594,
+      "token_start": 0,
+      "token_end": 356,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nLa préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "2b684b27b3dc60f3c8a2e19dacb8cab4428f1e468e823f89c72892a711702a3c",
+      "model_tokens": 369
+     },
+     "vector_sha256": "331943355952e1c8187550ae0bb9c33e3396463b7eecbd8598a3f44d9c71fde0"
+    },
+    {
+     "part_key": "body",
+     "start": 1346,
+     "end": 2619,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 1392,
+      "utf8_end": 2691,
+      "token_start": 307,
+      "token_end": 615,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 2410,
+     "end": 3713,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 2480,
+      "utf8_end": 3800,
+      "token_start": 567,
+      "token_end": 883,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 3555,
+     "end": 4853,
+     "derivation": {
+      "ordinal": 3,
+      "utf8_start": 3641,
+      "utf8_end": 4975,
+      "token_start": 834,
+      "token_end": 1145,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "4cb5027e00bc7ae265893f355ca6640fa9ad9bb485d67c16493db70c713a399f",
+      "model_tokens": 324
+     },
+     "vector_sha256": "7ba3763fa4a2bdef5e5723519585a9538d17ccc7de27bb0e172d1bb3e75cd66f"
+    },
+    {
+     "part_key": "body",
+     "start": 4650,
+     "end": 5924,
+     "derivation": {
+      "ordinal": 4,
+      "utf8_start": 4764,
+      "utf8_end": 6078,
+      "token_start": 1097,
+      "token_end": 1394,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\naprès 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "dd65e716ad382a56663807117212e8a9472369012478540059547e405b573b7f",
+      "model_tokens": 310
+     },
+     "vector_sha256": "9664dd62ad75c466bc7043d035aa6b76c1c14b56b5af0bf7dccd8608af380881"
+    },
+    {
+     "part_key": "body",
+     "start": 5729,
+     "end": 7002,
+     "derivation": {
+      "ordinal": 5,
+      "utf8_start": 5876,
+      "utf8_end": 7175,
+      "token_start": 1345,
+      "token_end": 1653,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 6793,
+     "end": 8096,
+     "derivation": {
+      "ordinal": 6,
+      "utf8_start": 6964,
+      "utf8_end": 8284,
+      "token_start": 1605,
+      "token_end": 1921,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 7938,
+     "end": 9236,
+     "derivation": {
+      "ordinal": 7,
+      "utf8_start": 8125,
+      "utf8_end": 9459,
+      "token_start": 1872,
+      "token_end": 2183,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "4cb5027e00bc7ae265893f355ca6640fa9ad9bb485d67c16493db70c713a399f",
+      "model_tokens": 324
+     },
+     "vector_sha256": "7ba3763fa4a2bdef5e5723519585a9538d17ccc7de27bb0e172d1bb3e75cd66f"
+    },
+    {
+     "part_key": "body",
+     "start": 9033,
+     "end": 10307,
+     "derivation": {
+      "ordinal": 8,
+      "utf8_start": 9248,
+      "utf8_end": 10562,
+      "token_start": 2135,
+      "token_end": 2432,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\naprès 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "dd65e716ad382a56663807117212e8a9472369012478540059547e405b573b7f",
+      "model_tokens": 310
+     },
+     "vector_sha256": "9664dd62ad75c466bc7043d035aa6b76c1c14b56b5af0bf7dccd8608af380881"
+    },
+    {
+     "part_key": "body",
+     "start": 10112,
+     "end": 11385,
+     "derivation": {
+      "ordinal": 9,
+      "utf8_start": 10360,
+      "utf8_end": 11659,
+      "token_start": 2383,
+      "token_end": 2691,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 11176,
+     "end": 12479,
+     "derivation": {
+      "ordinal": 10,
+      "utf8_start": 11448,
+      "utf8_end": 12768,
+      "token_start": 2643,
+      "token_end": 2959,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 12321,
+     "end": 13619,
+     "derivation": {
+      "ordinal": 11,
+      "utf8_start": 12609,
+      "utf8_end": 13943,
+      "token_start": 2910,
+      "token_end": 3221,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "4cb5027e00bc7ae265893f355ca6640fa9ad9bb485d67c16493db70c713a399f",
+      "model_tokens": 324
+     },
+     "vector_sha256": "7ba3763fa4a2bdef5e5723519585a9538d17ccc7de27bb0e172d1bb3e75cd66f"
+    },
+    {
+     "part_key": "body",
+     "start": 13416,
+     "end": 14690,
+     "derivation": {
+      "ordinal": 12,
+      "utf8_start": 13732,
+      "utf8_end": 15046,
+      "token_start": 3173,
+      "token_end": 3470,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\naprès 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "dd65e716ad382a56663807117212e8a9472369012478540059547e405b573b7f",
+      "model_tokens": 310
+     },
+     "vector_sha256": "9664dd62ad75c466bc7043d035aa6b76c1c14b56b5af0bf7dccd8608af380881"
+    },
+    {
+     "part_key": "body",
+     "start": 14495,
+     "end": 15768,
+     "derivation": {
+      "ordinal": 13,
+      "utf8_start": 14844,
+      "utf8_end": 16143,
+      "token_start": 3421,
+      "token_end": 3729,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 15559,
+     "end": 16862,
+     "derivation": {
+      "ordinal": 14,
+      "utf8_start": 15932,
+      "utf8_end": 17252,
+      "token_start": 3681,
+      "token_end": 3997,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 16704,
+     "end": 18002,
+     "derivation": {
+      "ordinal": 15,
+      "utf8_start": 17093,
+      "utf8_end": 18427,
+      "token_start": 3948,
+      "token_end": 4259,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "4cb5027e00bc7ae265893f355ca6640fa9ad9bb485d67c16493db70c713a399f",
+      "model_tokens": 324
+     },
+     "vector_sha256": "7ba3763fa4a2bdef5e5723519585a9538d17ccc7de27bb0e172d1bb3e75cd66f"
+    },
+    {
+     "part_key": "body",
+     "start": 17799,
+     "end": 19073,
+     "derivation": {
+      "ordinal": 16,
+      "utf8_start": 18216,
+      "utf8_end": 19530,
+      "token_start": 4211,
+      "token_end": 4508,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\naprès 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "dd65e716ad382a56663807117212e8a9472369012478540059547e405b573b7f",
+      "model_tokens": 310
+     },
+     "vector_sha256": "9664dd62ad75c466bc7043d035aa6b76c1c14b56b5af0bf7dccd8608af380881"
+    },
+    {
+     "part_key": "body",
+     "start": 18878,
+     "end": 20151,
+     "derivation": {
+      "ordinal": 17,
+      "utf8_start": 19328,
+      "utf8_end": 20627,
+      "token_start": 4459,
+      "token_end": 4767,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 19942,
+     "end": 21245,
+     "derivation": {
+      "ordinal": 18,
+      "utf8_start": 20416,
+      "utf8_end": 21736,
+      "token_start": 4719,
+      "token_end": 5035,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 21087,
+     "end": 22385,
+     "derivation": {
+      "ordinal": 19,
+      "utf8_start": 21577,
+      "utf8_end": 22911,
+      "token_start": 4986,
+      "token_end": 5297,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? » La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.\n« Quelles routes sont fermées après la crue à Amiens ? » L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+      "model_input_sha256": "4cb5027e00bc7ae265893f355ca6640fa9ad9bb485d67c16493db70c713a399f",
+      "model_tokens": 324
+     },
+     "vector_sha256": "7ba3763fa4a2bdef5e5723519585a9538d17ccc7de27bb0e172d1bb3e75cd66f"
+    },
+    {
+     "part_key": "body",
+     "start": 22182,
+     "end": 23456,
+     "derivation": {
+      "ordinal": 20,
+      "utf8_start": 22700,
+      "utf8_end": 24014,
+      "token_start": 5249,
+      "token_end": 5546,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\naprès 20 heures.\n\n« Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ? » Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.\n\n« Les ferries corses sont-ils touchés par la grève du port de Marseille ? » La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.\n« Quelle production solaire annuelle Nantes attend-elle de ses écoles ? » La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.\n\n« De combien baisse le quota breton de sardines ? » Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.\n\n« Combien de volontaires participent à l'essai vaccinal de Lille ? » L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.\n« How often will the Toulouse satellite map industrial methane emissions? » Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+      "model_input_sha256": "dd65e716ad382a56663807117212e8a9472369012478540059547e405b573b7f",
+      "model_tokens": 310
+     },
+     "vector_sha256": "9664dd62ad75c466bc7043d035aa6b76c1c14b56b5af0bf7dccd8608af380881"
+    },
+    {
+     "part_key": "body",
+     "start": 23261,
+     "end": 24534,
+     "derivation": {
+      "ordinal": 21,
+      "utf8_start": 23812,
+      "utf8_end": 25111,
+      "token_start": 5497,
+      "token_end": 5805,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\njusqu'à lundi matin.\n\n« At what altitude does the avalanche warning in Savoie apply? » À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.\n\n« What was voter turnout in Rouen at 5 p.m.? » Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.\n« How many restored objects are shown when Bordeaux's maritime museum reopens? » Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.\n\n« How many homes should the Normandy offshore wind farm supply? » Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.\n\n« When will buses replace trains between Dijon and Dole? » The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.\n« How many York footbridges closed because of the River Ouse flood? » The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+      "model_input_sha256": "ed454e858d12ebe8fd29bb44adc88502f14acfeab0126eb7df16bbc3b3d2b70d",
+      "model_tokens": 321
+     },
+     "vector_sha256": "466b96c30a2956b86a4d374ee1e074936ae58055fa18116e2bf9a5b5dbe5ac55"
+    },
+    {
+     "part_key": "body",
+     "start": 24325,
+     "end": 25628,
+     "derivation": {
+      "ordinal": 22,
+      "utf8_start": 24900,
+      "utf8_end": 26220,
+      "token_start": 5757,
+      "token_end": 6073,
+      "overlap_tokens": 48,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nis required after 7 p.m.\n\n« On how many October Fridays will Bristol's sculpture show open late? » Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.\n\n« Will Belfast passenger sailings run during the Liverpool port strike? » The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.\n« How much electricity should the Leeds school roofs generate annually? » The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.\n\n« By what percentage does Cornwall's mackerel quota fall? » Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.\n\n« How many adults will join Oxford's dengue vaccine trial? » The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.\n« À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ? » The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.\n\n« Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+      "model_input_sha256": "5f6dfd78a33499cbed8eca27496c1670b8cc0db252bb822ae11404e76077b400",
+      "model_tokens": 329
+     },
+     "vector_sha256": "2d4bfb75993d764ad2f5b15aeae15086d889a4be3a0cb92f28152dc9d3bfbccc"
+    },
+    {
+     "part_key": "body",
+     "start": 25470,
+     "end": 26298,
+     "derivation": {
+      "ordinal": 23,
+      "utf8_start": 26061,
+      "utf8_end": 26904,
+      "token_start": 6024,
+      "token_end": 6229,
+      "overlap_tokens": 49,
+      "hard_start": false,
+      "hard_end": false,
+      "normalized_content_sha256": "f2755bc4d11352fe69e3f1d5be307b997f12346480ebc27bd30a309cc83d247a",
+      "full_title_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_used_sha256": "4e5526b581821a1ece26a5be08ea63a67a46d9e279656b6206761205841426a9",
+      "title_tokens": 9,
+      "title_truncated": false,
+      "model_input": "passage: Crue de la Somme à Amiens\n\nl'alerte avalanche des Cairngorms s'applique-t-elle ? » The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.\n\n« Quel est le taux de participation à Norwich à 18 heures ? » A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.\n« Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ? » The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.\n\n« Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ? » Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.\n\n« Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ? »",
+      "model_input_sha256": "12ce9590753693192f4caeb97ed39914b0db05eff23b9a1a1c4b635b3d67cd83",
+      "model_tokens": 217
+     },
+     "vector_sha256": "c540524413e058bfd762778e4b51a23ef98f58a8e60239023b0bcece8a795834"
+    }
+   ]
+  },
+  {
+   "id": "long-word-hard-end",
+   "segments": [
+    {
+     "part_key": "body",
+     "start": 0,
+     "end": 1915,
+     "derivation": {
+      "ordinal": 0,
+      "utf8_start": 0,
+      "utf8_end": 1915,
+      "token_start": 0,
+      "token_end": 384,
+      "overlap_tokens": 0,
+      "hard_start": false,
+      "hard_end": true,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model_input_sha256": "57c7e5a8592b9241cf842de5fd3228ef4b7ffe95fa55106428b4dd17ee082152",
+      "model_tokens": 388
+     },
+     "vector_sha256": "da8ba290945a464f349dbe4b9ce302a9167be64ae5d71c29d06017fdf26734bb"
+    },
+    {
+     "part_key": "body",
+     "start": 1635,
+     "end": 3001,
+     "derivation": {
+      "ordinal": 1,
+      "utf8_start": 1635,
+      "utf8_end": 3001,
+      "token_start": 328,
+      "token_end": 602,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": false,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model_input_sha256": "c79497228ed2df72d6dba2770006eb3a674b54b2470a544b6f3e6cde8659d3f9",
+      "model_tokens": 278
+     },
+     "vector_sha256": "76760e59d53a437c46e7ee364ec981da2ce5e99ffb50377b25b1a003bcf73f74"
+    },
+    {
+     "part_key": "body",
+     "start": 2725,
+     "end": 3657,
+     "derivation": {
+      "ordinal": 2,
+      "utf8_start": 2725,
+      "utf8_end": 3657,
+      "token_start": 546,
+      "token_end": 930,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "model_input_sha256": "b60698e1159f712bd4d88905068e43b63defd3d2610f91022659b0accef0bf9e",
+      "model_tokens": 389
+     },
+     "vector_sha256": "41df2f3756d00ab0a5590faae1128d8ee6472d0d55acce81adcc0504e387281a"
+    },
+    {
+     "part_key": "body",
+     "start": 3545,
+     "end": 4313,
+     "derivation": {
+      "ordinal": 3,
+      "utf8_start": 3545,
+      "utf8_end": 4313,
+      "token_start": 874,
+      "token_end": 1258,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "model_input_sha256": "06675e729ec47e7b9b78707d51c7f3d7c0a27f9311fb4742cad7fbe968f36a23",
+      "model_tokens": 389
+     },
+     "vector_sha256": "f1a5622caaf7e9aaea22f416dfc0c1dbfd504020b23777134d92c59f3a27236d"
+    },
+    {
+     "part_key": "body",
+     "start": 4201,
+     "end": 4969,
+     "derivation": {
+      "ordinal": 4,
+      "utf8_start": 4201,
+      "utf8_end": 4969,
+      "token_start": 1202,
+      "token_end": 1586,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "model_input_sha256": "06675e729ec47e7b9b78707d51c7f3d7c0a27f9311fb4742cad7fbe968f36a23",
+      "model_tokens": 389
+     },
+     "vector_sha256": "f1a5622caaf7e9aaea22f416dfc0c1dbfd504020b23777134d92c59f3a27236d"
+    },
+    {
+     "part_key": "body",
+     "start": 4857,
+     "end": 5625,
+     "derivation": {
+      "ordinal": 5,
+      "utf8_start": 4857,
+      "utf8_end": 5625,
+      "token_start": 1530,
+      "token_end": 1914,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": true,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "model_input_sha256": "06675e729ec47e7b9b78707d51c7f3d7c0a27f9311fb4742cad7fbe968f36a23",
+      "model_tokens": 389
+     },
+     "vector_sha256": "f1a5622caaf7e9aaea22f416dfc0c1dbfd504020b23777134d92c59f3a27236d"
+    },
+    {
+     "part_key": "body",
+     "start": 5513,
+     "end": 6001,
+     "derivation": {
+      "ordinal": 6,
+      "utf8_start": 5513,
+      "utf8_end": 6001,
+      "token_start": 1858,
+      "token_end": 2102,
+      "overlap_tokens": 56,
+      "hard_start": true,
+      "hard_end": false,
+      "normalized_content_sha256": "c6a9169cb240c7a625415c06a97c21bed3205889b97700897f25bc1c39ed033d",
+      "title_tokens": 0,
+      "title_truncated": false,
+      "model_input": "passage: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "model_input_sha256": "111af1146de65a8a2db12e3876d74bd770614f4dc3758efdd636fd49183fc7df",
+      "model_tokens": 249
+     },
+     "vector_sha256": "68bd2d10691d897df3c1dcaf0534668e22e206a682b7fb8029480e1da5afadc2"
+    }
+   ]
+  }
+ ],
+ "queries": [
+  {
+   "normalized": "Quelles routes sont fermées après la crue à Amiens ?",
+   "vector_sha256": "6a83e73a7598a7642570f53edaf8419399bd9d40d64cec4d73a6e4d6f0ef5c3f"
+  },
+  {
+   "normalized": "Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ?",
+   "vector_sha256": "5fae6da41c94c9c0ea4f1f8d355ea3ee052108fe0f83a9dd88c0dc5911d90975"
+  },
+  {
+   "normalized": "Les ferries corses sont-ils touchés par la grève du port de Marseille ?",
+   "vector_sha256": "ae22a4662813d0f61aec6a7cba6f35d974b5536b1d9fe5d5e9387dc1564d608b"
+  },
+  {
+   "normalized": "Quelle production solaire annuelle Nantes attend-elle de ses écoles ?",
+   "vector_sha256": "864a2b5ca851334656d2f15dedfa8efb8ef2019e535ae4129ff72a38bf9321ac"
+  },
+  {
+   "normalized": "De combien baisse le quota breton de sardines ?",
+   "vector_sha256": "6bc76fa88a4343241e40af4ed4668c9dc2fd66fd20efc1572461a95398646261"
+  },
+  {
+   "normalized": "Combien de volontaires participent à l'essai vaccinal de Lille ?",
+   "vector_sha256": "9b08dc0837b2e0c33077ab7bacf0e8e8b12e4d6912cb95b1b8b5c76f2b6afc2d"
+  },
+  {
+   "normalized": "How often will the Toulouse satellite map industrial methane emissions?",
+   "vector_sha256": "ad703fa430dbaa28e8df77dcffc393cfc424369dc3b9e65de21be172238686a2"
+  },
+  {
+   "normalized": "At what altitude does the avalanche warning in Savoie apply?",
+   "vector_sha256": "f3f33592f098e38918311a03c8833a314557419e50d1bbf20860bc92fa6226ff"
+  },
+  {
+   "normalized": "What was voter turnout in Rouen at 5 p.m.?",
+   "vector_sha256": "b8c583a21ee833a7801390d3509b39d1956e44b7a41506d4a75e10d8f9b4796c"
+  },
+  {
+   "normalized": "How many restored objects are shown when Bordeaux's maritime museum reopens?",
+   "vector_sha256": "77d14e944daf3f99f76770c10c5ae069c526991af78ed03bc00a6ee78d6ba3d7"
+  },
+  {
+   "normalized": "How many homes should the Normandy offshore wind farm supply?",
+   "vector_sha256": "ba318727fdf47586b7ff5e28c48f1e9aee62a94eb723f838ce2766a3996d6422"
+  },
+  {
+   "normalized": "When will buses replace trains between Dijon and Dole?",
+   "vector_sha256": "8279f793d2d95a024dc31a07a0555758f73d722c2d6eb091753b7ac31e32a596"
+  },
+  {
+   "normalized": "How many York footbridges closed because of the River Ouse flood?",
+   "vector_sha256": "2b05c28b0336bc8136932274e1fc679f8d1a3caf9249f4c50ad6edff5b2f7422"
+  },
+  {
+   "normalized": "On how many October Fridays will Bristol's sculpture show open late?",
+   "vector_sha256": "574818a6b589eab77528cd4d3285fb4c72f0f9e4f9e4200129854cf735d0c21b"
+  },
+  {
+   "normalized": "Will Belfast passenger sailings run during the Liverpool port strike?",
+   "vector_sha256": "6c2c9e594722a77113423c260470ddf9de83b3f8e8ed6cd2954a9d34a4e5b19c"
+  },
+  {
+   "normalized": "How much electricity should the Leeds school roofs generate annually?",
+   "vector_sha256": "8d21e786f6e353878b523e4549c721666f74408e6859a8cc01c6a3d22358e369"
+  },
+  {
+   "normalized": "By what percentage does Cornwall's mackerel quota fall?",
+   "vector_sha256": "e525e7d488cc0ed1290412a8f6a36fef2bd339fb639c33071ca9294df60d3b5f"
+  },
+  {
+   "normalized": "How many adults will join Oxford's dengue vaccine trial?",
+   "vector_sha256": "c73bebb4a78db4d05b0f012b6f272d5ed11b747442ea758c375d4ec2e41c5ee7"
+  },
+  {
+   "normalized": "À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ?",
+   "vector_sha256": "0e433e6095fd76c4eb371a7d0297ec9c0fe82d3c927ce9ca1470c8d1ef53e316"
+  },
+  {
+   "normalized": "Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ?",
+   "vector_sha256": "979a1792a765dada454e4a6ac47aba56bf96081591044b6f93a3b055a33df99d"
+  },
+  {
+   "normalized": "Quel est le taux de participation à Norwich à 18 heures ?",
+   "vector_sha256": "076e18f6a6301522a7d9bdc6a20d1ee7f8efb5c63300b1cfaccbb907e34d30a4"
+  },
+  {
+   "normalized": "Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ?",
+   "vector_sha256": "f156e6239e16a4e9f189c20ed9ee77e5c7d130e2ba4e3b0539c2195d3e707e4c"
+  },
+  {
+   "normalized": "Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ?",
+   "vector_sha256": "b8c31968998c0e96f7c13cb9d46ff9bdc8cc5adce34848cab33b8e779e7b09cb"
+  },
+  {
+   "normalized": "Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ?",
+   "vector_sha256": "4e5cad9cf8f23c7689e38acf246e5ce49e4dc189c8d31203a195ae0fdb46884d"
+  },
+  {
+   "normalized": "Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris Paris",
+   "vector_sha256": "94b8e29349b0befa8be360241806148ffe6e2eb840e6afcee0405acdd9cce0f5"
+  },
+  {
+   "refused": true
+  },
+  {
+   "normalized": "ferries\nCorse",
+   "vector_sha256": "4e9249f1d86b46a4d2d3db81367ae3387803b3f811f6d9a302b75a9f9483ead3"
+  },
+  {
+   "normalized": "Paris 🌞 étoiles",
+   "vector_sha256": "bd471eac6d7818e9e39668f0ef6b04c244e1756ff017122959357f882f8ef0f7"
+  },
+  {
+   "refused": true
+  },
+  {
+   "refused": true
+  }
+ ]
+}

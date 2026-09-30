@@ -1561,7 +1561,7 @@ type SearchRequest struct {
 	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
 	Profile *string `json:"profile,omitempty"`
 
-	// Query At most 8192 code points on the wire. The built-in default profile also accepts at most 256 tokens of its model's tokenizer, and the owner of a plugin vector space may set its own limit; a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
+	// Query At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
 	Query string `json:"query"`
 }
 

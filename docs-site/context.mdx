@@ -64,7 +64,7 @@ A named and versioned embedding representation whose dimensions, distance metric
 _Avoid_: Universal embedding, vector column
 
 **Space Owner**:
-The single ingestion plugin, or the engine for its built-in space, that declares a vector space and alone produces its document and query vectors. A space never changes owner; vectors from another model or template are a new space version.
+The single ingestion plugin (or, for the legacy E5 space generations built before core.ingest still serve, the engine) that declares a vector space and alone produces its document and query vectors. A space never changes owner; vectors from another model or template are a new space version.
 _Avoid_: Shared space, embedder
 
 **Served Space**:

@@ -1,4 +1,5 @@
-// Package processing executes validated local contributions under engine ownership.
+// Package processing runs the baseline and enrichment of Record Versions
+// through the pinned ingestion plugin, under engine ownership.
 package processing
 
 import (
@@ -11,38 +12,31 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-var ErrUnsupported = errors.New("segmentation_limit")
-
-type Input struct {
-	Organization string
-	Version      content.Version
-}
-
-// Processor is the shared contribution interface. Local execution needs no network.
-type Processor interface {
-	Process(context.Context, Input) (content.Segmentation, error)
-}
-
 type Indexer interface {
 	Index(context.Context, string, content.Version, content.Segmentation) error
 }
+
+// Service runs the baseline (segments, searchable by keyword) and the
+// enrichment (vectors) of each Version through the pinned ingestion plugin.
+// The engine segments and embeds nothing itself.
 type Service struct {
 	Content    content.Service
-	Processor  Processor
 	Retrieval  Indexer
-	Embedder   Embedder
 	Enrichment EnrichmentIndexer
 	// Observer receives processing outcomes for metrics; nil disables them.
 	Observer Observer
 	// Normalizer invokes the pinned external normalizer for routed Blobs
 	// before publication; nil normalizes nothing.
 	Normalizer Normalizer
-	// Plugin segments and embeds the Versions of Corpora whose routed
-	// generation a pinned ingestion plugin serves; the others keep the
-	// built-in Processor and Embedder. Nil when no ingestion plugin is pinned.
+	// Plugin segments and embeds through the pinned ingestion plugin.
 	Plugin *PluginDeriver
-	// Routing resolves a Corpus's generation; needed with Plugin.
+	// Routing resolves a Corpus's generation.
 	Routing GenerationRouter
+	// LegacySpace is the E5 space the engine served itself before the
+	// core.ingest plugin (THE-777). A Corpus still routed to a generation it
+	// serves gets its new Versions segmented by the pinned plugin, searchable
+	// by keyword, while their vectors wait for the Corpus's rebuild.
+	LegacySpace string
 }
 
 // GenerationRouter resolves the generation PostgreSQL routes a Corpus to.
@@ -51,34 +45,43 @@ type GenerationRouter interface {
 }
 
 // ErrSpaceUnowned reports a Corpus whose routed generation is served by a
-// space neither the built-in embedder nor the pinned ingestion plugin owns,
-// such as the space of a plugin no longer pinned. Its Versions wait, rather
-// than being segmented another way, until the owner is pinned again or the
-// Corpus is rebuilt.
+// space the pinned ingestion plugin does not own, such as the space of a
+// plugin no longer pinned. Its Versions wait, rather than being segmented
+// another way, until the owner is pinned again or the Corpus is rebuilt; a
+// Corpus served by LegacySpace waits for its rebuild for vectors only.
 var ErrSpaceUnowned = errors.New("served space has no pinned owner")
 
-// pluginRoute reports whether a Version goes through the pinned ingestion
-// plugin: its Corpus's routed generation is served by one of the plugin's
-// spaces. It is ErrSpaceUnowned when no pinned owner serves that space.
-func (s Service) pluginRoute(ctx context.Context, org string, v content.Version) (bool, string, content.Generation, error) {
-	if s.Routing == nil {
-		return false, "", content.Generation{}, nil
+// route is how a Version's Corpus is served.
+type route struct {
+	corpusID   string
+	generation content.Generation
+	// legacy: the routed generation is served by LegacySpace.
+	legacy bool
+}
+
+// route resolves a Version's routed generation: served by one of the pinned
+// plugin's spaces, or by LegacySpace; ErrSpaceUnowned otherwise.
+func (s Service) route(ctx context.Context, org string, v content.Version) (route, error) {
+	if s.Plugin == nil || s.Routing == nil {
+		return route{}, ErrSpaceUnowned
 	}
 	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
 	if err != nil {
-		return false, "", content.Generation{}, err
+		return route{}, err
 	}
 	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
 	if err != nil {
-		return false, "", g, err
+		return route{}, err
 	}
-	if s.Plugin != nil && s.Plugin.Owns(g.SpaceID) {
-		return true, r.Source.CorpusID, g, nil
+	out := route{corpusID: r.Source.CorpusID, generation: g}
+	switch {
+	case s.Plugin.Owns(g.SpaceID):
+		return out, nil
+	case s.LegacySpace != "" && g.SpaceID == s.LegacySpace:
+		out.legacy = true
+		return out, nil
 	}
-	if s.Embedder != nil && g.SpaceID != s.Embedder.Space().ID {
-		return false, r.Source.CorpusID, g, ErrSpaceUnowned
-	}
-	return false, r.Source.CorpusID, g, nil
+	return out, ErrSpaceUnowned
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names)
@@ -130,28 +133,17 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	started := time.Now()
-	plugin, corpusID, g, err := s.pluginRoute(ctx, org, v)
 	var result content.Segmentation
-	switch {
-	case err != nil:
-	case plugin:
-		// The plugin's segmentation and vectors are stored together; the
-		// enrichment phase attaches the vectors from the stored artifacts.
-		result, _, err = s.Plugin.Derive(ctx, org, corpusID, v, g)
-		if errors.Is(err, content.ErrIngestionRefused) {
-			slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
-			s.outcome("baseline", "blocked", receiptID, v, started, "ingestion_refused")
-			return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "ingestion_refused", true)
-		}
-	default:
-		result, err = s.Processor.Process(ctx, Input{Organization: org, Version: v})
-		if errors.Is(err, ErrUnsupported) {
-			s.outcome("baseline", "blocked", receiptID, v, started, "segmentation_limit")
-			return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "segmentation_limit", true)
-		}
-		if err == nil {
-			err = s.Content.SaveSegmentation(ctx, org, v, result)
-		}
+	rt, err := s.route(ctx, org, v)
+	if err == nil {
+		// The segments alone, so the Version is searchable by keyword
+		// whatever the embedding backend's state; enrichment adds vectors.
+		result, err = s.Plugin.Segment(ctx, org, rt.corpusID, v, rt.generation)
+	}
+	if errors.Is(err, content.ErrIngestionRefused) {
+		slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
+		s.outcome("baseline", "blocked", receiptID, v, started, "ingestion_refused")
+		return s.Content.BaselineProgress(ctx, org, v.ID, "blocked", "ingestion_refused", true)
 	}
 	if err == nil {
 		err = s.Retrieval.Index(ctx, org, v, result)

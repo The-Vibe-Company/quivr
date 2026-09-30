@@ -4,12 +4,13 @@ description: "The plugin manifest, routes, schemas and fixtures"
 ---
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.7.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.8.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
 connector attachments, `0.5.0` the connector push mode (`receive`), and
-`0.6.0` the `ingestion` Contribution and `0.7.0` the `retrieval` Contribution. JSON Schemas in this
+`0.6.0` the `ingestion` Contribution, `0.7.0` the `retrieval` Contribution, and
+`0.8.0` segment-only `segment_and_embed` requests (`spaces: []`). JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: ADR 0001 (`docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md`),
 ADR 0002 (`docs/adr/0002-record-version-identity-from-submitted-input.md`)
@@ -68,9 +69,9 @@ are **reserved** (declare `retrieval` for search). A manifest that declares them
 ### Plugin API versions {#plugin-api-versions}
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.7.0` and still serves every `0.1` to `0.6` plugin unchanged: a
+implements `0.8.0` and still serves every `0.1` to `0.7` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0` or `0.7.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0` or `0.8.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
@@ -557,6 +558,13 @@ points, `vectors` with exactly one vector per requested space, and optionally
 excerpts keep the source text) and `provenance` (stored, never interpreted).
 The same idempotency key must yield the same answer: rebuilds reuse stored
 segments and vectors, and a different answer for the same Version is refused.
+Since 0.8, `spaces` may be empty: the answer then carries the segments with
+`vectors: {}`. The core asks a plugin whose `plugin_api` range admits 0.8 for
+the segments alone when a Version arrives, so it is searchable by keyword
+whatever the embedding backend's state, and for the vectors at enrichment; the
+segments, lexical text and provenance must be the same both times, or the
+Version is blocked (`derivation_conflict`). A plugin limited to 0.6 is asked
+once, with the spaces.
 
 **`embed_query`** (`ingestion-embed-query-request.schema.json`) carries the
 `space` and a `query` (`modality: text`, `text`) and answers `{"vector"}`
@@ -855,6 +863,7 @@ When the manifest declares `ingestion`, it adds checks with
 | `fixtures` | The normative `fixtures/ingestion/*.json` whose configuration the plugin accepts, plus the plugin's own ingestion fixtures, build valid requests. |
 | `invoke` (per fixture) | The answer is a 200 within `timeout_ms` that passes `CheckSegmentAndEmbedOutput` and the expected segments (`unexpected_segments`). |
 | `replay` (per fixture) | The same `idempotency_key` with a new `invocation_id` yields the same answer (`nondeterministic_output`). |
+| `segments_only` (per fixture) | When the `plugin_api` range admits 0.8: the request with `spaces: []` yields the same segments, lexical text and provenance as the full request, without vectors (`nondeterministic_output`). |
 | `embed_query` (per fixture and space) | Each fixture query is answered within `query_timeout_ms` with a vector `CheckEmbedQueryOutput` accepts, the same one twice. |
 | `invalid_request` | A non-JSON body, an unknown field, an undeclared space and the normative invalid requests in `fixtures/requests/ingestion/` are refused on both routes with a terminal error envelope. |
 | `credentials` | No value of a declared secret set in the runner's environment (8 characters or more) appears in an answer or the plugin's output (`credential_leak`). |

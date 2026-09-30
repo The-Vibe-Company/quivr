@@ -3,17 +3,12 @@ package processing
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
-type Embedder interface {
-	Embed(context.Context, string) ([]float32, error)
-	Space() content.VectorSpace
-	Producer() string
-}
 type EnrichmentIndexer interface {
 	IndexEmbeddings(context.Context, string, content.Version, content.Segmentation, []content.EmbeddingData) error
 }
@@ -35,6 +30,9 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 		state, code := "retrying", "enrichment_unavailable"
 		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrIngestionRefused) {
 			state, code = "blocked", "derivation_conflict"
+			// Name why: a plugin whose segments with vectors differ from the
+			// segments it returned alone at baseline, or another refusal.
+			slog.Warn("enrichment blocked", "component", "worker", "version_id", v.ID, "error", err.Error())
 		}
 		s.outcome("enrichment", state, receiptID, v, started, code)
 		_ = s.Content.EnrichmentProgress(ctx, org, v.ID, state, code)
@@ -47,39 +45,18 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	return nil
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) error {
-	plugin, corpusID, g, err := s.pluginRoute(ctx, org, v)
+	rt, err := s.route(ctx, org, v)
+	if err == nil && rt.legacy {
+		// The legacy E5 space has no pinned owner: the Corpus's rebuild onto
+		// the plugin's spaces embeds this Version, then this retry attaches.
+		err = ErrSpaceUnowned
+	}
 	if err != nil {
 		return err
 	}
-	if plugin {
-		seg, data, err := s.Plugin.Derive(ctx, org, corpusID, v, g)
-		if err != nil {
-			return err
-		}
-		return s.Enrichment.IndexEmbeddings(ctx, org, v, seg, data)
-	}
-	seg, err := s.Processor.Process(ctx, Input{Organization: org, Version: v})
+	seg, data, err := s.Plugin.Derive(ctx, org, rt.corpusID, v, rt.generation)
 	if err != nil {
 		return err
-	}
-	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
-	if err != nil {
-		return err
-	}
-	data := make([]content.EmbeddingData, 0, len(seg.Segments))
-	for _, p := range seg.Segments {
-		input := content.EmbeddingInput(org, r.Source.CorpusID, v, seg, p, s.Embedder.Space(), s.Embedder.Producer())
-		artifact, vector, err := s.Content.LoadEmbedding(ctx, org, input.DerivationID)
-		if errors.Is(err, corpus.ErrNotFound) {
-			vector, err = s.Embedder.Embed(ctx, p.Derivation.ModelInput)
-			if err == nil {
-				artifact, err = s.Content.SaveEmbedding(ctx, input, s.Embedder.Space(), vector)
-			}
-		}
-		if err != nil {
-			return err
-		}
-		data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
 	}
 	return s.Enrichment.IndexEmbeddings(ctx, org, v, seg, data)
 }

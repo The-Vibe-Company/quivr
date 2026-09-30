@@ -1,16 +1,17 @@
 """Ingestion plugin step of the local verification harness (THE-776).
 
-Pins the Go SDK sample ingestion plugin (sdks/go/examples/hash-embedder:
-paragraph segments embedded by hashing their words in two vector spaces)
-beside the stack's other pins, with its small space served and its large
-space for evaluation, restarts the API and the worker on that pin, and runs
-TestIngestionPlugin through the public API: a Corpus built before the pin
-keeps the built-in space until it is rebuilt, the rebuild moves it to the
-plugin's named spaces, and search then encodes queries with the plugin.
-The stack's configuration and processes are restored afterwards, even on
-failure.
+TestIngestionPluginBefore first ingests a Corpus through the stack's
+core.ingest. The step then pins the Go SDK sample ingestion plugin
+(sdks/go/examples/hash-embedder: paragraph segments embedded by hashing their
+words in two vector spaces) in place of core.ingest, a deployment pins one
+ingestion plugin, with its small space served and its large space for
+evaluation, restarts the API and the worker on that pin, and runs
+TestIngestionPlugin through the public API: the Corpus keeps core.ingest's
+space until it is rebuilt, the rebuild moves it to the plugin's named spaces,
+and search then encodes queries with the plugin. The stack's configuration
+and processes are restored afterwards, even on failure.
 """
-import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request
+import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
 import ports
 
@@ -31,6 +32,8 @@ def healthy(port):
 def verify(stack):
     """Pin the sample ingestion plugin, run its acceptance test, then restore the stack's pins."""
     directory = stack.directory / 'ingestion-plugin'
+    run = {'QUIVR_TEST_INGESTION_PLUGIN': '1', 'QUIVR_TEST_INGESTION_RUN': uuid.uuid4().hex}
+    stack.tests('^TestIngestionPluginBefore$', run)
     directory.mkdir(exist_ok=True)
     binary = directory / 'hash-embedder'
     subprocess.run([GO, 'build', '-o', str(binary), './examples/hash-embedder'], cwd=ROOT / 'sdks' / 'go', check=True)
@@ -47,7 +50,8 @@ def verify(stack):
             time.sleep(.1)
         for name, text in configs.items():
             cfg = json.loads(text)
-            cfg['plugins'] = cfg.get('plugins', []) + [{'manifest': str(SAMPLE / 'quivr-plugin.yaml'), 'endpoint': f'http://127.0.0.1:{port}', 'spaces': SPACES}]
+            others = [p for p in cfg.get('plugins', []) if not p['manifest'].endswith('/core-ingest/quivr-plugin.yaml')]
+            cfg['plugins'] = others + [{'manifest': str(SAMPLE / 'quivr-plugin.yaml'), 'endpoint': f'http://127.0.0.1:{port}', 'spaces': SPACES}]
             path = stack.directory / name
             path.write_text(json.dumps(cfg))
             path.chmod(0o600)
@@ -55,7 +59,7 @@ def verify(stack):
         # while the plugin's spaces are registered.
         stack.stop_processes()
         stack.start_processes()
-        stack.tests('^TestIngestionPlugin$', {'QUIVR_TEST_INGESTION_PLUGIN': '1'})
+        stack.tests('^TestIngestionPlugin$', run)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

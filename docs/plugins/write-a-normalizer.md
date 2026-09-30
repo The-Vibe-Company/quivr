@@ -153,8 +153,8 @@ What Quivr accepts:
 - **Determinism.** The same input must give the same output. Quivr may call the
   plugin again for the same Version, and `quivr plugin test` replays every fixture.
 
-What Quivr indexes per Record Version (a Version beyond these limits is
-published but not searchable, with `segmentation_limit`):
+What Quivr indexes per Record Version with the core.ingest plugin (a Version
+beyond these limits is published but not searchable, with `ingestion_refused`):
 
 | Limit | Value |
 | --- | --- |

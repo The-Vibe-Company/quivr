@@ -39,7 +39,7 @@
           },
           "vectors": {
             "type": "object",
-            "minProperties": 1,
+            "minProperties": 0,
             "maxProperties": 8,
             "propertyNames": {
               "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
@@ -53,7 +53,7 @@
               },
               "description": "One vector, exactly as many numbers as the space's dimensions. Values must be finite as 32-bit floats; under the cosine metric the vector must not be all zeros."
             },
-            "description": "One vector per requested space, by space id."
+            "description": "One vector per requested space, by space id; empty when the request asks for no space (since Plugin API 0.8)."
           },
           "lexical_text": {
             "type": "string",

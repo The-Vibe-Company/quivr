@@ -17,6 +17,8 @@ import (
 // Ingester segments and embeds Record Versions for the vector spaces the
 // manifest declares (the ingestion Contribution, Plugin API 0.6). Both
 // methods must be deterministic: the same request yields the same answer.
+// Since Plugin API 0.8 a request may name no space: the core asks for the
+// segments first and for the vectors later, and the segments must match.
 type Ingester interface {
 	// SegmentAndEmbed cuts the request's Parts into segments, in reading
 	// order, each with one vector per requested space.
@@ -46,8 +48,8 @@ type IngestRequest struct {
 	// Language is a BCP 47 hint, empty when the core knows none.
 	Language string       `json:"language,omitempty"`
 	Parts    []IngestPart `json:"parts"`
-	// Spaces are the declared spaces the deployment enables: every segment
-	// carries one vector for each.
+	// Spaces are the declared spaces to embed: every segment carries one
+	// vector for each. Empty (Plugin API 0.8) asks for the segments only.
 	Spaces []string `json:"spaces"`
 	logger *slog.Logger
 }
@@ -213,7 +215,11 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 	for _, part := range req.Parts {
 		lengths[part.Key] = utf8.RuneCountInString(part.Text)
 	}
-	for i, s := range segments {
+	for i := range segments {
+		if segments[i].Vectors == nil {
+			segments[i].Vectors = map[string][]float32{}
+		}
+		s := segments[i]
 		n, ok := lengths[s.PartKey]
 		if !ok || s.Start < 0 || s.Start > s.End || s.End > n {
 			return nil, fmt.Sprintf("segment %d: [%d, %d) is not inside Part %q", i, s.Start, s.End, s.PartKey)

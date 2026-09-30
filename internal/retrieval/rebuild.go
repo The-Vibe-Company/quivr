@@ -47,29 +47,27 @@ type RebuildStore interface {
 	ConfirmCancel(ctx context.Context, org, operationID string) error
 }
 
-// RebuildContent reads canonical Versions and verified durable Embedding Artifacts.
+// RebuildContent reads canonical Versions.
 type RebuildContent interface {
 	Version(ctx context.Context, scope corpus.Scope, recordID, versionID string) (content.Version, error)
-	LoadEmbedding(ctx context.Context, org, derivation string) (content.Embedding, []float32, error)
 }
 
-// ArtifactIdentity names the pinned vector space and producer used to derive
-// Embedding Artifact identities. It deliberately cannot run inference.
-type ArtifactIdentity interface {
-	Space() content.VectorSpace
-	Producer() string
-}
-
-// Segmenter re-derives a Version's segmentation locally from canonical text.
-type Segmenter func(ctx context.Context, org string, v content.Version) (content.Segmentation, error)
-
-// SpaceDeriver derives a Version's segmentation and its vectors in the
-// spaces of a generation whose served space a pinned ingestion plugin owns.
-// It reuses the stored segmentation and artifacts and calls the plugin only
-// for what is missing; a terminal refusal is content.ErrIngestionRefused.
+// SpaceDeriver derives a Version's segmentation and its vectors through the
+// pinned ingestion plugin. It reuses the stored segmentation and artifacts
+// and calls the plugin only for what is missing; a terminal refusal is
+// content.ErrIngestionRefused.
 type SpaceDeriver interface {
 	Owns(space string) bool
+	// Segment returns the Version's segmentation alone.
+	Segment(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, error)
+	// Derive returns the segmentation and its vectors in the generation's
+	// spaces the plugin owns.
 	Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error)
+}
+
+// GenerationRouter resolves the generation a Corpus is routed to.
+type GenerationRouter interface {
+	Generation(ctx context.Context, org, corpusID string) (content.Generation, error)
 }
 
 // rebuildBatch bounds the work of one step so progress is durable and
@@ -82,11 +80,11 @@ type Rebuilder struct {
 	Store      RebuildStore
 	Content    RebuildContent
 	Projection Projection
-	Segment    Segmenter
-	Artifacts  ArtifactIdentity
-	// Plugin derives targets served by a pinned ingestion plugin's space; nil
-	// when none is pinned.
+	// Plugin segments and embeds through the pinned ingestion plugin, which
+	// must own the target's served space.
 	Plugin SpaceDeriver
+	// Routing resolves the generation a Corpus is routed to during the rebuild.
+	Routing GenerationRouter
 }
 
 // terminal is a deterministic failure that retrying cannot repair.
@@ -157,30 +155,23 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	if err != nil {
 		return err
 	}
+	if r.Plugin == nil || !r.Plugin.Owns(target.Generation.SpaceID) {
+		return terminal{failure: operations.Error{Code: "unsupported_vector_space", Message: "the pinned ingestion plugin does not own the target generation's vector space"}}
+	}
 	var seg content.Segmentation
 	var data []content.EmbeddingData
-	if r.Plugin != nil && r.Plugin.Owns(target.Generation.SpaceID) {
+	if c.VectorsRequired {
 		seg, data, err = r.Plugin.Derive(ctx, org, corpusID, v, target.Generation)
-		switch {
-		case errors.Is(err, content.ErrIngestionRefused):
-			return terminal{failure: operations.Error{Code: "ingestion_refused", Message: "the ingestion plugin refuses a Version of the Corpus; its log names why"}}
-		case errors.Is(err, content.ErrConflict):
-			return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "the stored segmentation differs from canonical text"}}
-		case err != nil:
-			return err
-		}
 	} else {
-		seg, err = r.Segment(ctx, org, v)
-		if errors.Is(err, content.ErrInvalid) || errors.Is(err, content.ErrConflict) {
-			return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "segmentation cannot be reconstructed from canonical text"}}
-		}
-		if err != nil {
-			return err
-		}
-		data, err = r.vectors(ctx, org, corpusID, v, seg, target.Generation, c.VectorsRequired)
-		if err != nil {
-			return err
-		}
+		seg, data, err = r.lexicalFirst(ctx, org, corpusID, v, target.Generation)
+	}
+	switch {
+	case errors.Is(err, content.ErrIngestionRefused):
+		return terminal{failure: operations.Error{Code: "ingestion_refused", Message: "the ingestion plugin refuses a Version of the Corpus; its log names why"}}
+	case errors.Is(err, content.ErrConflict):
+		return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "the stored segmentation differs from canonical text"}}
+	case err != nil:
+		return err
 	}
 	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, c.SourceNamespace, v, seg); err != nil {
 		return err
@@ -201,35 +192,20 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	return err
 }
 
-// vectors loads every segment's verified stored vector. It never calls
-// inference: when the routed generation serves vectors for this Version, a
-// missing or corrupt artifact fails the rebuild; otherwise the Version stays
-// lexical-only until its own enrichment completes.
-func (r Rebuilder) vectors(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, g content.Generation, required bool) ([]content.EmbeddingData, error) {
-	space := r.Artifacts.Space()
-	if space.ID != g.SpaceID {
-		return nil, terminal{failure: operations.Error{Code: "unsupported_vector_space", Message: "target generation vector space is not the pinned space"}}
+// lexicalFirst covers a Version whose vectors the routed generation does not
+// serve. When the target keeps the routed generation's space, the Version is
+// still waiting for its own enrichment, which attaches its vectors after the
+// cutover: the rebuild covers it with its segments alone and never waits for
+// an embedding backend. A target of another space gets the Version's vectors
+// derived through the plugin, reusing any stored ones.
+func (r Rebuilder) lexicalFirst(ctx context.Context, org, corpusID string, v content.Version, target content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	routed, err := r.Routing.Generation(ctx, org, corpusID)
+	if err != nil {
+		return content.Segmentation{}, nil, err
 	}
-	data := make([]content.EmbeddingData, 0, len(seg.Segments))
-	for _, p := range seg.Segments {
-		input := content.EmbeddingInput(org, corpusID, v, seg, p, space, r.Artifacts.Producer())
-		artifact, vector, err := r.Content.LoadEmbedding(ctx, org, input.DerivationID)
-		switch {
-		case err == nil && artifact.SpaceID == g.SpaceID:
-			data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
-			continue
-		case err == nil, errors.Is(err, content.ErrConflict), errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrArtifactCorrupt):
-			if required {
-				return nil, terminal{failure: operations.Error{Code: "embedding_artifact_corrupt", Message: "stored embedding artifact failed verification"}}
-			}
-		case errors.Is(err, corpus.ErrNotFound), errors.Is(err, content.ErrArtifactMissing):
-			if required {
-				return nil, terminal{failure: operations.Error{Code: "embedding_artifact_unavailable", Message: "stored embedding artifact is missing"}}
-			}
-		default:
-			return nil, err
-		}
-		return nil, nil
+	if routed.SpaceID != target.SpaceID {
+		return r.Plugin.Derive(ctx, org, corpusID, v, target)
 	}
-	return data, nil
+	seg, err := r.Plugin.Segment(ctx, org, corpusID, v, target)
+	return seg, nil, err
 }

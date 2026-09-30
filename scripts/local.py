@@ -9,6 +9,7 @@ import normalizer_plugin
 import ports
 import subscription_plugin
 import connector_plugin
+import core_ingest_plugin
 import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
@@ -93,7 +94,9 @@ class Stack:
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
         tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
         tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
-        cfg=dict(tei_url='http://'+tei,tokenizer=prepare_tokenizer(),weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
+        # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
+        s['tei_url']='http://'+tei;self.save()
+        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
@@ -136,7 +139,7 @@ class Stack:
             # evaluator stays installed for the notification-mechanics acceptance tests.
             plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self),monitoring_fixture_evaluator=True)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
-        (self.directory/'tokenizer-provenance.json').write_text((ROOT/'internal/processing/profile.json').read_text())
+        (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
         worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps({**cfg,'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
@@ -266,10 +269,10 @@ class Stack:
         s=self.state
         env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         self.go_test(['-count=1','-run',pattern,'./tests/acceptance'],env,'acceptance')
-    def go_test(self,args,env,name):
+    def go_test(self,args,env,name,cwd=ROOT):
         """go test with its text in <name>.log; failed tests and every test's duration reach the report (THE-755)."""
         record=getattr(self,'steps',None) and self.steps.record_tests
-        try:results=gotest.run(GO,args,ROOT,env,self.directory/(name+'.log'),self.directory/(name+'.jsonl'))
+        try:results=gotest.run(GO,args,cwd,env,self.directory/(name+'.log'),self.directory/(name+'.jsonl'))
         except gotest.Failed as failed:
             if record and failed.results:record(failed.results.tests())
             raise
@@ -484,6 +487,8 @@ def parts():
         'core':setup+[
             acceptance('core_acceptance','TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch'),
             step('adapter_integration',adapters),
+            # The core.ingest plugin reproduces the engine's former segments and vectors, and is certified.
+            step('core_ingest_plugin',core_ingest_plugin.verify),
             step('ingestion_outages',Stack.ingestion_outages),
             step('embedding_outage',verify_embedding_outage),
             step('rebuild_recovery',verify_rebuild_recovery),

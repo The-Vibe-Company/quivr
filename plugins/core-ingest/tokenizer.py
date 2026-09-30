@@ -1,9 +1,8 @@
-"""Persistent pinned tokenizer (THE-675). stdout is protocol JSON, never diagnostics or source logs.
+"""Persistent pinned tokenizer of the core.ingest plugin. stdout is protocol JSON, never diagnostics or source logs.
 
-Encodes exactly like scripts/token_offsets.py (the pinned reference producer), but loads the
-tokenizer once: one JSON request per stdin line, one JSON response per stdout line. The first
-line is "ready" once the pinned tokenizer is loaded. A request the reference would reject gets
-"null"; any framing problem ends the process. Parity with the reference is enforced by tests.
+Loads the pinned tokenizer once (checking the tokenizers version and the tokenizer.json digest): one
+JSON request per stdin line, one JSON response per stdout line. The first line is "ready" once the
+tokenizer is loaded. A request over the batch limits gets "null"; any framing problem ends the process.
 """
 import hashlib, json, pathlib, sys
 import tokenizers

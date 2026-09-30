@@ -1,0 +1,52 @@
+# First-party ingestion plugin: the token-window segmentation and multilingual
+# E5-small embedding the engine ran itself before THE-777, unchanged. Every
+# stack pins it unless another ingestion plugin is pinned. Check it with:
+# quivr plugin inspect . && quivr plugin test --fixture <fixture with the
+# pin configuration> . (it needs TEI and the pinned tokenizer; see README.md).
+id: core.ingest
+version: 1.0.0
+description: Token windows of the pinned multilingual E5 tokenizer, embedded with multilingual-e5-small through the deployment's TEI.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.8.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      core.ingest.e5-small:
+        version: "1"
+        model: intfloat/multilingual-e5-small
+        dimensions: 384
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+    # One TEI request per segment, as before: a Version of 256 windows stays
+    # within the worker's 30 s activity.
+    timeout_ms: 25000
+    query_timeout_ms: 5000
+    limits:
+      max_segments: 256
+# Installer configuration: set in the plugin pin's `configuration`.
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    required: [tei_url, tokenizer]
+    properties:
+      tei_url:
+        type: string
+        pattern: "^https?://"
+        description: Base URL of the deployment's text-embeddings-inference service serving the pinned multilingual-e5-small.
+      tokenizer:
+        type: object
+        additionalProperties: false
+        required: [python, model]
+        description: The pinned tokenizer, as scripts/prepare_tokenizer.py prepares it.
+        properties:
+          python:
+            type: string
+            description: Python interpreter with tokenizers 0.23.2 installed.
+          model:
+            type: string
+            description: Path of the pinned tokenizer.json.
+run:
+  command: [go, run, .]

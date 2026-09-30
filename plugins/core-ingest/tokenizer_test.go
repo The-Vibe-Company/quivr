@@ -1,18 +1,15 @@
-package tokenizer
+package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 )
 
 // fakeServer speaks the persistent protocol without the pinned tokenizer: each
@@ -38,28 +35,24 @@ func fake(t *testing.T, source string) *Server {
 	if err != nil {
 		t.Skip("python3 required")
 	}
-	script, err := filepath.Abs("../../../scripts/token_offsets.py")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &Server{Config: Config{Python: python, Script: script, Model: "unused"}, source: source, timeout: 2 * time.Second, maxResponse: 1024}
+	s := &Server{Config: TokenizerConfig{Python: python, Model: "unused"}, source: source, timeout: 2 * time.Second, maxResponse: 1024}
 	t.Cleanup(s.Close)
 	return s
 }
 
-func encodeText(s *Server, ctx context.Context, text string) ([]processing.Encoding, error) {
-	return s.Encode(ctx, []processing.TokenInput{{Text: text}})
+func encodeText(s *Server, ctx context.Context, text string) ([]Encoding, error) {
+	return s.Encode(ctx, []TokenInput{{Text: text}})
 }
 
 func TestServerRoundTripsBatchesOnOneProcess(t *testing.T) {
 	s := fake(t, fakeServer)
 	for i := range 5 {
 		text := fmt.Sprintf("query %d\nwith newline", i)
-		got, err := s.Encode(context.Background(), []processing.TokenInput{{Text: text}, {Text: "query: " + text, Special: true}})
+		got, err := s.Encode(context.Background(), []TokenInput{{Text: text}, {Text: "query: " + text, Special: true}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []processing.Encoding{{Tokens: len(text), Offsets: [][2]int{{0, len(text)}}}, {Tokens: len(text) + 7, Offsets: [][2]int{{0, len(text) + 7}}}}
+		want := []Encoding{{Tokens: len(text), Offsets: [][2]int{{0, len(text)}}}, {Tokens: len(text) + 7, Offsets: [][2]int{{0, len(text) + 7}}}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatal("unexpected encodings", got)
 		}
@@ -144,12 +137,7 @@ func TestServerConcurrentCallersGetTheirOwnResults(t *testing.T) {
 	}
 }
 
-func TestServerRefusesUnidentifiedReferenceAndStartupFailure(t *testing.T) {
-	s := fake(t, fakeServer)
-	s.Config.Script = filepath.Join(t.TempDir(), "missing.py")
-	if _, err := encodeText(s, context.Background(), "ok"); err == nil || s.spawns != 0 {
-		t.Fatal("unpinned configuration must fail before spawning", err)
-	}
+func TestServerReportsStartupFailure(t *testing.T) {
 	broken := fake(t, "import sys; sys.exit(1)")
 	if _, err := encodeText(broken, context.Background(), "ok"); err == nil {
 		t.Fatal("startup failure must be reported")
@@ -162,7 +150,7 @@ func TestServerRefusesUnidentifiedReferenceAndStartupFailure(t *testing.T) {
 
 func TestServerKeepsGoSideLimits(t *testing.T) {
 	s := fake(t, fakeServer)
-	if _, err := s.Encode(context.Background(), make([]processing.TokenInput, 513)); err != processing.ErrUnsupported || s.spawns != 0 {
+	if _, err := s.Encode(context.Background(), make([]TokenInput, 513)); err != ErrUnsupported || s.spawns != 0 {
 		t.Fatal("batch limit", err)
 	}
 }
@@ -179,14 +167,14 @@ func TestServerClosedIsUnavailable(t *testing.T) {
 }
 
 func TestServerPinsTheProcessingProfile(t *testing.T) {
-	var profile struct {
+	var pinned struct {
 		Implementation string `json:"implementation_version"`
 		Tokenizer      string `json:"tokenizer_sha256"`
 	}
-	if err := json.Unmarshal(processing.Profile, &profile); err != nil {
+	if err := json.Unmarshal(profile, &pinned); err != nil {
 		t.Fatal(err)
 	}
-	for _, pin := range []string{"TOKENIZERS_VERSION = '" + profile.Implementation + "'", "TOKENIZER_SHA256 = '" + profile.Tokenizer + "'"} {
+	for _, pin := range []string{"TOKENIZERS_VERSION = '" + pinned.Implementation + "'", "TOKENIZER_SHA256 = '" + pinned.Tokenizer + "'"} {
 		if !strings.Contains(serverSource, pin) {
 			t.Fatal("persistent tokenizer does not pin", pin)
 		}

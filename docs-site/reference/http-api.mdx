@@ -5906,7 +5906,7 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `query` | string | yes | At most 8192 code points on the wire. The built-in default profile also accepts at most 256 tokens of its model's tokenizer, and the owner of a plugin vector space may set its own limit; a longer query is refused with 422 query_too_long, whose message names the limit, never truncated. Minimum length `1`. Maximum length `8192`. |
+| `query` | string | yes | At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated. Minimum length `1`. Maximum length `8192`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
 | `profile` | string |  | A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile. Default `default`. Pattern `^[a-z][a-z0-9_]{0,31}$`. |
@@ -5937,7 +5937,7 @@ properties:
     type: string
     minLength: 1
     maxLength: 8192
-    description: At most 8192 code points on the wire. The built-in default profile also accepts at most 256 tokens of its model's tokenizer, and the owner of a plugin vector space may set its own limit; a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
+    description: At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
   corpus_ids:
     type: array
     items:

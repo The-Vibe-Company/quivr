@@ -23,7 +23,8 @@ import (
 // ingestion-missing-vector, ingestion-nondeterministic, ingestion-split
 // (another segmentation than the fixture expects), ingestion-query-dimensions,
 // ingestion-query-nondeterministic, ingestion-secret-leak (echoes the value of
-// the first declared secret) and accept-invalid.
+// the first declared secret), ingestion-segments-only-split (other segments
+// when the request asks for no space) and accept-invalid.
 func ingestionRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write func(http.ResponseWriter, int, any)) {
 	declared := m.Contributions.Ingestion.Spaces
 	refuse := func(w http.ResponseWriter, message string) {
@@ -63,7 +64,7 @@ func ingestionRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 				continue
 			}
 			bounds := [][2]int{{0, n}}
-			if mode == "ingestion-split" && n > 1 {
+			if (mode == "ingestion-split" || mode == "ingestion-segments-only-split" && len(request.Spaces) == 0) && n > 1 {
 				bounds = [][2]int{{0, n / 2}, {n / 2, n}}
 			}
 			for _, b := range bounds {

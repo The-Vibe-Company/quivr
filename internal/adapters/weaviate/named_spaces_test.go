@@ -168,3 +168,22 @@ func TestNamedSpacesLiveBesideAGenerationBuiltBefore(t *testing.T) {
 		}
 	}
 }
+
+// A new install's generation is served by a plugin space whose named vector
+// the collection gains with the first vector write. A semantic or hybrid
+// search before that write (Versions still waiting for their vectors) finds
+// what it can, never an error.
+func TestSearchBeforeTheFirstVectorOfASpace(t *testing.T) {
+	f := newAttachFixture(t)
+	g := content.Generation{ID: "generation-first", Collection: f.gen.Collection, ProfileVersion: retrieval.ProfileVersion, SpaceID: "example.first@1", SourceNamespaceProjected: true, SpacesProjected: true,
+		Spaces: []content.GenerationSpace{{ID: "example.first@1", Metric: "cosine"}}}
+	f.publish(g, f.segmentation("waiting", "harbour strike at dawn"))
+	route := []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}
+	scope := corpus.Scope{Organization: f.org, Corpora: []string{"*"}}
+	for mode, want := range map[string]int{"semantic": 0, "hybrid": 1} {
+		candidates, err := f.store.Search(f.ctx, route, scope, retrieval.Request{Query: "harbour", Mode: mode, Vector: smallVector(1, 4), Space: "example.first@1"})
+		if err != nil || len(candidates) != want {
+			t.Fatalf("%s search before any vector: %d candidates, %v; want %d", mode, len(candidates), err, want)
+		}
+	}
+}

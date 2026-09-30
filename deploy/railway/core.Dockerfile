@@ -9,8 +9,9 @@ COPY migrations ./migrations
 COPY contracts ./contracts
 RUN CGO_ENABLED=0 go build -trimpath -o /quivr ./cmd/quivr
 
-# First-party Go connector plugins, always pinned and run by the worker
-# (core-entrypoint.py CONNECTORS). Every plugins/<id> with a go.mod is built to
+# First-party Go plugins, always pinned and run beside the worker (and the API
+# for the ones it calls) (core-entrypoint.py CONNECTORS): the connectors and
+# the core.ingest ingestion plugin. Every plugins/<id> with a go.mod is built to
 # /out/bin/quivr-<id>, and its manifest is kept at /out/plugins/<id>. A plugin
 # module builds only on the Go SDK (make plugin-boundary), which it replaces
 # with ../../sdks/go; make image-context builds them from exactly these COPY sources.
@@ -26,11 +27,12 @@ RUN mkdir -p /out/bin /out/plugins \
       mkdir -p "/out/plugins/$id" && cp "$dir/quivr-plugin.yaml" "/out/plugins/$id/"; \
     done
 
+# The pinned tokenizer the core.ingest plugin runs (core-entrypoint.py CONNECTORS).
 FROM python:3.12-slim-bookworm AS tokenizer
 WORKDIR /app
-COPY scripts/prepare_tokenizer.py scripts/token_offsets.py ./scripts/
+COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
-COPY internal/processing/profile.json ./internal/processing/profile.json
+COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
 RUN python scripts/prepare_tokenizer.py
 
 # First-party plugins the worker runs as sidecars when QUIVR_DEMO_PLUGINS=1

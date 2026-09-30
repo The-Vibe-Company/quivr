@@ -58,9 +58,9 @@ Set in the plugin pin's `configuration` (see the guide). Every field is optional
 
 ## Limits {#limits}
 
-Quivr's built-in indexing reads, per Record Version, at most 64 `title`/`body`
+Quivr's core.ingest plugin indexes, per Record Version, at most 64 `title`/`body`
 text Parts, 256 KiB of text, and 256 segments of about 384 tokens. A Version
-beyond any of these is published, but it is not searchable (`segmentation_limit`).
+beyond any of these is published, but it is not searchable (`ingestion_refused`).
 The plugin therefore merges pages and truncates text instead of failing:
 - `max_page_parts` covers the Part limit.
 - The default `max_text_bytes` of 128 KiB keeps ordinary prose well under the

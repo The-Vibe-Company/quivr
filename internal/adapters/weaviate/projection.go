@@ -362,6 +362,14 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 			return nil, errors.New("routes store the space under different vectors")
 		}
 		target = name
+		// A generation's named vectors exist from its first vector write; a
+		// semantic or hybrid search before any (a new install, a Corpus whose
+		// Versions still wait for their vectors) adds them, and finds nothing.
+		if q.Mode != "lexical" {
+			if err := s.ensureVectors(ctx, r.Generation); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// The source field ranks the title and body as written; the lexical field
 	// ranks the lexical text an ingestion plugin produced.

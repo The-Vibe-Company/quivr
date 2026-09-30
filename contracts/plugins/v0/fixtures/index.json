@@ -1409,14 +1409,12 @@
       "description": "A Version without a title Part, one space."
     },
     {
-      "file": "requests/ingestion/segment-and-embed-no-spaces.json",
+      "file": "requests/ingestion/segment-only.json",
       "schema": "ingestion-segment-and-embed-request.schema.json",
-      "valid": false,
-      "schema_valid": false,
-      "errors": [
-        "schema_violation"
-      ],
-      "description": "At least one space is requested."
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "No space: the segments only, without vectors (since Plugin API 0.8)."
     },
     {
       "file": "requests/ingestion/segment-and-embed-no-parts.json",
@@ -1465,6 +1463,16 @@
       "manifest": "manifests/valid/ingestion.yaml",
       "request": "requests/ingestion/segment-and-embed.json",
       "description": "Two segments, a vector per requested space, lexical text and provenance."
+    },
+    {
+      "file": "responses/ingestion/segment-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-only.json",
+      "description": "Segments without vectors, for a request that asks for no space."
     },
     {
       "file": "responses/ingestion/title-only.json",

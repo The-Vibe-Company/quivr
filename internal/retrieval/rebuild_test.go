@@ -87,26 +87,15 @@ func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operati
 
 type fakeRebuildContent struct {
 	versionErr error
-	loadErr    error
-	loads      int
-	onLoad     func()
+	reads      int
 }
 
 func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID, id string) (content.Version, error) {
+	f.reads++
 	if f.versionErr != nil {
 		return content.Version{}, f.versionErr
 	}
 	return content.Version{ID: id, RecordID: recordID}, nil
-}
-func (f *fakeRebuildContent) LoadEmbedding(_ context.Context, org, derivation string) (content.Embedding, []float32, error) {
-	f.loads++
-	if f.onLoad != nil {
-		f.onLoad()
-	}
-	if f.loadErr != nil {
-		return content.Embedding{}, nil, f.loadErr
-	}
-	return content.Embedding{ID: "artifact-" + derivation, Organization: org, SpaceID: "space"}, []float32{1}, nil
 }
 
 type fakeRebuildProjection struct{ lexical, vectors int }
@@ -123,17 +112,39 @@ func (f *fakeRebuildProjection) Search(context.Context, []retrieval.Route, corpu
 	return nil, errors.New("unused")
 }
 
-type fixedIdentity struct{}
+// fakeDeriver stands for the pinned ingestion plugin that owns "space".
+type fakeDeriver struct {
+	err               error
+	derived, segments int
+	onDerive          func()
+}
 
-func (fixedIdentity) Space() content.VectorSpace { return content.VectorSpace{ID: "space"} }
-func (fixedIdentity) Producer() string           { return "fixture-producer" }
+func (*fakeDeriver) Owns(space string) bool { return space == "space" }
+func (d *fakeDeriver) segmentation(v content.Version) content.Segmentation {
+	return content.Segmentation{ID: "plugin-seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "plugin-segment-" + v.ID, PartKey: "body"}}}
+}
+func (d *fakeDeriver) Segment(_ context.Context, _, _ string, v content.Version, _ content.Generation) (content.Segmentation, error) {
+	d.segments++
+	return d.segmentation(v), d.err
+}
+func (d *fakeDeriver) Derive(_ context.Context, org, _ string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	d.derived++
+	if d.onDerive != nil {
+		d.onDerive()
+	}
+	data := []content.EmbeddingData{{Artifact: content.Embedding{ID: "plugin-artifact", Organization: org, SegmentID: "plugin-segment-" + v.ID, SpaceID: g.SpaceID}, Vector: []float32{1}}}
+	return d.segmentation(v), data, d.err
+}
 
-func segmenter(_ context.Context, _ string, v content.Version) (content.Segmentation, error) {
-	return content.Segmentation{ID: "seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "segment-" + v.ID, PartKey: "body"}}}, nil
+// routedTo routes every Corpus to a generation served by one space.
+type routedTo string
+
+func (r routedTo) Generation(context.Context, string, string) (content.Generation, error) {
+	return content.Generation{ID: "routed", SpaceID: string(r)}, nil
 }
 
 func rebuilder(store *fakeRebuildStore, c *fakeRebuildContent, p *fakeRebuildProjection) retrieval.Rebuilder {
-	return retrieval.Rebuilder{Store: store, Content: c, Projection: p, Segment: segmenter, Artifacts: fixedIdentity{}}
+	return retrieval.Rebuilder{Store: store, Content: c, Projection: p, Plugin: &fakeDeriver{}, Routing: routedTo("space")}
 }
 
 func run(t *testing.T, r retrieval.Rebuilder) {
@@ -150,33 +161,45 @@ func run(t *testing.T, r retrieval.Rebuilder) {
 	t.Fatal("rebuild did not converge")
 }
 
-func TestRebuildReusesStoredVectorsAndActivates(t *testing.T) {
+// A Version whose vectors the routed generation serves is derived with its
+// vectors through the plugin; one still waiting for its enrichment in the
+// same space is covered with its segments alone, and never waits for an
+// embedding backend: its enrichment attaches the vectors after the cutover.
+func TestRebuildDerivesThroughThePluginAndActivates(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2"}}, covered: map[string][]content.Embedding{}}
-	c, p := &fakeRebuildContent{}, &fakeRebuildProjection{}
-	run(t, rebuilder(store, c, p))
-	if !store.activated || len(store.failed) != 0 {
-		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
+	p, d := &fakeRebuildProjection{}, &fakeDeriver{}
+	r := rebuilder(store, &fakeRebuildContent{}, p)
+	r.Plugin = d
+	run(t, r)
+	if !store.activated || len(store.failed) != 0 || d.derived != 1 || d.segments != 1 {
+		t.Fatalf("activated=%v failed=%v derived=%d segmented=%d", store.activated, store.failed, d.derived, d.segments)
 	}
-	if len(store.covered["v1"]) != 1 || p.lexical != 2 || p.vectors != 2 {
+	if len(store.covered["v1"]) != 1 || store.covered["v1"][0].ID != "plugin-artifact" || len(store.covered["v2"]) != 0 || p.lexical != 2 || p.vectors != 1 {
 		t.Fatalf("covered=%v projection=%+v", store.covered, p)
 	}
 }
 
-func TestRebuildFailsWithoutInferenceWhenRequiredVectorsAreMissing(t *testing.T) {
-	for name, loadErr := range map[string]error{"embedding_artifact_unavailable": corpus.ErrNotFound, "embedding_artifact_corrupt": content.ErrConflict} {
-		store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-		run(t, rebuilder(store, &fakeRebuildContent{loadErr: loadErr}, &fakeRebuildProjection{}))
-		if store.activated || len(store.failed) != 1 || store.failed[0].Code != name || store.failed[0].Retryable {
-			t.Fatalf("%s: activated=%v failed=%v", name, store.activated, store.failed)
-		}
+// A target of another space than the routed generation's, such as the move
+// off the legacy E5 space, gets every Version's vectors in its space.
+func TestRebuildOntoAnotherSpaceEmbedsEveryVersion(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	d := &fakeDeriver{}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin, r.Routing = d, routedTo("legacy-e5")
+	run(t, r)
+	if !store.activated || d.derived != 1 || d.segments != 0 || len(store.covered["v1"]) != 1 {
+		t.Fatalf("activated=%v derived=%d segmented=%d covered=%v", store.activated, d.derived, d.segments, store.covered)
 	}
-	// Object-storage integrity failures of the stored vector bytes are terminal too.
-	for name, loadErr := range map[string]error{"embedding_artifact_unavailable": fmt.Errorf("read: %w", content.ErrArtifactMissing), "embedding_artifact_corrupt": fmt.Errorf("read: %w", content.ErrArtifactCorrupt)} {
-		store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-		run(t, rebuilder(store, &fakeRebuildContent{loadErr: loadErr}, &fakeRebuildProjection{}))
-		if store.activated || len(store.failed) != 1 || store.failed[0].Code != name || store.failed[0].Retryable {
-			t.Fatalf("%s: activated=%v failed=%v", name, store.activated, store.failed)
-		}
+}
+
+// A target whose served space the pinned plugin does not own cannot be built.
+func TestRebuildFailsForATargetNoPinnedPluginServes(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin = nil
+	run(t, r)
+	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "unsupported_vector_space" {
+		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
 
@@ -185,23 +208,6 @@ func TestRebuildFailsWhenCanonicalTextArtifactIsLost(t *testing.T) {
 	run(t, rebuilder(store, &fakeRebuildContent{versionErr: content.ErrArtifactCorrupt}, &fakeRebuildProjection{}))
 	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "canonical_content_unavailable" {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
-	}
-}
-
-func TestRebuildKeepsNotYetEnrichedVersionsLexical(t *testing.T) {
-	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
-	p := &fakeRebuildProjection{}
-	run(t, rebuilder(store, &fakeRebuildContent{loadErr: corpus.ErrNotFound}, p))
-	if !store.activated || len(store.covered["v1"]) != 0 || p.vectors != 0 {
-		t.Fatalf("activated=%v covered=%v", store.activated, store.covered)
-	}
-}
-
-func TestRebuildTransientArtifactFailureRetriesWithoutFailing(t *testing.T) {
-	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-	_, err := rebuilder(store, &fakeRebuildContent{loadErr: errors.New("object storage unavailable")}, &fakeRebuildProjection{}).Step(context.Background(), "org", "op")
-	if err == nil || len(store.failed) != 0 {
-		t.Fatalf("transient error %v recorded failures %v", err, store.failed)
 	}
 }
 
@@ -240,8 +246,8 @@ func TestRebuildConfirmsCancellationRequestedBetweenSteps(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}, state: operations.StateCancelRequested}
 	c, p := &fakeRebuildContent{}, &fakeRebuildProjection{}
 	done, err := rebuilder(store, c, p).Step(context.Background(), "org", "op")
-	if err != nil || !done || store.state != operations.StateCanceled || p.lexical != 0 || c.loads != 0 {
-		t.Fatalf("done=%v err=%v state=%s projection=%+v loads=%d", done, err, store.state, p, c.loads)
+	if err != nil || !done || store.state != operations.StateCanceled || p.lexical != 0 || c.reads != 0 {
+		t.Fatalf("done=%v err=%v state=%s projection=%+v reads=%d", done, err, store.state, p, c.reads)
 	}
 	// A queued Operation canceled directly never runs and needs no confirmation.
 	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}, state: operations.StateCanceled}
@@ -261,42 +267,20 @@ func TestRebuildCancellationBeforeActivationPreventsCutover(t *testing.T) {
 	}
 }
 
-// fakeDeriver stands for the pinned ingestion plugin that owns the target's space.
-type fakeDeriver struct {
-	err     error
-	derived int
-}
-
-func (*fakeDeriver) Owns(space string) bool { return space == "space" }
-func (d *fakeDeriver) Derive(_ context.Context, org, _ string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
-	d.derived++
-	seg := content.Segmentation{ID: "plugin-seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "plugin-segment-" + v.ID, PartKey: "body"}}}
-	data := []content.EmbeddingData{{Artifact: content.Embedding{ID: "plugin-artifact", Organization: org, SegmentID: "plugin-segment-" + v.ID, SpaceID: g.SpaceID}, Vector: []float32{1}}}
-	return seg, data, d.err
-}
-
-// A target served by an ingestion plugin's space is derived through the
-// plugin, which reuses stored artifacts and embeds only what is missing; the
-// built-in segmenter and artifact reuse are not involved. A plugin refusal
-// fails the rebuild, an outage retries it.
-func TestRebuildDerivesPluginServedTargetsThroughThePlugin(t *testing.T) {
-	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-	c, p, d := &fakeRebuildContent{loadErr: corpus.ErrNotFound}, &fakeRebuildProjection{}, &fakeDeriver{}
-	r := rebuilder(store, c, p)
-	r.Plugin = d
-	run(t, r)
-	if !store.activated || d.derived != 1 || c.loads != 0 || len(store.covered["v1"]) != 1 || store.covered["v1"][0].ID != "plugin-artifact" || p.vectors != 1 {
-		t.Fatalf("activated=%v derived=%d loads=%d covered=%v projection=%+v", store.activated, d.derived, c.loads, store.covered, p)
+// A plugin refusal or a segmentation that differs from the stored one fails
+// the rebuild; an outage retries it.
+func TestRebuildPluginFailures(t *testing.T) {
+	for code, err := range map[string]error{"ingestion_refused": fmt.Errorf("%w: terminal", content.ErrIngestionRefused), "segmentation_mismatch": content.ErrConflict} {
+		store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+		r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+		r.Plugin = &fakeDeriver{err: err}
+		run(t, r)
+		if store.activated || len(store.failed) != 1 || store.failed[0].Code != code || store.failed[0].Retryable {
+			t.Fatalf("%s: activated=%v failed=%v", code, store.activated, store.failed)
+		}
 	}
-	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
-	r = rebuilder(store, c, &fakeRebuildProjection{})
-	r.Plugin = &fakeDeriver{err: fmt.Errorf("%w: terminal", content.ErrIngestionRefused)}
-	run(t, r)
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "ingestion_refused" {
-		t.Fatalf("refusal: activated=%v failed=%v", store.activated, store.failed)
-	}
-	store = &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
-	r = rebuilder(store, c, &fakeRebuildProjection{})
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 	r.Plugin = &fakeDeriver{err: errors.New("plugin unavailable")}
 	if _, err := r.Step(context.Background(), "org", "op"); err == nil || len(store.failed) != 0 {
 		t.Fatalf("outage: err=%v failed=%v", err, store.failed)
@@ -307,8 +291,9 @@ func TestRebuildDerivesPluginServedTargetsThroughThePlugin(t *testing.T) {
 // canceled: the earlier operator request wins over the later failure.
 func TestRebuildTerminalFailureAfterCancelRequestSettlesCanceled(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-	c := &fakeRebuildContent{loadErr: corpus.ErrNotFound, onLoad: func() { store.state = operations.StateCancelRequested }}
-	run(t, rebuilder(store, c, &fakeRebuildProjection{}))
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin = &fakeDeriver{err: fmt.Errorf("%w: terminal", content.ErrIngestionRefused), onDerive: func() { store.state = operations.StateCancelRequested }}
+	run(t, r)
 	if store.activated || store.state != operations.StateCanceled || len(store.failed) != 0 {
 		t.Fatalf("activated=%v state=%s failed=%v", store.activated, store.state, store.failed)
 	}

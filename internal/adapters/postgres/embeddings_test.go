@@ -7,10 +7,8 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tokenizer"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strconv"
@@ -28,16 +26,15 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		DatabaseURL string           `json:"database_url"`
-		TEIURL      string           `json:"tei_url"`
-		S3          s3store.Config   `json:"s3"`
-		Tokenizer   tokenizer.Config `json:"tokenizer"`
+		DatabaseURL string         `json:"database_url"`
+		TEIURL      string         `json:"tei_url"`
+		S3          s3store.Config `json:"s3"`
 	}
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if postgresOnly() {
-		t.Skip("needs TEI, S3 and the tokenizer; runs inside make verify, not make adapter-postgres")
+		t.Skip("needs TEI and S3; runs inside make verify, not make adapter-postgres")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -64,7 +61,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seg, err := (processing.TokenWindows{Tokenizer: tokenizer.Encoder{Config: cfg.Tokenizer}}).Process(ctx, processing.Input{Organization: scope.Organization, Version: v})
+	seg, err := wholeParts(scope.Organization, v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,16 +69,25 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 		t.Fatal(err)
 	}
 	model := tei.Encoder{Endpoint: cfg.TEIURL}
-	vector, err := model.Embed(ctx, seg.Segments[0].Derivation.ModelInput)
+	vector, err := model.Embed(ctx, "passage: "+seg.Segments[0].Text)
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], model.Space(), model.Producer())
-	artifact, err := service.SaveEmbedding(ctx, input, model.Space(), vector)
+	g, err := store.Generation(ctx, scope.Organization, c.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := service.SaveEmbedding(ctx, input, model.Space(), vector)
+	// The vectors of the space the Corpus's generation serves (the stack's core.ingest).
+	space := content.VectorSpace{ID: g.SpaceID, Dimensions: len(vector)}
+	if err = pool.QueryRow(ctx, `SELECT manifest FROM vector_spaces WHERE id=$1`, g.SpaceID).Scan(&space.Manifest); err != nil {
+		t.Fatal(err)
+	}
+	input := content.EmbeddingInput(scope.Organization, c.ID, v, seg, seg.Segments[0], space, model.Producer())
+	artifact, err := service.SaveEmbedding(ctx, input, space, vector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := service.SaveEmbedding(ctx, input, space, vector)
 	if err != nil || replay.ID != artifact.ID {
 		t.Fatal("artifact replay", err)
 	}
@@ -97,12 +103,8 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	// A changed but normalized output under the same derivation must conflict.
 	divergent := append([]float32(nil), vector...)
 	divergent[0] = -divergent[0]
-	if _, err = service.SaveEmbedding(ctx, input, model.Space(), divergent); !errors.Is(err, content.ErrConflict) {
+	if _, err = service.SaveEmbedding(ctx, input, space, divergent); !errors.Is(err, content.ErrConflict) {
 		t.Fatal("divergence accepted", err)
-	}
-	g, err := store.Generation(ctx, scope.Organization, c.ID)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if err = service.Promote(ctx, scope.Organization, seg, g); err != nil {
 		t.Fatal(err)
@@ -132,7 +134,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 		t.Fatal("duplicate enrichment event", count, err)
 	}
 	h, _, err = store.Hydrate(ctx, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
-	if err != nil || h.EmbeddingID != artifact.ID || h.SpaceID != model.Space().ID {
+	if err != nil || h.EmbeddingID != artifact.ID || h.SpaceID != g.SpaceID {
 		t.Fatal("unpaired provenance", h, err)
 	}
 }

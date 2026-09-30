@@ -31,9 +31,35 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	pool := rebuildAdapterPool(t, ctx)
 	store := postgres.ContentStore{Pool: pool}
 	served, evaluation := pluginSpace("example.words", "example.words.small", 4, content.SpaceServed), pluginSpace("example.words", "example.words.large", 6, content.SpaceEvaluation)
+	// The registry is the deployment's (the verify stack pins core.ingest):
+	// restore every space's role as it was, and retire the test's spaces.
+	roles := map[string]string{}
+	rows, err := pool.Query(ctx, `SELECT id,role FROM vector_spaces`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id, role string
+		if err = rows.Scan(&id, &role); err != nil {
+			t.Fatal(err)
+		}
+		roles[id] = role
+	}
+	rows.Close()
 	t.Cleanup(func() {
-		if err := store.RegisterSpaces(context.Background(), app.DeploymentSpaces(nil)); err != nil {
-			t.Errorf("restore the built-in space: %v", err)
+		if len(roles) == 0 {
+			if err := store.RegisterSpaces(context.Background(), app.DeploymentSpaces(nil)); err != nil {
+				t.Errorf("restore the registry: %v", err)
+			}
+			return
+		}
+		if _, err := pool.Exec(context.Background(), `UPDATE vector_spaces SET role='retired'`); err != nil {
+			t.Errorf("restore the registry: %v", err)
+		}
+		for id, role := range roles {
+			if _, err := pool.Exec(context.Background(), `UPDATE vector_spaces SET role=$2 WHERE id=$1`, id, role); err != nil {
+				t.Errorf("restore the registry: %v", err)
+			}
 		}
 	})
 	if err := store.RegisterSpaces(ctx, []content.RegisteredSpace{served, evaluation}); err != nil {

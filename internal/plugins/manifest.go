@@ -19,13 +19,13 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.7.0"
+const PluginAPIVersion = "0.8.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -44,6 +44,11 @@ var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.
 // PushSince is the Plugin API version that introduced the connector push
 // mode: the core relays webhook deliveries to receive.
 const PushSince = "0.5.0"
+
+// SegmentOnlySince is the Plugin API version that lets segment_and_embed ask
+// for no space: the segments only, without vectors. The core then segments a
+// Version before, and independently of, embedding it.
+const SegmentOnlySince = "0.8.0"
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:

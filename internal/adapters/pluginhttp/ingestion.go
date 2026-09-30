@@ -61,6 +61,19 @@ func (i Ingestor) Owns(key string) bool {
 	return ok
 }
 
+// Spaces are the space keys the pin enables, the served one first.
+func (i Ingestor) Spaces() []string {
+	var keys []string
+	for _, s := range i.Pin.EnabledSpaces() {
+		keys = append(keys, s.Key)
+	}
+	return keys
+}
+
+// SegmentsOnly reports whether the plugin's plugin_api range admits a
+// request with no space (Plugin API 0.7).
+func (i Ingestor) SegmentsOnly() bool { return plugins.SegmentsOnly(&i.Pin.Manifest) }
+
 // VectorSpace describes one of the plugin's spaces.
 func (i Ingestor) VectorSpace(key string) (content.VectorSpace, bool) {
 	id, space, ok := i.declared(key)
@@ -93,7 +106,7 @@ func refused(format string, args ...any) error {
 }
 
 // SegmentAndEmbed asks the plugin for a Version's segments with a vector in
-// each space key. A plugin that is unavailable or answers a retryable error
+// each space key; with no key, for the segments alone. A plugin that is unavailable or answers a retryable error
 // is retried by the caller; a terminal error or an answer the output checks
 // refuse is content.ErrIngestionRefused.
 func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, keys []string) ([]processing.PluginSegment, error) {

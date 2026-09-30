@@ -17,6 +17,10 @@ import (
 // CheckEmbedQuery certifies embed_query for one fixture and one space.
 const CheckEmbedQuery = "embed_query"
 
+// CheckSegmentsOnly certifies a segment_and_embed request with no space
+// (Plugin API 0.8): the same segments, without vectors.
+const CheckSegmentsOnly = "segments_only"
+
 // ContributionIngestion is the ingestion Contribution (Plugin API 0.6).
 const ContributionIngestion = "ingestion"
 
@@ -166,6 +170,41 @@ func (r *run) invokeIngestion(ctx context.Context, ir ingestionRun) {
 		}
 	}
 	r.add(replay, started)
+	if len(replay.Issues) == 0 && plugins.SegmentsOnly(r.m) {
+		r.segmentsOnly(ctx, ir, first.Body)
+	}
+}
+
+// segmentsOnly asks for the fixture's segments without any space, as the
+// core does before embedding a Version, and compares them with the segments
+// of the full answer: the core stores the first and refuses a Version whose
+// later answer differs.
+func (r *run) segmentsOnly(ctx context.Context, ir ingestionRun, full []byte) {
+	started := time.Now()
+	check := Check{ID: CheckSegmentsOnly, Contribution: ContributionIngestion, Fixture: ir.label,
+		Title: "a request with no space returns the same segments, lexical text and provenance, without vectors"}
+	result, problem := r.callSegmentAndEmbed(ctx, ir.run.SegmentsOnlyRequest())
+	check.Issues = judgeSuccess(result, problem)
+	if len(check.Issues) == 0 {
+		want, got := withoutVectors(full), withoutVectors(result.Body)
+		if diff := firstDifference(want, got, ""); diff != "" {
+			check.Issues = []plugins.Issue{{Code: CodeNondeterministic, Path: diff,
+				Message: fmt.Sprintf("the segments without spaces differ from the segments with spaces at %s; the core segments a Version first and embeds it later, and refuses a Version whose segments change", diff)}}
+		}
+	}
+	r.add(check, started)
+}
+
+// withoutVectors decodes an answer and drops every segment's vectors.
+func withoutVectors(body []byte) any {
+	doc, _ := decoded(body).(map[string]any)
+	segments, _ := doc["segments"].([]any)
+	for _, s := range segments {
+		if segment, ok := s.(map[string]any); ok {
+			delete(segment, "vectors")
+		}
+	}
+	return doc
 }
 
 func decoded(body []byte) any {

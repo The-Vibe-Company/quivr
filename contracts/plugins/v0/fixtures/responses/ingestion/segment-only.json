@@ -1,0 +1,17 @@
+{
+  "segments": [
+    {
+      "part_key": "body",
+      "start": 0,
+      "end": 29,
+      "vectors": {},
+      "lexical_text": "docker stop work dawn"
+    },
+    {
+      "part_key": "body",
+      "start": 30,
+      "end": 49,
+      "vectors": {}
+    }
+  ]
+}

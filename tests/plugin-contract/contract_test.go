@@ -234,13 +234,13 @@ func TestContractRunnerJudgesIngestion(t *testing.T) {
 		}
 	}
 	// The normative article and the plugin's own memo; two spaces for the article, one for the memo.
-	for want, n := range map[string]int{"ingestion/fixtures": 1, "ingestion/invoke": 2, "ingestion/replay": 2, "ingestion/embed_query": 3, "ingestion/credentials": 1, "/discovery": 1} {
+	for want, n := range map[string]int{"ingestion/fixtures": 1, "ingestion/invoke": 2, "ingestion/replay": 2, "ingestion/segments_only": 2, "ingestion/embed_query": 3, "ingestion/credentials": 1, "/discovery": 1} {
 		if passed[want] < n {
 			t.Errorf("%d passing %s checks, want %d:\n%s", passed[want], want, n, out)
 		}
 	}
 	// Non-JSON, unknown field and undeclared space on both routes, plus the normative invalid requests.
-	if passed["ingestion/invalid_request"] < 10 {
+	if passed["ingestion/invalid_request"] < 9 {
 		t.Errorf("invalid requests probed: %d\n%s", passed["ingestion/invalid_request"], out)
 	}
 	for mode, want := range map[string]expectation{
@@ -249,6 +249,7 @@ func TestContractRunnerJudgesIngestion(t *testing.T) {
 		"ingestion-missing-vector":         {Check: "invoke", Code: "missing_vector"},
 		"ingestion-split":                  {Check: "invoke", Code: "unexpected_segments"},
 		"ingestion-nondeterministic":       {Check: "replay", Code: "nondeterministic_output"},
+		"ingestion-segments-only-split":    {Check: "segments_only", Code: "nondeterministic_output"},
 		"ingestion-query-dimensions":       {Check: "embed_query", Code: "dimension_mismatch"},
 		"ingestion-query-nondeterministic": {Check: "embed_query", Code: "nondeterministic_output"},
 		"ingestion-secret-leak":            {Check: "credentials", Code: "credential_leak"},

@@ -178,9 +178,10 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 		request(t, "POST", "/v0/search", admin, q, 422)
 	}
 	delete(q, "profile")
-	q["query"] = strings.Repeat("bonjour ", 257)
+	// The space's model refuses a query it would truncate; a lexical search encodes nothing.
+	q["query"], q["mode"] = strings.Repeat("bonjour ", 257), "hybrid"
 	request(t, "POST", "/v0/search", admin, q, 422)
-	q["query"] = "constellation"
+	q["query"], q["mode"] = "constellation", "lexical"
 	delete(q, "corpus_ids")
 	request(t, "POST", "/v0/search", admin, q, 422)
 	q["corpus_ids"] = []string{}

@@ -8,10 +8,12 @@
 #     plugin sdks/go/examples/fusion-retriever pass `quivr plugin
 #     inspect` and `quivr plugin test` (JSON reports in
 #     .scratch/plugin-sdk/<example>-contract-report.json);
-#  4. every first-party Go connector plugin under plugins/ passes its own
-#     tests and `quivr plugin test`. A plugin whose source needs a local fake
+#  4. every first-party Go plugin under plugins/ passes its own tests and
+#     `quivr plugin test`. A plugin whose source needs a local fake
 #     (plugins/x-list) has scripts/plugin_<id>_fixtures.py, which serves the
-#     fake and writes the fixtures to certify with.
+#     fake and writes the fixtures to certify with. plugins/core-ingest needs
+#     TEI and the pinned tokenizer: the verify stack certifies it
+#     (scripts/core_ingest_plugin.py), so here it is vetted, tested and inspected.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -62,6 +64,7 @@ for mod in "$root"/plugins/*/go.mod; do
   "$GO" vet ./... && "$GO" test ./...
   "$GO" build -o /dev/null .
   "$quivr" plugin inspect . > "$work/$id-inspect.log"
+  [ "$id" = core-ingest ] && continue
   fixtures=()
   helper="$root/scripts/plugin_${id//-/_}_fixtures.py"
   if [ -e "$helper" ]; then
