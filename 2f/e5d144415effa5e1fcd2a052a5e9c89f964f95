@@ -1,0 +1,41 @@
+internal/backfill/promote.go
+  s_54b80c92daa9cb::t_f168af7b0318df 1-63
+internal/adapters/postgres/promote.go
+  s_54b80c92daa9cb::t_fb39d5bc0577bd 19
+  s_54b80c92daa9cb::t_ab6ed683b47703 1-18,20-121
+internal/adapters/postgres/backfill.go
+  s_54b80c92daa9cb::t_07c4cab9ff7ed4 1-501
+internal/operations/operations.go
+  s_54b80c92daa9cb::t_1287de3f23522f 10,24-28,39-41,74-81,102-144,168-173,265-297
+  s_54b80c92daa9cb::t_f71d5c098616ce 298
+internal/backfill/run.go
+  s_54b80c92daa9cb::t_8dcb24573a4ad1 1-282
+internal/operations/operations_test.go
+  s_54b80c92daa9cb::t_d631d3deb41072 15,39-46,172-212
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_a5af2b7b627430 26-27,31-32,40-42,209-210,285-295
+internal/backfill/backfill.go
+  s_54b80c92daa9cb::t_231cfcb6c04c50 293
+  s_54b80c92daa9cb::t_0f26d261f6a505 1-292,294-326
+internal/adapters/postgres/spaces.go
+  s_54b80c92daa9cb::t_bea35510a7c628 82
+  s_54b80c92daa9cb::t_ae3a7f00e99efd 41-44
+internal/processing/plugin.go
+  s_54b80c92daa9cb::t_e7fb7b9fe97981 183-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2fe5d144415effa5e1fcd2a052a5e9c89f964f95",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
