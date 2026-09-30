@@ -1,0 +1,61 @@
+tests/acceptance/plugin_activation_test.go
+  s_54b80c92daa9cb::t_387991646c95b1 130-133
+  s_54b80c92daa9cb::t_584e1b628a132a 53-60,66-69,73
+  s_54b80c92daa9cb::t_fccb35990cb5dd 126-129,134-164
+  s_54b80c92daa9cb::t_9455bed78e36e7 110-114
+scripts/measure_upgrade.py
+  s_54b80c92daa9cb::t_680e3172e33031 403-407
+  s_54b80c92daa9cb::t_f6335891642bdb 323
+  s_54b80c92daa9cb::t_f2534e9021d9a8 303
+  s_54b80c92daa9cb::t_4c216ebc5f7ef4 364-369
+  s_54b80c92daa9cb::t_ce0ce980b978f3 454
+  s_54b80c92daa9cb::t_4c97cadedf2678 325
+  s_54b80c92daa9cb::t_91b92ee304675d 217,219
+  s_54b80c92daa9cb::t_fd3a9b0c7eb2f8 352-354
+  s_54b80c92daa9cb::t_80b899a2ac2404 338
+  s_54b80c92daa9cb::t_1f41608c5c8021 340
+  s_54b80c92daa9cb::t_1cea6be9a7a148 372
+  s_54b80c92daa9cb::t_605644e6796c1b 471
+  s_54b80c92daa9cb::t_ff3cc79a302471 1-216,218,220-302,304-322,324,326-337,339,341-351,355-363,370-371,373-402,408-453,455-470,472-497
+docs-site/plugins/upgrade-a-plugin.mdx
+  s_54b80c92daa9cb::t_d4694a47a0e0f4 1-24,26-35,37,42-45,47-50,52-62,64-67,70-71,73-83,85-87,89-99,101-119
+  s_54b80c92daa9cb::t_9b14275603d56d 25,36,38-41,46,51,63,68-69,72,84,88,100,120
+scripts/test_measure_upgrade.py
+  s_54b80c92daa9cb::t_38e9a39dfa1449 1-48
+Makefile
+  s_54b80c92daa9cb::t_ea4cefebbbc941 2,38-41
+docs-site/plugins/reprocess-quarantined-versions.mdx
+  s_54b80c92daa9cb::t_e072d751f34b29 7
+docs-site/docs.json
+  s_54b80c92daa9cb::t_611f712b2c896f 56
+README.md
+  s_54b80c92daa9cb::t_aa6c1d8c39d0d4 200-203
+.github/workflows/measure-upgrade.yml
+  s_54b80c92daa9cb::t_1aeedaa27d883a 1-56
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_65349bfbfc05fc 16-19,110,112-121
+  s_54b80c92daa9cb::t_d256a8bcc9183a 133,136,141,143,147,150,153
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_8602f9307b357c 7
+docs-site/plugins/backfill-a-vector-space.mdx
+  s_54b80c92daa9cb::t_528e4f693ad0d5 7
+scripts/local.py
+  s_54b80c92daa9cb::t_0574d57bedbcc8 424
+  s_54b80c92daa9cb::t_37557073b09a11 184,245-254,266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f82c0b1c787cd51b065b262fe48c40da973fa0c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
