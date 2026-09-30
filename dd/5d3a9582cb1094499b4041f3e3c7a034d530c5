@@ -1,0 +1,70 @@
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_aec4ee639a42b4 194-196
+migrations/20260930T1515Z_plan_rollback.sql
+  s_54b80c92daa9cb::t_5592a897115a85 1-21
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_aec4ee639a42b4 114-116
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_fdab02916bee8a 391,401-420,1464-1467,1477,1483,1675-1677,1681,1685,1688-1692,1701-1714,2472-2476,2568-2570,2866-2871,3179-3225,5166-5167,5386-5463,7924-7929,8284-8339
+  s_54b80c92daa9cb::t_e7766d6682c533 8340
+internal/transport/httpapi/plugins_test.go
+  s_54b80c92daa9cb::t_4f7bc91c128fe9 186-208
+  s_54b80c92daa9cb::t_612b65debf494c 151
+  s_54b80c92daa9cb::t_745b2d4958afc0 71-76
+internal/plugins/work.go
+  s_54b80c92daa9cb::t_213bac09d6bd02 26-31,39-41,69-72,86-92
+  s_54b80c92daa9cb::t_e5ad231a2989da 93
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_b4f184dc9f5eae 1860-1928,2373-2376,2397,2401-2402,3401-3435,3454-3462
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_75dcfd42bff8c4 73-74,140-144
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_fdab02916bee8a 80-81,1217-1250,1549-1552,1563-1564,1609-1612,1633,1637,4239-4297,4305-4306,4355-4360
+internal/plugins/registry/rollback_test.go
+  s_54b80c92daa9cb::t_7f84ef554cea33 1-54,57-59,64-67,71-81
+  s_54b80c92daa9cb::t_41b60f304e518e 55-56,60-63,68-70
+internal/adapters/pluginhttp/pluginhttp.go
+  s_54b80c92daa9cb::t_213bac09d6bd02 83-85,101-103,127-134
+  s_54b80c92daa9cb::t_44c48f9b331f26 135-136
+client/client.gen.go
+  s_54b80c92daa9cb::t_fdab02916bee8a 391,401-420,1464-1467,1477,1483,1675-1677,1681,1685,1688-1692,1701-1714,2472-2476,2568-2570,2954-2970,3551-3597,5149-5242,8088-8108,8966-9061,12040-12078,13376-13440
+  s_54b80c92daa9cb::t_c18c1721f40a92 13441
+internal/adapters/postgres/plugins_test.go
+  s_54b80c92daa9cb::t_6fd297bd34e774 78,246,261,264,298-392
+  s_54b80c92daa9cb::t_e9a0838d0dfd7f 393
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_06412ada2a9276 226-228
+internal/app/plugins.go
+  s_54b80c92daa9cb::t_213bac09d6bd02 72,94,99
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_8804af660e8d59 44-45,49,73-77,240-241,243-245,292-298,322-323,325-327
+  s_54b80c92daa9cb::t_6cdbd86cfa089f 269-270,363-369
+  s_54b80c92daa9cb::t_db51e9615b5577 299
+  s_54b80c92daa9cb::t_aeb5bdded268b7 370-371
+internal/plugins/registry/rollback.go
+  s_54b80c92daa9cb::t_fb3e3551d2a970 1-158
+internal/adapters/postgres/plugins.go
+  s_54b80c92daa9cb::t_51bfdf0b9d0e7d 148,162-164,170,234,428
+  s_54b80c92daa9cb::t_32bb70b0cc42a0 438-487,491-540
+  s_54b80c92daa9cb::t_a5b3de7045b93d 281-290,488-490
+internal/transport/httpapi/plugins.go
+  s_54b80c92daa9cb::t_75dcfd42bff8c4 6,8,27,44-45,76-79,124-168,198-202,209,235-238
+internal/plugins/registry/plan.go
+  s_54b80c92daa9cb::t_6e07c4e7849d17 95-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd5d3a9582cb1094499b4041f3e3c7a034d530c5",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
