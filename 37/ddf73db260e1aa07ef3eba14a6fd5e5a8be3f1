@@ -1,0 +1,70 @@
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-91
+sdks/go/quivrplugin/retrieval.go
+  s_54b80c92daa9cb::t_d342773d6696e8 1-287
+internal/plugins/registry/registry_test.go
+  s_54b80c92daa9cb::t_1ca4db0a948821 13-14,20,26,47
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-91
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-523
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_a90304f5573d09 19,23,26,45-65,178-179,212-233,236-237
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 3,45,59-61,538-628
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_471f306cecd97f 55-57
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_5aaa14260f925e 82-85
+  s_54b80c92daa9cb::t_b6b610490e1b21 79-81
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 3,45,59-61,538-628
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_d342773d6696e8 85
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-145
+sdks/go/examples/fusion-retriever/fixtures/harbour.json
+  s_54b80c92daa9cb::t_97a03384b86eae 1-13
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_a90304f5573d09 3-5,47,130-132,183-185,210-212
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-523
+sdks/go/quivrplugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 48-49
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 1-145
+sdks/go/examples/fusion-retriever/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_97a03384b86eae 1-27
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_d7478374c446bb 6-8,42-48
+internal/plugins/retrieval_test.go
+  s_54b80c92daa9cb::t_7424c681594021 1-3,5-23,25-26,36
+  s_54b80c92daa9cb::t_71892b11456fae 4,24,27-35
+sdks/go/examples/fusion-retriever/main.go
+  s_54b80c92daa9cb::t_97a03384b86eae 1-107
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_471f306cecd97f 951-1122,1129-1131,1209-1213,1218-1228
+  s_54b80c92daa9cb::t_cd4b2876763ad7 170,299-323,326,332,1208,1214-1215
+sdks/python/src/quivr_plugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_cd4b2876763ad7 48-49
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_15c184f1b1802c 381
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_471f306cecd97f 42-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "37ddf73db260e1aa07ef3eba14a6fd5e5a8be3f1",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
