@@ -14,11 +14,13 @@ import (
 
 const segmentText = "une lanterne"
 
-type fakeRouting struct{}
+// fakeRouting routes every Corpus to one generation; unprojected models a
+// generation built before Source Namespaces were projected.
+type fakeRouting struct{ unprojected bool }
 
 func (fakeRouting) Authorize(context.Context, corpus.Scope, []string) error { return nil }
-func (fakeRouting) Generation(context.Context, string, string) (content.Generation, error) {
-	return content.Generation{ID: "gen", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space"}, nil
+func (f fakeRouting) Generation(context.Context, string, string) (content.Generation, error) {
+	return content.Generation{ID: "gen", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space", SourceNamespaceProjected: !f.unprojected}, nil
 }
 
 type fakeEmbedder struct{}
@@ -35,9 +37,10 @@ type fakeProjection struct {
 	fetch      int
 	attachErr  error
 	attached   int
+	searched   []retrieval.Request
 }
 
-func (f *fakeProjection) Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error {
+func (f *fakeProjection) Publish(context.Context, content.Generation, string, string, string, content.Version, content.Segmentation) error {
 	return nil
 }
 func (f *fakeProjection) PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error {
@@ -46,7 +49,8 @@ func (f *fakeProjection) PublishEmbeddings(context.Context, content.Generation, 
 }
 
 // Search returns at most CandidateLimit candidates, as the adapter does.
-func (f *fakeProjection) Search(context.Context, []retrieval.Route, corpus.Scope, retrieval.Request) ([]content.Candidate, error) {
+func (f *fakeProjection) Search(_ context.Context, _ []retrieval.Route, _ corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+	f.searched = append(f.searched, q)
 	f.fetch = retrieval.CandidateLimit
 	if len(f.candidates) > retrieval.CandidateLimit {
 		return f.candidates[:retrieval.CandidateLimit], nil
@@ -154,6 +158,37 @@ func TestSearchStaleCandidatesConsumeTheCandidateBudget(t *testing.T) {
 	}
 	if got := search(build(stale + 10)); got != retrieval.MaxLimit-10 {
 		t.Fatalf("stale candidates beyond the budget left a page of %d, want the documented shortfall %d", got, retrieval.MaxLimit-10)
+	}
+}
+
+// A source filter reaches the projection query, and is refused rather than
+// silently narrowed when the routed generation's objects lack Source Namespaces.
+func TestSearchSourceFilterNeedsProjectedGeneration(t *testing.T) {
+	q := retrieval.Request{Query: "lanterne", Mode: "lexical", CorpusIDs: []string{"corpus"}, SourceNamespaces: []string{"feed-a", "feed-b"}}
+	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "segment", GenerationID: "gen"}}}
+	if _, err := service(p, &fakeEmbeddings{}).Search(context.Background(), searchScope, q); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.searched) != 1 || strings.Join(p.searched[0].SourceNamespaces, ",") != "feed-a,feed-b" {
+		t.Fatalf("projection queried with %+v, want the source filter feed-a,feed-b", p.searched)
+	}
+	legacy := service(p, &fakeEmbeddings{})
+	legacy.Routing = fakeRouting{unprojected: true}
+	if _, err := legacy.Search(context.Background(), searchScope, q); !errors.Is(err, retrieval.ErrSourceFilterUnavailable) {
+		t.Fatalf("filtered search on an unprojected generation = %v, want ErrSourceFilterUnavailable", err)
+	}
+	if len(p.searched) != 1 {
+		t.Fatal("a refused filtered search must not query the projection")
+	}
+	q.SourceNamespaces = nil
+	if _, err := legacy.Search(context.Background(), searchScope, q); err != nil {
+		t.Fatalf("unfiltered search on an unprojected generation = %v, want it served", err)
+	}
+	for _, namespaces := range [][]string{{"feed-a", "feed-a"}, {""}} {
+		q.SourceNamespaces = namespaces
+		if _, err := service(p, &fakeEmbeddings{}).Search(context.Background(), searchScope, q); !errors.Is(err, retrieval.ErrUnsupported) {
+			t.Errorf("source filter %q = %v, want ErrUnsupported", namespaces, err)
+		}
 	}
 }
 

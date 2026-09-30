@@ -67,7 +67,7 @@ func (f *attachFixture) segmentation(id, text string) content.Segmentation {
 
 func (f *attachFixture) publish(g content.Generation, seg content.Segmentation) {
 	f.t.Helper()
-	if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, content.Version{ID: seg.VersionID}, seg); err != nil {
+	if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, "example-feed", content.Version{ID: seg.VersionID}, seg); err != nil {
 		f.t.Fatal(err)
 	}
 }

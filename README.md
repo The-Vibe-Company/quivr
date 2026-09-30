@@ -90,7 +90,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   extensions and relations.
 - **Corrections and withdrawals** with immutable Versions and fenced withdrawn Records.
 - **Search**: lexical, semantic and hybrid, with canonical rehydration and access
-  rechecks on every hit.
+  rechecks on every hit, optionally within chosen Source Namespaces (filtered before
+  ranking).
 - **Change feed** through polling and resumable SSE, plus **catalog resync** after
   cursor expiry.
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn

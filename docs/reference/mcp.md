@@ -126,6 +126,7 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
 | `mode` | string | no | lexical matches words, semantic matches meaning, hybrid combines both; the server default is hybrid<br><br>One of `lexical`, `semantic`, `hybrid`. |
 | `profile` | string | no | retrieval profile; the server default is balanced<br><br>One of `fast`, `balanced`, `deep`. |
 | `limit` | integer | no | maximum number of hits; the server default is 10<br><br>Minimum 1. Maximum 50. |
+| `filter` | object | no | narrow the search before ranking |
 
 <details>
 <summary>Input schema</summary>
@@ -179,6 +180,26 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
       "minimum": 1,
       "maximum": 50,
       "description": "maximum number of hits; the server default is 10"
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "narrow the search before ranking",
+      "properties": {
+        "source_namespaces": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": "keep only Records from these Source Namespaces (a Record's source.namespace); the best matches of these sources are returned even when others rank higher"
+        }
+      }
     }
   }
 }

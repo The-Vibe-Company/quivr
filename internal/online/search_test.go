@@ -59,7 +59,7 @@ func server(t *testing.T, status int, body string) (*httptest.Server, *http.Requ
 func TestSearchPrintsRankedHitsWithProvenance(t *testing.T) {
 	s, last, payload := server(t, 200, hitJSON)
 	r := run(t, map[string]string{online.EnvAPIURL: s.URL + "/", online.EnvAPIKey: "env-key"},
-		"search", "eclipse", "--corpus", "c1,c2", "--corpus", "c3", "--mode", "lexical", "--limit", "5", "city")
+		"search", "eclipse", "--corpus", "c1,c2", "--corpus", "c3", "--mode", "lexical", "--limit", "5", "--source", "feed-a,feed-b", "city")
 	if r.code != online.ExitOK {
 		t.Fatalf("exit %d: %s", r.code, r.stderr)
 	}
@@ -71,7 +71,7 @@ func TestSearchPrintsRankedHitsWithProvenance(t *testing.T) {
 	if got := last.Header.Get("Authorization"); got != "Bearer env-key" {
 		t.Errorf("Authorization = %q", got)
 	}
-	want := map[string]any{"query": "eclipse city", "corpus_ids": []any{"c1", "c2", "c3"}, "mode": "lexical", "limit": float64(5)}
+	want := map[string]any{"query": "eclipse city", "corpus_ids": []any{"c1", "c2", "c3"}, "mode": "lexical", "limit": float64(5), "filter": map[string]any{"source_namespaces": []any{"feed-a", "feed-b"}}}
 	if b1, b2 := mustJSON(*payload), mustJSON(want); b1 != b2 {
 		t.Errorf("request body = %s, want %s", b1, b2)
 	}

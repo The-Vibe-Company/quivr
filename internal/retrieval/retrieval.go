@@ -24,16 +24,26 @@ const CandidateLimit = 3 * MaxLimit
 var ErrUnsupported = errors.New("unsupported_search")
 var ErrUnavailable = errors.New("search_unavailable")
 
+// ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
+// generation predates projected Source Namespaces; a rebuild enables it.
+var ErrSourceFilterUnavailable = errors.New("source_filter_unavailable")
+
+// MaxSourceNamespaces bounds the Source Namespaces one search may filter on.
+const MaxSourceNamespaces = 50
+
 // ErrProjectionMissing reports that a segment has no projected object in the
 // generation, so an embedding cannot be attached to it.
 var ErrProjectionMissing = errors.New("projection missing")
 
 type Request struct {
-	Query         string
-	CorpusIDs     []string
-	Mode, Profile string
-	Limit         int
-	Vector        []float32
+	Query     string
+	CorpusIDs []string
+	// SourceNamespaces, when set, keeps only Records from these Source
+	// Namespaces. The projection applies it before ranking.
+	SourceNamespaces []string
+	Mode, Profile    string
+	Limit            int
+	Vector           []float32
 }
 type Result struct {
 	Hits []content.Hydrated
@@ -54,7 +64,9 @@ type Routing interface {
 	Generation(ctx context.Context, org, corpusID string) (content.Generation, error)
 }
 type Projection interface {
-	Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error
+	// Publish projects a Version's segments into a generation, tagged with
+	// their Organization, Corpus and Source Namespace.
+	Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error
 	PublishEmbeddings(context.Context, content.Generation, string, []content.EmbeddingData) error
 	Search(context.Context, []Route, corpus.Scope, Request) ([]content.Candidate, error)
 }
@@ -82,7 +94,7 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 	if err != nil {
 		return err
 	}
-	if err = s.Projection.Publish(ctx, g, org, r.Source.CorpusID, v, seg); err != nil {
+	if err = s.Projection.Publish(ctx, g, org, r.Source.CorpusID, r.Source.Namespace, v, seg); err != nil {
 		return err
 	}
 	return s.Content.Promote(ctx, org, seg, g)
@@ -114,6 +126,16 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 			return out, corpus.ErrForbidden
 		}
 	}
+	if len(q.SourceNamespaces) > MaxSourceNamespaces {
+		return out, ErrUnsupported
+	}
+	namespaces := map[string]bool{}
+	for _, ns := range q.SourceNamespaces {
+		if ns == "" || namespaces[ns] {
+			return out, ErrUnsupported
+		}
+		namespaces[ns] = true
+	}
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		return out, err
 	}
@@ -134,6 +156,11 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		if g.ProfileVersion != ProfileVersion || g.SpaceID != s.Embedder.Space().ID {
 			return out, ErrUnsupported
+		}
+		// Objects of an older generation carry no Source Namespace, so a
+		// filter would silently drop them: refuse instead.
+		if len(q.SourceNamespaces) > 0 && !g.SourceNamespaceProjected {
+			return out, ErrSourceFilterUnavailable
 		}
 		routes = append(routes, Route{CorpusID: id, Generation: g})
 		routed[g.ID] = id

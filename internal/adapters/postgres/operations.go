@@ -155,9 +155,10 @@ func insertOperation(ctx context.Context, tx pgx.Tx, org, id, kind, corpusID, ke
 		retrieval, version = target.Retrieval, &target.Version
 	}
 	// The target is a new logical generation in the default generation's shared
-	// physical collection and pinned profile/vector space.
-	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,retrieval,retrieval_version)
-SELECT $1,d.collection,d.profile_version,false,d.space_id,$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version)
+	// physical collection and pinned profile/vector space. Every object it gets
+	// is written with its Source Namespace, so it is projected for filtering.
+	tag, err := tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,organization,corpus_id,retrieval,retrieval_version,source_namespace_projected)
+SELECT $1,d.collection,d.profile_version,false,d.space_id,$2,$3,COALESCE($4::jsonb,r.retrieval,c.retrieval),COALESCE($5::integer,r.retrieval_version),true
 FROM projection_generations d, projection_generations r, corpora c
 WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL("$2", "$3"), generation, org, corpusID, retrieval, version)
 	if err != nil {

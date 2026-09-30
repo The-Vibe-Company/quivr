@@ -111,7 +111,7 @@ func (f *fakeRebuildContent) LoadEmbedding(_ context.Context, org, derivation st
 
 type fakeRebuildProjection struct{ lexical, vectors int }
 
-func (f *fakeRebuildProjection) Publish(context.Context, content.Generation, string, string, content.Version, content.Segmentation) error {
+func (f *fakeRebuildProjection) Publish(context.Context, content.Generation, string, string, string, content.Version, content.Segmentation) error {
 	f.lexical++
 	return nil
 }

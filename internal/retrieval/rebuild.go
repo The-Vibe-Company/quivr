@@ -20,7 +20,9 @@ type RebuildTarget struct {
 // the target must reuse the stored artifacts rather than degrade to lexical-only.
 type RebuildCandidate struct {
 	RecordID, VersionID string
-	VectorsRequired     bool
+	// SourceNamespace is the Record's Source Namespace, projected for filtering.
+	SourceNamespace string
+	VectorsRequired bool
 }
 
 // RebuildStore owns the canonical PostgreSQL side of a rebuild: Operation
@@ -154,7 +156,7 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	if err != nil {
 		return err
 	}
-	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, v, seg); err != nil {
+	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, c.SourceNamespace, v, seg); err != nil {
 		return err
 	}
 	artifacts := make([]content.Embedding, 0, len(data))

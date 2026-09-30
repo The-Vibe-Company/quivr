@@ -1630,8 +1630,8 @@ paths:
   /v0/search:
     post:
       operationId: searchRecords
-      description: Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain
-        candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records
+      description: Resolve the requested profile, compile mandatory Corpus/Organization prefilters and
+        any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records
         remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection
         does not change access/currentness rules.
       requestBody:
@@ -1649,8 +1649,8 @@ paths:
                 $ref: '#/components/schemas/SearchResponse'
         default:
           description: Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action,
-            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency
-            unavailable.
+            404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input or
+            source_filter_unavailable, 503 dependency unavailable.
           content:
             application/json:
               schema:
@@ -3532,6 +3532,8 @@ components:
           minimum: 1
           maximum: 50
           default: 10
+        filter:
+          $ref: '#/components/schemas/SearchFilter'
       required:
       - query
       - corpus_ids
@@ -3539,7 +3541,29 @@ components:
         read/search permission for every requested Corpus before querying. Never silently drop an unauthorized
         Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not
         an empty successful result. Query token limits are checked against the resolved profile; no silent
-        truncation. Metadata filter syntax and pagination are outside this initial surface.
+        truncation. An optional filter narrows candidates inside the engine query, before ranking and
+        the limit, in every mode. Other metadata filters and pagination are outside this surface.
+    SearchFilter:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        source_namespaces:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: Keep only Records whose Source Namespace is one of these values. Ranking
+            and the limit apply within the filtered set, so a source's best matches are returned
+            even when other sources outrank them.
+      description: Candidate filter applied before ranking. Every present condition must hold.
+        A requested Corpus served by a Projection Generation built before source filtering existed
+        returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection)
+        to enable it. Unfiltered search is unaffected.
     SearchProfile:
       type: object
       additionalProperties: false

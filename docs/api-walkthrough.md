@@ -245,6 +245,8 @@ search. See [E5 provenance](../third_party/e5/NOTICE.md).
   excerpts and rechecks access, current Version, quarantine and withdrawal.
 - Excerpt coordinates are Unicode code points. No raw score, physical collection name
   or vector is exposed. A dependency outage returns 503, never an empty success.
+- `filter.source_namespaces` narrows to those Source Namespaces before ranking; a Corpus
+  projected before it existed returns `422 source_filter_unavailable` until rebuilt.
 
 ### From the command line
 
@@ -265,8 +267,8 @@ quivr search --corpus <corpus_id> --mode lexical --limit 5 "eclipse"
    Éclipse 🌞 à Paris.
 ```
 
-Repeat `--corpus` (or separate IDs with commas) to search several Corpora; `--profile`
-selects the retrieval profile. `--json` prints the API response unchanged. The command
+Repeat `--corpus` or `--source` (or separate values with commas) for several Corpora or
+Source Namespaces; `--profile` selects the profile. `--json` prints the API response unchanged. The command
 talks only to the public API, through the Go client generated from the contract in
 [`client/`](../client/) (`make generate` refreshes it; `make verify` fails when it is
 stale). Exit codes are the same for every online command:

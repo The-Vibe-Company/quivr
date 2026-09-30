@@ -164,6 +164,14 @@ func TestRebuildActivatesScopedGenerationAndReplays(t *testing.T) {
 	if after[versions[a]] != generation || after[versions[b]] != before[versions[b]] {
 		t.Fatalf("routing after rebuild %v, before %v, activated %s", after, before, generation)
 	}
+	// The rebuilt generation projects Source Namespaces on lexical and
+	// enriched objects, so a source filter serves it in every mode.
+	for _, mode := range []string{"lexical", "semantic"} {
+		filtered := request(t, "POST", "/v0/search", admin, map[string]any{"query": "lanterne", "corpus_ids": []string{a}, "mode": mode, "filter": map[string]any{"source_namespaces": []string{"example-feed"}}}, 200)["items"].([]any)
+		if len(filtered) != 1 || filtered[0].(map[string]any)["projection_generation_id"] != generation {
+			t.Fatalf("%s search filtered on example-feed after rebuild = %v, want one hit from %s", mode, filtered, generation)
+		}
+	}
 	// Operation state transitions join the Corpus's committed journal.
 	deadline := time.Now().Add(15 * time.Second)
 	var seen []map[string]any

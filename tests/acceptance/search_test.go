@@ -105,6 +105,20 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 	if len(all["items"].([]any)) != 12 {
 		t.Fatal("missing indexed texts", all)
 	}
+	// A source filter narrows before ranking: every text is in example-feed.
+	q["filter"] = map[string]any{"source_namespaces": []string{"absent-feed", "example-feed"}}
+	if n := len(request(t, "POST", "/v0/search", admin, q, 200)["items"].([]any)); n != 12 {
+		t.Fatalf("source filter on example-feed returned %d hits, want 12", n)
+	}
+	q["filter"] = map[string]any{"source_namespaces": []string{"absent-feed"}}
+	if n := len(request(t, "POST", "/v0/search", admin, q, 200)["items"].([]any)); n != 0 {
+		t.Fatalf("source filter on absent-feed returned %d hits, want 0", n)
+	}
+	for _, invalid := range []map[string]any{{}, {"source_namespaces": []string{}}, {"source_namespaces": []string{"a", "a"}}, {"source_namespaces": []string{""}}, {"namespace": "a"}} {
+		q["filter"] = invalid
+		request(t, "POST", "/v0/search", admin, q, 422)
+	}
+	delete(q, "filter")
 	segments := map[string]bool{}
 	for i, item := range all["items"].([]any) {
 		h := item.(map[string]any)

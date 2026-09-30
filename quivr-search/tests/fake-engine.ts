@@ -186,8 +186,10 @@ export interface Engine {
   ws: Workspace;
   /** POST bodies the app sent, by path. */
   sent: { path: string; body: any }[];
-  /** Search requests the app sent. */
-  searches: { query: string; mode: string; limit: number }[];
+  /** Search requests the app sent; sources is their source filter, if any. */
+  searches: { query: string; mode: string; limit: number; sources?: string[] }[];
+  /** sourceFilter false answers like a corpus built before source filtering. */
+  options: { sourceFilter: boolean };
   /** Sends the next incoming article on the live stream. */
   arrive: () => Article;
   close: () => Promise<void>;
@@ -196,6 +198,7 @@ export interface Engine {
 export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> {
   const sent: Engine["sent"] = [];
   const searches: Engine["searches"] = [];
+  const options: Engine["options"] = { sourceFilter: true };
   const streams = new Set<http.ServerResponse>();
   const server = http.createServer((req, res) => {
     res.writeHead(200, {
@@ -242,11 +245,15 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (path === "/v0/changes")
       return json(route, { items: [], next_cursor: "c0", has_more: false });
     if (path === "/v0/search") {
-      searches.push({ query: body.query, mode: body.mode, limit: body.limit });
+      const sources: string[] | undefined = body.filter?.source_namespaces;
+      searches.push({ query: body.query, mode: body.mode, limit: body.limit, sources });
+      if (sources && !options.sourceFilter)
+        return json(route, { code: "source_filter_unavailable", message: "source filter unavailable", retryable: false }, 422);
       const typed = words(body.query);
       const meaning = new Set(typed.flatMap((w) => MEANINGS[w] || []));
       const hits = [];
       for (const a of ws.articles) {
+        if (sources && !sources.includes(a.namespace)) continue;
         const text = words(`${a.title} ${a.body}`);
         const literal = typed.some((w) => text.some((t) => t.startsWith(w)));
         const near =
@@ -465,6 +472,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     ws,
     sent,
     searches,
+    options,
     arrive() {
       const next = ws.incoming.shift()!;
       next.received_at = new Date().toISOString();

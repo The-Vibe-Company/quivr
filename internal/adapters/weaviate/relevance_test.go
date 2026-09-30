@@ -74,7 +74,7 @@ func TestFR_ENRelevanceByMode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = projection.Publish(ctx, g, scope.Organization, "fixture", v, seg); err != nil {
+		if err = projection.Publish(ctx, g, scope.Organization, "fixture", "example-feed", v, seg); err != nil {
 			t.Fatal(err)
 		}
 		raw, _ := content.VectorBytes(vector)

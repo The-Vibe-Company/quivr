@@ -86,7 +86,10 @@ Returns {"items": [...], "retrieval_profile": {"name", "version"}}. Each item is
     "corpus_ids": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Corpora to search, from list_corpora"},
     "mode": {"type": "string", "enum": ["lexical", "semantic", "hybrid"], "description": "lexical matches words, semantic matches meaning, hybrid combines both; the server default is hybrid"},
     "profile": {"type": "string", "enum": ["fast", "balanced", "deep"], "description": "retrieval profile; the server default is balanced"},
-    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "maximum number of hits; the server default is 10"}
+    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "maximum number of hits; the server default is 10"},
+    "filter": {"type": "object", "additionalProperties": false, "minProperties": 1, "description": "narrow the search before ranking", "properties": {
+      "source_namespaces": {"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}, "description": "keep only Records from these Source Namespaces (a Record's source.namespace); the best matches of these sources are returned even when others rank higher"}
+    }}
   }
 }`),
 		Profiles:   []string{"read", "ingest"},

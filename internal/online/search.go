@@ -11,13 +11,13 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/client"
 )
 
-const searchUsage = "quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--json] [--api-url <url>] [--api-key <key>] <query>"
+const searchUsage = "quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>"
 
 const searchSummary = "Search one or more Corpora of a running Quivr and print ranked hits with their provenance."
 
 var searchCommand = Command{Name: "search", Usage: searchUsage, Summary: searchSummary, run: search}
 
-// corpusList collects repeated --corpus flags; each may also be a comma-separated list.
+// corpusList collects repeated --corpus or --source flags; each may also be a comma-separated list.
 type corpusList []string
 
 func (c *corpusList) String() string { return strings.Join(*c, ",") }
@@ -36,12 +36,14 @@ func search(ctx context.Context, env Env, args []string) int {
 	var (
 		conn    connection
 		corpora corpusList
+		sources corpusList
 		mode    = fs.String("mode", "", "search mode: lexical, semantic or hybrid (server default: hybrid)")
 		profile = fs.String("profile", "", "retrieval profile: fast, balanced or deep (server default: balanced)")
 		limit   = fs.Int("limit", 0, "maximum number of hits, 1 to 50 (server default: 10)")
 		asJSON  = fs.Bool("json", false, "print the public API response unchanged")
 	)
 	fs.Var(&corpora, "corpus", "Corpus ID to search; repeat or separate with commas (required)")
+	fs.Var(&sources, "source", "keep only Records from this Source Namespace, ranked among themselves; repeat or separate with commas")
 	conn.register(fs)
 	fs.Usage = func() {} // help and usage errors are printed below
 	positional, err := parseInterspersed(fs, args)
@@ -74,6 +76,10 @@ func search(ctx context.Context, env Env, args []string) int {
 	if *profile != "" {
 		p := client.SearchRequestProfile(*profile)
 		body.Profile = &p
+	}
+	if len(sources) > 0 {
+		namespaces := []string(sources)
+		body.Filter = &client.SearchFilter{SourceNamespaces: &namespaces}
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "limit" {

@@ -190,11 +190,12 @@ func usageError(msg string) *Failure { return &Failure{Exit: ExitUsage, Message:
 
 // hints explain the public codes an operator most often meets.
 var hints = map[string]string{
-	"invalid_api_key":    "the server rejected the API key; check " + EnvAPIKey + " or --api-key",
-	"forbidden":          "the API key lacks a permission or Corpus scope this request needs",
-	"invalid_schema":     "the request does not match the API contract; check the arguments",
-	"unsupported_search": "the server does not support this search mode or profile",
-	"search_unavailable": "the search backend is unavailable; retry later",
+	"invalid_api_key":           "the server rejected the API key; check " + EnvAPIKey + " or --api-key",
+	"forbidden":                 "the API key lacks a permission or Corpus scope this request needs",
+	"invalid_schema":            "the request does not match the API contract; check the arguments",
+	"unsupported_search":        "the server does not support this search mode or profile",
+	"search_unavailable":        "the search backend is unavailable; retry later",
+	"source_filter_unavailable": "a requested Corpus predates source filtering; an operator rebuilds it once (POST /v0/corpora/{id}/rebuilds)",
 }
 
 // unreachable classifies a transport error: nothing usable answered.

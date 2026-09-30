@@ -116,7 +116,7 @@ Search one or more Corpora of a running Quivr and print ranked hits with their p
 `quivr search --help` prints:
 
 ```text
-usage: quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--json] [--api-url <url>] [--api-key <key>] <query>
+usage: quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile fast|balanced|deep] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>
 
 Search one or more Corpora of a running Quivr and print ranked hits with their provenance.
 
@@ -135,6 +135,8 @@ Flags:
     	search mode: lexical, semantic or hybrid (server default: hybrid)
   -profile string
     	retrieval profile: fast, balanced or deep (server default: balanced)
+  -source value
+    	keep only Records from this Source Namespace, ranked among themselves; repeat or separate with commas
 
 This command needs a running Quivr server. It reads the server address from
 QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key

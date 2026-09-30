@@ -1354,6 +1354,12 @@ type SearchExcerpt struct {
 // SearchExcerptCoordinateSystem defines model for SearchExcerpt.CoordinateSystem.
 type SearchExcerptCoordinateSystem string
 
+// SearchFilter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+type SearchFilter struct {
+	// SourceNamespaces Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+	SourceNamespaces *[]string `json:"source_namespaces,omitempty"`
+}
+
 // SearchHit One authorized segment hit. Rehydrate from canonical storage and recheck Organization/Corpus access, currentness, quarantine and Tombstone before returning. Rank is contiguous and one-based after hydration/filtering. Projection Generation, segmentation, segment and optional Embedding Artifact/Vector Space are logical durable IDs, not physical collection names or workflow IDs. Embedding references are omitted when that segment has lexical coverage only. They do not assert that the dense branch contributed to its rank. All hits inherit the response retrieval profile. Raw scores/explainScore stay internal.
 type SearchHit struct {
 	Availability        Availability `json:"availability"`
@@ -1377,13 +1383,16 @@ type SearchProfile struct {
 	Version string `json:"version"`
 }
 
-// SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. Metadata filter syntax and pagination are outside this initial surface.
+// SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
 type SearchRequest struct {
-	CorpusIds []string              `json:"corpus_ids"`
-	Limit     *int                  `json:"limit,omitempty"`
-	Mode      *SearchRequestMode    `json:"mode,omitempty"`
-	Profile   *SearchRequestProfile `json:"profile,omitempty"`
-	Query     string                `json:"query"`
+	CorpusIds []string `json:"corpus_ids"`
+
+	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+	Filter  *SearchFilter         `json:"filter,omitempty"`
+	Limit   *int                  `json:"limit,omitempty"`
+	Mode    *SearchRequestMode    `json:"mode,omitempty"`
+	Profile *SearchRequestProfile `json:"profile,omitempty"`
+	Query   string                `json:"query"`
 }
 
 // SearchRequestMode defines model for SearchRequest.Mode.

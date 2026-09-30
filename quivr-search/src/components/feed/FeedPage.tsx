@@ -94,6 +94,8 @@ export function FeedPage({
 }) {
   const [sort, setSort] = useState<"relevance" | "recent">("relevance");
   const [hits, setHits] = useState<Hit[] | null>(null);
+  // The source the engine ranked the hits within, or "" for every source.
+  const [searchedSource, setSearchedSource] = useState("");
   const [searching, setSearching] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [searchError, setSearchError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -109,7 +111,11 @@ export function FeedPage({
   useEffect(() => setNow(Date.now()), [feed.items]);
 
   // Search: lexical, or hybrid when "Idées proches" is on. The top 50
-  // passages are grouped by article, in the engine's order.
+  // passages are grouped by article, in the engine's order. A chosen source
+  // is searched on its own, so its best matches come back even when other
+  // sources rank higher. A corpus the engine cannot filter yet falls back to
+  // narrowing the top 50 of every source.
+  const source = filter.kind === "source" ? filter.namespace : "";
   useEffect(() => {
     if (!query) {
       setHits(null);
@@ -120,14 +126,18 @@ export function FeedPage({
     setSearching("loading");
     setSearchError("");
     const timer = setTimeout(() => {
-      search(
-        query,
-        near ? "hybrid" : "lexical",
-        corpus,
-        controller.signal,
-        SEARCH_LIMIT,
-      )
-        .then((data) => {
+      const mode = near ? "hybrid" : "lexical";
+      const run = (within: string) =>
+        search(query, mode, corpus, controller.signal, SEARCH_LIMIT, within ? [within] : []).then(
+          (data) => ({ data, within }),
+        );
+      run(source)
+        .catch((error) => {
+          if (source && error instanceof APIError && error.code === "source_filter_unavailable")
+            return run("");
+          throw error;
+        })
+        .then(({ data, within }) => {
           const words = tokenize(query).filter((w) => w.length > 2);
           const seen = new Map<string, Hit>();
           for (const r of data.items) {
@@ -144,6 +154,7 @@ export function FeedPage({
             });
           }
           setHits([...seen.values()]);
+          setSearchedSource(within);
           setSearching("ready");
         })
         .catch((error) => {
@@ -162,7 +173,7 @@ export function FeedPage({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, near, corpus, attempt, onUnauthorized]);
+  }, [query, near, corpus, source, attempt, onUnauthorized]);
 
   const byId = useMemo(() => {
     const map = new Map<string, FeedItem>();
@@ -199,7 +210,7 @@ export function FeedPage({
         // An article older than the feed's window: its passage stands in.
         record_id: hit.record_id,
         version_id: hit.version_id,
-        namespace: "",
+        namespace: searchedSource,
           title: hit.excerpt.slice(0, 110),
           excerpt: hit.excerpt,
         },
@@ -208,7 +219,7 @@ export function FeedPage({
     return sort === "recent"
       ? [...rows].sort((a, b) => when(b.item).localeCompare(when(a.item)))
       : rows;
-  }, [query, hits, feed.items, byId, sort, terms]);
+  }, [query, hits, searchedSource, feed.items, byId, sort, terms]);
 
   const pass = useCallback(
     (row: Row) => {
@@ -348,7 +359,7 @@ export function FeedPage({
 
   let empty: { title: string; text: string } | null = null;
   if (query && searching === "ready" && !rows.length)
-    empty = base.length
+    empty = base.length || searchedSource
       ? { title: "Rien ici pour ce filtre.", text: "Retirez le filtre pour voir tous les résultats." }
       : {
           title: "Aucun article ne parle de ça.",

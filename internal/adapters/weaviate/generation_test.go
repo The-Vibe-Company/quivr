@@ -51,7 +51,7 @@ func TestLogicalGenerationsCoexistInSharedCollection(t *testing.T) {
 		corpus string
 		seg    content.Segmentation
 	}{{old, "corpus-a", a}, {next, "corpus-a", a}, {old, "corpus-b", bSeg}} {
-		if err = store.Publish(ctx, publish.g, org, publish.corpus, content.Version{ID: publish.seg.VersionID}, publish.seg); err != nil {
+		if err = store.Publish(ctx, publish.g, org, publish.corpus, "example-feed", content.Version{ID: publish.seg.VersionID}, publish.seg); err != nil {
 			t.Fatal(err)
 		}
 	}

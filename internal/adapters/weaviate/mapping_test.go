@@ -55,7 +55,7 @@ func TestPinnedRetrievalFieldsShapeProjectedText(t *testing.T) {
 	for _, g := range []content.Generation{plain, mapped} {
 		// Publishing twice is idempotent and verified after write.
 		for i := 0; i < 2; i++ {
-			if err = store.Publish(ctx, g, org, "corpus-"+g.ID, v, seg); err != nil {
+			if err = store.Publish(ctx, g, org, "corpus-"+g.ID, "example-feed", v, seg); err != nil {
 				t.Fatal(err)
 			}
 		}

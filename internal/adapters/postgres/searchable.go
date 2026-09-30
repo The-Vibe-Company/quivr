@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// BootstrapGeneration creates the default generation of a fresh install. It is
+// source-namespace projected; an existing default keeps its recorded state.
 func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id) VALUES($1,$2,$3,true,$4) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected) VALUES($1,$2,$3,true,$4,true) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
 
@@ -20,7 +22,7 @@ func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, space
 func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
 	var cfg []byte
-	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &cfg)
+	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &cfg)
 	if err != nil {
 		return g, err
 	}

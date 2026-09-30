@@ -86,7 +86,7 @@ func (s ContentStore) RebuildCandidates(ctx context.Context, org, id string, lim
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
+	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
 FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org, op.CorpusID, op.TargetGenerationID, limit)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org
 	out := []retrieval.RebuildCandidate{}
 	for rows.Next() {
 		var c retrieval.RebuildCandidate
-		if err = rows.Scan(&c.RecordID, &c.VersionID, &c.VectorsRequired); err != nil {
+		if err = rows.Scan(&c.RecordID, &c.VersionID, &c.SourceNamespace, &c.VectorsRequired); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

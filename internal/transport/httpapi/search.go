@@ -35,6 +35,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if wire.Limit != nil {
 		q.Limit = *wire.Limit
 	}
+	if wire.Filter != nil && wire.Filter.SourceNamespaces != nil {
+		q.SourceNamespaces = *wire.Filter.SourceNamespaces
+	}
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
 	if err != nil {
 		switch {
@@ -42,6 +45,8 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 			failure(w, 403, "forbidden")
 		case errors.Is(err, retrieval.ErrUnsupported):
 			failure(w, 422, "unsupported_search")
+		case errors.Is(err, retrieval.ErrSourceFilterUnavailable):
+			failure(w, 422, "source_filter_unavailable")
 		default:
 			failure(w, 503, "search_unavailable")
 		}

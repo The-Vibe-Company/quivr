@@ -45,6 +45,9 @@ type Segmentation struct {
 type Generation struct {
 	ID, Collection, ProfileVersion, SpaceID string
 	Fields                                  []corpus.Field
+	// SourceNamespaceProjected reports that every object of the generation
+	// carries its Record's Source Namespace, so search can filter on it.
+	SourceNamespaceProjected bool
 }
 type Candidate struct{ SegmentID, GenerationID string }
 type Hydrated struct {

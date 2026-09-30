@@ -53,10 +53,19 @@ export const search = (
   corpus: string,
   signal?: AbortSignal,
   limit = 10,
+  sources: string[] = [],
 ) =>
   request<SearchResponse>(
     "/v0/search",
-    { query, mode, profile: "balanced", limit, corpus_ids: [corpus] },
+    {
+      query,
+      mode,
+      profile: "balanced",
+      limit,
+      corpus_ids: [corpus],
+      // The engine ranks within these sources, before the limit.
+      ...(sources.length ? { filter: { source_namespaces: sources } } : {}),
+    },
     signal,
   );
 export const fetchDocument = (

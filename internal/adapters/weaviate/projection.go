@@ -67,16 +67,30 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	if !className.MatchString(collection) {
 		return errors.New("invalid projection route")
 	}
-	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, nil)
+	var existing struct {
+		Properties []struct {
+			Name string `json:"name"`
+		} `json:"properties"`
+	}
+	status, err := s.call(ctx, "GET", "/v1/schema/"+collection, nil, &existing)
 	if err == nil {
-		return nil
+		for _, p := range existing.Properties {
+			if p.Name == sourceNamespaceProperty {
+				return nil
+			}
+		}
+		// A collection created before Source Namespace filtering gains the
+		// property; its older objects lack a value, so their generations stay
+		// unprojected until rebuilt.
+		_, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", filterable(sourceNamespaceProperty), nil)
+		return err
 	}
 	if status != 404 {
 		return err
 	}
 	properties := []any{}
-	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId"} {
-		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "field", "indexFilterable": true, "indexSearchable": false})
+	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", sourceNamespaceProperty} {
+		properties = append(properties, filterable(name))
 	}
 	for _, name := range []string{"title", "body"} {
 		properties = append(properties, map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "word", "indexSearchable": true})
@@ -85,6 +99,15 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
+
+// sourceNamespaceProperty holds the Record's Source Namespace for filtering.
+const sourceNamespaceProperty = "sourceNamespace"
+
+// filterable declares an exact-match text property that search never scores.
+func filterable(name string) map[string]any {
+	return map[string]any{"name": name, "dataType": []string{"text"}, "tokenization": "field", "indexFilterable": true, "indexSearchable": false}
+}
+
 func uuidOf(stable string) string {
 	h := content.Hash([]byte(stable))
 	return h[:8] + "-" + h[8:12] + "-5" + h[13:16] + "-a" + h[17:20] + "-" + h[20:32]
@@ -102,7 +125,7 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
 }
 
-var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", "body", "title"}
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", sourceNamespaceProperty, "body", "title"}
 
 type storedObject struct {
 	Properties map[string]any       `json:"properties"`
@@ -151,17 +174,23 @@ func (s *Store) insert(ctx context.Context, object map[string]any) error {
 // rewritten or deleted. Weaviate re-indexes an updated object under a new
 // document id, and a BM25 query does not read its index atomically, so an
 // update or a delete of the object serving a segment can hide it.
-func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID string, v content.Version, seg content.Segmentation) error {
+func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
 	}
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
-		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, "body": texts[i].Body, "title": texts[i].Title}
+		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
 		existing, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
+		}
+		if found && existing.Properties[sourceNamespaceProperty] == nil {
+			// An anchor projected before Source Namespaces stays as written:
+			// its generation is not source-filterable, and a rewrite would
+			// re-index it.
+			delete(properties, sourceNamespaceProperty)
 		}
 		if found && sameProperties(existing.Properties, properties) {
 			continue
@@ -198,7 +227,17 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		}
 		filters = append(filters, "{operator:And,operands:["+equal("corpusId", r.CorpusID)+","+equal("generationId", r.Generation.ID)+"]}")
 	}
-	where := "{operator:And,operands:[" + equal("organization", scope.Organization) + ",{operator:Or,operands:[" + strings.Join(filters, ",") + "]}]}"
+	operands := []string{equal("organization", scope.Organization), "{operator:Or,operands:[" + strings.Join(filters, ",") + "]}"}
+	// The source filter is part of the candidate query, so ranking and the
+	// candidate limit apply within it in every mode.
+	if len(q.SourceNamespaces) > 0 {
+		sources := make([]string, 0, len(q.SourceNamespaces))
+		for _, ns := range q.SourceNamespaces {
+			sources = append(sources, equal(sourceNamespaceProperty, ns))
+		}
+		operands = append(operands, "{operator:Or,operands:["+strings.Join(sources, ",")+"]}")
+	}
+	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
 	branch := fmt.Sprintf("bm25:{query:%s,properties:[\"title^2\",\"body\"]}", quote(q.Query))
 	vector, _ := json.Marshal(q.Vector)
 	if q.Mode == "semantic" {
@@ -271,7 +310,10 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			}
 			lexical := map[string]any{}
 			for _, key := range lexicalProperties {
-				lexical[key] = anchor.Properties[key]
+				// An anchor written before a property existed has no value to copy.
+				if value, ok := anchor.Properties[key]; ok {
+					lexical[key] = value
+				}
 			}
 			// Create-only: an object already written by a concurrent attachment is
 			// never re-indexed. A rejected or lost create is reconciled by the read below.

@@ -1054,7 +1054,7 @@ Connector kinds enabled in this deployment, with the JSON Schemas that validate 
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -1063,7 +1063,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters,
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input, 503 dependency unavailable. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported profile/input or source_filter_unavailable, 503 dependency unavailable. |
 
 ## Webhooks
 
@@ -5456,7 +5456,7 @@ required:
 
 ### `SearchRequest`
 
-Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. Metadata filter syntax and pagination are outside this initial surface.
+Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5465,6 +5465,7 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
 | `profile` | string |  | One of `fast`, `balanced`, `deep`. Default `balanced`. |
 | `limit` | integer |  | Default `10`. Minimum `1`. Maximum `50`. |
+| `filter` | [`SearchFilter`](#searchfilter) |  |  |
 
 Example `text_search`:
 
@@ -5518,10 +5519,43 @@ properties:
     minimum: 1
     maximum: 50
     default: 10
+  filter:
+    $ref: '#/components/schemas/SearchFilter'
 required:
   - query
   - corpus_ids
-description: Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. Metadata filter syntax and pagination are outside this initial surface.
+description: Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
+```
+
+</details>
+
+### `SearchFilter`
+
+Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source_namespaces` | array of string |  | Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them. At least `1` items. At most `50` items. Items are unique. Each item: Minimum length `1`. Maximum length `200`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+minProperties: 1
+properties:
+  source_namespaces:
+    type: array
+    items:
+      type: string
+      minLength: 1
+      maxLength: 200
+    minItems: 1
+    maxItems: 50
+    uniqueItems: true
+    description: Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+description: Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
 ```
 
 </details>

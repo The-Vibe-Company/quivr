@@ -109,6 +109,25 @@ test("la recherche passe des mots exacts aux idées proches et devient une alert
   await page.getByRole("group", { name: "Trier" }).getByRole("button", { name: "Récents" }).click();
   await expect(rows(page).first()).toContainText("Orages : la grêle");
 
+  // A source picked while searching is searched on its own by the engine.
+  const sources = page.getByRole("complementary", { name: "Alertes et sources" });
+  await sources.getByRole("button", { name: /Météo locale/ }).click();
+  await expect
+    .poll(() => engine.searches.at(-1))
+    .toEqual({ query: "grêle", mode: "lexical", limit: 50, sources: ["Météo locale"] });
+  await expect(page.getByRole("heading", { name: /1 article sur « grêle »/ })).toBeVisible();
+  await expect(rows(page).first()).toContainText("Cellule orageuse");
+  // A corpus the engine cannot filter yet: the top 50 of every source, narrowed here.
+  engine.options.sourceFilter = false;
+  const before = engine.searches.length;
+  await sources.getByRole("button", { name: /Dépêches exemple/ }).click();
+  await expect.poll(() => engine.searches.slice(before)).toEqual([
+    { query: "grêle", mode: "lexical", limit: 50, sources: ["Dépêches exemple"] },
+    { query: "grêle", mode: "lexical", limit: 50 },
+  ]);
+  await expect(page.getByRole("heading", { name: /2 articles sur « grêle »/ })).toBeVisible();
+  await sources.getByRole("button", { name: /Dépêches exemple/ }).click();
+
   await page.getByRole("button", { name: "Créer une alerte" }).click();
   await expect(page.getByRole("button", { name: "Alerte créée ✓" })).toBeVisible();
   await expect(page.locator(".toast")).toContainText("« grêle »");

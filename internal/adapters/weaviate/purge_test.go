@@ -68,10 +68,10 @@ func TestPurgeDeletesOnlyFilteredObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A neighbour Corpus and a neighbour Organization in the same generation.
-	if err := f.store.Publish(f.ctx, old, f.org, "corpus-neighbour", content.Version{ID: "version-n"}, f.segmentation("segment-n", "phare voisin")); err != nil {
+	if err := f.store.Publish(f.ctx, old, f.org, "corpus-neighbour", "example-feed", content.Version{ID: "version-n"}, f.segmentation("segment-n", "phare voisin")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.Publish(f.ctx, old, "adapter-attach-other", f.corpusID, content.Version{ID: "version-segment-a"}, a); err != nil {
+	if err := f.store.Publish(f.ctx, old, "adapter-attach-other", f.corpusID, "example-feed", content.Version{ID: "version-segment-a"}, a); err != nil {
 		t.Fatal(err)
 	}
 	collection := f.gen.Collection
