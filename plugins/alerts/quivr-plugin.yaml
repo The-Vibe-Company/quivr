@@ -37,6 +37,17 @@ contributions:
               maxLength: 1000
               pattern: "\\S"
               description: What the articles are about, in plain language, for example "Tensions between two countries over visa rules".
+            sources:
+              type: array
+              minItems: 1
+              maxItems: 64
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+                maxLength: 256
+                pattern: "\\S"
+              description: Optional. Only articles from these Source Namespaces are judged; the others do not match and are never sent to the classifier. Compared like the keyword source filter, without case or accents. Absent, every source is judged.
       $defs:
         term:
           type: object

@@ -112,6 +112,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   "Labour strikes at ports and harbours", judged by TypeSafe's Jev classifier, so
   rephrased and translated articles alert too:
   - one classifier call per article covers all described alerts;
+  - an alert can be limited to chosen sources, whose other articles are never sent;
   - the Match evidence carries the classifier's score;
   - they are off without a TypeSafe key, because article text is sent to TypeSafe
     ([guide](docs/described-alerts.md));

@@ -60,6 +60,13 @@ The expression holds the description:
 {"kind": "described", "description": "Labour strikes at ports and harbours"}
 ```
 
+To watch only some sources, list their Source Namespaces in `sources`. Articles
+from other sources do not match and are never sent to TypeSafe:
+
+```json
+{"kind": "described", "description": "Labour strikes at ports and harbours", "sources": ["wire"]}
+```
+
 Create a Saved Query with it, then a Subscription pinned to the `alerts` evaluator,
 exactly as for [keyword alerts](keyword-alerts.md#save-it-as-an-alert):
 

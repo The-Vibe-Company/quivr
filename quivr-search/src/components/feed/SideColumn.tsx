@@ -11,7 +11,11 @@ import type { Filter } from "./FeedPage";
 export function alertRule(alert: Alert, withState = true) {
   const rule =
     alert.kind === "described"
-      ? `Décrite : « ${alert.expression.description} »`
+      ? `Décrite : « ${alert.expression.description} »${
+          alert.expression.sources?.length
+            ? ` · ${alert.expression.sources.map(sourceName).join(", ")}`
+            : ""
+        }`
       : alert.kind === "keywords"
         ? keywordRule(alert.expression.match)
         : "Alerte d’un autre type";

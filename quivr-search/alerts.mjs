@@ -23,6 +23,8 @@ const SHOWN = 30; // newest caught articles returned by an alert's page
 const PARALLEL = 6;
 // Bounds of a described alert's description, as in the plugin's schema.
 const DESCRIPTION = { min: 3, max: 1000 };
+// Source Namespaces a described alert may be limited to, as in the plugin's schema.
+const SOURCES_MAX = 64;
 const ACTION = /^\/demo\/alerts\/([\w-]+)(?:\/(pause|resume|edit|delete))?$/;
 // A preview judges this many of the newest articles (POST /v0/subscription-previews).
 // Each article of a described preview is one paid classifier call: fewer of them.
@@ -119,7 +121,21 @@ export function alertRoutes({
           400,
           `Décrivez l’alerte en ${DESCRIPTION.min} à ${DESCRIPTION.max} caractères.`,
         );
-      return { kind: "described", description: text };
+      const sources = value.sources ?? [];
+      if (
+        !Array.isArray(sources) ||
+        sources.length > SOURCES_MAX ||
+        sources.some(
+          (s) => typeof s !== "string" || !s.trim() || s.length > 256,
+        )
+      )
+        throw fail(400, "Requête invalide.");
+      const watched = [...new Set(sources)];
+      return {
+        kind: "described",
+        description: text,
+        ...(watched.length ? { sources: watched } : {}),
+      };
     }
     if (
       value?.kind !== "keywords" ||

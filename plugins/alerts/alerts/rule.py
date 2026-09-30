@@ -56,7 +56,11 @@ def evaluate(invocation: SubscriptionInvocation) -> list[Decision]:
         if kind not in WAITS_BY_DEFAULT:
             # The expression schema admits only the implemented kinds.
             raise TerminalError("unsupported_kind", f"evaluation {evaluation.id} has the unsupported kind {kind!r}")
-        if evaluation.configuration.get("wait_for_enrichment", WAITS_BY_DEFAULT[kind]) and not invocation.enriched:
+        outside = described.outside_sources(evaluation, record) if kind == "described" else None
+        if outside is not None:
+            # Decided before enrichment and before the classifier: the source alone rules it out.
+            decisions[evaluation.id] = no_match(evaluation, f'The article\'s source "{outside}" is not one of the alert\'s sources.')
+        elif evaluation.configuration.get("wait_for_enrichment", WAITS_BY_DEFAULT[kind]) and not invocation.enriched:
             decisions[evaluation.id] = not_ready(evaluation, "Waiting for the article to be enriched.")
         elif kind == "keywords":
             decisions[evaluation.id] = decide_keywords(article, evaluation)

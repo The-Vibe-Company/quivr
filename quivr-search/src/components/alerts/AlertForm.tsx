@@ -77,7 +77,11 @@ export function AlertForm({
     setWords(form?.words || []);
     setMode(form?.mode || "any");
     setExclude(form?.exclude.join(", ") || "");
-    setWatched(form?.sources || []);
+    setWatched(
+      next?.kind === "described"
+        ? next.expression.sources || []
+        : form?.sources || [],
+    );
     const needsAdvanced = next?.kind === "keywords" && !form;
     setAdvanced(needsAdvanced);
     setQuery(
@@ -102,7 +106,11 @@ export function AlertForm({
   const isDescribed = kind === "described";
   const expression: AlertExpression | null = isDescribed
     ? description.trim().length >= DESCRIPTION.min
-      ? { kind: "described", description: description.trim() }
+      ? {
+          kind: "described",
+          description: description.trim(),
+          ...(watched.length ? { sources: watched } : {}),
+        }
       : null
     : advanced
       ? parsed.state === "valid"
@@ -393,7 +401,7 @@ export function AlertForm({
           </p>
         )}
       </div>
-      {!isDescribed && !advanced && (
+      {(isDescribed || !advanced) && (
         <div className="form-field">
           <span className="form-label" id={`${id}-sources`}>
             Sources surveillées
@@ -432,11 +440,6 @@ export function AlertForm({
             ))}
           </div>
         </div>
-      )}
-      {isDescribed && (
-        <p className="form-note">
-          Une alerte décrite surveille toutes les sources.
-        </p>
       )}
       {!isDescribed && !advanced && (
         <div className="form-preview" aria-live="polite">

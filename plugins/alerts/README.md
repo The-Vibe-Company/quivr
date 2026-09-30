@@ -182,9 +182,13 @@ System One endpoint, for example with the fake server in tests.
 ```
 
 The description has 3 to 1000 characters, with at least one character that is not a
-space. Each batch is decided as follows.
+space. An optional `sources` (1 to 64 distinct Source Namespaces) limits the alert to
+those sources, compared like the keyword `source` filter: an article from another
+source is `no_match` at once, without waiting for enrichment and without a classifier
+question for that alert. Each batch is decided as follows.
 
-1. **One call.** All described evaluations of the batch that are ready share one
+1. **One call.** All described evaluations of the batch that are ready and watch the
+   article's source share one
    classifier call. Their descriptions are deduplicated after runs of spaces are
    collapsed, then sorted, so each distinct description is asked once. Evaluations
    that differ only in threshold share their question. The core already

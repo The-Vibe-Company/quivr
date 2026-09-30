@@ -246,11 +246,21 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   await expect(page.getByLabel(/Ignorer les articles/)).toHaveValue("football");
   await page.getByRole("button", { name: "Annuler" }).click();
 
-  // Described alerts: a sentence, every source.
+  // Described alerts: a sentence, limited to the chosen sources.
   await page.getByRole("group", { name: "Type d’alerte" }).getByRole("button", { name: "Un sujet décrit" }).click();
-  await expect(page.getByLabel("Décrivez le sujet en une phrase")).toBeVisible();
-  await expect(page.getByRole("group", { name: "Sources surveillées" })).toHaveCount(0);
-  await expect(page.getByText("Une alerte décrite surveille toutes les sources.")).toBeVisible();
+  await page.getByLabel("Décrivez le sujet en une phrase").fill("Les grèves dans les transports publics");
+  await page.getByRole("group", { name: "Sources surveillées" }).getByRole("button", { name: "Revue technique" }).click();
+  await page.getByLabel(/Nom de l’alerte/).fill("Grèves, revue technique");
+  const described = posted(page, "/demo/alerts");
+  await page.getByRole("button", { name: "Créer l’alerte" }).click();
+  expect((await described).expression).toEqual({
+    kind: "described",
+    description: "Les grèves dans les transports publics",
+    sources: ["Revue technique"],
+  });
+  await expect(list.getByRole("listitem").first()).toContainText(
+    "Décrite : « Les grèves dans les transports publics » · Revue technique",
+  );
 
   // Pause, then delete after a confirmation.
   await storm.getByRole("button", { name: "Mettre en pause" }).click();

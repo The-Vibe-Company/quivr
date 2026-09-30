@@ -58,9 +58,9 @@ such as `(port OR quai) AND grève`, goes in **Écrire une requête avancée**, 
 how Quivr reads it (`src/lib/alertForm.ts`; `src/lib/notation.ts` ports the plugin's parser).
 With `DEMO_DESCRIBED_ALERTS`, **Un sujet décrit** offers [described alerts](../docs/described-alerts.md):
 a sentence judged by Jev, whose note says article text goes to TypeSafe and a catch can take a
-minute; they watch every source. Without it, a line says why the choice is missing. The form
-previews what the alert would have caught among the newest articles (saving nothing): as typed,
-or on a click for described alerts, since each article is a classifier call. Each alert
+minute; they can watch chosen sources too. Without it, a line says why the choice is missing.
+The form previews what the alert would have caught among the newest articles (saving nothing):
+as typed, or on a click for described alerts, since each article is a classifier call. Each alert
 lists what it caught, live, with the matched words or the score; it can be paused, resumed,
 edited (its name stays) and deleted. `alerts.mjs` explains how alerts are stored and read.
 

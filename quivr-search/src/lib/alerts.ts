@@ -9,6 +9,8 @@ import type { KeywordExpression } from "./notation";
 export interface DescribedExpression {
   kind: "described";
   description: string;
+  /** Source Namespaces the alert watches; absent means every source. */
+  sources?: string[];
 }
 
 export type AlertExpression = KeywordExpression | DescribedExpression;

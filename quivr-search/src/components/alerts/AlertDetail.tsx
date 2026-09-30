@@ -163,7 +163,11 @@ export function AlertDetail({
               const next = await editAlert(
                 detail.alert_id,
                 isDescribed
-                  ? { kind: "described", description: draft.trim() }
+                  ? {
+                      ...detail.expression,
+                      kind: "described",
+                      description: draft.trim(),
+                    }
                   : parsed.state === "valid"
                     ? parsed.expression
                     : detail.expression,

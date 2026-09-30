@@ -2,7 +2,9 @@
 
 Every described evaluation of a batch is decided by one classifier call: the
 article is sent once as the state, with one yes/no question per distinct
-description. There is no keyword pre-filter. A match is a score at or above
+description. There is no keyword pre-filter; an alert limited to some
+sources (``sources``) is decided no_match for an article from another source
+before the call, which then does not ask its description. A match is a score at or above
 the threshold; the classifier's own confidence, when it has one, is never used.
 
 The classifier sits behind the small ``Classifier`` protocol so another one
@@ -19,6 +21,7 @@ from typing import Any, Protocol
 from quivr_plugin import Decision, Evaluation, match, no_match, record_field
 
 from .keywords import BUILT_IN_FIELDS, DEFAULT_TEXT_ROLES
+from .text import same_value
 
 # Calibrated on calibration/set.json (see README.md, "Described alerts").
 DEFAULT_THRESHOLD = 0.5
@@ -127,6 +130,18 @@ def article_state(record: dict[str, Any], configuration: dict[str, Any]) -> Stat
 def description_of(evaluation: Evaluation) -> str:
     """The description as it is asked: runs of spaces collapsed, so trivially different spellings share a question."""
     return " ".join(evaluation.expression["description"].split())
+
+
+def outside_sources(evaluation: Evaluation, record: dict[str, Any]) -> str | None:
+    """The article's Source Namespace when the alert watches other sources only, else None.
+
+    Namespaces compare like the keyword ``source`` filter: folded whole values.
+    """
+    sources = evaluation.expression.get("sources")
+    if not sources:
+        return None
+    namespace = str(record_field(record, BUILT_IN_FIELDS["source"]) or "")
+    return None if same_value(namespace) in {same_value(s) for s in sources} else namespace
 
 
 def threshold_of(evaluation: Evaluation, configuration: dict[str, Any]) -> float:

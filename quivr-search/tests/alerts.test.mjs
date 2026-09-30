@@ -425,6 +425,12 @@ test("a described alert reaches the core only where the deployment offers it, an
     expression: { kind: "described", description: "  a " },
   });
   assert.equal(tooShort.status, 400);
+  const badSources = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "x",
+    expression: { kind: "described", description: "Des grèves", sources: [" "] },
+  });
+  assert.equal(badSources.status, 400);
   const created = await call("/demo/alerts", {
     idempotency_key: idem(),
     name: "Ports",
@@ -432,15 +438,17 @@ test("a described alert reaches the core only where the deployment offers it, an
       kind: "described",
       description: "  Des grèves dans les ports ",
       threshold: 0.01,
+      sources: ["wire", "wire", "feed-b"],
     },
   });
   assert.equal(created.status, 201);
   assert.equal(created.data.kind, "described");
-  // Only the description goes through; the deployment keeps the threshold.
+  // The description and the watched sources go through; the deployment keeps the threshold.
   const [saved] = core.seen.filter((r) => r.url === "/v0/saved-queries");
   assert.deepEqual(saved.body.definition.expression, {
     kind: "described",
     description: "Des grèves dans les ports",
+    sources: ["wire", "feed-b"],
   });
   const [sub] = core.seen.filter(
     (r) => r.url === "/v0/subscriptions" && r.method === "POST",

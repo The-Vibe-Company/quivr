@@ -162,10 +162,28 @@ class Errors(FakeServer):
         self.assertEqual((answer.status, answer.body["code"], answer.body["retryable"]), (422, "described_unavailable", False))
 
 
+class Sources(FakeServer):
+    def test_only_articles_from_the_chosen_sources_reach_the_classifier(self):
+        # The request's article comes from the Source Namespace "wire".
+        elsewhere = {**D(STRIKE), "sources": ["feed-b"]}
+        here = {**D(VISAS), "sources": ["feed-b", "WIRE"]}
+        answer = self.ask([(elsewhere, {}), (here, {}), (D(STRIKE), {})], parts=FR_PARTS)
+        self.assertEqual([d["decision"] for d in answer.body["decisions"]], ["no_match", "no_match", "match"])
+        self.assertEqual(answer.body["decisions"][0]["evidence"]["explanation"], 'The article\'s source "wire" is not one of the alert\'s sources.')
+        # Only the alerts watching this source were asked about the article.
+        self.assertEqual([sorted(r["descriptions"]) for r in self.fake.requests], [sorted([STRIKE, VISAS])])
+
+    def test_an_article_from_another_source_is_decided_without_a_call_or_enrichment(self):
+        self.key = None
+        self.assertEqual(self.decisions([({**D(STRIKE), "sources": ["feed-b"]}, {})], parts=FR_PARTS, enriched=False), ["no_match"])
+        self.assertEqual(self.fake.requests, [])
+
+
 class Schema(unittest.TestCase):
     def test_malformed_described_alerts_are_refused(self):
         for expression, configuration in [(D("  "), {}), (D("ab"), {}), (D("x" * 1001), {}), ({"kind": "described"}, {}),
-                                          ({**D(STRIKE), "match": {"term": "a"}}, {}), (D(STRIKE), {"threshold": 0.1}), (D(STRIKE), {"threshold": 1})]:
+                                          ({**D(STRIKE), "match": {"term": "a"}}, {}), (D(STRIKE), {"threshold": 0.1}), (D(STRIKE), {"threshold": 1}),
+                                          ({**D(STRIKE), "sources": []}, {}), ({**D(STRIKE), "sources": [" "]}, {}), ({**D(STRIKE), "sources": ["a", "a"]}, {})]:
             with self.subTest(expression=expression, configuration=configuration):
                 self.assertEqual(reply([(expression, configuration)]).status, 400)
 
