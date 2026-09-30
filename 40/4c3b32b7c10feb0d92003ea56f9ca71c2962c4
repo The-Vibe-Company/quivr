@@ -53,6 +53,8 @@ internal/transport/httpapi/api.go
   s_54b80c92daa9cb::t_0dc1baf4d83e05 104
 docs/api-walkthrough.md
   s_54b80c92daa9cb::t_522d3029216f28 312-318
+quivr-search/README.md
+  s_54b80c92daa9cb::t_1decdd5f105b6d 65
 ---
 {
   "schema_version": "authorship/3.0.0",
