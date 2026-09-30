@@ -181,7 +181,7 @@ class Stack:
         with (self.directory/(command+'-startup.log')).open('a') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid)
-        if command=='worker':self.state['worker_pid']=p.pid
+        if command in ('api','worker'):self.state[command+'_pid']=p.pid
         self.save()
     def await_ready(self,key,timeout=20):
         """Bounded readiness wait; a timeout names the probe, its last answer and the logs to read."""
@@ -242,6 +242,16 @@ class Stack:
         while alive(pid) and time.monotonic()<deadline:time.sleep(.05)
     def start_worker(self):
         self.spawn('worker','worker.json');self.await_ready('worker_probe_port')
+    def stop_api(self):
+        """Stop only the api, as a rolling deploy does: the worker keeps processing."""
+        pid=self.state.pop('api_pid',None)
+        if pid is None:raise RuntimeError('api not tracked')
+        self.signal_owned(pid,signal.SIGTERM)
+        self.state['pids']=[p for p in self.state['pids'] if p!=pid];self.save()
+        deadline=time.monotonic()+10
+        while alive(pid) and time.monotonic()<deadline:time.sleep(.05)
+    def start_api(self):
+        self.spawn('api','config.json');self.await_ready('probe_port')
     def start_short_retention_api(self):
         # Its pins are the stack's current ones: a start with other pins would apply them to the plan all
         # processes follow (THE-781).
@@ -253,7 +263,7 @@ class Stack:
         self.await_ready('short_probe_port')
     def stop_processes(self):
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
-        self.state['pids']=[];self.state.pop('worker_pid',None);self.save()
+        self.state['pids']=[];self.state.pop('worker_pid',None);self.state.pop('api_pid',None);self.save()
         time.sleep(.15)
     def check_disk(self):
         disk=docker_disk()
@@ -411,7 +421,7 @@ class Stack:
         started again (make dev initializes a fresh schema)."""
         normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
-            for key in ['scoped_id','worker_pid']:self.state.pop(key,None)
+            for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)
             self.save()
 
 

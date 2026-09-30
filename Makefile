@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure measure-backfill eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure measure-backfill measure-upgrade eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -35,6 +35,10 @@ measure:
 # Live ingestion freshness while a backfill runs (THE-784); not part of verify.
 measure-backfill:
 	GO=$(GO) python3 scripts/measure_backfill.py
+# A live plugin upgrade, drain, rollback and backfill under load, gated on no lost Record and no API failure
+# outside api restarts (THE-786); not part of verify.
+measure-upgrade:
+	GO=$(GO) python3 scripts/measure_upgrade.py
 # Search quality on public evaluation sets (THE-775, docs/agents/evaluation.md); not part of verify.
 # Needs scripts/eval/requirements.txt. make eval [args='--sets scifact --baseline <report.json>']
 eval:

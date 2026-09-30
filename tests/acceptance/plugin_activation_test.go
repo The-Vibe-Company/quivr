@@ -50,14 +50,27 @@ func planRoles(plan map[string]any) map[string]string {
 	return out
 }
 
+// inFlightCommand is the Record whose processing starts on 0.1.0 and is
+// still running when 0.2.0 is activated; posting it again replays it.
+func inFlightCommand(t *testing.T) map[string]any {
+	t.Helper()
+	corpusID, run := ingestionPluginCorpus(t)
+	return inlineCommand(corpusID, "in-flight-"+run, "in-flight", "The pilot boat waited at the harbour mouth for the freighter.")
+}
+
 // TestPluginActivation registers a second version of the pinned ingestion
 // plugin through the operator API. Registered with another build's manifest,
 // the Contract Runner rejects it on the discovery check and it cannot be
 // activated; registered with its own, it is validated, and activating it
 // records a new plan naming it while the previous plan stays readable.
+//
+// The harness froze 0.1.0, so its calls hang rather than fail: a Record
+// whose processing started before the activation stays pinned to 0.1.0,
+// which reads as draining, while a search answers at once through 0.2.0.
 func TestPluginActivation(t *testing.T) {
 	operator, endpoint, pinned, next := activationSetup(t)
 	run := os.Getenv("QUIVR_TEST_INGESTION_RUN")
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	spaces := map[string]string{"example.hash_embedder.small": "served", "example.hash_embedder.large": "evaluation"}
 	before := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
 	if got := planRoles(before)["ingestion"]; got != "example.hash_embedder@0.1.0" {
@@ -94,8 +107,11 @@ func TestPluginActivation(t *testing.T) {
 	if validated["state"] != "validated" || validated["version"] != "0.2.0" || validated["check"].(map[string]any)["certified"] != true {
 		t.Fatalf("the 0.2.0 build: %v, want validated", validated)
 	}
-	request(t, "GET", "/v0/admin/plugins", os.Getenv("QUIVR_TEST_ADMIN"), nil, 403)
-	request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", os.Getenv("QUIVR_TEST_ADMIN"), map[string]any{}, 403)
+	request(t, "GET", "/v0/admin/plugins", admin, nil, 403)
+	request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", admin, map[string]any{}, 403)
+	// The receipt resolves in the processing's first step, which pins the
+	// plan; its segmentation then waits on the frozen 0.1.0.
+	awaitReceipt(t, request(t, "POST", "/v0/records", admin, inFlightCommand(t), 202)["receipt_id"].(string))
 	plan := request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
 	if plan["plan_id"] == before["plan_id"] || plan["source"] != "activation" || planRoles(plan)["ingestion"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("activation: %v, want a new plan with 0.2.0 serving ingestion", plan)
@@ -106,6 +122,46 @@ func TestPluginActivation(t *testing.T) {
 	earlier := request(t, "GET", "/v0/admin/plugins/plans/"+before["plan_id"].(string), operator, nil, 200)
 	if planRoles(earlier)["ingestion"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("the previous plan changed: %v", earlier)
+	}
+	if old := registrationAt(t, operator, "0.1.0", os.Getenv("QUIVR_TEST_ROLLBACK_ENDPOINT")); old["state"] != "draining" || old["pinned_work"].(float64) < 1 {
+		t.Fatalf("0.1.0 with a Record in flight: %v, want draining", old)
+	}
+	corpusID, _ := ingestionPluginCorpus(t)
+	// The api that served the activation follows it at once, so this query
+	// is encoded by 0.2.0; sent to the frozen 0.1.0 it would time out.
+	hits := request(t, "POST", "/v0/search", admin, map[string]any{"query": "vineyard harvest", "corpus_ids": []string{corpusID}, "mode": "semantic"}, 200)["items"].([]any)
+	if len(hits) == 0 || hits[0].(map[string]any)["vector_space_id"] != pluginServedSpace {
+		t.Fatalf("a semantic search while 0.1.0 drains: %v", hits)
+	}
+}
+
+// TestPluginActivationDrains runs once the harness let 0.1.0 run again, both
+// versions up: the Record in flight at the activation finishes on 0.1.0,
+// never moved to 0.2.0, and 0.1.0 then has nothing pinned to it.
+func TestPluginActivationDrains(t *testing.T) {
+	operator, _, _, _ := activationSetup(t)
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	receipt := awaitRetrievalReady(t, request(t, "POST", "/v0/records", admin, inFlightCommand(t), 202)["receipt_id"].(string))
+	timeline := request(t, "GET", "/v0/admin/documents/"+receipt["version_id"].(string)+"/timeline", admin, nil, 200)
+	segmentedBy := ""
+	for _, raw := range timeline["steps"].([]any) {
+		if step := raw.(map[string]any); step["step"] == "segmented" {
+			segmentedBy, _ = step["plugin_version"].(string)
+		}
+	}
+	if segmentedBy != "0.1.0" {
+		t.Fatalf("the Record in flight at the activation was segmented by %q, want 0.1.0: %v", segmentedBy, timeline)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		old := registrationAt(t, operator, "0.1.0", os.Getenv("QUIVR_TEST_ROLLBACK_ENDPOINT"))
+		if old["state"] == "inactive" && old["pinned_work"].(float64) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("0.1.0 never finished draining: %v", old)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

@@ -197,7 +197,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   plan it started on, even across a worker restart. The replaced version shows `draining`
   with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
   disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
-  the new version. Quivr never starts a plugin process.
+  the new version. Quivr never starts a plugin process. One call rolls back to the previous
+  plan. A nightly run (`make measure-upgrade`) upgrades, drains, rolls back and backfills
+  under continuous ingestion and checks that no article is lost and the API keeps answering
+  ([Upgrade a plugin with no downtime](https://docs.quivr.thevibecompany.co/plugins/upgrade-a-plugin)).
 - **Backfill and vector space promotion**: an operator fills a new embedding model's
   evaluation space for a Corpus's past articles, whole or for a window, after a dry run
   of the volume, duration and cost (`POST /v0/admin/backfills`). The backfill runs paced

@@ -13,8 +13,10 @@ and search then encodes queries with the plugin.
 
 Then, with no restart (THE-781), the same plugin built as 0.2.0 runs at a
 second address: TestPluginActivation registers, checks and activates it
-through the operator API; the step stops 0.1.0, and TestPluginActivationIngests
-ingests and searches through 0.2.0 alone. Finally (THE-782) 0.1.0 runs again
+through the operator API while 0.1.0, frozen by the step, holds a Record in
+flight; the step lets 0.1.0 run again, TestPluginActivationDrains sees that
+Record finish on 0.1.0 and 0.1.0 drain (THE-786); the step stops 0.1.0, and
+TestPluginActivationIngests ingests and searches through 0.2.0 alone. Finally (THE-782) 0.1.0 runs again
 and 0.2.0 stops: TestPinnedWorkStarts pins a Record to 0.2.0's plan and
 activates 0.1.0, the step restarts the worker, and TestPinnedWorkDrains checks
 that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
@@ -105,9 +107,20 @@ def verify(stack):
         stack.tests('^TestIngestionPlugin$', run)
         next_plugin = start_plugin(directory, binary, next_port, next_manifest, 'plugin-0.2.0.log')
         await_healthy(next_plugin, next_port, directory / 'plugin-0.2.0.log')
-        activation = {**run, 'QUIVR_TEST_ACTIVATION_ENDPOINT': f'http://127.0.0.1:{next_port}',
+        activation = {**run, 'QUIVR_TEST_ACTIVATION_ENDPOINT': f'http://127.0.0.1:{next_port}', 'QUIVR_TEST_ROLLBACK_ENDPOINT': f'http://127.0.0.1:{port}',
                       'QUIVR_TEST_ACTIVATION_PINNED_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml'), 'QUIVR_TEST_ACTIVATION_MANIFEST': str(next_manifest)}
-        stack.tests('^TestPluginActivation$', activation)
+        # Work in flight finishes on the version it started on (THE-786):
+        # 0.1.0 is frozen, so its calls hang instead of failing, while
+        # TestPluginActivation starts a Record on it and activates 0.2.0;
+        # running again, it finishes that Record and drains. Keep the freeze
+        # short: two 10 s call deadlines (timeout_ms, pinned_plugin_attempts=2)
+        # would quarantine the Record instead.
+        os.killpg(plugin.pid, signal.SIGSTOP)
+        try:
+            stack.tests('^TestPluginActivation$', activation)
+        finally:
+            os.killpg(plugin.pid, signal.SIGCONT)
+        stack.tests('^TestPluginActivationDrains$', activation)
         # Only 0.2.0 is left to segment, embed and encode queries.
         stop_plugin(plugin)
         stack.tests('^TestPluginActivationIngests$', activation)
@@ -119,28 +132,27 @@ def verify(stack):
         plugin = start_plugin(directory, binary, port, SAMPLE / 'quivr-plugin.yaml', 'plugin.log')
         await_healthy(plugin, port, directory / 'plugin.log')
         stop_plugin(next_plugin)
-        pinned = {**activation, 'QUIVR_TEST_ROLLBACK_ENDPOINT': f'http://127.0.0.1:{port}'}
-        stack.tests('^TestPinnedWorkStarts$', pinned)
+        stack.tests('^TestPinnedWorkStarts$', activation)
         stack.stop_worker()
         stack.start_worker()
-        stack.tests('^TestPinnedWorkDrains$', pinned)
+        stack.tests('^TestPinnedWorkDrains$', activation)
         # One-call rollback (THE-783): 0.2.0 runs again and is activated as a
         # bad release, then stops; TestRollback rolls back to 0.1.0.
         next_plugin = start_plugin(directory, binary, next_port, next_manifest, 'plugin-0.2.0.log')
         await_healthy(next_plugin, next_port, directory / 'plugin-0.2.0.log')
-        stack.tests('^TestRollbackStarts$', pinned)
+        stack.tests('^TestRollbackStarts$', activation)
         stop_plugin(next_plugin)
-        stack.tests('^TestRollback$', pinned)
+        stack.tests('^TestRollback$', activation)
         # Backfill (THE-784): a Corpus built while 0.1.0 enabled its small
         # space alone gets the large one from a paced backfill, which is
         # paused, survives a worker restart, resumes and is promoted.
-        stack.tests('^TestBackfillStarts$', pinned)
+        stack.tests('^TestBackfillStarts$', activation)
         stack.stop_worker()
         stack.start_worker()
-        stack.tests('^TestBackfillResumes$', pinned)
+        stack.tests('^TestBackfillResumes$', activation)
         # Quarantine reprocess (THE-785): the Record TestRollback stopped is
         # reprocessed through the plan now active and becomes searchable.
-        stack.tests('^TestQuarantineReprocessIngestion$', pinned)
+        stack.tests('^TestQuarantineReprocessIngestion$', activation)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

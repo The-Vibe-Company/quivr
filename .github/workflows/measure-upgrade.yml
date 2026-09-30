@@ -1,0 +1,59 @@
+name: Live upgrade
+# Spec 5's exit criterion (THE-786): under continuous ingestion and API
+# sampling, an ingestion plugin is upgraded, drains, is rolled back and
+# backfills, with api and worker restarts. A gate with a fixed threshold (no
+# lost or duplicated Record, no API failure outside api restarts), too slow for
+# the pull-request path (docs/agents/testing.md): it runs nightly, on demand,
+# and on pull requests that change what it proves. Not a required check.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '53 3 * * *'
+  pull_request:
+    paths:
+      - internal/plugins/registry/**
+      - internal/plugins/live.go
+      - internal/plugins/pins.go
+      - internal/plugins/work.go
+      - internal/app/plugins.go
+      - internal/adapters/postgres/plugins.go
+      - internal/backfill/**
+      - internal/orchestration/temporal/**
+      - internal/processing/**
+      - scripts/measure_upgrade.py
+      - scripts/ingestion_plugin.py
+      - scripts/local.py
+      - .github/workflows/measure-upgrade.yml
+permissions:
+  contents: read
+concurrency:
+  group: live-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: make measure-upgrade
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-upgrade
+          path: |
+            .scratch/quivr-measure-upgrade-*/upgrade-measurement.json
+            .scratch/quivr-measure-upgrade-*/upgrade-measurement.md
+            .scratch/quivr-measure-upgrade-*/api*.log*
+            .scratch/quivr-measure-upgrade-*/worker*.log*
+            .scratch/quivr-measure-upgrade-*/measure-upgrade/*.log
+          if-no-files-found: ignore
+          # The stack lives under .scratch/, a hidden folder.
+          include-hidden-files: true
+      - if: always()
+        run: cat .scratch/quivr-measure-upgrade-*/upgrade-measurement.md | tee -a "$GITHUB_STEP_SUMMARY" || true

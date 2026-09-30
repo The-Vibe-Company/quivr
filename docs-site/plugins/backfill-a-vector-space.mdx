@@ -4,7 +4,7 @@ description: "After you add an embedding model to your ingestion plugin, give th
 keywords: ["backfill", "vector space", "embedding model", "promote", "evaluation space", "reprocess"]
 ---
 
-A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it.
+A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. It is the last step of [Upgrade a plugin with no downtime](/plugins/upgrade-a-plugin).
 
 ## Prerequisites
 
