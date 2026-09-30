@@ -1,0 +1,56 @@
+quivr-search/tests/fake-admin.ts
+  s_54b80c92daa9cb::t_01985eb2e2e664 80,82,84,89-90,122,332,335-336
+internal/transport/httpapi/plugins_test.go
+  s_54b80c92daa9cb::t_718ac1f22823d6 139-141,151,154,167-171
+internal/transport/httpapi/admin_plugins.go
+  s_54b80c92daa9cb::t_718ac1f22823d6 26-28
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_633247ffba8252 58
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_1ea6141bbb806a 98-99,103
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_28e728d9db2304 1233,1240
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_718ac1f22823d6 1887-1888,1899-1900
+quivr-search/src/health.css
+  s_54b80c92daa9cb::t_f2d8421b38999e 273,288,620
+quivr-search/src/components/admin/Plugins.tsx
+  s_54b80c92daa9cb::t_83540afc43e370 72-78,81,165,192
+  s_54b80c92daa9cb::t_c6364d1feae1df 166,173-191,282,286,294,299
+quivr-search/tests/admin-health-live.spec.ts
+  s_54b80c92daa9cb::t_64f46f1a8dc64e 22-33,41-43
+quivr-search/tests/health.spec.ts
+  s_54b80c92daa9cb::t_17ab6d41b168ac 158-161,163
+  s_54b80c92daa9cb::t_da9a1b9f692a13 162
+  s_54b80c92daa9cb::t_3b511ebdc28909 157
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_28e728d9db2304 1980-1981,1992-1993
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_718ac1f22823d6 333-335,337
+quivr-search/src/components/admin/Bottlenecks.tsx
+  s_54b80c92daa9cb::t_f2d8421b38999e 57-60
+internal/app/metrics.go
+  s_54b80c92daa9cb::t_873b286b22f303 55-64
+internal/app/metrics_test.go
+  s_54b80c92daa9cb::t_08d21cfe91a5ad 4,45-47,51,82-85,89
+client/client.gen.go
+  s_54b80c92daa9cb::t_28e728d9db2304 2887,3412,7900,11754
+quivr-search/src/lib/health.ts
+  s_54b80c92daa9cb::t_c18364736fa7a8 207-208,252,265-266,340-347,394-395,408-410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d17408abc771abfcfc550efec7ebd9966bda9652",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
