@@ -834,6 +834,43 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ActionRequest'
+  /v0/saved-queries/{saved_query_id}/rename:
+    post:
+      operationId: renameSavedQuery
+      description: Change the display name of a Saved Query. The name belongs to the Saved Query, not
+        to its immutable Versions, so no Version is created and no Subscription moves. A new name commits
+        saved_query.renamed in every Corpus of the current Version; the same name commits nothing.
+        Replay of the same key and request returns the Saved Query; a changed request is 409
+        idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: saved_query_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRequest'
   /v0/subscriptions:
     get:
       operationId: listSubscriptions
@@ -1163,6 +1200,44 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SubscriptionPreviewRequest'
+  /v0/subscriptions/{subscription_id}/rename:
+    post:
+      operationId: renameSubscription
+      description: Change the display name of a Subscription. The name belongs to the Subscription, not
+        to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged,
+        and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every
+        Corpus of the current Version; the same name commits nothing. Replay of the same key and
+        request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted
+        Subscription is 409 subscription_deleted.
+      x-required-permissions:
+      - monitoring:write
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        default:
+          description: Structured error. Existing /v0 authentication, scope, pagination and idempotency
+            semantics apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: subscription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRequest'
   /v0/matches:
     get:
       operationId: listMatches
@@ -2760,6 +2835,20 @@ components:
           minLength: 1
       required:
       - idempotency_key
+    RenameRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+      required:
+      - idempotency_key
+      - name
+      description: New display name of a Saved Query or Subscription.
     ResourceReference:
       type: object
       additionalProperties: false
@@ -2946,7 +3035,8 @@ components:
       required:
       - idempotency_key
       - definition
-      description: New immutable definition of an existing Saved Query. The name is unchanged.
+      description: New immutable definition of an existing Saved Query. The name is unchanged (rename
+        changes it).
     SavedQueryVersion:
       type: object
       additionalProperties: false
@@ -3060,7 +3150,8 @@ components:
       - evaluator
       - destination_id
       description: New immutable configuration of an existing Subscription. The Saved Query and name
-        are unchanged; saved_query_version_id is the current Version of that Saved Query.
+        are unchanged (rename changes the name); saved_query_version_id is the current Version of that
+        Saved Query.
     SubscriptionVersion:
       type: object
       additionalProperties: false

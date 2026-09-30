@@ -78,6 +78,24 @@ func (d *definitions) DeleteSavedQuery(_ context.Context, org, key, id string) (
 	d.queries[id] = q
 	return q, nil
 }
+func (d *definitions) RenameSavedQuery(_ context.Context, org, key, id, name string) (monitoring.SavedQuery, error) {
+	q := d.queries[id]
+	if q.Deleted {
+		return q, monitoring.ErrSavedQueryDeleted
+	}
+	q.Name = name
+	d.queries[id] = q
+	return q, nil
+}
+func (d *definitions) RenameSubscription(_ context.Context, org, key, id, name string) (monitoring.Subscription, error) {
+	s := d.subs[id]
+	if s.Deleted {
+		return s, monitoring.ErrSubscriptionDeleted
+	}
+	s.Name = name
+	d.subs[id] = s
+	return s, nil
+}
 func (d *definitions) SavedQuery(_ context.Context, org, id string) (monitoring.SavedQuery, error) {
 	q, ok := d.queries[id]
 	if !ok || org != "org_a" {
@@ -309,6 +327,17 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 	call(t, server, "GET", "/v0/subscriptions/subscription_s1/versions/"+first, monitorReader, "", 200)
 	call(t, server, "GET", "/v0/subscriptions/subscription_s1/versions", monitorReader, "", 405)
 
+	// A rename answers the resource with its new name and keeps its Version.
+	renamed, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/rename", monitor, `{"idempotency_key":"sr","name":"Renamed"}`, 200)
+	if renamed["name"] != "Renamed" || renamed["current_version"].(map[string]any)["version_id"] != sv2["version_id"] {
+		t.Fatalf("renamed Subscription: %v", renamed)
+	}
+	if got, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/rename", monitor, `{"idempotency_key":"qr","name":"Renamed"}`, 200); got["name"] != "Renamed" {
+		t.Fatalf("renamed Saved Query: %v", got)
+	}
+	call(t, server, "POST", "/v0/subscriptions/subscription_s1/rename", monitor, `{"idempotency_key":"sr","name":""}`, 422)
+	call(t, server, "POST", "/v0/subscriptions/subscription_s1/rename", monitorReader, `{"idempotency_key":"sr","name":"x"}`, 403)
+
 	inUse, _ := call(t, server, "POST", "/v0/saved-queries/saved_query_q1/delete", monitor, `{"idempotency_key":"qd"}`, 409)
 	if inUse["code"] != "saved_query_in_use" {
 		t.Fatalf("delete of a used Saved Query: %v", inUse)
@@ -320,6 +349,7 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 	call(t, server, "GET", "/v0/subscriptions/subscription_s1", monitorReader, "", 200)
 	for path, body := range map[string]string{
 		"/v0/subscriptions/subscription_s1/enable":   `{"idempotency_key":"se"}`,
+		"/v0/subscriptions/subscription_s1/rename":   `{"idempotency_key":"sr2","name":"Late"}`,
 		"/v0/subscriptions/subscription_s1/versions": strings.Replace(subEdit, "s-edit", "s-edit-2", 1),
 	} {
 		if got, _ := call(t, server, "POST", path, monitor, body, 409); got["code"] != "subscription_deleted" {

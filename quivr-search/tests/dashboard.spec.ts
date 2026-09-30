@@ -240,21 +240,26 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
     "Parle de « orage » et « vent » — sauf « football », « publicité » · Météo locale",
   );
 
-  // An alert the chips cannot show opens in the advanced query; its name stays.
+  // An alert the chips cannot show opens in the advanced query; it can be renamed.
   const ports = list.getByRole("listitem").filter({ hasText: "Ports et quais" });
   await ports.getByRole("button", { name: "Modifier" }).click();
   const edit = page.getByRole("form", { name: "Modifier l’alerte" });
   await expect(edit.getByLabel("Requête avancée")).toHaveValue(
     "(port OR quai) AND grève AND NOT (football OR rugby)",
   );
-  await expect(edit.getByLabel(/Nom de l’alerte/)).toHaveJSProperty("readOnly", true);
+  await expect(edit.getByLabel(/Nom de l’alerte/)).toHaveValue("Ports et quais");
+  await edit.getByLabel(/Nom de l’alerte/).fill("Grèves sur les quais");
   await edit.getByLabel("Requête avancée").fill("(port OR quai) AND grève");
   const saved = posted(page, "/demo/alerts/alert_port/edit");
   await edit.getByRole("button", { name: "Enregistrer" }).click();
-  expect((await saved).expression).toEqual({
+  const body = await saved;
+  expect(body.expression).toEqual({
     kind: "keywords",
     match: { all: [{ any: [{ term: "port" }, { term: "quai" }] }, { term: "grève" }] },
   });
+  expect(body.name).toBe("Grèves sur les quais");
+  await expect(list.getByRole("listitem").filter({ hasText: "Grèves sur les quais" })).toHaveCount(1);
+  await expect(list.getByRole("listitem").filter({ hasText: "Ports et quais" })).toHaveCount(0);
 
   // A simple keyword alert comes back as chips.
   const storm = list.getByRole("listitem").filter({ hasText: "Orages et grêle" });

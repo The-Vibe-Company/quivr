@@ -97,7 +97,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
   Delivery. Matching is decided by a pinned alert-rule plugin (the
-  `subscription` Contribution), batched per article.
+  `subscription` Contribution), batched per article. Both can be renamed without a
+  new Version.
 - **Keyword alerts** through the first-party plugin [`plugins/alerts`](plugins/alerts/README.md),
   pinned by default in the local stack:
   - queries such as `"Airbus" AND (grève OR strike) NOT sport`, with exact phrases,

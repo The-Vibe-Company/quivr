@@ -74,6 +74,8 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &ConnectorKindCatalog{}
 			case "ScheduleChange":
 				target = &ScheduleChange{}
+			case "RenameRequest":
+				target = &RenameRequest{}
 			default:
 				t.Fatalf("unhandled fixture schema %s", c.Schema)
 			}

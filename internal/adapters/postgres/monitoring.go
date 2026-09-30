@@ -208,6 +208,39 @@ FROM saved_queries q JOIN saved_query_versions v ON (v.organization,v.id)=(q.org
 	return s.SavedQuery(ctx, org, existing)
 }
 
+// RenameSavedQuery changes a Saved Query's display name once per key. A new
+// name commits saved_query.renamed per Corpus of the current Version, whose
+// identity names the request; the same name commits nothing.
+func (s ContentStore) RenameSavedQuery(ctx context.Context, org, key, id, name string) (monitoring.SavedQuery, error) {
+	existing, err := s.monitoringCommand(ctx, org, "saved_query_rename", key, map[string]string{"saved_query_id": id, "name": name}, id, func(tx pgx.Tx) error {
+		var deleted bool
+		var current string
+		var corpora []string
+		err := tx.QueryRow(ctx, `SELECT q.deleted,q.name,v.corpus_ids FROM saved_queries q JOIN saved_query_versions v ON (v.organization,v.id)=(q.organization,q.current_version_id) WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&deleted, &current, &corpora)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return monitoring.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return monitoring.ErrSavedQueryDeleted
+		}
+		if current == name {
+			return nil
+		}
+		if _, err = tx.Exec(ctx, "UPDATE saved_queries SET name=$3 WHERE organization=$1 AND id=$2", org, id, name); err != nil {
+			return err
+		}
+		_, err = appendScopedEvents(ctx, tx, org, "saved_query.renamed", "saved_query", id, id+"/rename/"+key, corpora)
+		return err
+	})
+	if err != nil {
+		return monitoring.SavedQuery{}, err
+	}
+	return s.SavedQuery(ctx, org, existing)
+}
+
 // pinnableQuery checks, under the journal lock, that a new Subscription
 // Version may pin query: its Saved Query is not deleted and query is current.
 func pinnableQuery(ctx context.Context, tx pgx.Tx, org string, query monitoring.SavedQueryVersion) error {
@@ -484,6 +517,33 @@ func (s ContentStore) DeleteSubscription(ctx context.Context, org, key, id strin
 			return err
 		}
 		_, err = tx.Exec(ctx, "UPDATE subscriptions SET deleted=true,enabled=false,deleted_position=$3 WHERE organization=$1 AND id=$2", org, id, position)
+		return err
+	})
+	if err != nil {
+		return monitoring.Subscription{}, err
+	}
+	return s.Subscription(ctx, org, id)
+}
+
+// RenameSubscription changes a Subscription's display name once per key. The
+// name is not part of any Version, so evaluation, Matches and Deliveries are
+// untouched. A new name commits subscription.renamed per Corpus of the
+// current Version, whose identity names the request; the same name commits
+// nothing.
+func (s ContentStore) RenameSubscription(ctx context.Context, org, key, id, name string) (monitoring.Subscription, error) {
+	_, err := s.monitoringCommand(ctx, org, "subscription_rename", key, map[string]string{"subscription_id": id, "name": name}, id, func(tx pgx.Tx) error {
+		deleted, corpora, err := subscriptionScope(ctx, tx, org, id)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			return monitoring.ErrSubscriptionDeleted
+		}
+		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET name=$3 WHERE organization=$1 AND id=$2 AND name<>$3", org, id, name)
+		if err != nil || changed.RowsAffected() != 1 {
+			return err
+		}
+		_, err = appendScopedEvents(ctx, tx, org, "subscription.renamed", "subscription", id, id+"/rename/"+key, corpora)
 		return err
 	})
 	if err != nil {

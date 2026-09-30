@@ -148,7 +148,11 @@ export function AlertForm({
     setError("");
     try {
       const saved = editing
-        ? await editAlert(editing.alert_id, expression)
+        ? await editAlert(
+            editing.alert_id,
+            expression,
+            name.trim() || editing.name,
+          )
         : await createAlert(
             name.trim() || fallbackName,
             expression,
@@ -387,19 +391,12 @@ export function AlertForm({
           className="form-input"
           value={name}
           maxLength={120}
-          readOnly={!!editing}
-          aria-describedby={editing ? `${id}-name-help` : undefined}
           placeholder={fallbackName || "Par défaut : les mots surveillés"}
           onChange={(event) => {
             setName(event.target.value);
             changed();
           }}
         />
-        {editing && (
-          <p id={`${id}-name-help`} className="form-help">
-            Le nom d’une alerte ne peut pas encore être changé.
-          </p>
-        )}
       </div>
       {(isDescribed || !advanced) && (
         <div className="form-field">

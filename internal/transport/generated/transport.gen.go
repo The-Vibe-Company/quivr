@@ -1268,6 +1268,12 @@ type RelationInput struct {
 	Type                 string         `json:"type"`
 }
 
+// RenameRequest New display name of a Saved Query or Subscription.
+type RenameRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Name           string `json:"name"`
+}
+
 // ResolvedRelation Separate live view, not a mutation of the source Manifest. Unavailable covers missing, unready, withdrawn and inaccessible without distinguishing existence or revealing resolved target IDs.
 type ResolvedRelation struct {
 	// SourceReference Source-provided link to an independently identified Record in the same Organization. Optional source revision preserves provenance; ordinary expansion resolves the current eligible target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise Part-target syntax remains outside this initial draft.
@@ -1330,7 +1336,7 @@ type SavedQueryVersion struct {
 	VersionId    string               `json:"version_id"`
 }
 
-// SavedQueryVersionCreate New immutable definition of an existing Saved Query. The name is unchanged.
+// SavedQueryVersionCreate New immutable definition of an existing Saved Query. The name is unchanged (rename changes it).
 type SavedQueryVersionCreate struct {
 	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
 	Definition     SavedQueryDefinition `json:"definition"`
@@ -1517,7 +1523,7 @@ type SubscriptionVersion struct {
 	VersionId           string             `json:"version_id"`
 }
 
-// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
+// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
 type SubscriptionVersionCreate struct {
 	DestinationId string `json:"destination_id"`
 
@@ -1708,6 +1714,9 @@ type CreateSavedQueryJSONRequestBody = SavedQueryCreate
 // DeleteSavedQueryJSONRequestBody defines body for DeleteSavedQuery for application/json ContentType.
 type DeleteSavedQueryJSONRequestBody = ActionRequest
 
+// RenameSavedQueryJSONRequestBody defines body for RenameSavedQuery for application/json ContentType.
+type RenameSavedQueryJSONRequestBody = RenameRequest
+
 // CreateSavedQueryVersionJSONRequestBody defines body for CreateSavedQueryVersion for application/json ContentType.
 type CreateSavedQueryVersionJSONRequestBody = SavedQueryVersionCreate
 
@@ -1728,6 +1737,9 @@ type DisableSubscriptionJSONRequestBody = ActionRequest
 
 // EnableSubscriptionJSONRequestBody defines body for EnableSubscription for application/json ContentType.
 type EnableSubscriptionJSONRequestBody = ActionRequest
+
+// RenameSubscriptionJSONRequestBody defines body for RenameSubscription for application/json ContentType.
+type RenameSubscriptionJSONRequestBody = RenameRequest
 
 // CreateSubscriptionVersionJSONRequestBody defines body for CreateSubscriptionVersion for application/json ContentType.
 type CreateSubscriptionVersionJSONRequestBody = SubscriptionVersionCreate
@@ -2042,6 +2054,9 @@ type ServerInterface interface {
 	// (POST /v0/saved-queries/{saved_query_id}/delete)
 	DeleteSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string)
 
+	// (POST /v0/saved-queries/{saved_query_id}/rename)
+	RenameSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string)
+
 	// (POST /v0/saved-queries/{saved_query_id}/versions)
 	CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string)
 
@@ -2071,6 +2086,9 @@ type ServerInterface interface {
 
 	// (POST /v0/subscriptions/{subscription_id}/enable)
 	EnableSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
+
+	// (POST /v0/subscriptions/{subscription_id}/rename)
+	RenameSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string)
 
 	// (POST /v0/subscriptions/{subscription_id}/versions)
 	CreateSubscriptionVersion(w http.ResponseWriter, r *http.Request, subscriptionId string)
@@ -3154,6 +3172,32 @@ func (siw *ServerInterfaceWrapper) DeleteSavedQuery(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// RenameSavedQuery operation middleware
+func (siw *ServerInterfaceWrapper) RenameSavedQuery(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "saved_query_id" -------------
+	var savedQueryId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameSavedQuery(w, r, savedQueryId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateSavedQueryVersion operation middleware
 func (siw *ServerInterfaceWrapper) CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request) {
 
@@ -3411,6 +3455,32 @@ func (siw *ServerInterfaceWrapper) EnableSubscription(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.EnableSubscription(w, r, subscriptionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameSubscription operation middleware
+func (siw *ServerInterfaceWrapper) RenameSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscription_id" -------------
+	var subscriptionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameSubscription(w, r, subscriptionId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3692,6 +3762,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions/{version_id}", wrapper.GetSavedQueryVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions", wrapper.CreateSavedQueryVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/delete", wrapper.DeleteSavedQuery)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/rename", wrapper.RenameSavedQuery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions", wrapper.ListSubscriptions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions", wrapper.CreateSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}", wrapper.GetSubscription)
@@ -3701,6 +3772,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/disable", wrapper.DisableSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/enable", wrapper.EnableSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscription-previews", wrapper.PreviewSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/subscriptions/{subscription_id}/rename", wrapper.RenameSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches", wrapper.ListMatches)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/matches/{match_id}", wrapper.GetMatch)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}", wrapper.GetDelivery)
@@ -5141,6 +5213,46 @@ func (response DeleteSavedQuerydefaultJSONResponse) VisitDeleteSavedQueryRespons
 	return err
 }
 
+type RenameSavedQueryRequestObject struct {
+	SavedQueryId string `json:"saved_query_id"`
+	Body         *RenameSavedQueryJSONRequestBody
+}
+
+type RenameSavedQueryResponseObject interface {
+	VisitRenameSavedQueryResponse(w http.ResponseWriter) error
+}
+
+type RenameSavedQuery200JSONResponse SavedQuery
+
+func (response RenameSavedQuery200JSONResponse) VisitRenameSavedQueryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameSavedQuerydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RenameSavedQuerydefaultJSONResponse) VisitRenameSavedQueryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateSavedQueryVersionRequestObject struct {
 	SavedQueryId string `json:"saved_query_id"`
 	Body         *CreateSavedQueryVersionJSONRequestBody
@@ -5536,6 +5648,46 @@ func (response EnableSubscriptiondefaultJSONResponse) VisitEnableSubscriptionRes
 	return err
 }
 
+type RenameSubscriptionRequestObject struct {
+	SubscriptionId string `json:"subscription_id"`
+	Body           *RenameSubscriptionJSONRequestBody
+}
+
+type RenameSubscriptionResponseObject interface {
+	VisitRenameSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type RenameSubscription200JSONResponse Subscription
+
+func (response RenameSubscription200JSONResponse) VisitRenameSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameSubscriptiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RenameSubscriptiondefaultJSONResponse) VisitRenameSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateSubscriptionVersionRequestObject struct {
 	SubscriptionId string `json:"subscription_id"`
 	Body           *CreateSubscriptionVersionJSONRequestBody
@@ -5841,6 +5993,9 @@ type StrictServerInterface interface {
 	// (POST /v0/saved-queries/{saved_query_id}/delete)
 	DeleteSavedQuery(ctx context.Context, request DeleteSavedQueryRequestObject) (DeleteSavedQueryResponseObject, error)
 
+	// (POST /v0/saved-queries/{saved_query_id}/rename)
+	RenameSavedQuery(ctx context.Context, request RenameSavedQueryRequestObject) (RenameSavedQueryResponseObject, error)
+
 	// (POST /v0/saved-queries/{saved_query_id}/versions)
 	CreateSavedQueryVersion(ctx context.Context, request CreateSavedQueryVersionRequestObject) (CreateSavedQueryVersionResponseObject, error)
 
@@ -5870,6 +6025,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/subscriptions/{subscription_id}/enable)
 	EnableSubscription(ctx context.Context, request EnableSubscriptionRequestObject) (EnableSubscriptionResponseObject, error)
+
+	// (POST /v0/subscriptions/{subscription_id}/rename)
+	RenameSubscription(ctx context.Context, request RenameSubscriptionRequestObject) (RenameSubscriptionResponseObject, error)
 
 	// (POST /v0/subscriptions/{subscription_id}/versions)
 	CreateSubscriptionVersion(ctx context.Context, request CreateSubscriptionVersionRequestObject) (CreateSubscriptionVersionResponseObject, error)
@@ -6929,6 +7087,39 @@ func (sh *strictHandler) DeleteSavedQuery(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// RenameSavedQuery operation middleware
+func (sh *strictHandler) RenameSavedQuery(w http.ResponseWriter, r *http.Request, savedQueryId string) {
+	var request RenameSavedQueryRequestObject
+
+	request.SavedQueryId = savedQueryId
+
+	var body RenameSavedQueryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameSavedQuery(ctx, request.(RenameSavedQueryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameSavedQuery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameSavedQueryResponseObject); ok {
+		if err := validResponse.VisitRenameSavedQueryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateSavedQueryVersion operation middleware
 func (sh *strictHandler) CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request, savedQueryId string) {
 	var request CreateSavedQueryVersionRequestObject
@@ -7226,6 +7417,39 @@ func (sh *strictHandler) EnableSubscription(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnableSubscriptionResponseObject); ok {
 		if err := validResponse.VisitEnableSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameSubscription operation middleware
+func (sh *strictHandler) RenameSubscription(w http.ResponseWriter, r *http.Request, subscriptionId string) {
+	var request RenameSubscriptionRequestObject
+
+	request.SubscriptionId = subscriptionId
+
+	var body RenameSubscriptionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameSubscription(ctx, request.(RenameSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameSubscriptionResponseObject); ok {
+		if err := validResponse.VisitRenameSubscriptionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

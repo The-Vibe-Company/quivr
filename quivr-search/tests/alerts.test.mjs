@@ -102,6 +102,17 @@ function fakeCore() {
         : send(404, { code: "not_found" });
     if ((m = p.match(/^\/v0\/saved-queries\/(\w+)\/delete$/)))
       return send(200, { saved_query_id: m[1], deleted: true });
+    if ((m = p.match(/^\/v0\/saved-queries\/(\w+)\/rename$/)))
+      return send(200, { saved_query_id: m[1], name: body.name });
+    if ((m = p.match(/^\/v0\/saved-queries\/(\w+)\/versions$/))) {
+      const version = {
+        saved_query_id: m[1],
+        version_id: `sqv${++n}`,
+        definition: body.definition,
+      };
+      queries.set(version.version_id, version);
+      return send(201, version);
+    }
     if (p === "/v0/subscriptions" && req.method === "POST") {
       if (refuse) return send(422, refuse);
       const id = `sub${++n}`;
@@ -124,7 +135,7 @@ function fakeCore() {
     }
     if (
       (m = p.match(
-        /^\/v0\/subscriptions\/(\w+)(?:\/(disable|enable|delete))?$/,
+        /^\/v0\/subscriptions\/(\w+)(?:\/(disable|enable|delete|rename|versions))?$/,
       ))
     ) {
       const sub = subs.get(m[1]);
@@ -133,6 +144,15 @@ function fakeCore() {
       if (m[2] === "enable") sub.enabled = true;
       if (m[2] === "delete")
         Object.assign(sub, { enabled: false, deleted: true });
+      if (m[2] === "rename") sub.name = body.name;
+      if (m[2] === "versions") {
+        sub.current_version = {
+          ...sub.current_version,
+          version_id: `${m[1]}-v${++n}`,
+          saved_query_version_id: body.saved_query_version_id,
+        };
+        return send(201, sub.current_version);
+      }
       return send(200, sub);
     }
     if (p === "/v0/subscription-previews" && req.method === "POST")
@@ -267,6 +287,61 @@ test("an alert is created in the demo corpus with the deployment's evaluator, de
   });
   assert.equal(deleted.status, 200);
   assert.deepEqual((await call("/demo/alerts")).data.items, []);
+});
+
+test("renaming an alert renames its Subscription and Saved Query without a new Version, and keeps what it caught", async (t) => {
+  const { core, call } = await start(t);
+  const expression = { kind: "keywords", match: { term: "orage" } };
+  const created = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "Orages",
+    expression,
+  });
+  const id = created.data.alert_id;
+  core.matches.push({
+    match_id: "m1",
+    subscription_id: id,
+    record_id: "r1",
+    record_version_id: "r1v1",
+  });
+  const posts = () =>
+    core.seen.filter((r) => r.method === "POST").map((r) => r.url);
+  const before = posts().length;
+  const renamed = await call(`/demo/alerts/${id}/edit`, {
+    idempotency_key: idem(),
+    name: "  Orages et grêle ",
+    expression,
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.data.name, "Orages et grêle");
+  assert.equal(renamed.data.match_count, 1, "what it caught stays attached");
+  assert.deepEqual(posts().slice(before), [
+    `/v0/subscriptions/${id}/rename`,
+    `/v0/saved-queries/${core.subs.get(id).current_version.saved_query_id}/rename`,
+  ]);
+  const listed = await call("/demo/alerts");
+  assert.deepEqual(
+    listed.data.items.map((a) => a.name),
+    ["Orages et grêle"],
+  );
+
+  // New words under the same name: a new Version, no rename.
+  const after = posts().length;
+  const edited = await call(`/demo/alerts/${id}/edit`, {
+    idempotency_key: idem(),
+    name: "Orages et grêle",
+    expression: { kind: "keywords", match: { term: "grêle" } },
+  });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.data.expression.match, { term: "grêle" });
+  assert.ok(posts().slice(after).every((url) => url.endsWith("/versions")));
+
+  const empty = await call(`/demo/alerts/${id}/edit`, {
+    idempotency_key: idem(),
+    name: " ",
+    expression,
+  });
+  assert.equal(empty.status, 400);
 });
 
 test("alerts of another owner or another corpus are not the demo's: reads and actions are 404 and never relayed", async (t) => {

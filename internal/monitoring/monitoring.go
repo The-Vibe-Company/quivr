@@ -177,6 +177,9 @@ type Store interface {
 	// DeleteSavedQuery logically deletes a Saved Query that no Subscription
 	// which is not deleted belongs to, else returns ErrSavedQueryInUse.
 	DeleteSavedQuery(ctx context.Context, org, key, id string) (SavedQuery, error)
+	// RenameSavedQuery changes the display name; a deleted Saved Query
+	// returns ErrSavedQueryDeleted.
+	RenameSavedQuery(ctx context.Context, org, key, id, name string) (SavedQuery, error)
 	// CreateSubscription pins query, which must still be its Saved Query's
 	// current Version for a new Subscription (ErrUnknownSavedQuery otherwise).
 	CreateSubscription(ctx context.Context, org string, in SubscriptionInput, query SavedQueryVersion) (Subscription, error)
@@ -193,6 +196,9 @@ type Store interface {
 	EnableSubscription(ctx context.Context, org, key, id string) (Subscription, error)
 	// DeleteSubscription logically deletes and disables a Subscription.
 	DeleteSubscription(ctx context.Context, org, key, id string) (Subscription, error)
+	// RenameSubscription changes the display name; a deleted Subscription
+	// returns ErrSubscriptionDeleted.
+	RenameSubscription(ctx context.Context, org, key, id, name string) (Subscription, error)
 	// Subscriptions lists up to limit active (enabled, not deleted)
 	// Subscriptions of owner with an ID after after, in ID order. A non-nil
 	// corpora keeps only those whose every pinned Corpus it contains.
@@ -322,6 +328,19 @@ func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, 
 		return SavedQuery{}, err
 	}
 	return s.Store.DeleteSavedQuery(ctx, scope.Organization, key, id)
+}
+
+// RenameSavedQuery changes the display name of a Saved Query. The name is not
+// part of its immutable Versions, so no Version is created and no
+// Subscription moves. Repeating it is idempotent.
+func (s Service) RenameSavedQuery(ctx context.Context, scope corpus.Scope, key, id, name string) (SavedQuery, error) {
+	if !scope.Allows("monitoring:write") {
+		return SavedQuery{}, ErrForbidden
+	}
+	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
+		return SavedQuery{}, err
+	}
+	return s.Store.RenameSavedQuery(ctx, scope.Organization, key, id, name)
 }
 
 // validSubscription checks the evaluator and destination of a Subscription Version.
@@ -523,6 +542,19 @@ func (s Service) DeleteSubscription(ctx context.Context, scope corpus.Scope, key
 		return Subscription{}, err
 	}
 	return s.Store.DeleteSubscription(ctx, scope.Organization, key, id)
+}
+
+// RenameSubscription changes the display name of a Subscription. The name is
+// not part of its immutable Versions: evaluation, enabled state, Matches and
+// Deliveries are unchanged. Repeating it is idempotent.
+func (s Service) RenameSubscription(ctx context.Context, scope corpus.Scope, key, id, name string) (Subscription, error) {
+	if !scope.Allows("monitoring:write") {
+		return Subscription{}, ErrForbidden
+	}
+	if _, err := s.visible(ctx, scope, id); err != nil {
+		return Subscription{}, err
+	}
+	return s.Store.RenameSubscription(ctx, scope.Organization, key, id, name)
 }
 
 func (s Service) visible(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {

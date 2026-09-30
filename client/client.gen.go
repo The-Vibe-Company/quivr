@@ -1268,6 +1268,12 @@ type RelationInput struct {
 	Type                 string         `json:"type"`
 }
 
+// RenameRequest New display name of a Saved Query or Subscription.
+type RenameRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Name           string `json:"name"`
+}
+
 // ResolvedRelation Separate live view, not a mutation of the source Manifest. Unavailable covers missing, unready, withdrawn and inaccessible without distinguishing existence or revealing resolved target IDs.
 type ResolvedRelation struct {
 	// SourceReference Source-provided link to an independently identified Record in the same Organization. Optional source revision preserves provenance; ordinary expansion resolves the current eligible target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise Part-target syntax remains outside this initial draft.
@@ -1330,7 +1336,7 @@ type SavedQueryVersion struct {
 	VersionId    string               `json:"version_id"`
 }
 
-// SavedQueryVersionCreate New immutable definition of an existing Saved Query. The name is unchanged.
+// SavedQueryVersionCreate New immutable definition of an existing Saved Query. The name is unchanged (rename changes it).
 type SavedQueryVersionCreate struct {
 	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
 	Definition     SavedQueryDefinition `json:"definition"`
@@ -1517,7 +1523,7 @@ type SubscriptionVersion struct {
 	VersionId           string             `json:"version_id"`
 }
 
-// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
+// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
 type SubscriptionVersionCreate struct {
 	DestinationId string `json:"destination_id"`
 
@@ -1708,6 +1714,9 @@ type CreateSavedQueryJSONRequestBody = SavedQueryCreate
 // DeleteSavedQueryJSONRequestBody defines body for DeleteSavedQuery for application/json ContentType.
 type DeleteSavedQueryJSONRequestBody = ActionRequest
 
+// RenameSavedQueryJSONRequestBody defines body for RenameSavedQuery for application/json ContentType.
+type RenameSavedQueryJSONRequestBody = RenameRequest
+
 // CreateSavedQueryVersionJSONRequestBody defines body for CreateSavedQueryVersion for application/json ContentType.
 type CreateSavedQueryVersionJSONRequestBody = SavedQueryVersionCreate
 
@@ -1728,6 +1737,9 @@ type DisableSubscriptionJSONRequestBody = ActionRequest
 
 // EnableSubscriptionJSONRequestBody defines body for EnableSubscription for application/json ContentType.
 type EnableSubscriptionJSONRequestBody = ActionRequest
+
+// RenameSubscriptionJSONRequestBody defines body for RenameSubscription for application/json ContentType.
+type RenameSubscriptionJSONRequestBody = RenameRequest
 
 // CreateSubscriptionVersionJSONRequestBody defines body for CreateSubscriptionVersion for application/json ContentType.
 type CreateSubscriptionVersionJSONRequestBody = SubscriptionVersionCreate
@@ -2288,6 +2300,18 @@ type ClientInterface interface {
 	// Logically delete a Saved Query that no Subscription which is not deleted belongs to (409 saved_query_in_use otherwise), with saved_query.deleted per Corpus. It and its Versions stay readable with deleted true; it gets no new Version or Subscription. Repeat is idempotent and commits no event.
 	DeleteSavedQuery(ctx context.Context, savedQueryId string, body DeleteSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RenameSavedQueryWithBody performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+	RenameSavedQueryWithBody(ctx context.Context, savedQueryId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameSavedQuery performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+	RenameSavedQuery(ctx context.Context, savedQueryId string, body RenameSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateSavedQueryVersionWithBody performs a POST /v0/saved-queries/{saved_query_id}/versions (the `CreateSavedQueryVersion` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -2386,6 +2410,18 @@ type ClientInterface interface {
 	//
 	// Commit re-enable of a disabled Subscription on the same Subscription Version. Evaluation resumes from this commit; changes made while disabled are never evaluated. Pending Deliveries parked by the disable become eligible again under the usual admission checks and keep their delivery window, except a match.withdrawn notice committed while disabled, whose window starts at this re-enable. Enabling an enabled Subscription, or repeating the request, is idempotent and commits no event. A deleted Subscription is 409 subscription_deleted.
 	EnableSubscription(ctx context.Context, subscriptionId string, body EnableSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameSubscriptionWithBody performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+	RenameSubscriptionWithBody(ctx context.Context, subscriptionId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameSubscription performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+	RenameSubscription(ctx context.Context, subscriptionId string, body RenameSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateSubscriptionVersionWithBody performs a POST /v0/subscriptions/{subscription_id}/versions (the `CreateSubscriptionVersion` operationId) request,
 	// with any type of body and a specified content type.
@@ -3207,6 +3243,38 @@ func (c *Client) DeleteSavedQuery(ctx context.Context, savedQueryId string, body
 	return c.Client.Do(req)
 }
 
+// RenameSavedQueryWithBody performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request,
+// with any type of body and a specified content type.
+//
+// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+func (c *Client) RenameSavedQueryWithBody(ctx context.Context, savedQueryId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameSavedQueryRequestWithBody(c.Server, savedQueryId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameSavedQuery performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+func (c *Client) RenameSavedQuery(ctx context.Context, savedQueryId string, body RenameSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameSavedQueryRequest(c.Server, savedQueryId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // CreateSavedQueryVersionWithBody performs a POST /v0/saved-queries/{saved_query_id}/versions (the `CreateSavedQueryVersion` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -3466,6 +3534,38 @@ func (c *Client) EnableSubscriptionWithBody(ctx context.Context, subscriptionId 
 // Commit re-enable of a disabled Subscription on the same Subscription Version. Evaluation resumes from this commit; changes made while disabled are never evaluated. Pending Deliveries parked by the disable become eligible again under the usual admission checks and keep their delivery window, except a match.withdrawn notice committed while disabled, whose window starts at this re-enable. Enabling an enabled Subscription, or repeating the request, is idempotent and commits no event. A deleted Subscription is 409 subscription_deleted.
 func (c *Client) EnableSubscription(ctx context.Context, subscriptionId string, body EnableSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnableSubscriptionRequest(c.Server, subscriptionId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameSubscriptionWithBody performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request,
+// with any type of body and a specified content type.
+//
+// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+func (c *Client) RenameSubscriptionWithBody(ctx context.Context, subscriptionId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameSubscriptionRequestWithBody(c.Server, subscriptionId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameSubscription performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+func (c *Client) RenameSubscription(ctx context.Context, subscriptionId string, body RenameSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameSubscriptionRequest(c.Server, subscriptionId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5206,6 +5306,53 @@ func NewDeleteSavedQueryRequestWithBody(server string, savedQueryId string, cont
 	return req, nil
 }
 
+// NewRenameSavedQueryRequest calls the generic RenameSavedQuery builder with application/json body
+func NewRenameSavedQueryRequest(server string, savedQueryId string, body RenameSavedQueryJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRenameSavedQueryRequestWithBody(server, savedQueryId, "application/json", bodyReader)
+}
+
+// NewRenameSavedQueryRequestWithBody constructs an http.Request for the RenameSavedQuery method, with any body, and a specified content type
+func NewRenameSavedQueryRequestWithBody(server string, savedQueryId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "saved_query_id", savedQueryId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/saved-queries/%s/rename", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewCreateSavedQueryVersionRequest calls the generic CreateSavedQueryVersion builder with application/json body
 func NewCreateSavedQueryVersionRequest(server string, savedQueryId string, body CreateSavedQueryVersionJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5644,6 +5791,53 @@ func NewEnableSubscriptionRequestWithBody(server string, subscriptionId string, 
 	}
 
 	operationPath := fmt.Sprintf("/v0/subscriptions/%s/enable", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRenameSubscriptionRequest calls the generic RenameSubscription builder with application/json body
+func NewRenameSubscriptionRequest(server string, subscriptionId string, body RenameSubscriptionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRenameSubscriptionRequestWithBody(server, subscriptionId, "application/json", bodyReader)
+}
+
+// NewRenameSubscriptionRequestWithBody constructs an http.Request for the RenameSubscription method, with any body, and a specified content type
+func NewRenameSubscriptionRequestWithBody(server string, subscriptionId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "subscription_id", subscriptionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/subscriptions/%s/rename", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -6253,6 +6447,20 @@ type ClientWithResponsesInterface interface {
 	// Logically delete a Saved Query that no Subscription which is not deleted belongs to (409 saved_query_in_use otherwise), with saved_query.deleted per Corpus. It and its Versions stay readable with deleted true; it gets no new Version or Subscription. Repeat is idempotent and commits no event.
 	DeleteSavedQueryWithResponse(ctx context.Context, savedQueryId string, body DeleteSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*DeleteSavedQueryResponse, error)
 
+	// RenameSavedQueryWithBodyWithResponse performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RenameSavedQueryWithBodyWithResponse(ctx context.Context, savedQueryId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameSavedQueryResponse, error)
+
+	// RenameSavedQueryWithResponse performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+	RenameSavedQueryWithResponse(ctx context.Context, savedQueryId string, body RenameSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameSavedQueryResponse, error)
+
 	// CreateSavedQueryVersionWithBodyWithResponse performs a POST /v0/saved-queries/{saved_query_id}/versions (the `CreateSavedQueryVersion` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -6371,6 +6579,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Commit re-enable of a disabled Subscription on the same Subscription Version. Evaluation resumes from this commit; changes made while disabled are never evaluated. Pending Deliveries parked by the disable become eligible again under the usual admission checks and keep their delivery window, except a match.withdrawn notice committed while disabled, whose window starts at this re-enable. Enabling an enabled Subscription, or repeating the request, is idempotent and commits no event. A deleted Subscription is 409 subscription_deleted.
 	EnableSubscriptionWithResponse(ctx context.Context, subscriptionId string, body EnableSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*EnableSubscriptionResponse, error)
+
+	// RenameSubscriptionWithBodyWithResponse performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RenameSubscriptionWithBodyWithResponse(ctx context.Context, subscriptionId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameSubscriptionResponse, error)
+
+	// RenameSubscriptionWithResponse performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+	RenameSubscriptionWithResponse(ctx context.Context, subscriptionId string, body RenameSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameSubscriptionResponse, error)
 
 	// CreateSubscriptionVersionWithBodyWithResponse performs a POST /v0/subscriptions/{subscription_id}/versions (the `CreateSubscriptionVersion` operationId) request,
 	// with any type of body and a specified content type.
@@ -8074,6 +8296,54 @@ func (r DeleteSavedQueryResponse) ContentType() string {
 	return ""
 }
 
+type RenameSavedQueryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SavedQuery
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RenameSavedQueryResponse) GetJSON200() *SavedQuery {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RenameSavedQueryResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RenameSavedQueryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RenameSavedQueryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RenameSavedQueryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RenameSavedQueryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type CreateSavedQueryVersionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8548,6 +8818,54 @@ func (r EnableSubscriptionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r EnableSubscriptionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RenameSubscriptionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Subscription
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RenameSubscriptionResponse) GetJSON200() *Subscription {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RenameSubscriptionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RenameSubscriptionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RenameSubscriptionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RenameSubscriptionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RenameSubscriptionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9444,6 +9762,32 @@ func (c *ClientWithResponses) DeleteSavedQueryWithResponse(ctx context.Context, 
 	return ParseDeleteSavedQueryResponse(rsp)
 }
 
+// RenameSavedQueryWithBodyWithResponse performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request,
+// with any type of body and a specified content type.
+//
+// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RenameSavedQueryWithBodyWithResponse(ctx context.Context, savedQueryId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameSavedQueryResponse, error) {
+	rsp, err := c.RenameSavedQueryWithBody(ctx, savedQueryId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameSavedQueryResponse(rsp)
+}
+
+// RenameSavedQueryWithResponse performs a POST /v0/saved-queries/{saved_query_id}/rename (the `RenameSavedQuery` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+func (c *ClientWithResponses) RenameSavedQueryWithResponse(ctx context.Context, savedQueryId string, body RenameSavedQueryJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameSavedQueryResponse, error) {
+	rsp, err := c.RenameSavedQuery(ctx, savedQueryId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameSavedQueryResponse(rsp)
+}
+
 // CreateSavedQueryVersionWithBodyWithResponse performs a POST /v0/saved-queries/{saved_query_id}/versions (the `CreateSavedQueryVersion` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -9663,6 +10007,32 @@ func (c *ClientWithResponses) EnableSubscriptionWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseEnableSubscriptionResponse(rsp)
+}
+
+// RenameSubscriptionWithBodyWithResponse performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request,
+// with any type of body and a specified content type.
+//
+// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RenameSubscriptionWithBodyWithResponse(ctx context.Context, subscriptionId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameSubscriptionResponse, error) {
+	rsp, err := c.RenameSubscriptionWithBody(ctx, subscriptionId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameSubscriptionResponse(rsp)
+}
+
+// RenameSubscriptionWithResponse performs a POST /v0/subscriptions/{subscription_id}/rename (the `RenameSubscription` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+func (c *ClientWithResponses) RenameSubscriptionWithResponse(ctx context.Context, subscriptionId string, body RenameSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameSubscriptionResponse, error) {
+	rsp, err := c.RenameSubscription(ctx, subscriptionId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameSubscriptionResponse(rsp)
 }
 
 // CreateSubscriptionVersionWithBodyWithResponse performs a POST /v0/subscriptions/{subscription_id}/versions (the `CreateSubscriptionVersion` operationId) request,
@@ -10883,6 +11253,39 @@ func ParseDeleteSavedQueryResponse(rsp *http.Response) (*DeleteSavedQueryRespons
 	return response, nil
 }
 
+// ParseRenameSavedQueryResponse parses an HTTP response from a RenameSavedQueryWithResponse call
+func ParseRenameSavedQueryResponse(rsp *http.Response) (*RenameSavedQueryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RenameSavedQueryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SavedQuery
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseCreateSavedQueryVersionResponse parses an HTTP response from a CreateSavedQueryVersionWithResponse call
 func ParseCreateSavedQueryVersionResponse(rsp *http.Response) (*CreateSavedQueryVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11189,6 +11592,39 @@ func ParseEnableSubscriptionResponse(rsp *http.Response) (*EnableSubscriptionRes
 	}
 
 	response := &EnableSubscriptionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Subscription
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRenameSubscriptionResponse parses an HTTP response from a RenameSubscriptionWithResponse call
+func ParseRenameSubscriptionResponse(rsp *http.Response) (*RenameSubscriptionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RenameSubscriptionResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

@@ -364,7 +364,10 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       if (!a) return json(route, { message: "Alerte introuvable." }, 404);
       if (action[2] === "pause") a.enabled = false;
       if (action[2] === "resume") a.enabled = true;
-      if (action[2] === "edit") a.expression = body.expression;
+      if (action[2] === "edit") {
+        a.expression = body.expression;
+        if (body.name) a.name = body.name;
+      }
       if (action[2] === "delete") {
         ws.alerts.splice(ws.alerts.indexOf(a), 1);
         return json(route, { deleted: true });

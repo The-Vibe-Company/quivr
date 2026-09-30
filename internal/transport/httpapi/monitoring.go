@@ -23,7 +23,7 @@ func WithMonitoring(service monitoring.Service) Option {
 }
 
 type monitoringSchemas struct {
-	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action, preview *jsonschema.Schema
+	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action, preview, rename *jsonschema.Schema
 }
 
 func monitoringFailure(w http.ResponseWriter, err error) {
@@ -64,8 +64,8 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 }
 
 // monitoringRoutes serves /v0/saved-queries and /v0/subscriptions: creation,
-// reads, the Subscription listing by owner, editing by new Version, disable,
-// enable and deletion.
+// reads, the Subscription listing by owner, editing by new Version, renaming,
+// disable, enable and deletion.
 func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	if r.URL.Path == "/v0/subscription-previews" {
 		a.previewSubscription(w, r, scope)
@@ -94,7 +94,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	}
 	method := "GET"
 	switch {
-	case len(parts) == 0, len(parts) == 2 && (parts[1] == "versions" || parts[1] == "delete"):
+	case len(parts) == 0, len(parts) == 2 && (parts[1] == "versions" || parts[1] == "delete" || parts[1] == "rename"):
 		method = "POST"
 	case resource == "subscriptions" && len(parts) == 2 && (parts[1] == "disable" || parts[1] == "enable"):
 		method = "POST"
@@ -138,6 +138,13 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		}
 		v, err := a.Monitoring.CreateSavedQueryVersion(ctx, scope, parts[0], in)
 		respondMonitoring(w, 201, savedQueryVersionToTransport(v), err)
+	case resource == "saved-queries" && parts[1] == "rename":
+		var in renameRequest
+		if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+			return true
+		}
+		q, err := a.Monitoring.RenameSavedQuery(ctx, scope, in.Key, parts[0], in.Name)
+		respondMonitoring(w, 200, savedQueryToTransport(q), err)
 	case resource == "saved-queries" && parts[1] == "delete":
 		key, ok := a.decodeAction(w, r)
 		if !ok {
@@ -167,6 +174,13 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		}
 		v, err := a.Monitoring.CreateSubscriptionVersion(ctx, scope, parts[0], in)
 		respondMonitoring(w, 201, subscriptionVersionToTransport(v), err)
+	case parts[1] == "rename":
+		var in renameRequest
+		if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+			return true
+		}
+		s, err := a.Monitoring.RenameSubscription(ctx, scope, in.Key, parts[0], in.Name)
+		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	case parts[1] == "disable" || parts[1] == "enable" || parts[1] == "delete":
 		key, ok := a.decodeAction(w, r)
 		if !ok {
@@ -182,6 +196,12 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		respondMonitoring(w, 200, subscriptionVersionToTransport(v), err)
 	}
 	return true
+}
+
+// renameRequest is the body of a Saved Query or Subscription rename.
+type renameRequest struct {
+	Key  string `json:"idempotency_key"`
+	Name string `json:"name"`
 }
 
 // decodeAction decodes an idempotent action request and returns its key.

@@ -46,6 +46,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/saved-queries/{saved_query_id}/versions/{version_id}`](#get-v0saved-queriessaved_query_idversionsversion_id) | `getSavedQueryVersion` | `monitoring:read` |
 | [`POST /v0/saved-queries/{saved_query_id}/versions`](#post-v0saved-queriessaved_query_idversions) | `createSavedQueryVersion` | `monitoring:write` |
 | [`POST /v0/saved-queries/{saved_query_id}/delete`](#post-v0saved-queriessaved_query_iddelete) | `deleteSavedQuery` | `monitoring:write` |
+| [`POST /v0/saved-queries/{saved_query_id}/rename`](#post-v0saved-queriessaved_query_idrename) | `renameSavedQuery` | `monitoring:write` |
 | [`GET /v0/subscriptions`](#get-v0subscriptions) | `listSubscriptions` | `monitoring:read` |
 | [`POST /v0/subscriptions`](#post-v0subscriptions) | `createSubscription` | `monitoring:write` |
 | [`GET /v0/subscriptions/{subscription_id}`](#get-v0subscriptionssubscription_id) | `getSubscription` | `monitoring:read` |
@@ -54,6 +55,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/subscriptions/{subscription_id}/delete`](#post-v0subscriptionssubscription_iddelete) | `deleteSubscription` | `monitoring:write` |
 | [`POST /v0/subscriptions/{subscription_id}/disable`](#post-v0subscriptionssubscription_iddisable) | `disableSubscription` | `monitoring:write` |
 | [`POST /v0/subscriptions/{subscription_id}/enable`](#post-v0subscriptionssubscription_idenable) | `enableSubscription` | `monitoring:write` |
+| [`POST /v0/subscriptions/{subscription_id}/rename`](#post-v0subscriptionssubscription_idrename) | `renameSubscription` | `monitoring:write` |
 | [`POST /v0/subscription-previews`](#post-v0subscription-previews) | `previewSubscription` | `monitoring:write` |
 | [`GET /v0/matches`](#get-v0matches) | `listMatches` | `monitoring:read` |
 | [`GET /v0/matches/{match_id}`](#get-v0matchesmatch_id) | `getMatch` | `monitoring:read` |
@@ -586,6 +588,27 @@ Logically delete a Saved Query that no Subscription which is not deleted belongs
 | `200` | `application/json` [`SavedQuery`](#savedquery) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error. Existing /v0 authentication, scope, pagination and idempotency semantics apply. |
 
+#### `POST /v0/saved-queries/{saved_query_id}/rename`
+
+Operation `renameSavedQuery`. Requires `monitoring:write`.
+
+Change the display name of a Saved Query. The name belongs to the Saved Query, not to its immutable Versions, so no Version is created and no Subscription moves. A new name commits saved_query.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Saved Query; a changed request is 409 idempotency_conflict. A deleted Saved Query is 409 saved_query_deleted.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `saved_query_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`RenameRequest`](#renamerequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`SavedQuery`](#savedquery) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error. Existing /v0 authentication, scope, pagination and idempotency semantics apply. |
+
 ### Subscriptions
 
 #### `GET /v0/subscriptions`
@@ -739,6 +762,27 @@ Commit re-enable of a disabled Subscription on the same Subscription Version. Ev
 | `subscription_id` | path | string | yes | Minimum length `1`. |
 
 **Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Subscription`](#subscription) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error. Existing /v0 authentication, scope, pagination and idempotency semantics apply. |
+
+#### `POST /v0/subscriptions/{subscription_id}/rename`
+
+Operation `renameSubscription`. Requires `monitoring:write`.
+
+Change the display name of a Subscription. The name belongs to the Subscription, not to its immutable Versions, so no Version is created, evaluation and enabled state are unchanged, and its Matches and Deliveries stay attached. A new name commits subscription.renamed in every Corpus of the current Version; the same name commits nothing. Replay of the same key and request returns the Subscription; a changed request is 409 idempotency_conflict. A deleted Subscription is 409 subscription_deleted.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `subscription_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`RenameRequest`](#renamerequest)
 
 **Responses**
 
@@ -3903,6 +3947,45 @@ required:
 
 </details>
 
+### `RenameRequest`
+
+New display name of a Saved Query or Subscription.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idempotency_key` | string | yes | Minimum length `1`. |
+| `name` | string | yes | Minimum length `1`. |
+
+Example `rename`:
+
+```json
+{
+  "idempotency_key": "rename-1",
+  "name": "Storms and hail"
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+  name:
+    type: string
+    minLength: 1
+required:
+  - idempotency_key
+  - name
+description: New display name of a Saved Query or Subscription.
+```
+
+</details>
+
 ### `ResourceReference`
 
 | Field | Type | Required | Description |
@@ -4234,7 +4317,7 @@ required:
 
 ### `SavedQueryVersionCreate`
 
-New immutable definition of an existing Saved Query. The name is unchanged.
+New immutable definition of an existing Saved Query. The name is unchanged (rename changes it).
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4274,7 +4357,7 @@ properties:
 required:
   - idempotency_key
   - definition
-description: New immutable definition of an existing Saved Query. The name is unchanged.
+description: New immutable definition of an existing Saved Query. The name is unchanged (rename changes it).
 ```
 
 </details>
@@ -4504,7 +4587,7 @@ description: Create enabled from-now Subscription. An optional owner makes it th
 
 ### `SubscriptionVersionCreate`
 
-New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
+New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -4553,7 +4636,7 @@ required:
   - saved_query_version_id
   - evaluator
   - destination_id
-description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged; saved_query_version_id is the current Version of that Saved Query.
+description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
 ```
 
 </details>

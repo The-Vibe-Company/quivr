@@ -311,16 +311,13 @@ Operations are supported.
   (`GET /v0/records/{id}/versions/{version_id}`) gives `accepted_at`, when Quivr
   accepted it, so a client rebuilt from the catalog can still date what arrived.
 - `/v0/saved-queries` and `/v0/subscriptions` create pinned, versioned Saved Queries and
-  activate, disable or re-enable Subscriptions. Re-enabling resumes evaluation from
-  that point, with no backfill of the pause.
-- Edit a Saved Query or a Subscription by committing a new Version:
-  `POST /v0/saved-queries/{id}/versions` (a new definition; Subscriptions keep the
-  Version they pin) and `POST /v0/subscriptions/{id}/versions` (pin the Saved Query's
-  current Version, an evaluator and a destination). A new Subscription Version judges
-  only changes committed after it; earlier Matches keep their Versions, all readable
-  through `…/versions/{version_id}`. `POST /v0/subscriptions/{id}/delete` stops
-  evaluation and deliveries for good while its history stays readable;
-  `POST /v0/saved-queries/{id}/delete` works once no Subscription uses the Saved Query.
+  activate, disable or re-enable Subscriptions (re-enabling does not backfill the pause).
+- Edit either by committing a new Version (`POST …/{id}/versions`). Subscriptions keep the
+  Saved Query Version they pin until their own new Version, which judges only later
+  changes; earlier Matches keep their Versions, readable through `…/versions/{version_id}`.
+  `POST …/{id}/rename` changes the name without a Version. `POST /v0/subscriptions/{id}/delete`
+  stops evaluation and deliveries for good, history kept; `POST /v0/saved-queries/{id}/delete`
+  works once no Subscription uses the Saved Query.
 - Give a Subscription an optional `owner` at creation, an opaque reference to one of
   your application's end users (for example `"owner": "user-123"`); without it the
   Subscription is global to the Organization. The owner never changes and is echoed on

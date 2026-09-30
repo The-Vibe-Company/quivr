@@ -84,8 +84,17 @@ export const pauseAlert = (id: string) =>
 export const resumeAlert = (id: string) =>
   request<Alert>(`${path(id)}/resume`, { idempotency_key: key() });
 
-export const editAlert = (id: string, expression: AlertExpression) =>
-  request<Alert>(`${path(id)}/edit`, { expression, idempotency_key: key() });
+/** New words for an alert, and a new name when `name` is given. */
+export const editAlert = (
+  id: string,
+  expression: AlertExpression,
+  name?: string,
+) =>
+  request<Alert>(`${path(id)}/edit`, {
+    expression,
+    name,
+    idempotency_key: key(),
+  });
 
 /** What an alert being written would have caught among the newest articles. */
 export interface AlertPreview {

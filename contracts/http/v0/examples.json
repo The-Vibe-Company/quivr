@@ -1139,5 +1139,13 @@
         "owner": "user-123"
       }
     }
+  },
+  {
+    "name": "rename",
+    "schema": "RenameRequest",
+    "value": {
+      "idempotency_key": "rename-1",
+      "name": "Storms and hail"
+    }
   }
 ]

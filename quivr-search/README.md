@@ -62,7 +62,7 @@ minute; they can watch chosen sources too. Without it, a line says why the choic
 The form previews what the alert would have caught among the newest articles (saving nothing):
 as typed, or on a click for described alerts, since each article is a classifier call. Each alert
 lists what it caught, live, with the matched words or the score; it can be paused, resumed,
-edited (its name stays) and deleted. `alerts.mjs` explains how alerts are stored and read.
+edited, renamed and deleted. `alerts.mjs` explains how alerts are stored and read.
 
 ## Frontend development and checks
 

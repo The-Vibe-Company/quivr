@@ -145,6 +145,22 @@ export function alertRoutes({
       throw fail(400, "Requête invalide.");
     return value;
   };
+  // An alert's name, 1 to 120 characters.
+  const alertName = (body) => {
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 120)
+      throw fail(400, "Donnez un nom à l’alerte.");
+    return name;
+  };
+  // Expressions compared whatever the order of their keys.
+  const canonical = (value) =>
+    JSON.stringify(value, (_, v) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)),
+          )
+        : v,
+    );
   const definition = (corpus, match) => ({
     corpus_ids: [corpus],
     expression: match,
@@ -327,9 +343,7 @@ export function alertRoutes({
     const body = await jsonBody(req);
     const idem = key(body);
     const match = expression(body);
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 120)
-      throw fail(400, "Donnez un nom à l’alerte.");
+    const name = alertName(body);
     const saved = await upstream("/v0/saved-queries", "POST", {
       idempotency_key: `demo-alert:${idem}`,
       name,
@@ -391,32 +405,56 @@ export function alertRoutes({
       await registry.remove([id]);
       return { status: 200, data: { alert_id: id, deleted: true } };
     } else {
-      // Edit: a new Saved Query Version, pinned by a new Subscription Version.
-      // It applies to articles that arrive afterwards; Matches keep their Version.
-      const version = await upstream(
-        `/v0/saved-queries/${encodeURIComponent(sub.current_version.saved_query_id)}/versions`,
-        "POST",
-        {
-          idempotency_key: `demo-alert-edit:${idem}`,
-          definition: definition(corpus, expression(body)),
-        },
-      );
-      if (version.status !== 201 && version.status !== 200) return version;
-      result = await upstream(`${path}/versions`, "POST", {
-        idempotency_key: `demo-alert-edit-subscription:${idem}`,
-        saved_query_version_id: version.data.version_id,
-        evaluator: pin,
-        destination_id: destination,
-      });
-      if (result.status !== 201 && result.status !== 200) return result;
-      queries.set(version.data.version_id, version.data);
-      result = await upstream(path);
+      const next = expression(body);
+      const name = body.name === undefined ? sub.name : alertName(body);
+      // A rename changes the name of the Subscription and of its Saved Query,
+      // not their Versions: what the alert caught stays attached to it.
+      if (name !== sub.name) {
+        result = await upstream(`${path}/rename`, "POST", {
+          idempotency_key: `demo-alert-rename:${idem}`,
+          name,
+        });
+        if (result.status !== 200) return result;
+        const renamed = await upstream(
+          `/v0/saved-queries/${encodeURIComponent(sub.current_version.saved_query_id)}/rename`,
+          "POST",
+          { idempotency_key: `demo-alert-rename-query:${idem}`, name },
+        );
+        if (renamed.status !== 200) return renamed;
+      }
+      if (canonical(next) === canonical(query.definition.expression))
+        result = await upstream(path);
+      else result = await newVersion(sub, next, idem, corpus);
     }
     if (result.status !== 200) return result;
     const next = result.data.current_version
       ? await queryVersion(result.data)
       : query;
     return { status: 200, data: view(result.data, next, await matches(id)) };
+  }
+
+  // Edit: a new Saved Query Version, pinned by a new Subscription Version. It
+  // applies to articles that arrive afterwards; Matches keep their Version.
+  async function newVersion(sub, next, idem, corpus) {
+    const path = `/v0/subscriptions/${encodeURIComponent(sub.subscription_id)}`;
+    const version = await upstream(
+      `/v0/saved-queries/${encodeURIComponent(sub.current_version.saved_query_id)}/versions`,
+      "POST",
+      {
+        idempotency_key: `demo-alert-edit:${idem}`,
+        definition: definition(corpus, next),
+      },
+    );
+    if (version.status !== 201 && version.status !== 200) return version;
+    const result = await upstream(`${path}/versions`, "POST", {
+      idempotency_key: `demo-alert-edit-subscription:${idem}`,
+      saved_query_version_id: version.data.version_id,
+      evaluator: pin,
+      destination_id: destination,
+    });
+    if (result.status !== 201 && result.status !== 200) return result;
+    queries.set(version.data.version_id, version.data);
+    return upstream(path);
   }
 
   async function detail(id, corpus) {

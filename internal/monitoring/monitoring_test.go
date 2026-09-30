@@ -66,6 +66,20 @@ func (m *memoryStore) DeleteSavedQuery(_ context.Context, org, key, id string) (
 	m.queries[org+"/"+id] = q
 	return q, nil
 }
+func (m *memoryStore) RenameSavedQuery(_ context.Context, org, key, id, name string) (monitoring.SavedQuery, error) {
+	m.writes = append(m.writes, "query rename "+id)
+	q := m.queries[org+"/"+id]
+	q.Name = name
+	m.queries[org+"/"+id] = q
+	return q, nil
+}
+func (m *memoryStore) RenameSubscription(_ context.Context, org, key, id, name string) (monitoring.Subscription, error) {
+	m.writes = append(m.writes, "subscription rename "+id)
+	s := m.subscriptions[org+"/"+id]
+	s.Name = name
+	m.subscriptions[org+"/"+id] = s
+	return s, nil
+}
 func (m *memoryStore) SubscriptionVersion(_ context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
 	v, err := m.version(org, id, versionID)
 	if err != nil {
@@ -441,6 +455,10 @@ func TestEditsAndDeletesFollowScopeRules(t *testing.T) {
 		{"query edit to an ungranted Corpus", func() error { _, err := s.CreateSavedQueryVersion(ctx, narrow, q.ID, wide); return err }(), monitoring.ErrForbidden},
 		{"query edit in another Organization", func() error { _, err := s.CreateSavedQueryVersion(ctx, outside, q.ID, wide); return err }(), monitoring.ErrNotFound},
 		{"query delete in another Organization", func() error { _, err := s.DeleteSavedQuery(ctx, outside, "d", q.ID); return err }(), monitoring.ErrNotFound},
+		{"read-only query rename", func() error { _, err := s.RenameSavedQuery(ctx, reader, "r", q.ID, "x"); return err }(), monitoring.ErrForbidden},
+		{"query rename in another Organization", func() error { _, err := s.RenameSavedQuery(ctx, outside, "r", q.ID, "x"); return err }(), monitoring.ErrNotFound},
+		{"read-only subscription rename", func() error { _, err := s.RenameSubscription(ctx, reader, "r", sub.ID, "x"); return err }(), monitoring.ErrForbidden},
+		{"subscription rename in another Organization", func() error { _, err := s.RenameSubscription(ctx, outside, "r", sub.ID, "x"); return err }(), monitoring.ErrNotFound},
 		{"subscription edit pinning another Saved Query", func() error {
 			_, err := s.CreateSubscriptionVersion(ctx, writer, sub.ID, subEdit(otherQuery.Current.VersionID))
 			return err
