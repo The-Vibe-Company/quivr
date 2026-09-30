@@ -1,0 +1,33 @@
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_8915d1ff0aedb3 115-117
+docs-site/plugins/upgrade-a-plugin.mdx
+  s_54b80c92daa9cb::t_68a8e643930321 30
+  s_54b80c92daa9cb::t_35932cd63dd962 11
+  s_54b80c92daa9cb::t_a751fe0a0f7b94 95
+tests/acceptance/plugin_activation_test.go
+  s_54b80c92daa9cb::t_a65c8150172d8c 130-131
+scripts/measure_upgrade.py
+  s_54b80c92daa9cb::t_e05e5a0cfbb33d 8-11,18-20,24-28,31,48-49,51,54,58,98-135,169-171,173-174,185,240-243,247-248,270,331-334,336-339,353,358-371,383,388-389,392,404-405,408,414-418,428,438,468-473,477-479,482-483,485-488,510-511,541-542
+  s_54b80c92daa9cb::t_f9efa00cfb518f 419-420
+scripts/test_measure_upgrade.py
+  s_54b80c92daa9cb::t_a7564d2a77833c 48-57
+  s_54b80c92daa9cb::t_e7597fc71a80c6 13-16
+.github/workflows/measure-upgrade.yml
+  s_54b80c92daa9cb::t_77c39657ddb113 21-22,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4878029d79abbf4dcd70bf09cbbc6ef3f0109e2c",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
