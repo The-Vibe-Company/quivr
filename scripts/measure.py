@@ -27,6 +27,8 @@ import measure_metrics as m
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WORKLOAD = ROOT / 'tests/measurement/workload-v1.json'
+# The search parity queries (THE-779): the 24 fixture queries, then edge cases of query normalization.
+PARITY_QUERIES = ROOT / 'plugins/core-ingest/testdata/parity-input.json'
 THE_641 = 'https://linear.app/thevibecompany/issue/THE-641'
 PRIOR = {'source': 'prototype 1e4446a public-search-report.md', 'semantic': {'mrr_at_10': 0.9583, 'recall_at_3': 1.0}, 'hybrid': {'mrr_at_10': 0.7969, 'recall_at_3': 0.9583}}
 
@@ -84,7 +86,7 @@ def pins():
     return {'source_revision': output('git', 'rev-parse', 'HEAD'), 'source_dirty': bool(output('git', 'status', '--porcelain', '--untracked-files=no')),
             'images': sorted(set(re.findall(r'image:\s*(\S+)', compose))),
             'model_lock': json.loads((ROOT / 'third_party/e5/model-lock.json').read_text()),
-            'processing_profile_sha256': sha256('internal/processing/profile.json'),
+            'processing_profile_sha256': sha256('plugins/core-ingest/profile.json'),
             'tokenizer_requirements_sha256': sha256('third_party/tokenizer/requirements-linux-x86_64.txt'),
             'workload_sha256': sha256('tests/measurement/workload-v1.json'),
             'hybrid_recipe_source': 'internal/adapters/weaviate/projection.go (unchanged by this measurement)'}
@@ -200,6 +202,27 @@ def ingest_fixture(client, corpus, rows):
         time.sleep(0.5)
 
 
+def expand(query):
+    """A parity query: text, or {"repeat": [[piece, times], ...]} spelled out."""
+    return query if isinstance(query, str) else ''.join(piece * times for piece, times in query['repeat'])
+
+
+def rankings(client, corpus, keys, search):
+    """Every hit of every parity query in each mode, at the largest limit: the ranking fingerprint
+    two runs compare exactly. A hit is [fixture key, part key, start, end]; a refusal is its code."""
+    out = {}
+    queries = [expand(q) for q in json.loads(PARITY_QUERIES.read_text())['queries']]
+    for mode in search['modes']:
+        out[mode] = []
+        for text in queries:
+            try:
+                items = client.call('POST', '/v0/search', {'query': text, 'corpus_ids': [corpus], 'mode': mode, 'profile': search['profile'], 'limit': 50})['items']
+                out[mode].append([[keys.get(h['record_id'], 'other'), h['part_key'], h['excerpt']['start'], h['excerpt']['end']] for h in items])
+            except RuntimeError as error:
+                out[mode].append(re.search(r"'code': '([a-z_]+)'", str(error)).group(1) if "'code'" in str(error) else str(error)[:120])
+    return out
+
+
 def run_latency(client, corpus, plan, rows, concurrency, search):
     query_text = {r[0]: r[4] for r in rows}
     def one(item):
@@ -223,6 +246,7 @@ def measure(stack, workload, rows, report):
     from prepare_embeddings import prepare as prepare_embeddings
     from prepare_tokenizer import prepare as prepare_tokenizer
     from local import GO, run
+    import connector_plugin
     report.update(host=host(), pins=pins(), phases_seconds={}, fixture_sha256=workload['fixture']['sha256'])
     phases = report['phases_seconds']
     timed('prepare_tokenizer', phases, prepare_tokenizer)
@@ -233,6 +257,8 @@ def measure(stack, workload, rows, report):
     def start():
         stack.compose('up', '-d', '--wait', '--wait-timeout', '300')
         stack.migrate()
+        # The engine segments, embeds and ranks nothing itself: the core plugins run beside it.
+        connector_plugin.start_first_party(stack)
         stack.start_processes()
 
     # The frozen v1 workload names the default profile by its former name, balanced.
@@ -266,6 +292,7 @@ def measure(stack, workload, rows, report):
             details.append({'query_id': row[0], 'rank': rank, 'top10': [keys.get(h['record_id'], 'other') for h in result['items']]})
         quality[mode] = {**m.quality(ranks), 'per_query': details}
     report['retrieval_profile'] = profile
+    report['rankings'] = rankings(c, corpus, keys, cfg)
 
     lat = workload['latency']
     ids = [r[0] for r in rows]
@@ -341,11 +368,13 @@ def main():
         sys.exit(f'measure: unsupported platform {platform.system()}/{platform.machine()}; the pinned E5/tokenizer harness requires Linux x86_64')
     workload, rows = m.load_workload(WORKLOAD, ROOT)
     from local import Stack
+    import connector_plugin
 
     def interrupted(*_):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)  # a cancelled run still writes its report and cleans up
     stack = Stack('quivr-measure-' + uuid.uuid4().hex[:10])
+    connector_plugin.select_first_party(stack, connector_plugin.CORE)
     started = time.monotonic()
     report = {'status': 'failed', 'workload': workload['workload'], 'limits': workload['limits']}
     try:

@@ -16,8 +16,8 @@ make eval args='--sets scifact'             # one set
 make eval args='--baseline <report.json>'   # also compare with an earlier run, query by query
 ```
 
-The local stack needs Linux x86_64, like `make measure`; it runs the engine with no plugin
-pinned. To measure an existing installation instead, pass `--api-url <url>` and put a key
+The local stack needs Linux x86_64, like `make measure`; it runs the engine with only its
+core plugins pinned, core.ingest and core.retrieve. To measure an existing installation instead, pass `--api-url <url>` and put a key
 with `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
 `QUIVR_EVAL_API_KEY`. Each run creates new Corpora and never deletes them.
 

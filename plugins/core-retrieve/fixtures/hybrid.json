@@ -1,0 +1,57 @@
+{
+  "description": "Mode hybrid: the ranking is the hybrid candidates in the order the engine served them, cut to the limit. Each primitive serves another order, so the first hits show which one was asked for.",
+  "retrieval": {
+    "query": "harbour strike",
+    "mode": "hybrid",
+    "limit": 3,
+    "candidates": [
+      {
+        "segment_id": "seg_harbour",
+        "record_id": "rec_harbour",
+        "text": "Dockers went on strike and the harbour stayed closed."
+      },
+      {
+        "segment_id": "seg_ferry",
+        "record_id": "rec_ferry",
+        "text": "Ferries stayed in the harbour all day."
+      },
+      {
+        "segment_id": "seg_rail",
+        "record_id": "rec_rail",
+        "text": "The strike spread to the rail network by noon."
+      },
+      {
+        "segment_id": "seg_market",
+        "record_id": "rec_market",
+        "text": "The flower market opened early."
+      }
+    ],
+    "order": {
+      "bm25": [
+        "seg_ferry",
+        "seg_harbour",
+        "seg_market",
+        "seg_rail"
+      ],
+      "near_vector": [
+        "seg_rail",
+        "seg_market",
+        "seg_harbour",
+        "seg_ferry"
+      ],
+      "hybrid": [
+        "seg_market",
+        "seg_ferry",
+        "seg_rail",
+        "seg_harbour"
+      ]
+    },
+    "expect": {
+      "top": [
+        "seg_market",
+        "seg_ferry",
+        "seg_rail"
+      ]
+    }
+  }
+}

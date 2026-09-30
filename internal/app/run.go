@@ -277,6 +277,11 @@ func Run(command string) error {
 	if command != "migrate" && pins.Ingestion() == nil {
 		return errors.New("no ingestion plugin pinned: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
 	}
+	// Nor does it rank search results itself (THE-779): the api needs a
+	// pinned retrieval plugin, normally the first-party core.retrieve.
+	if command == "api" && pins.Retrieval() == nil {
+		return errors.New("no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -367,6 +372,9 @@ func Run(command string) error {
 	if resolved.Ingestion() == nil {
 		return errors.New("the active pipeline plan has no ingestion plugin: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
 	}
+	if command == "api" && resolved.Retrieval() == nil {
+		return errors.New("the active pipeline plan has no retrieval plugin: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
+	}
 	if err = registry.Replace(kindsOf(resolved)...); err != nil {
 		return fmt.Errorf("pipeline plan %s: %w", planID, err)
 	}
@@ -418,7 +426,9 @@ func Run(command string) error {
 	// switches one (registry.PlanActivation).
 	evaluators := cfg.evaluators(resolved)
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
-	search := retrieval.Service{Embedder: embedding, Routing: store, Projection: projection, Content: contents}
+	// Coverage counts read every current segment of a Corpus; a search sees
+	// them at most 10 s old.
+	search := retrieval.Service{Embedder: embedding, Routing: store, Registry: store, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: projection, Content: contents}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: live}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
@@ -432,11 +442,11 @@ func Run(command string) error {
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
 	rebuilder.Plugin = deriver
-	// A retrieval plugin answers every search: it requests candidates, which
-	// search serves after authorization and hydration, and ranks them.
-	// Without one the built-in path answers the default profile.
+	// The retrieval plugin, normally core.retrieve, answers every search: it
+	// requests candidates, which search serves after authorization and
+	// hydration, and ranks them. The api refuses to start without one.
 	if resolved.Retrieval() != nil {
-		search.Ranker, search.Registry = pluginhttp.LiveRetriever{Live: live, Started: resolved.Retrieval()}, store
+		search.Ranker = pluginhttp.LiveRetriever{Live: live, Started: resolved.Retrieval()}
 	}
 	// The api that served an activation follows it at once; new Corpora
 	// start on the spaces it registered.

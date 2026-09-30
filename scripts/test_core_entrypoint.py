@@ -97,11 +97,12 @@ class CoreEntrypointTest(unittest.TestCase):
         both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
         self.assertEqual(both, {'rss', 'x-list', 'm365-mail', 'core-ingest', 'pdf-text', 'alerts'})
         # The API runs only the push connector plugins, to relay webhook deliveries to them,
-        # the ingestion plugin, to encode queries, and the alerts plugin, for Subscription previews.
+        # the ingestion plugin, to encode queries, the retrieval plugin, to rank searches,
+        # and the alerts plugin, for Subscription previews.
         api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'}, 'api')}
-        self.assertEqual(api, {'x-list', 'core-ingest', 'alerts'})
+        self.assertEqual(api, {'x-list', 'core-ingest', 'core-retrieve', 'alerts'})
         api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'}, 'api')}
-        self.assertEqual(api, {'x-list', 'core-ingest'})
+        self.assertEqual(api, {'x-list', 'core-ingest', 'core-retrieve'})
 
     def test_core_ingest_embeds_with_the_deployment_tei_and_the_image_tokenizer(self):
         # The engine segments and embeds nothing itself: api and worker refuse to start without it.
@@ -124,7 +125,7 @@ class CoreEntrypointTest(unittest.TestCase):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
         pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['plugins']
-        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920', 'http://127.0.0.1:9930', 'http://127.0.0.1:9940', 'http://127.0.0.1:9950'])
+        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920', 'http://127.0.0.1:9930', 'http://127.0.0.1:9940', 'http://127.0.0.1:9950', 'http://127.0.0.1:9960'])
         ids = set()
         for pin in pins:
             source = pathlib.PurePosixPath(pin['manifest']).relative_to('/app')
@@ -134,7 +135,7 @@ class CoreEntrypointTest(unittest.TestCase):
             else:
                 self.assertIn(f'COPY {source.parent} /app/{source.parent}', dockerfile)
             ids.add(re.search(r'^id: (\S+)$', (ROOT / source).read_text(), re.M).group(1))
-        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'core.ingest'})
+        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'core.ingest', 'core.retrieve'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
 
@@ -170,7 +171,7 @@ class CoreEntrypointTest(unittest.TestCase):
         def kinds(env):
             pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1', **env})['plugins']
             return {pathlib.PurePosixPath(p['manifest']).parent.name: p.get('kinds') for p in pins}
-        others = {'pdf-text': None, 'm365-mail': None, 'rss': None, 'x-list': None, 'core-ingest': None}
+        others = {'pdf-text': None, 'm365-mail': None, 'rss': None, 'x-list': None, 'core-ingest': None, 'core-retrieve': None}
         self.assertEqual(kinds({}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])

@@ -64,7 +64,7 @@ SETS = {
 
 def max_source_bytes():
     """The engine's per-Record text limit; larger documents cannot be ingested and are left out."""
-    return json.loads((ROOT / 'internal/processing/profile.json').read_text())['max_source_bytes']
+    return json.loads((ROOT / 'plugins/core-ingest/profile.json').read_text())['max_source_bytes']
 
 
 def size(doc):

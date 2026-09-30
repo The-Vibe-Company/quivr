@@ -113,6 +113,12 @@ func TestCLISearch(t *testing.T) {
 		t.Fatalf("--json is not JSON: %v\n%s", err, js.stdout)
 	}
 	fromAPI := request(t, "POST", "/v0/search", admin, map[string]any{"query": "aurora borealis", "corpus_ids": []string{c}, "mode": "lexical"}, 200)
+	// Two searches take their own time: usage.elapsed_ms is the one field that may differ.
+	for _, response := range []map[string]any{fromCLI, fromAPI} {
+		if usage, ok := response["usage"].(map[string]any); ok {
+			delete(usage, "elapsed_ms")
+		}
+	}
 	if a, b := canonicalJSON(t, fromCLI), canonicalJSON(t, fromAPI); a != b {
 		t.Fatalf("--json differs from the API response\ncli: %s\napi: %s", a, b)
 	}

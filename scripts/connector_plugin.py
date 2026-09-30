@@ -16,8 +16,9 @@ Afterwards the process logs are scanned for the sample's test token.
 
 First-party Go plugins (``FIRST_PARTY``) are different: every stack
 (`make dev`, `make verify`, the browser demo) pins them by default, because
-their kinds are real sources, and because the engine segments and embeds
-nothing itself: core.ingest is its ingestion plugin (THE-777). Each row names a module under plugins/<id>,
+their kinds are real sources, and because the engine segments, embeds and
+ranks nothing itself: core.ingest is its ingestion plugin (THE-777) and
+core.retrieve its retrieval plugin (THE-779). Each row names a module under plugins/<id>,
 built with ``go build`` into the stack directory whenever the stack starts
 (the Go build cache makes it quick) and run on its own allocated port.
 ``QUIVR_<ID>=off make dev`` (the id in upper case, ``-`` as ``_``, for example
@@ -53,7 +54,14 @@ FIRST_PARTY = [
     # Token windows and E5 embeddings through the stack's TEI and the pinned tokenizer. The api and
     # the worker refuse to start without an ingestion plugin; scripts/ingestion_plugin.py swaps it.
     {'id': 'core-ingest', 'configuration': lambda stack: {'tei_url': stack.state['tei_url'], 'tokenizer': prepare_tokenizer()}},
+    # Today's search, answered from the candidates the engine serves. The api refuses to start without
+    # a retrieval plugin; scripts/retrieval_plugin.py swaps it for the Go SDK sample.
+    {'id': 'core-retrieve', 'configuration': lambda stack: {}},
 ]
+
+# The first-party plugins without which the api and worker refuse to start: the engine segments,
+# embeds and ranks nothing itself. Measurement stacks (make measure, make eval) pin only these.
+CORE = ['core-ingest', 'core-retrieve']
 
 
 def variable(row):

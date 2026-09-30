@@ -40,7 +40,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .scratch/eval/cache
-          key: eval-sets-${{ hashFiles('scripts/eval/public_sets.py', 'internal/processing/profile.json') }}
+          key: eval-sets-${{ hashFiles('scripts/eval/public_sets.py', 'plugins/core-ingest/profile.json') }}
       - run: python3 -m pip install -q -r scripts/eval/requirements.txt
       - run: python3 -m unittest discover -s scripts/eval -p 'test_*.py'
       - name: Find the baseline run

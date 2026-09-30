@@ -119,7 +119,7 @@ A deployment pins exactly one ingestion plugin; Quivr does not segment or embed 
 | When Quivr calls it | In the API, for every search, in up to three rounds. |
 | Operation | `search` |
 | SDK | Go |
-| First-party | none yet; without a retrieval plugin, Quivr's built-in search answers the `default` profile |
+| First-party | `core-retrieve`: keyword, vector or hybrid search, as the index ranks it |
 
 ```yaml quivr-plugin.yaml
 id: acme.ranker

@@ -658,8 +658,10 @@ yield the same answer.
 **Errors.** A terminal envelope refuses the search (422
 `unsupported_search`); unavailability or a retryable envelope makes it
 unavailable (503); an answer the checks below refuse fails it with 502
-`retrieval_plugin_invalid`; a search that outruns the profile's
-`max_latency_ms` fails with 504 `search_deadline_exceeded`.
+`retrieval_plugin_invalid`; a search whose rounds outrun the profile's
+`max_latency_ms` fails with 504 `search_deadline_exceeded`, and one whose
+candidates the engine could not serve in time (a dependency such as the
+embedding service is down) with 503.
 
 `CheckSearchOutput` and `RetrievalSession` in `internal/plugins` judge every
 answer for the engine and the Contract Runner:
@@ -676,8 +678,9 @@ answer for the engine and the Contract Runner:
 
 **Deployment.** A pin needs no routes; a deployment pins one retrieval
 plugin (`retrieval_conflict`), which then answers every search.
-`GET /v0/search/profiles` lists its profiles. Without one, the built-in path
-answers the `default` profile.
+`GET /v0/search/profiles` lists its profiles. The api refuses to start
+without one; every stack pins the first-party `core.retrieve` unless another
+is pinned.
 
 **Retrieval fixtures** (`retrieval-fixture.schema.json`, a file with a
 top-level `retrieval` property) hold a `query`, `mode`, `limit`,

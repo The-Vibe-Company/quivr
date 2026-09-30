@@ -53,19 +53,17 @@ type Usage struct {
 // Profile is one search profile a deployment answers.
 type Profile struct {
 	Name, Description string
-	// MaxLatencyMS and MaxCostCents are the plugin's declared budgets; zero
-	// for the built-in default, which declares none.
+	// MaxLatencyMS and MaxCostCents are the plugin's declared budgets.
 	MaxLatencyMS int
 	MaxCostCents float64
-	// PluginID and PluginVersion name the plugin that answers it; empty for
-	// the built-in path.
+	// PluginID and PluginVersion name the plugin that answers it.
 	PluginID, PluginVersion string
 }
 
 // Profiles lists the profiles this deployment answers, default first.
 func (s Service) Profiles() []Profile {
 	if s.Ranker == nil {
-		return []Profile{{Name: DefaultProfile, Description: "Built-in hybrid search: keywords and the served vector space fused by relative score."}}
+		return []Profile{}
 	}
 	m := s.Ranker.Manifest()
 	r := m.Contributions.Retrieval
@@ -88,7 +86,7 @@ func (s Service) Serves(profile string) bool {
 
 func (s Service) declares(profile string) bool {
 	if s.Ranker == nil {
-		return profile == DefaultProfile
+		return false
 	}
 	_, ok := s.Ranker.Manifest().Contributions.Retrieval.Profiles[profile]
 	return ok
@@ -118,7 +116,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 	}
 	spaces, err := s.searchSpaces(ctx, scope.Organization, routes)
 	if err != nil {
-		return out, s.deadline(ctx, ErrUnavailable)
+		return out, s.unserved(ctx, m.ID, ErrUnavailable)
 	}
 	session := plugins.NewRetrievalSession(m, plugins.SearchRequest{
 		InvocationID: invocationID(), OrganizationID: scope.Organization, Configuration: s.Ranker.Configuration(),
@@ -159,17 +157,30 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 		served := make([][]plugins.Candidate, len(answer.Requests))
 		for i, request := range answer.Requests {
 			if served[i], err = sv.serve(ctx, q, request); err != nil {
-				return out, s.deadline(ctx, err)
+				return out, s.unserved(ctx, m.ID, err)
 			}
 		}
 		session.Serve(invocationID(), answer.Requests, served)
 	}
 }
 
-// deadline turns a failure caused by the profile's deadline into ErrDeadline.
+// deadline turns a failure of the plugin's round caused by the profile's
+// deadline into ErrDeadline: the plugin outran its budget.
 func (s Service) deadline(ctx context.Context, err error) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return ErrDeadline
+	}
+	return err
+}
+
+// unserved reports a failure of the engine to serve candidates as it is,
+// even when the profile's deadline passed meanwhile: then a dependency of the
+// engine (the space owner encoding the query, the index, canonical storage)
+// did not answer in time, as when the embedding service is down, so the
+// search is unavailable (retryable), not a plugin that outran its budget.
+func (s Service) unserved(ctx context.Context, plugin string, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		slog.Warn("search candidates not served within the profile's deadline", "component", "search", "plugin", plugin, "error", err.Error())
 	}
 	return err
 }
@@ -182,7 +193,7 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 	}
 	var out []plugins.SearchSpace
 	for i, r := range routes {
-		_, spaces, total, err := s.Registry.VectorSpaces(ctx, org, r.CorpusID)
+		spaces, total, err := s.Coverage.spaces(ctx, s.Registry, org, r)
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +269,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		}
 		text = normalized
 	}
-	pq := Request{Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Space: c.Space, Field: c.EffectiveField(), K: 3 * c.K}
+	pq := Request{Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Space: c.Space, Field: c.EffectiveField(), K: fetch(c.K)}
 	if c.Filter != nil && len(c.Filter.SourceNamespaces) > 0 {
 		pq.SourceNamespaces = c.Filter.SourceNamespaces
 		for _, r := range sv.routes {
@@ -305,35 +316,52 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		seen[f.SegmentID] = true
 		unique = append(unique, f)
 	}
-	hydrated, err := sv.hydrate(ctx, unique)
-	if err != nil {
-		return nil, err
-	}
 	out := []plugins.Candidate{}
 	records := map[string]bool{}
-	for i, f := range unique {
-		h, ok := hydrated[i]
-		if !ok {
-			continue
+	// Hydrate in index order, a wave at a time, until k candidates are kept:
+	// a candidate further down is never read from storage.
+	for next := 0; next < len(unique) && len(out) < c.K; {
+		wave := unique[next:min(len(unique), next+min(hydrateParallelism, c.K-len(out)))]
+		next += len(wave)
+		hydrated, err := sv.hydrate(ctx, wave)
+		if err != nil {
+			return nil, err
 		}
-		// A vector hit on the served space counts only with its embedding
-		// coverage, as in a semantic search.
-		if c.Primitive == plugins.PrimitiveNearVector && c.Space == routed[f.GenerationID].Generation.SpaceID && h.EmbeddingID == "" {
-			continue
-		}
-		if c.GroupBy == plugins.GroupByRecord {
-			if records[h.RecordID] {
+		for i, f := range wave {
+			h, ok := hydrated[i]
+			if !ok {
 				continue
 			}
-			records[h.RecordID] = true
-		}
-		out = append(out, plugins.Candidate{SegmentID: h.Segment.ID, RecordID: h.RecordID, VersionID: h.VersionID, PartKey: h.Segment.PartKey,
-			Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, Score: f.Score})
-		if len(out) == c.K {
-			break
+			// A vector hit on the served space counts only with its embedding
+			// coverage, as in a semantic search.
+			if c.Primitive == plugins.PrimitiveNearVector && c.Space == routed[f.GenerationID].Generation.SpaceID && h.EmbeddingID == "" {
+				continue
+			}
+			if c.GroupBy == plugins.GroupByRecord {
+				if records[h.RecordID] {
+					continue
+				}
+				records[h.RecordID] = true
+			}
+			out = append(out, plugins.Candidate{SegmentID: h.Segment.ID, RecordID: h.RecordID, VersionID: h.VersionID, PartKey: h.Segment.PartKey,
+				Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, Score: f.Score})
+			if len(out) == c.K {
+				break
+			}
 		}
 	}
 	return out, nil
+}
+
+// fetch is how many projected objects serving k candidates asks the index
+// for: three per candidate, since a segment has up to three objects (its
+// lexical anchor and one or, while its embedding is replaced, two enriched
+// objects), and never fewer than CandidateLimit, so the index query, and
+// therefore its ranking, does not depend on k. Hybrid fusion normalizes each
+// side over what it retrieved and the vector index widens its search with the
+// limit: a smaller fetch could order the same candidates differently.
+func fetch(k int) int {
+	return max(3*k, CandidateLimit)
 }
 
 // hydrate rechecks and reads each candidate from canonical storage, a few at
@@ -376,8 +404,9 @@ func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[i
 	return out, failure
 }
 
-// encode encodes a query with the owner of a space: the built-in encoder for
-// its space, the pinned ingestion plugin for its own.
+// encode encodes a query with the owner of a space: the engine's E5 encoder
+// for the legacy space that Corpora not yet rebuilt since THE-777 serve, the
+// pinned ingestion plugin for its own.
 func (sv *server) encode(ctx context.Context, space, text string) ([]float32, error) {
 	key := space + "\x00" + text
 	if v, ok := sv.vectors[key]; ok {

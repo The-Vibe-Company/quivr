@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -78,6 +79,17 @@ type fakeBlobs struct{ content.Blobs }
 
 func (fakeBlobs) Read(context.Context, content.Blob) ([]byte, error) { return []byte(segmentText), nil }
 
+// countingBlobs counts the segment texts read: one per hydrated candidate.
+type countingBlobs struct {
+	content.Blobs
+	reads *atomic.Int64
+}
+
+func (b countingBlobs) Read(context.Context, content.Blob) ([]byte, error) {
+	b.reads.Add(1)
+	return []byte(segmentText), nil
+}
+
 type fakeEmbeddings struct {
 	content.EmbeddingRepository
 	eligible []bool
@@ -98,15 +110,19 @@ func (f *fakeEmbeddings) CommitEnrichment(context.Context, string, content.Segme
 	return nil
 }
 
+// service answers searches through a retrieval plugin that asks, like
+// core.retrieve, for the candidates of the search's mode and ranks them as
+// served.
 func service(p *fakeProjection, e *fakeEmbeddings) retrieval.Service {
-	return retrieval.Service{Embedder: fakeEmbedder{}, Routing: fakeRouting{}, Projection: p, Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: e}}
+	return retrieval.Service{Embedder: fakeEmbedder{}, Routing: fakeRouting{}, Projection: p, Ranker: &scriptedRanker{answer: passthrough}, Registry: spaceList{},
+		Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: e}}
 }
 
 var searchScope = corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}
 
 // An enriched segment has a lexical and an enriched object, and a third while
 // its embedding is replaced. Every matching segment in that state at once is the
-// worst case: a full page must still come back.
+// worst case: a full page of candidates must still be served.
 func TestSearchFillsPageWhileSegmentsHaveDuplicateObjects(t *testing.T) {
 	p := &fakeProjection{}
 	for i := 0; i < retrieval.MaxLimit+10; i++ {
@@ -132,8 +148,8 @@ func TestSearchFillsPageWhileSegmentsHaveDuplicateObjects(t *testing.T) {
 }
 
 // Objects of superseded or withdrawn Versions are not filtered by the projection
-// query; hydration drops them. They consume the candidate budget, so a page is
-// full only while live segments fit in it (docs/quivr-v2-remaining-limits.md).
+// query; hydration drops them. They consume the fetched objects, so a page is
+// full only while live segments fit in them (docs/quivr-v2-remaining-limits.md).
 func TestSearchStaleCandidatesConsumeTheCandidateBudget(t *testing.T) {
 	const stale = retrieval.CandidateLimit - retrieval.MaxLimit
 	build := func(stale int) *fakeProjection {
@@ -159,6 +175,29 @@ func TestSearchStaleCandidatesConsumeTheCandidateBudget(t *testing.T) {
 	}
 	if got := search(build(stale + 10)); got != retrieval.MaxLimit-10 {
 		t.Fatalf("stale candidates beyond the budget left a page of %d, want the documented shortfall %d", got, retrieval.MaxLimit-10)
+	}
+}
+
+// The index query of a candidate request does not depend on its k, so the
+// served order is the one the engine's own search had for any limit; and
+// serving reads from storage only the candidates it keeps.
+func TestServingAsksTheSameIndexQueryAndReadsOnlyWhatItKeeps(t *testing.T) {
+	p := &fakeProjection{}
+	for i := 0; i < retrieval.CandidateLimit; i++ {
+		p.candidates = append(p.candidates, content.Candidate{SegmentID: "segment-" + strconv.Itoa(i), GenerationID: "gen"})
+	}
+	reads := &atomic.Int64{}
+	s := service(p, &fakeEmbeddings{})
+	s.Content.Blobs = countingBlobs{reads: reads}
+	out, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: "hybrid", Limit: 10, CorpusIDs: []string{"corpus"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.searched) != 1 || p.searched[0].K != retrieval.CandidateLimit || p.searched[0].Hybrid == nil || p.searched[0].Hybrid.Alpha != 0.5 || p.searched[0].Hybrid.Fusion != retrieval.FusionRelativeScore {
+		t.Fatalf("projection searched %+v; want one hybrid query of %d objects, alpha 0.5, relative score", p.searched, retrieval.CandidateLimit)
+	}
+	if len(out.Hits) != 10 || out.Hits[0].Segment.ID != "segment-0" || out.Hits[9].Segment.ID != "segment-9" || reads.Load() != 10 {
+		t.Fatalf("%d hits after %d storage reads; want the first 10 in index order, reading 10", len(out.Hits), reads.Load())
 	}
 }
 

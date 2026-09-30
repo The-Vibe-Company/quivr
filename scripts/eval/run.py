@@ -243,7 +243,7 @@ def git(*args):
 
 
 def start_stack(phases):
-    """An isolated local stack with no plugin pinned: the engine alone, as make measure runs it."""
+    """An isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         sys.exit(f'eval: the local stack needs Linux x86_64 (this is {platform.system()}/{platform.machine()}); use --api-url for an existing installation')
     import connector_plugin
@@ -256,12 +256,12 @@ def start_stack(phases):
     normalizer_plugin.select(stack, 'none')
     subscription_plugin.select(stack, False)
     connector_plugin.select(stack, False)
-    connector_plugin.select_first_party(stack, [])
+    connector_plugin.select_first_party(stack, connector_plugin.CORE)
     stack.check_disk()
     for label, step in [('prepare_tokenizer', prepare_tokenizer), ('prepare_model', prepare_embeddings),
                         ('go_build', lambda: run([GO, 'build', '-o', str(stack.directory / 'quivr'), './cmd/quivr'])),
                         ('start_dependencies', lambda: stack.compose('up', '-d', '--wait', '--wait-timeout', '300')),
-                        ('migrate_and_start', lambda: (stack.migrate(), stack.start_processes()))]:
+                        ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack), stack.start_processes()))]:
         started = time.monotonic()
         step()
         phases[label] = round(time.monotonic() - started, 3)
@@ -326,7 +326,7 @@ def main():
         else:
             stack, client = start_stack(report['run']['phases_seconds'])
             options.paid_calls = 0  # the local stack embeds with its own TEI and calls no paid service
-            report['run']['target'] = 'isolated local stack, no plugin pinned'
+            report['run']['target'] = 'isolated local stack, core plugins only'
         for name, directory in sets:
             report['sets'][name] = measure_set(client, name, directory, run_id, options)
         if options.baseline:

@@ -167,7 +167,7 @@ jobs:
           path: |
             .scratch/e5-model
             .scratch/tokenizer
-          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'internal/processing/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
       - if: matrix.part == 'demo'
         uses: actions/setup-node@v4
         with:

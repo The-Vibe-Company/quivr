@@ -1,0 +1,31 @@
+# First-party retrieval plugin: the search the engine ran itself before
+# THE-779, unchanged: keywords, the served vector space, or both fused with
+# alpha 0.5 by relative score. Every stack pins it unless another retrieval
+# plugin is pinned. Check it with: quivr plugin inspect . && quivr plugin test .
+id: core.retrieve
+version: 1.0.0
+description: Keywords (BM25F on title and body), the served vector space, or both fused with alpha 0.5 by relative score, as the index ranks them.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.8.0 <0.10.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: The index's ranking for the search mode; hybrid fuses keywords and the served vector space with alpha 0.5 by relative score.
+        max_latency_ms: 500
+        max_cost_cents: 0
+      # Reserved for re-ranking and query rewriting (Spec 15 experiments); it
+      # ranks like default until then, so clients can already select it.
+      deep:
+        description: The default ranking for now; reserved for re-ranking and query rewriting within 3 s and 1 cent per search.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      # One candidate request, then the ranking.
+      max_rounds: 2
+      max_requests: 1
+      # A search's limit is at most 50.
+      max_candidates: 50
+run:
+  command: [go, run, .]

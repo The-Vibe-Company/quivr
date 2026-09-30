@@ -63,7 +63,7 @@ run:
   command: [go, run, .]
 ```
 
-`max_latency_ms` is a hard deadline for the whole search: Quivr stops one that runs longer and answers `504 search_deadline_exceeded`. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
+`max_latency_ms` is a hard deadline for the whole search: Quivr stops one that runs longer and answers `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
 
 </Step>
 <Step title="Rank">
@@ -95,12 +95,12 @@ The Contract Runner runs offline. It serves candidates from a normative fixture 
 </Step>
 <Step title="Pin it">
 
-A deployment pins one retrieval plugin, and it answers every search. Add it to the configuration of every `api` process:
+A deployment pins one retrieval plugin, and it answers every search; the api refuses to start without one. Add yours to the configuration of every `api` process in place of the first-party `core-retrieve`:
 
 ```json QUIVR_CONFIG
 {"plugins": [
   {"manifest": "/etc/quivr/plugins/acme-ranker/quivr-plugin.yaml",
-   "endpoint": "http://127.0.0.1:9960"}
+   "endpoint": "http://127.0.0.1:9970"}
 ]}
 ```
 
@@ -122,5 +122,6 @@ The response lists your profiles. A search response names the profile that answe
 | `503 search_unavailable` | The plugin is down or answered a retryable error. |
 | `422 unsupported_search` | The plugin answered a terminal error. |
 | `502 retrieval_plugin_invalid` | The plugin ranked a candidate it was never served, asked for too much, or sent an answer the checks refuse. |
-| `504 search_deadline_exceeded` | The search outran the profile's `max_latency_ms`. |
+| `504 search_deadline_exceeded` | The plugin's rounds outran the profile's `max_latency_ms`. |
+| `503 search_unavailable` after `max_latency_ms` | Quivr could not serve candidates in time: a dependency, such as the embedding service, is down or slow. |
 | `422 unsupported_profile` | The client named a profile the plugin does not declare. |

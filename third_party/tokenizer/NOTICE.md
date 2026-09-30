@@ -20,7 +20,7 @@ committed or redistributed in this repository. Preparation fetches the tokenizer
 from the pinned upstream URL and verifies its digest before use. This records
 the upstream declaration, without claiming to audit model training-data rights.
 
-The [profile](../../internal/processing/profile.json) records model identity,
+The [profile](../../plugins/core-ingest/profile.json) records model identity,
 implementation version, token budgets, templates, source policy and technical
 limits. Each persisted Segmentation stores this profile and the SHA-256 of the
 Go recipe source. The profile also pins the executable Python helper SHA-256;

@@ -22,7 +22,7 @@ type scriptedRanker struct {
 func (r *scriptedRanker) Manifest() *plugins.Manifest {
 	return &plugins.Manifest{ID: "example.fusion", Version: "0.1.0", Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{
 		Profiles: map[string]plugins.RetrievalProfile{"default": {MaxLatencyMS: 2000}, "deep": {MaxLatencyMS: 50, MaxCostCents: 1}},
-		Limits:   plugins.RetrievalLimits{MaxRounds: 3, MaxRequests: 2, MaxCandidates: 20},
+		Limits:   plugins.RetrievalLimits{MaxRounds: 3, MaxRequests: 2, MaxCandidates: 50},
 	}}}
 }
 func (r *scriptedRanker) Configuration() json.RawMessage { return json.RawMessage(`{}`) }
@@ -32,6 +32,26 @@ func (r *scriptedRanker) Round(ctx context.Context, q plugins.SearchRequest) ([]
 }
 
 func answer(v any) ([]byte, error) { return json.Marshal(v) }
+
+// passthrough asks for the candidates of the search's mode, k = limit, as
+// core.retrieve does, and ranks them as served.
+func passthrough(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
+	if q.Round == 1 {
+		request := map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": q.Limit}
+		switch q.Query.Mode {
+		case "semantic":
+			request = map[string]any{"primitive": "near_vector", "space": q.Spaces[0].ID, "query_text": q.Query.Text, "k": q.Limit}
+		case "hybrid":
+			request = map[string]any{"primitive": "hybrid", "space": q.Spaces[0].ID, "query_text": q.Query.Text, "alpha": 0.5, "fusion": "relative_score", "k": q.Limit}
+		}
+		return answer(map[string]any{"requests": []any{request}})
+	}
+	hits := []any{}
+	for _, c := range q.Served[0].Candidates {
+		hits = append(hits, map[string]any{"segment_id": c.SegmentID, "score": c.Score})
+	}
+	return answer(map[string]any{"ranking": map[string]any{"hits": hits}})
+}
 
 // fusion asks for keyword and vector candidates, then ranks every served
 // candidate once, vector candidates first, with an explanation.
@@ -81,7 +101,7 @@ func TestPluginRanksServedCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.searched) != 2 || p.searched[0].Mode != "lexical" || p.searched[0].K != 6 || p.searched[1].Mode != "semantic" || p.searched[1].Space != "space" || len(p.searched[1].Vector) != 1 {
+	if len(p.searched) != 2 || p.searched[0].Mode != "lexical" || p.searched[0].K != retrieval.CandidateLimit || p.searched[1].Mode != "semantic" || p.searched[1].Space != "space" || len(p.searched[1].Vector) != 1 {
 		t.Fatalf("projection searched %+v; want bm25 then near_vector, k oversampled", p.searched)
 	}
 	first := r.sent[0]
@@ -124,7 +144,7 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 			return answer(map[string]any{"requests": []any{map[string]any{"primitive": "bm25", "query_text": "x", "k": 1}}})
 		}, want: retrieval.ErrPluginInvalid, rounds: 3},
 		{name: "k over the declared limit", answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
-			return answer(map[string]any{"requests": []any{map[string]any{"primitive": "bm25", "query_text": "x", "k": 21}}})
+			return answer(map[string]any{"requests": []any{map[string]any{"primitive": "bm25", "query_text": "x", "k": 51}}})
 		}, want: retrieval.ErrPluginInvalid, rounds: 1},
 		{name: "the plugin refuses the query", answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
 			return nil, content.ErrInvalid
@@ -147,33 +167,51 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 	}
 }
 
-// Profiles resolve against what the deployment answers: the built-in path
-// answers default only, a pinned plugin its declared profiles; balanced is
-// the deprecated name of default.
+// Profiles resolve against what the pinned retrieval plugin declares;
+// balanced is the deprecated name of default. Without a plugin nothing
+// answers.
 func TestSearchResolvesProfiles(t *testing.T) {
 	for _, c := range []struct {
-		profile string
-		plugin  bool
-		want    string
-		err     error
+		profile  string
+		unpinned bool
+		want     string
+		err      error
 	}{
 		{profile: "", want: "default"},
 		{profile: "balanced", want: "default"},
-		{profile: "deep", err: retrieval.ErrUnsupportedProfile},
-		{profile: "", plugin: true, want: "default"},
-		{profile: "balanced", plugin: true, want: "default"},
-		{profile: "deep", plugin: true, want: "deep"},
-		{profile: "fast", plugin: true, err: retrieval.ErrUnsupportedProfile},
+		{profile: "deep", want: "deep"},
+		{profile: "fast", err: retrieval.ErrUnsupportedProfile},
+		{profile: "", unpinned: true, err: retrieval.ErrUnavailable},
 	} {
-		s := service(&fakeProjection{}, &fakeEmbeddings{})
-		if c.plugin {
-			s = rankedService(&fakeProjection{}, &scriptedRanker{answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
-				return answer(map[string]any{"ranking": map[string]any{"hits": []any{}}})
-			}})
+		s := rankedService(&fakeProjection{}, &scriptedRanker{answer: func(context.Context, plugins.SearchRequest) ([]byte, error) {
+			return answer(map[string]any{"ranking": map[string]any{"hits": []any{}}})
+		}})
+		if c.unpinned {
+			s.Ranker = nil
 		}
 		result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: c.profile})
 		if !errors.Is(err, c.err) || (c.err == nil && result.Profile != c.want) {
-			t.Errorf("profile %q (plugin %v): %q, %v; want %q, %v", c.profile, c.plugin, result.Profile, err, c.want, c.err)
+			t.Errorf("profile %q (unpinned %v): %q, %v; want %q, %v", c.profile, c.unpinned, result.Profile, err, c.want, c.err)
 		}
+	}
+}
+
+// stalledEmbedder is an embedding service that never answers.
+type stalledEmbedder struct{ fakeEmbedder }
+
+func (stalledEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// When the engine cannot serve candidates before the profile's deadline, a
+// dependency is down (here the embedding service): the search is unavailable
+// and retryable, 503, not a plugin that outran its budget, 504.
+func TestADependencyOutrunningTheDeadlineMakesSearchUnavailable(t *testing.T) {
+	s := rankedService(&fakeProjection{}, &scriptedRanker{answer: passthrough})
+	s.Embedder = stalledEmbedder{}
+	_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: "semantic", CorpusIDs: []string{"corpus"}, Profile: "deep"})
+	if !errors.Is(err, retrieval.ErrUnavailable) {
+		t.Fatalf("error %v, want ErrUnavailable", err)
 	}
 }

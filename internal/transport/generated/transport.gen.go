@@ -2040,7 +2040,7 @@ type SearchHit struct {
 	VersionId              string  `json:"version_id"`
 }
 
-// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
+// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -2050,20 +2050,21 @@ type SearchProfile struct {
 type SearchProfileDescription struct {
 	Description *string `json:"description,omitempty"`
 
-	// MaxCostCents Most a search may spend on paid calls; absent for the built-in default.
+	// MaxCostCents Most a search may spend on paid calls.
 	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
 
-	// MaxLatencyMs Deadline of one search under this profile; absent for the built-in default.
+	// MaxLatencyMs Deadline of one search under this profile.
 	MaxLatencyMs *int   `json:"max_latency_ms,omitempty"`
 	Name         string `json:"name"`
 	Provider     struct {
+		// Kind plugin, the retrieval plugin that answers the profile. engine is no longer returned since the engine's own search moved into core.retrieve.
 		Kind          SearchProfileDescriptionProviderKind `json:"kind"`
 		PluginId      *string                              `json:"plugin_id,omitempty"`
 		PluginVersion *string                              `json:"plugin_version,omitempty"`
 	} `json:"provider"`
 }
 
-// SearchProfileDescriptionProviderKind defines model for SearchProfileDescription.Provider.Kind.
+// SearchProfileDescriptionProviderKind plugin, the retrieval plugin that answers the profile. engine is no longer returned since the engine's own search moved into core.retrieve.
 type SearchProfileDescriptionProviderKind string
 
 // SearchProfileList defines model for SearchProfileList.
@@ -2080,7 +2081,7 @@ type SearchRequest struct {
 	Limit  *int               `json:"limit,omitempty"`
 	Mode   *SearchRequestMode `json:"mode,omitempty"`
 
-	// Profile A search profile this deployment answers (listSearchProfiles). The built-in path answers default only; a pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+	// Profile A search profile this deployment answers (listSearchProfiles). The pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
 	Profile *string `json:"profile,omitempty"`
 
 	// Query At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
@@ -2094,7 +2095,7 @@ type SearchRequestMode string
 type SearchResponse struct {
 	Items []SearchHit `json:"items"`
 
-	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked; the built-in path's immutable profile version, or plugin:<plugin id>@<version>/<profile> for a retrieval plugin.
+	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
 
 	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.

@@ -102,7 +102,7 @@ Each hit carries what a citation needs:
 
 ## Choose a profile
 
-A profile names how results are found and ranked. The built-in search answers `default`. A deployment with a retrieval plugin may offer more, such as a slower `deep` profile; list them:
+A profile names how results are found and ranked. The deployment's retrieval plugin declares them: the default `core-retrieve` answers `default` and `deep`, which ranks the same way until re-ranking is added. List them:
 
 {/* runnable */}
 ```bash

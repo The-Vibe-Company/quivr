@@ -84,6 +84,7 @@ excluded = [
 "docs/start/plugin-author.md" = { audience = "plugin-author", kind = "start-page" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
+"plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
@@ -97,7 +98,7 @@ excluded = [
 [budgets]
 "AGENTS.md" = 45
 "CONTEXT.md" = 319
-"deploy/railway/README.md" = 216
+"deploy/railway/README.md" = 217
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
 "docs/agents/evaluation.md" = 92
@@ -107,6 +108,7 @@ excluded = [
 "docs/agents/triage-labels.md" = 15
 "docs/runnable-guides.md" = 85
 "plugins/core-ingest/README.md" = 60
+"plugins/core-retrieve/README.md" = 60
 "plugins/pdf-text/README.md" = 120
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60

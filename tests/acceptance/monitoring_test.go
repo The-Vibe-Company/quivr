@@ -185,9 +185,9 @@ func TestMonitoringScopeAndConfigurationErrors(t *testing.T) {
 		}
 	}
 	profile := savedQueryCommand("profile-"+run, a)
-	profile["definition"].(map[string]any)["retrieval_profile"] = "deep"
+	profile["definition"].(map[string]any)["retrieval_profile"] = "fast"
 	if got := request(t, "POST", "/v0/saved-queries", admin, profile, 422); got["code"] != "unsupported_profile" {
-		t.Error("unimplemented profile", got)
+		t.Error("undeclared profile", got)
 	}
 	backfill := savedQueryCommand("backfill-"+run, a)
 	backfill["definition"].(map[string]any)["temporal_policy"] = "all_history"

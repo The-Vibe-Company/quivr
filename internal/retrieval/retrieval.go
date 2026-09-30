@@ -12,10 +12,12 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
+// ProfileVersion identifies the projection recipe every generation is built
+// with; a routed generation of another recipe cannot be searched.
 const ProfileVersion = "balanced.e5-token-windows.v1"
 
-// DefaultProfile answers a search that names no profile. The built-in path
-// has no other; a pinned retrieval plugin declares it beside its own.
+// DefaultProfile answers a search that names no profile. Every retrieval
+// plugin declares it beside its own.
 const DefaultProfile = plugins.DefaultProfile
 
 // LegacyProfile is the former name of the default profile, accepted as an
@@ -25,10 +27,10 @@ const LegacyProfile = "balanced"
 // MaxLimit is the largest page a search may request.
 const MaxLimit = 50
 
-// CandidateLimit bounds the candidates fetched from the projection per search.
+// CandidateLimit is the fewest projected objects a candidate request fetches.
 // An enriched segment has a lexical object and an enriched object, and briefly
 // a second enriched object while its embedding is replaced: never more than
-// three. Three times MaxLimit candidates therefore hold MaxLimit distinct
+// three. Three times MaxLimit objects therefore hold MaxLimit distinct
 // segments when that many match, so deduplication cannot shrink a page.
 const CandidateLimit = 3 * MaxLimit
 
@@ -39,8 +41,8 @@ var ErrUnsupported = errors.New("unsupported_search")
 // limit, which the API returns as the message.
 var ErrQueryTooLong = errors.New("query_too_long")
 
-// ErrUnsupportedProfile reports a profile neither the built-in path nor the
-// pinned retrieval plugin declares.
+// ErrUnsupportedProfile reports a profile the pinned retrieval plugin does
+// not declare.
 var ErrUnsupportedProfile = errors.New("unsupported_profile")
 var ErrUnavailable = errors.New("search_unavailable")
 
@@ -48,16 +50,12 @@ var ErrUnavailable = errors.New("search_unavailable")
 // generation predates projected Source Namespaces; a rebuild enables it.
 var ErrSourceFilterUnavailable = errors.New("source_filter_unavailable")
 
-// ErrSpaceUnavailable reports a request for a named vector space that a
-// routed generation does not carry: it was built before named spaces, or
-// without that space. A rebuild enables it.
-var ErrSpaceUnavailable = errors.New("space_unavailable")
-
 // ErrRouteChanged reports that routing moved to a generation of other spaces
 // while vectors were derived for the prior one; the caller retries.
 var ErrRouteChanged = errors.New("projection route changed")
 
-// MaxQueryCodepoints bounds a query sent to an ingestion plugin's space.
+// MaxQueryCodepoints bounds a query and every query text a retrieval plugin
+// asks candidates for.
 const MaxQueryCodepoints = 8192
 
 // MaxSourceNamespaces bounds the Source Namespaces one search may filter on.
@@ -67,6 +65,7 @@ const MaxSourceNamespaces = 50
 // generation, so an embedding cannot be attached to it.
 var ErrProjectionMissing = errors.New("projection missing")
 
+// Request is a search, and each candidate request's projection query.
 type Request struct {
 	Query     string
 	CorpusIDs []string
@@ -76,11 +75,10 @@ type Request struct {
 	Mode, Profile    string
 	Limit            int
 	Vector           []float32
-	// Space names the vector space to search, which every routed generation
-	// must carry as a named space; empty searches the generations' served
-	// space. The projection receives the resolved space.
+	// Space names the vector space a projection query ranks in; empty is the
+	// routed generations' served space.
 	Space string
-	// K bounds the projection's candidates; 0 means CandidateLimit.
+	// K bounds the projection's objects; 0 means CandidateLimit.
 	K int
 	// Field is the keyword field: FieldSource (title and body, the default)
 	// or FieldLexical (an ingestion plugin's lexical text).
@@ -114,10 +112,10 @@ type Result struct {
 	Hits []Hit
 	// Profile is the resolved profile name.
 	Profile string
-	// ProfileVersion identifies what ranked: the immutable profile shared by
-	// every routed generation, or the retrieval plugin and its profile.
+	// ProfileVersion identifies what ranked: the retrieval plugin, its
+	// version and the profile.
 	ProfileVersion string
-	// Usage is reported when a retrieval plugin ranked.
+	// Usage is what the search spent.
 	Usage *Usage
 }
 
@@ -160,11 +158,13 @@ type Service struct {
 	// Spaces encodes queries into plugin-owned spaces; nil when no ingestion
 	// plugin is pinned.
 	Spaces QueryEncoder
-	// Ranker answers searches when a retrieval plugin is pinned; nil keeps
-	// the built-in path.
+	// Ranker is the pinned retrieval plugin, normally core.retrieve: it
+	// answers every search, from the candidates the engine serves it.
 	Ranker Ranker
 	// Registry describes the vector spaces a ranker may request.
-	Registry   SpaceRegistry
+	Registry SpaceRegistry
+	// Coverage, when set, keeps the Registry's answers for a short time.
+	Coverage   *CoverageCache
 	Routing    Routing
 	Projection Projection
 	Content    content.Service
@@ -184,10 +184,18 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 	}
 	return s.Content.Promote(ctx, org, seg, g)
 }
+
+// Search validates and authorizes a search, routes each Corpus to its
+// generation, and lets the pinned retrieval plugin rank it from the
+// candidates the engine serves (rank).
 func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Result, error) {
 	out := Result{Hits: []Hit{}}
 	if !scope.Allows("content:read") || !scope.Allows("search:query") {
 		return out, corpus.ErrForbidden
+	}
+	if s.Ranker == nil {
+		// The api refuses to start without a retrieval plugin.
+		return out, ErrUnavailable
 	}
 	if q.Mode == "" {
 		q.Mode = "hybrid"
@@ -229,8 +237,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		return out, err
 	}
 	routes := make([]Route, 0, len(q.CorpusIDs))
-	routed := map[string]string{}
-	named := q.Space != ""
+	served := ""
 	for _, id := range q.CorpusIDs {
 		g, err := s.Routing.Generation(ctx, scope.Organization, id)
 		if err != nil {
@@ -244,78 +251,14 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		if len(q.SourceNamespaces) > 0 && !g.SourceNamespaceProjected {
 			return out, ErrSourceFilterUnavailable
 		}
-		switch {
-		case named && (!g.SpacesProjected || !g.Carries(q.Space)):
-			return out, ErrSpaceUnavailable
-		case !named && q.Space == "":
-			q.Space = g.SpaceID
-		case !named && q.Space != g.SpaceID:
-			// One query ranks every Corpus in one space.
+		// One query ranks every Corpus in one space.
+		if served != "" && g.SpaceID != served {
 			return out, ErrUnsupported
 		}
+		served = g.SpaceID
 		routes = append(routes, Route{CorpusID: id, Generation: g})
-		routed[g.ID] = id
 	}
-	if s.Ranker != nil {
-		return s.rank(ctx, scope, q, routes, out)
-	}
-	builtin := q.Space == s.Embedder.Space().ID
-	plugin := !builtin && s.Spaces != nil && s.Spaces.Owns(q.Space)
-	if !builtin && !plugin && (named || q.Mode != "lexical") {
-		// No pinned owner can encode a query into this space.
-		return out, ErrUnsupported
-	}
-	normalized, err := normalizeQuery(q.Query)
-	if err != nil {
-		return out, ErrUnsupported
-	}
-	q.Query = normalized
-	out.ProfileVersion = ProfileVersion
-	if q.Mode != "lexical" {
-		if builtin {
-			q.Vector, err = s.Embedder.Embed(ctx, "query: "+q.Query)
-		} else {
-			q.Vector, err = s.Spaces.EncodeQuery(ctx, scope.Organization, q.Space, q.Query)
-			if errors.Is(err, ErrQueryTooLong) {
-				return out, err
-			}
-			if errors.Is(err, content.ErrInvalid) {
-				// The owner refuses this query: it can never be encoded.
-				return out, ErrUnsupported
-			}
-		}
-		if err != nil {
-			return out, ErrUnavailable
-		}
-	}
-	candidates, err := s.Projection.Search(ctx, routes, scope, q)
-	if err != nil {
-		return out, ErrUnavailable
-	}
-	// Narrow hydration to the requested scope as well as the caller's grants.
-	scope.Corpora = q.CorpusIDs
-	segments := map[string]bool{}
-	for _, c := range candidates {
-		if routed[c.GenerationID] == "" || segments[c.SegmentID] {
-			continue
-		}
-		h, err := s.Content.Hydrate(ctx, scope, c)
-		if errors.Is(err, corpus.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return out, ErrUnavailable
-		}
-		if q.Mode == "semantic" && h.EmbeddingID == "" {
-			continue
-		}
-		segments[c.SegmentID] = true
-		out.Hits = append(out.Hits, Hit{Hydrated: h})
-		if len(out.Hits) == q.Limit {
-			break
-		}
-	}
-	return out, nil
+	return s.rank(ctx, scope, q, routes, out)
 }
 
 // normalizeQuery prepares a query: valid text of at most MaxQueryCodepoints,

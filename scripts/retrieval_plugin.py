@@ -1,8 +1,9 @@
 """Retrieval plugin step of the local verification harness (THE-778).
 
 Pins the Go SDK sample retrieval plugin (sdks/go/examples/fusion-retriever:
-keyword and vector candidates fused by reciprocal rank) beside the stack's
-other pins, restarts the API and the worker on that pin, and runs
+keyword and vector candidates fused by reciprocal rank) in place of the
+stack's core.retrieve, a deployment pins one retrieval plugin, restarts the
+API and the worker on that pin, and runs
 TestRetrievalPlugin through the public API. The stack's configuration and
 processes are restored afterwards, even on failure.
 """
@@ -35,7 +36,8 @@ def verify(stack):
             time.sleep(.1)
         for name, text in configs.items():
             cfg = json.loads(text)
-            cfg['plugins'] = cfg.get('plugins', []) + [{'manifest': str(SAMPLE / 'quivr-plugin.yaml'), 'endpoint': f'http://127.0.0.1:{port}'}]
+            others = [p for p in cfg.get('plugins', []) if not p['manifest'].endswith('/core-retrieve/quivr-plugin.yaml')]
+            cfg['plugins'] = others + [{'manifest': str(SAMPLE / 'quivr-plugin.yaml'), 'endpoint': f'http://127.0.0.1:{port}'}]
             path = stack.directory / name
             path.write_text(json.dumps(cfg))
             path.chmod(0o600)

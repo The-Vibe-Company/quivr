@@ -9,7 +9,7 @@
 #     inspect` and `quivr plugin test` (JSON reports in
 #     .scratch/plugin-sdk/<example>-contract-report.json);
 #  4. every first-party Go plugin under plugins/ passes its own tests and
-#     `quivr plugin test`. A plugin whose source needs a local fake
+#     `quivr plugin test` (plugins/core-retrieve with its per-mode fixtures). A plugin whose source needs a local fake
 #     (plugins/x-list) has scripts/plugin_<id>_fixtures.py, which serves the
 #     fake and writes the fixtures to certify with. plugins/core-ingest needs
 #     TEI and the pinned tokenizer: the verify stack certifies it
@@ -77,6 +77,12 @@ for mod in "$root"/plugins/*/go.mod; do
   fi
   "$quivr" plugin test --startup-timeout 120s --report "$work/$id-contract-report.json" ${fixtures[@]+"${fixtures[@]}"} . > "$work/$id-contract.log" 2>&1 || { cat "$work/$id-contract.log"; exit 1; }
   grep -q "^CERTIFIED" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+  # A retrieval plugin (core-retrieve) declares no secret: its searches must replay instead.
+  if grep -q "^  retrieval:" quivr-plugin.yaml; then
+    grep -q "PASS  replay .*retrieval" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
+    echo "quivr plugin test certified the $id retrieval plugin: $work/$id-contract-report.json"
+    continue
+  fi
   grep -q "PASS  credentials" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }
   # A plugin that declares attachments must have them exchanged, not skipped.
   if grep -q "^    attachments:" quivr-plugin.yaml; then grep -q "PASS  attachments" "$work/$id-contract.log" || { cat "$work/$id-contract.log"; exit 1; }; fi

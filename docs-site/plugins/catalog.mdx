@@ -1,7 +1,7 @@
 ---
 title: "First-party plugins"
 description: "The plugins that ship with Quivr: what each provides, its configuration, and where it runs."
-keywords: ["pdf-text", "alerts", "core-ingest", "rss", "m365-mail", "x-list", "catalog"]
+keywords: ["pdf-text", "alerts", "core-ingest", "core-retrieve", "rss", "m365-mail", "x-list", "catalog"]
 ---
 
 These plugins live in the `plugins/` folder of the repository. They use the same public protocol as your own plugins, and none is compiled into the engine. `make dev` runs and pins all of them.
@@ -11,11 +11,10 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
 | `alerts` | `alerts` 0.2.0 | Alert rule | keyword alerts and described alerts |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
+| `core-retrieve` | `core.retrieve` 1.0.0 | Retrieval | keyword, vector or hybrid search, as the index ranks it |
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
 | `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
 | `x-list` | `connector.x_list` 1.0.0 | Connector | kind `x_list`: the posts of an X list |
-
-A first-party retrieval plugin is in progress. Until it ships, Quivr's built-in search answers the `default` profile.
 
 ## pdf-text
 
@@ -49,6 +48,10 @@ The default ingestion plugin. It cuts the `title` and `body` Parts of each Versi
 | --- | --- |
 | `tei_url` | The Text Embeddings Inference server that serves the pinned E5 model |
 | `tokenizer` | `python` and `model`: the pinned tokenizer helper and its `tokenizer.json` |
+
+## core-retrieve
+
+The default retrieval plugin: the search Quivr ran itself before it moved into a plugin, with the same rankings. It asks for one candidate list that follows the search mode, `bm25` on the title and body for `lexical`, `near_vector` in the served space for `semantic`, `hybrid` in the served space with alpha 0.5 and relative score fusion for `hybrid`, and returns it as the ranking. Candidates of exactly equal score rank by segment id. It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent), which ranks the same way until re-ranking is added. It has no configuration. The api refuses to start without a retrieval plugin.
 
 ## rss
 

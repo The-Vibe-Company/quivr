@@ -173,10 +173,11 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 	delete(q, "mode")
 	request(t, "POST", "/v0/search", admin, q, 200) // Hybrid is the default.
 	q["mode"] = "lexical"
-	for _, profile := range []string{"fast", "deep"} {
-		q["profile"] = profile
-		request(t, "POST", "/v0/search", admin, q, 422)
-	}
+	// core.retrieve declares default and deep, nothing else.
+	q["profile"] = "fast"
+	request(t, "POST", "/v0/search", admin, q, 422)
+	q["profile"] = "deep"
+	request(t, "POST", "/v0/search", admin, q, 200)
 	delete(q, "profile")
 	// The space's model refuses a query it would truncate; a lexical search encodes nothing.
 	q["query"], q["mode"] = strings.Repeat("bonjour ", 257), "hybrid"

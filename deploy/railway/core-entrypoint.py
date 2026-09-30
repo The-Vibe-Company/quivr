@@ -32,8 +32,9 @@ PLUGINS = [
 # also run beside the API, which relays the webhook deliveries of their kinds to them
 # (the instance webhook addresses need QUIVR_PUBLIC_URL). The core.ingest
 # ingestion plugin segments and embeds every Version for the worker and encodes
-# queries for the API, so both run it (``api``); ``configuration`` may be a
-# function of the runtime variables.
+# queries for the API, so both run it (``api``); the core.retrieve retrieval
+# plugin ranks searches, which only the API answers (``api``, not ``worker``).
+# ``configuration`` may be a function of the runtime variables.
 TOKENIZER = {'python': '/app/.scratch/tokenizer/venv/bin/python', 'model': '/app/.scratch/tokenizer/tokenizer.json'}
 CONNECTORS = [
     {'id': 'rss', 'port': 9920},
@@ -43,6 +44,8 @@ CONNECTORS = [
     # Token windows and E5 embeddings through the deployment's TEI (plugins/core-ingest).
     {'id': 'core-ingest', 'port': 9950, 'api': True,
      'configuration': lambda env: {'tei_url': env['TEI_URL'], 'tokenizer': TOKENIZER}},
+    # Today's search: keywords, vectors or both, from the candidates the engine serves (plugins/core-retrieve).
+    {'id': 'core-retrieve', 'port': 9960, 'api': True, 'worker': False},
 ]
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
@@ -147,9 +150,9 @@ def build_config(env):
 
 def sidecar_commands(env, role='worker'):
     """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
-    plugin, the API only the connector plugins it relays push deliveries to, the
-    ingestion plugin it encodes queries with, and the
-    subscription plugins it calls for previews. Its
+    plugin but the retrieval plugin, the API only the connector plugins it relays push
+    deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
+    that ranks its searches, and the subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts:
     TYPESAFE_API_KEY), never the core's.
 
@@ -158,6 +161,8 @@ def sidecar_commands(env, role='worker'):
     commands = []
     for connector in CONNECTORS:
         if role == 'api' and not (connector.get('push') or connector.get('api')):
+            continue
+        if role == 'worker' and connector.get('worker') is False:
             continue
         directory = PLUGIN_ROOT / connector['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
@@ -232,9 +237,10 @@ def main():
     # Only the API applies startup migrations; failures abort before serving.
     if mode == 'api':
         subprocess.run(['quivr', 'migrate'], check=True)
-    # The worker calls every plugin, and the API the push connector plugins it relays
-    # webhook deliveries to and the ingestion plugin it encodes queries with, so each
-    # runs those beside itself.
+    # The worker calls every plugin but the retrieval plugin, and the API the push
+    # connector plugins it relays webhook deliveries to, the ingestion plugin it encodes
+    # queries with and the retrieval plugin that ranks its searches, so each runs those
+    # beside itself.
     sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
     if sidecars:
         sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, None)]))

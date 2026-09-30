@@ -1,0 +1,110 @@
+// Command quivr-core-retrieve is the first-party retrieval plugin
+// (core.retrieve): the search the engine ran itself before THE-779. It asks
+// the engine for one candidate list that follows the search mode, and returns
+// that list as the ranking; see README.md.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"os"
+	"sort"
+
+	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+)
+
+// alpha weights the vector side of a hybrid search; relative score fusion
+// normalizes each side's scores before weighting them.
+const alpha = 0.5
+
+type retriever struct{}
+
+func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
+	if req.Round == 1 {
+		c, err := request(req)
+		if err != nil {
+			return nil, err
+		}
+		return quivrplugin.Ask(c), nil
+	}
+	// The served order is the ranking: the index ranked it, and the engine
+	// kept each segment's first object, as the engine's own search did.
+	hits := []quivrplugin.RankedHit{}
+	for _, s := range req.Served {
+		explanation := explain(s.Request)
+		for _, c := range s.Candidates {
+			hits = append(hits, quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: explanation})
+		}
+	}
+	// The index returns candidates of equal score in the order their objects
+	// were written, which enrichment and rebuilds change: equal scores rank by
+	// segment id, so the same search over the same Records ranks the same way.
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return hits[i].SegmentID < hits[j].SegmentID
+	})
+	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
+}
+
+// request is the one candidate request of a search: keywords on the title
+// and body for lexical, the served space for semantic, both for hybrid.
+func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, error) {
+	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: req.Limit}
+	if req.Query.Mode == "lexical" {
+		c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource
+		return c, nil
+	}
+	space := req.ServedSpace()
+	if space == nil {
+		return c, quivrplugin.TerminalSearchError("no_served_space", "the searched Corpora serve no vector space; search by keywords, or rebuild them")
+	}
+	c.Space = space.ID
+	if req.Query.Mode == "semantic" {
+		c.Primitive = quivrplugin.PrimitiveNearVector
+		return c, nil
+	}
+	weight := alpha
+	c.Primitive, c.Field, c.Alpha, c.Fusion = quivrplugin.PrimitiveHybrid, quivrplugin.FieldSource, &weight, "relative_score"
+	return c, nil
+}
+
+func explain(c quivrplugin.CandidateRequest) string {
+	switch c.Primitive {
+	case quivrplugin.PrimitiveBM25:
+		return "keywords"
+	case quivrplugin.PrimitiveNearVector:
+		return "vectors in " + c.Space
+	}
+	weight := alpha
+	if c.Alpha != nil {
+		weight = *c.Alpha
+	}
+	return fmt.Sprintf("keywords and vectors in %s, alpha %g, relative score fusion", c.Space, weight)
+}
+
+func main() {
+	plugin, err := quivrplugin.New("")
+	if err == nil {
+		err = plugin.Retrieval(retriever{})
+	}
+	if err == nil {
+		m := plugin.Manifest()
+		host, port := os.Getenv(quivrplugin.EnvHost), os.Getenv(quivrplugin.EnvPort)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		if port == "" {
+			port = "8080"
+		}
+		// One startup line, so an operator sees the sidecar came up and what it serves.
+		fmt.Fprintf(os.Stderr, "quivr-core-retrieve: serving %s@%s (retrieval) on %s\n", m.ID, m.Version, net.JoinHostPort(host, port))
+		err = plugin.Serve()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "quivr-core-retrieve:", err)
+		os.Exit(1)
+	}
+}

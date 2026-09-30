@@ -67,10 +67,11 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
 `QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read`, which turns on the web app's read-only **Admin** tab (live flow of documents, timelines, throughput).
 
-## Ingestion plugin and the rebuild after THE-777
+## Core plugins and the rebuild after THE-777
 
-api and worker run the core.ingest plugin (`127.0.0.1:9950`, `CONNECTORS` in
-`core-entrypoint.py`), which segments and embeds with TEI. After the first deploy with it,
+api and worker run the core.ingest plugin (`127.0.0.1:9950`, `CONNECTORS` in `core-entrypoint.py`),
+which segments and embeds with TEI; the api alone also runs core.retrieve (`127.0.0.1:9960`), which
+ranks every search (THE-779). Neither starts without its plugin. After the first deploy with core.ingest,
 rebuild each earlier Corpus once with the operator key (later ones start on core.ingest):
 `POST /v0/corpora/{corpus_id}/rebuilds` with an `idempotency_key`, then poll the Operation.
 Until then search works in every mode and new articles are searchable by keyword at once;
