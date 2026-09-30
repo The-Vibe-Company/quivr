@@ -1,0 +1,50 @@
+README.md
+  s_54b80c92daa9cb::t_25ac1759ba1e90 195-199
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_5cd89cb5fbd4d7 89-93,445-448,450-451,456-458
+scripts/local.py
+  s_54b80c92daa9cb::t_a6f36c0f651b1b 103-104
+tests/acceptance/plugin_activation_test.go
+  s_54b80c92daa9cb::t_56f61fda9b86e2 125-230
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_8f82cdb6d5c69a 2418-2423,2438-2445,3408-3414,3432
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_5cd89cb5fbd4d7 143,187-188,194,211
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_8f82cdb6d5c69a 32-36,49-69,95-97,100
+  s_54b80c92daa9cb::t_04d9db03e6aacd 70-74
+migrations/20260930T1422Z_pinned_plan_work.sql
+  s_54b80c92daa9cb::t_5cd89cb5fbd4d7 21-22
+docs/plugins/switch-plugins-without-restarting.md
+  s_54b80c92daa9cb::t_8f82cdb6d5c69a 29-33,46-66,92-94,97
+  s_54b80c92daa9cb::t_5cd89cb5fbd4d7 67-71
+internal/plugins/registry/registry_test.go
+  s_54b80c92daa9cb::t_5cd89cb5fbd4d7 196,199,202
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_8f82cdb6d5c69a 1503-1513,1521-1522,1557-1567,1582-1589,3700-3701,3722,3805-3809,3827,4071,4088-4089
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_a6f36c0f651b1b 17-22,106-118
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_04d9db03e6aacd 198-202
+migrations/20260930T1423Z_normalization_failure_plan.sql
+  s_54b80c92daa9cb::t_70f18ca8d5c207 1-4
+internal/adapters/postgres/plugins_test.go
+  s_54b80c92daa9cb::t_70f18ca8d5c207 78
+  s_54b80c92daa9cb::t_2c99427e876d1b 218-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4f6d9731a12b67db69f095eb9bc32f3ad9187527",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
