@@ -1,0 +1,23 @@
+.github/proof/page_script.py
+  s_5abfa02e46338f::t_1f0861e2f4c693 1-47
+.github/proof/proof.sh
+  s_5abfa02e46338f::t_e8bb9cae17ba7a 1-37
+.github/workflows/docs-proof.yml
+  s_5abfa02e46338f::t_098d4e2d521ebb 1-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "79857def1fdf7ec2ca1b42166f522aae221cfc0c",
+  "prompts": {},
+  "sessions": {
+    "s_5abfa02e46338f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af0fac39258780752",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
