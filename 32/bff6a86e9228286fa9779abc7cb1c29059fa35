@@ -1,0 +1,114 @@
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_a2d54b2e8085db 115-117,122,124-127
+  s_54b80c92daa9cb::t_f5c4d6d0a09030 112-114,118-121,123,128-130
+tests/acceptance/search_test.go
+  s_54b80c92daa9cb::t_3389f3e1f1f4da 108-121
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_54b49ca1e72939 67-69
+  s_54b80c92daa9cb::t_3ff4679d4fb584 129-138
+  s_54b80c92daa9cb::t_80be20af913288 97
+  s_54b80c92daa9cb::t_ac497dca8a5baf 27-33,39-46
+  s_54b80c92daa9cb::t_8e7f291573fb8c 160-164
+quivr-search/src/components/feed/FeedPage.tsx
+  s_54b80c92daa9cb::t_d58c2ae84b137c 97-98,114-118,129-140,157,176,213,222,362
+client/client.gen.go
+  s_54b80c92daa9cb::t_0de2020ee26831 1357-1362,1386,1388-1395,2311,2317,3260,3276,6280,6288,9489,9503
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_c0637369b881f9 158-161
+tests/acceptance/rebuild_test.go
+  s_54b80c92daa9cb::t_afb1c30a086ee7 167-174
+internal/adapters/weaviate/purge_test.go
+  s_54b80c92daa9cb::t_abda0d3d89d9af 71,74
+internal/retrieval/rebuild.go
+  s_54b80c92daa9cb::t_edce78a6753987 23-25
+  s_54b80c92daa9cb::t_67391331ad97f9 159
+internal/transport/httpapi/search.go
+  s_54b80c92daa9cb::t_7d23f8bf9aa4fd 38-40
+  s_54b80c92daa9cb::t_16b8df670ce72c 48-49
+internal/adapters/postgres/searchable.go
+  s_54b80c92daa9cb::t_c0637369b881f9 14-15,17,25
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_b01c8d3ccf7f9b 129,183-202
+internal/online/online.go
+  s_54b80c92daa9cb::t_06922d3d2e7d3d 198
+  s_54b80c92daa9cb::t_b20057e4c91ef0 193-197
+README.md
+  s_54b80c92daa9cb::t_eec91a06f85dab 93-94
+quivr-search/README.md
+  s_54b80c92daa9cb::t_158390b9d3942f 21
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_d67709f257e396 89-92
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_0de2020ee26831 1357-1362,1386,1388-1395
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_b01c8d3ccf7f9b 119,138-139
+internal/adapters/weaviate/projection.go
+  s_54b80c92daa9cb::t_c008b32d817060 233
+  s_54b80c92daa9cb::t_679e60a1bb3bce 190-194
+  s_54b80c92daa9cb::t_a3eb3de1e30939 70-75,77-86,92-93,103-110,128,177,184,230-232,234-240,313-316
+  s_54b80c92daa9cb::t_be75a787a97c3d 189
+  s_54b80c92daa9cb::t_b20057e4c91ef0 102
+internal/online/search.go
+  s_54b80c92daa9cb::t_5bc2b3346c714e 39
+  s_54b80c92daa9cb::t_ec6f7cd9bd0951 14
+  s_54b80c92daa9cb::t_0371a2f31f5361 80-83
+  s_54b80c92daa9cb::t_a21d6318af8b3f 20
+  s_54b80c92daa9cb::t_ed9207dee94578 46
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_68968642b5ed91 3535-3536,3544-3566
+  s_54b80c92daa9cb::t_0de2020ee26831 1633-1634,1652-1653
+internal/adapters/weaviate/relevance_test.go
+  s_54b80c92daa9cb::t_bb319963fc84ce 77
+internal/adapters/weaviate/generation_test.go
+  s_54b80c92daa9cb::t_86e9ad985c37a7 54
+internal/online/search_test.go
+  s_54b80c92daa9cb::t_a32cf32463f7c5 74
+  s_54b80c92daa9cb::t_25bf08cfdcef68 62
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_e98d3c786f9bd4 274-275
+  s_54b80c92daa9cb::t_af32f5afc0a761 248-253
+internal/adapters/postgres/rebuild.go
+  s_54b80c92daa9cb::t_4589e349c84d1f 89
+  s_54b80c92daa9cb::t_6d7b6ec8c0930c 98
+internal/adapters/weaviate/source_filter_test.go
+  s_54b80c92daa9cb::t_f3d3d219a7864c 4-5,7
+  s_54b80c92daa9cb::t_fa9ec13246edc0 115-136
+  s_54b80c92daa9cb::t_0d11b5d689006c 1-3,6,8-79,139-146
+  s_54b80c92daa9cb::t_51376fb1899e0e 80-114,137-138
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_34e85fa4c2836b 48-50
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_cb245d545d8558 43
+  s_54b80c92daa9cb::t_44bc2617e6e3af 17-19,22-23,40,52-53,164-192
+  s_54b80c92daa9cb::t_6fd8c9c0a98fe2 193-194
+migrations/20260930T0508Z_source_namespace_projection.sql
+  s_54b80c92daa9cb::t_4070f3bd9921ab 1-6
+internal/adapters/weaviate/attach_test.go
+  s_54b80c92daa9cb::t_2f5180717234de 70
+internal/adapters/weaviate/mapping_test.go
+  s_54b80c92daa9cb::t_f47bb87f61f5e0 58
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_f5c4d6d0a09030 186-189,198,245-248,253,471
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_0de2020ee26831 1057,1066,5459,5468,5522-5523,5527-5558
+quivr-search/src/lib/search.ts
+  s_54b80c92daa9cb::t_3439c5d8dd7e60 56,60-68
+internal/retrieval/rebuild_test.go
+  s_54b80c92daa9cb::t_cb245d545d8558 114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32bff6a86e9228286fa9779abc7cb1c29059fa35",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
