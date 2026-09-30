@@ -1,0 +1,61 @@
+CONTEXT.md
+  s_54b80c92daa9cb::t_3876b4d97711fb 242,270
+README.md
+  s_54b80c92daa9cb::t_4e4abb987e67ec 183-190
+client/client.gen.go
+  s_54b80c92daa9cb::t_7c5ef875d6a29a 2387,2877,6905,10374
+contracts/http/v0/checks/roundtrip.cjs
+  s_54b80c92daa9cb::t_01f822456a7e74 23
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_4b3f67052e468c 85-88
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_220b72cd874dd7 1710-1711
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_4eca0a0e903ff3 61-62
+docs-site/context.mdx
+  s_54b80c92daa9cb::t_640b5894d9ceb7 245,273
+docs-site/deploy/railway/index.mdx
+  s_54b80c92daa9cb::t_0de2d82bca86c8 64-65
+docs-site/docs.json
+  s_54b80c92daa9cb::t_45b20cd3d9bd91 81
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_370e2ee47079c2 186-193
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_75bdabef255a9e 1796-1797,1816-1953,1958-1959,3019-3022,3040-3173,3218-3224,3234
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_1db67ee1deeab2 77-80,1129,1138-1209,1214,3267-3268,3272-3325,3370-3372,3394-3606,3714,3737-3738,3757-3762,3772
+docs-site/start/plugin-author.mdx
+  s_54b80c92daa9cb::t_1dcdaf58b79599 11
+docs/inventory.toml
+  s_54b80c92daa9cb::t_fb303b5cad28ce 86
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_9e7c503789b382 1128
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_cd3a244731ea89 9
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_e943e362887930 12-18,38-63,73-78,81,94-101,105-107
+scripts/local.py
+  s_54b80c92daa9cb::t_8c83064c184726 100-101,231-234
+docs-site/plugins/switch-plugins-without-restarting.mdx
+  s_54b80c92daa9cb::t_115073d6abe123 1-75
+docs/plugins/switch-plugins-without-restarting.md
+  s_54b80c92daa9cb::t_b92e68c654c412 1-72
+tests/acceptance/plugin_activation_test.go
+  s_54b80c92daa9cb::t_4f1b5327702e85 1-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c2a8cb8d24b96727793b874e756f6af50f9d7f99",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
