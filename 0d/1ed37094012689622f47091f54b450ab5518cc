@@ -8,6 +8,7 @@ internal/adapters/postgres/monitoring.go
 internal/transport/httpapi/monitoring.go
   s_54b80c92daa9cb::t_9b8bb401a9ec11 67-68,97,141-147,177-183,201-204
   s_54b80c92daa9cb::t_3d968e4ec64bc4 205-206
+  s_54b80c92daa9cb::t_0dc1baf4d83e05 26
 internal/transport/httpapi/monitoring_test.go
   s_54b80c92daa9cb::t_1c23756bc39a17 330-340,352
   s_54b80c92daa9cb::t_87e94ed9e3061b 81-98
@@ -48,6 +49,13 @@ contracts/http/v0/openapi.yaml
 internal/monitoring/monitoring.go
   s_54b80c92daa9cb::t_9b8bb401a9ec11 180-182,199-201,333-345,547-558
   s_54b80c92daa9cb::t_8834815d0aed28 559
+quivr-search/README.md
+  s_54b80c92daa9cb::t_1ed26dc6343bb7 61-63
+  s_54b80c92daa9cb::t_38209f2e7dcc23 64
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_0dc1baf4d83e05 104
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_522d3029216f28 312-318
 ---
 {
   "schema_version": "authorship/3.0.0",
