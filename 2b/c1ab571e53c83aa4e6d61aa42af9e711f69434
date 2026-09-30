@@ -1,0 +1,41 @@
+internal/plugins/devhost/fakeplugin/retrieval.go
+  s_54b80c92daa9cb::t_3c130323f39aa1 20,42
+  s_54b80c92daa9cb::t_ed3784ead5ad15 1-19,21-41,43-96
+tests/plugin-contract/retrieval-valid/fixtures/wire.json
+  s_54b80c92daa9cb::t_ed3784ead5ad15 1-13
+internal/plugins/runner/retrieval.go
+  s_54b80c92daa9cb::t_4a04b87c498d1a 1-215
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_1b25a37c11ac4f 320-372
+tests/plugin-contract/retrieval-valid/expect.json
+  s_54b80c92daa9cb::t_ed3784ead5ad15 1-4
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_bd58bc016261d1 217
+  s_54b80c92daa9cb::t_7d04459b739717 218-219
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_ed3784ead5ad15 313-315
+internal/plugins/devhost/retrieval.go
+  s_54b80c92daa9cb::t_4285d2866651c4 1-280
+tests/plugin-contract/retrieval-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_3c130323f39aa1 18-19
+  s_54b80c92daa9cb::t_ed3784ead5ad15 1-14,16-17,20-30
+  s_54b80c92daa9cb::t_d700756a407ad2 15
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_14e86488af36a4 259-261,315-316,378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2bc1ab571e53c83aa4e6d61aa42af9e711f69434",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
