@@ -1,0 +1,19 @@
+quivr-search/tests/usage-stack.spec.ts
+  s_54b80c92daa9cb::t_66037c7f770794 54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6e37e331db9e7190c40d8b739945990c6e20c90",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
