@@ -1,0 +1,37 @@
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_9ba1943e5dcf0f 1779-1780
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_f9d8facfb96397 661-664
+docs-site/contracts/plugins/v0/index.mdx
+  s_54b80c92daa9cb::t_63f3ad96670a47 664-667
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_bc78aadefecccf 1865-1866
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_8508b2850b4b45 49-50,107-108
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_334e3ba4d5a77e 1162
+docs/plugins/write-a-retrieval-plugin.md
+  s_54b80c92daa9cb::t_0976153eb7e774 46-47,104-105
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_ab9dac556e9590 1161
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_9f8f73a3bc3b23 119,160,167-168,176-187
+internal/retrieval/plugin_test.go
+  s_54b80c92daa9cb::t_82b651dbb71ea6 198-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c77cd7ee50519e9f88b64872875d55d262b1944e",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
