@@ -1,0 +1,35 @@
+internal/app/run.go
+  s_54b80c92daa9cb::t_296a10c7dc30ae 105-108,270-278,369-371
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_e8edc3e1928073 34
+internal/app/schema.go
+  s_54b80c92daa9cb::t_0b773d3a9f310b 13-14,19,24-27,41,43,46,54
+  s_54b80c92daa9cb::t_22ec7e80dd661a 1-12,15-18,20-23,28-40,42,45,47-53,55-59
+  s_54b80c92daa9cb::t_296a10c7dc30ae 44
+internal/app/schema_test.go
+  s_54b80c92daa9cb::t_c2f54146d7ea69 1-26,28-46
+  s_54b80c92daa9cb::t_d733e05e71ec60 27
+internal/adapters/postgres/migrate.go
+  s_54b80c92daa9cb::t_02d1ba5e61c340 5,116-119,136,140
+  s_54b80c92daa9cb::t_be5e9f9b42ed8d 63-70,73,77,80,85,91,96,103-113,131-133,135,137
+  s_54b80c92daa9cb::t_9ec30ce0e0ff28 127-129
+  s_54b80c92daa9cb::t_6a2822748ca6a8 120-123,126,138
+internal/adapters/postgres/migrate_test.go
+  s_54b80c92daa9cb::t_1f0d9f9c417be1 8,157-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a8dbd61c8831dff67c10580863e6dff4df442014",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
