@@ -1,0 +1,74 @@
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_8359f90f6bd19c 1751-1896,2836-3088
+internal/transport/httpapi/stats.go
+  s_54b80c92daa9cb::t_576767e791a8b1 1-158
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_e1899ebb15aa2a 83-85
+  s_54b80c92daa9cb::t_cb1bdbc96ab548 11,70-82,86-120
+  s_54b80c92daa9cb::t_b2fe8e3a3325f0 121
+internal/adapters/pluginhttp/receive.go
+  s_54b80c92daa9cb::t_3dd675b65932af 60,64
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_3dd675b65932af 144,148,233,237
+internal/adapters/pluginhttp/retrieval.go
+  s_54b80c92daa9cb::t_3dd675b65932af 8,41,43
+internal/adapters/pluginhttp/subscription.go
+  s_54b80c92daa9cb::t_3dd675b65932af 180,182,197
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_47dbf664ddb654 87-89,91,96,98,146,153,157
+internal/transport/httpapi/stats_test.go
+  s_54b80c92daa9cb::t_1064c92223667b 1-4,6-61,64-94
+  s_54b80c92daa9cb::t_d7a7fdf445e80e 5,62-63
+internal/app/run.go
+  s_54b80c92daa9cb::t_8c4d3841968140 19,96-101,240-242,372-392,414,420,427,437-438
+client/client.gen.go
+  s_54b80c92daa9cb::t_bc94deab45534c 357-398,587-589,595-637,639,641,801-884,1472-1496,1775-1801,1817-1858,1979-1994,2108-2140,2557-2576,3060-3119,4426-4427,4435,4445-4471,4480-4481,4489,4508,4510,4534-4535,4543,4562,4564,4574-4806,7141-7168,7674-7864,7866-7872,7874-7881,7883-7886,7888-7891,7893-7896,7898-7904,7906-7911,7914-7922,7926,7932,7937,7942,7947,7955,7963,7970,7974,7980,7985,7990,7995,8003,8011,10608-10659,11760-11884,11886-11891
+  s_54b80c92daa9cb::t_84dff85f108730 11885
+internal/app/metrics_test.go
+  s_54b80c92daa9cb::t_50a367dd6184d5 6
+  s_54b80c92daa9cb::t_18e861e7e2abd4 20
+  s_54b80c92daa9cb::t_31c42644b31a1a 48
+internal/adapters/pluginhttp/observe.go
+  s_54b80c92daa9cb::t_e115b9c7f3c096 1-75
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_bc94deab45534c 357-398,587-589,595,597,599-641,801-884,1472-1496,1775-1801,1817-1858,1979-1994,2108-2140,2482-2493,2694-2838,4553-4556,4641-4796,6975-6986,7237-7339
+  s_54b80c92daa9cb::t_e287af2d9f9c40 7340
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_8359f90f6bd19c 1272-1331
+internal/app/metrics.go
+  s_54b80c92daa9cb::t_8c4d3841968140 5,9,13-14,20,23-32,35-37,46,52,56
+  s_54b80c92daa9cb::t_18e861e7e2abd4 33-34
+internal/adapters/pluginhttp/pluginhttp.go
+  s_54b80c92daa9cb::t_3dd675b65932af 14,99,101,120-128
+  s_54b80c92daa9cb::t_0143f9c4ae7ffe 129
+migrations/20260930T1348Z_observability_rollups.sql
+  s_54b80c92daa9cb::t_d72ed7f3cf5078 1-26
+internal/adapters/postgres/observability.go
+  s_54b80c92daa9cb::t_0a413fca09e111 1-101
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_3dd675b65932af 193,196,220,248,250,261,317,321,346,348
+internal/adapters/postgres/observability_test.go
+  s_54b80c92daa9cb::t_8727ccae5b39a9 1-71
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_47dbf664ddb654 37,44
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_d3a136368c22e2 29,72-75,232-234
+internal/transport/httpapi/search.go
+  s_54b80c92daa9cb::t_7721d2fbf532d4 7,43,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c3c6890a5981e3589e193f18a66326c6dce8a49",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
