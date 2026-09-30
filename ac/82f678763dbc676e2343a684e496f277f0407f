@@ -1,0 +1,45 @@
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_357aae7d12817d 271-276,288,1255
+  s_54b80c92daa9cb::t_7d87bb1464d344 270
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_dacef1ce97b9dd 1386-1394
+  s_54b80c92daa9cb::t_08505aa0c4aa6c 1385
+sdks/go/examples/hash-embedder/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_e0b09915b6f456 10,28-30
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_8480a568792673 481-496
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_916f9dee874489 22,28,53-56,209-215,722-732
+  s_54b80c92daa9cb::t_b824e2e090be19 733
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_916f9dee874489 19,23,87-94
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_8480a568792673 481-496
+migrations/20260930T1608Z_backfills.sql
+  s_54b80c92daa9cb::t_11323f7efaaae6 1-50
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_37b1f04e72ef2a 138
+  s_54b80c92daa9cb::t_67973f8327c4c3 4,10-11,70,72,76
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_674da70a5af9f3 181
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-price-plugin-api-0.8.yaml
+  s_54b80c92daa9cb::t_5492ce5ce29b66 1-31
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_8480a568792673 481-496
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac82f678763dbc676e2343a684e496f277f0407f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
