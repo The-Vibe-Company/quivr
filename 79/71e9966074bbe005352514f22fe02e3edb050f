@@ -1,0 +1,149 @@
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-bad-space.yaml
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-29
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_a9b7373e82a390 10
+  s_54b80c92daa9cb::t_8a0c6bb5e43aa3 431-437,456,461-482
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-body-only.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-22
+contracts/plugins/v0/fixtures/responses/ingestion/zero-dot-vector.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query-image.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-11
+contracts/plugins/v0/fixtures/responses/ingestion/string-vector.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-12
+tests/plugin-contract/ingestion-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_15861550b54495 1-34
+contracts/plugins/v0/ingestion-fixture.schema.json
+  s_54b80c92daa9cb::t_8efcee157521a7 1-91
+contracts/plugins/v0/fixtures/ingestion/article.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-22
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-valid.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-8
+tests/plugin-contract/ingestion-valid/expect.json
+  s_54b80c92daa9cb::t_6d09658eae6d07 1-4
+internal/plugins/pins.go
+  s_54b80c92daa9cb::t_040563f5d569c1 18-21,34,86-92,171-176
+  s_54b80c92daa9cb::t_eb4a9098daaaf3 177-178
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-plugin-api-0.5.yaml
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-29
+contracts/plugins/v0/fixtures/responses/ingestion/lexical-text-at-limit.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/ingestion-embed-query-request.schema.json
+  s_54b80c92daa9cb::t_8efcee157521a7 1-59
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_8a0c6bb5e43aa3 256-258,310-311,373
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_79f35519bf25f2 3,45,56-58,408-534
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-29
+contracts/plugins/v0/fixtures/responses/ingestion/unknown-field.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-52
+contracts/contracts.go
+  s_54b80c92daa9cb::t_131f6d828788de 22
+contracts/plugins/v0/fixtures/responses/ingestion/no-segments.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-3
+contracts/plugins/v0/fixtures/responses/ingestion/valid.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_8efcee157521a7 1-70
+contracts/plugins/v0/fixtures/responses/ingestion/float32-overflow.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/lexical-text-too-large.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/provenance-too-large.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-50
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_adabdd76878ff5 22,28,33,77-80,102,135,151-153,171-199,432-445,483,502-505,738-750
+  s_54b80c92daa9cb::t_df8eeb9907811e 751
+contracts/plugins/v0/fixtures/responses/ingestion/missing-vector.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-43
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-11
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_52dd58a8b2825b 304-332
+  s_54b80c92daa9cb::t_78788e1f5952dd 113-114
+  s_54b80c92daa9cb::t_6e3c899e4a9051 179
+contracts/plugins/v0/fixtures/responses/ingestion/nul-lexical-text.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query-missing-space.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-10
+contracts/plugins/v0/fixtures/responses/ingestion/duplicate-segment.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-73
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_6e3c899e4a9051 77
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-dimension-mismatch.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-7
+contracts/plugins/v0/fixtures/responses/ingestion/unknown-part-key.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/zero-cosine-vector.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+internal/plugins/devhost/ingestion.go
+  s_54b80c92daa9cb::t_248cc8e5b396b9 1-243
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-no-parts.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-18
+contracts/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_79f35519bf25f2 47-48
+contracts/plugins/v0/fixtures/responses/ingestion/too-many-segments.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-117
+contracts/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_8efcee157521a7 1-109
+internal/plugins/ingestion_test.go
+  s_54b80c92daa9cb::t_b57b50fe849404 1-62
+contracts/plugins/v0/fixtures/responses/ingestion/start-after-end.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/unrequested-space.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-57
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_572a0909154467 214-216
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-no-spaces.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-26
+internal/plugins/runner/ingestion.go
+  s_54b80c92daa9cb::t_a263dac3a5ed18 1-255
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-extra.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-9
+contracts/plugins/v0/fixtures/responses/ingestion/title-only.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-25
+contracts/plugins/v0/ingestion-embed-query-response.schema.json
+  s_54b80c92daa9cb::t_8efcee157521a7 1-21
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_040563f5d569c1 47-51,54-59,78-80,127,136-137,172-244
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_bc3ec2920e154e 219-276
+contracts/plugins/v0/fixtures/manifests/valid/ingestion.yaml
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-29
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_0ea9b5623d5f54 161-162,172-173
+contracts/plugins/v0/fixtures/responses/ingestion/offset-out-of-range.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-51
+internal/plugins/ingestion.go
+  s_54b80c92daa9cb::t_22363f4659ce34 1-279
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_22166d038b6e58 2
+  s_54b80c92daa9cb::t_14c94ed17199a9 1356-1744
+internal/plugins/devhost/fakeplugin/ingestion.go
+  s_54b80c92daa9cb::t_4735842cdcbbe6 1-154
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-foreign-space.yaml
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-29
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_8d4f3703f947f9 310-312
+tests/plugin-contract/ingestion-valid/fixtures/memo.json
+  s_54b80c92daa9cb::t_0663cb83b89086 1-18
+contracts/plugins/v0/fixtures/responses/ingestion/dimension-mismatch.json
+  s_54b80c92daa9cb::t_14c94ed17199a9 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7971e9966074bbe005352514f22fe02e3edb050f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
