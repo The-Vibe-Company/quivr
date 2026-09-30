@@ -1,0 +1,98 @@
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_775ffd343aa48b 14-16,24,128-129,144,147-148
+quivr-search/tests/alerts.test.mjs
+  s_54b80c92daa9cb::t_3fe688ac071fb6 25-26,138-139,166,487-541
+  s_54b80c92daa9cb::t_3017c7e680a43e 542
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_5be2ac944d790c 225
+  s_54b80c92daa9cb::t_63b910408f054f 11,221-224,226
+migrations/20260930T0447Z_subscription_preview_recent.sql
+  s_54b80c92daa9cb::t_827a13da124f70 1-4
+internal/transport/httpapi/matches.go
+  s_54b80c92daa9cb::t_c1de63eac714be 159,164-175
+tests/acceptance/subscription_preview_test.go
+  s_54b80c92daa9cb::t_c24719e6599165 1-93
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_1dcb1e3475a37d 164-181,329-348
+  s_54b80c92daa9cb::t_55bf9915aa2b0b 349
+quivr-search/src/components/alerts/AlertPreview.tsx
+  s_54b80c92daa9cb::t_cd7135d6e483f1 1-125
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_1dcb1e3475a37d 249-287
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_775ffd343aa48b 74-75,77-78
+internal/adapters/postgres/preview.go
+  s_54b80c92daa9cb::t_0eb253608e82aa 1-36
+internal/adapters/postgres/preview_test.go
+  s_54b80c92daa9cb::t_cb41827a2a3759 1-58
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_775ffd343aa48b 88-90,93
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_9ba9cf170e95e7 57,749-765,4718-4860,4862
+  s_54b80c92daa9cb::t_1741e6668c1c11 4861,4863
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_218f0cb0a5189b 245-246
+  s_54b80c92daa9cb::t_fa4d0e6e02543e 242-244,247-250
+internal/monitoring/preview_test.go
+  s_54b80c92daa9cb::t_b7f57668ea4090 1-182
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_6d19a6e2cd9aea 105-123
+client/client.gen.go
+  s_54b80c92daa9cb::t_9ba9cf170e95e7 1441-1487,1697-1699,2288-2299,3225-3256,5226-5265,6166-6179,8048-8095,9313-9338,10753-10768,10781,10784
+  s_54b80c92daa9cb::t_9a7c82448a798a 10769-10780,10782-10783,10785
+quivr-search/src/dashboard.css
+  s_54b80c92daa9cb::t_14da978546854f 1687
+  s_54b80c92daa9cb::t_b8ed38710526fc 1670-1686,1688-1715
+internal/monitoring/preview.go
+  s_54b80c92daa9cb::t_b0500a6382e837 1-20,23-168,170-254
+  s_54b80c92daa9cb::t_5be2ac944d790c 21-22
+  s_54b80c92daa9cb::t_63b910408f054f 169
+README.md
+  s_54b80c92daa9cb::t_39f74d746c1fe1 121-124
+quivr-search/src/lib/alerts.ts
+  s_54b80c92daa9cb::t_b8ed38710526fc 95-96
+  s_54b80c92daa9cb::t_3f73a10d18ff6e 88-94,97-102,123-127
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_c7de6e4e9a9d22 104
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_fc0bcc12bfc336 27-30,420-445,463-464
+  s_54b80c92daa9cb::t_a5596c730ec302 16-19
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_c7de6e4e9a9d22 26,57-60,70-73,343-373,376-380
+  s_54b80c92daa9cb::t_c1de63eac714be 374-375
+  s_54b80c92daa9cb::t_dc747d59de5246 381
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_84d6e5cfab622d 338-341
+internal/app/run.go
+  s_54b80c92daa9cb::t_5f8dce170d5f66 373-375
+quivr-search/src/components/alerts/AlertForm.tsx
+  s_54b80c92daa9cb::t_b8ed38710526fc 22,449-453,462-468
+  s_54b80c92daa9cb::t_ef632d99a83e8b 469-470
+docs/inventory.toml
+  s_54b80c92daa9cb::t_4c5edbc8c52b08 132
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_04929bbe71245e 1130-1165,3090-3179
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_7571c8ea9d2f8e 229-231
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_9ba9cf170e95e7 1441-1487,1697-1699,2031-2033,3183-3196,3654,5173-5211,5760-5762,6897-6920,6925-6926
+  s_54b80c92daa9cb::t_3d344464140c6d 6921-6924,6927
+quivr-search/README.md
+  s_54b80c92daa9cb::t_6deeee948845ab 60-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3225d5b885fbf9cd611ae66c3bf14c8d999aff7",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
