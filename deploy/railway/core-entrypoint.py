@@ -107,6 +107,12 @@ def build_config(env):
                        'actions': actions,
                        'corpora': ['*']}},
     }
+    # Optional operator key, never given to the web app: rebuilds a Corpus projection
+    # (for example after a migration adds a projected field) from inside the deployment.
+    operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
+    if operator:
+        config['keys'][operator] = {'organization': 'quivr-demo', 'corpora': ['*'],
+                                    'actions': ['corpora:read', 'projections:rebuild', 'operations:read']}
     if CONNECTORS:
         config['plugins'] = connector_pins()
     if plugins_enabled(env):

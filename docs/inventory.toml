@@ -105,7 +105,7 @@ excluded = [
 [budgets]
 "AGENTS.md" = 45
 "CONTEXT.md" = 315
-"deploy/railway/README.md" = 195
+"deploy/railway/README.md" = 201
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
 "docs/agents/fleet-workflow.md" = 65

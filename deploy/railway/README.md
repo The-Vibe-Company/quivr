@@ -55,6 +55,12 @@ and retried after it returns `409 idempotency_conflict` instead of replaying. Ke
 value stable afterwards: changing or removing it also makes stored credentials
 unreadable (`access_error` / `credential_unreadable`) until they are deposited again. `provision.py` generates this value by default.
 
+## Operator key (optional)
+
+`QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, which the web
+app never gets. Use it from inside the deployment (`railway ssh --service api`, port
+8080) to rebuild a Corpus projection, for example after a migration adds a projected field.
+
 ## Connectors in the web app (optional)
 
 The web app has a **Sources** view (THE-679, THE-732). By default the demo key cannot use

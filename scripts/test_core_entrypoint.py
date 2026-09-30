@@ -31,6 +31,12 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertNotIn('credential_key', config)
             self.assertEqual(config['cursor_key'], 'placeholder-cursor-key')
 
+    def test_operator_key_is_separate_and_opt_in(self):
+        self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
+        keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']
+        self.assertIn('projections:rebuild', keys['placeholder-operator-key']['actions'])
+        self.assertNotIn('projections:rebuild', keys[ENV['QUIVR_API_KEY']]['actions'])
+
     def test_connector_permissions_are_opt_in(self):
         base = core_entrypoint.build_config(ENV)['keys']['placeholder-api-key']['actions']
         self.assertFalse({'connectors:read', 'connectors:write'} & set(base))
