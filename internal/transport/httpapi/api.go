@@ -70,6 +70,8 @@ type API struct {
 	// Plugins serves the operator routes of the plugin registry.
 	Plugins      registry.Service
 	pluginSchema *jsonschema.Schema
+	// pluginRollbackSchema validates the plan rollback command.
+	pluginRollbackSchema *jsonschema.Schema
 	// Activity serves the operator reads of document activity.
 	Activity content.Activities
 	// Recorder counts searches; nil counts nothing.
@@ -135,7 +137,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{pluginSchema: pluginSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	pluginRollbackSchema, err := compiler.Compile(contracts.HTTPSchema("PipelinePlanRollbackRequest"))
+	if err != nil {
+		return nil, err
+	}
+	a := &API{pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}

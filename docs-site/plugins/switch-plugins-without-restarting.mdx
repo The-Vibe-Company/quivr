@@ -1,7 +1,7 @@
 ---
 title: "Switch plugins without restarting"
 description: "Register a new plugin version at its address, let Quivr check it, and make it serve without restarting the api or the worker."
-keywords: ["plugin registry", "activate", "pipeline plan", "plugins:admin", "upgrade", "zero downtime"]
+keywords: ["plugin registry", "activate", "rollback", "pipeline plan", "plugins:admin", "upgrade", "zero downtime"]
 ---
 
 You run the new plugin version next to the one in service, register it with Quivr, wait for Quivr to check it, then activate it. The api and the worker follow within seconds, with no restart. This page switches a deployment's ingestion to the plugin from [Write an ingestion plugin](/plugins/write-an-ingestion-plugin).
@@ -94,6 +94,33 @@ curl -s "$QUIVR_API_URL/v0/admin/plugins/plan" -H "Authorization: Bearer $QUIVR_
 ```
 
 The active plan names your plugin for its roles. Every api and worker process checks the active plan every 2 seconds (`plugin_plan_poll` in the [configuration](/reference/configuration)) and swaps in a new one whole. New work and every new search use the new plan.
+
+## Roll back
+
+If the new version misbehaves, one call makes the previous plan's plugins serve again:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  -H "Content-Type: application/json" -d '{"idempotency_key": "rollback-acme-embedder-0.1.0", "pinned_work": "stop"}' \
+  | jq '{source, previous_plan_id, roles: [.roles[] | {role, plugin_id, version}]}'
+```
+
+```json
+{"source": "rollback", "previous_plan_id": "plan_…", "roles": [{"role": "ingestion", "plugin_id": "core.ingest", "version": "…"}, "…"]}
+```
+
+The answer is a new plan whose roles are the previous plan's, and `previous_plan_id` names the plan you left. To return to an earlier plan, add its `plan_id` to the request. The api and the worker follow a rollback as they follow an activation. Nothing already produced is rewritten: articles the version you left processed keep their text and stay searchable.
+
+`pinned_work` decides what happens to work pinned to the version you left:
+
+| Value | What happens |
+| --- | --- |
+| `drain` (default) | The work finishes on that version, which drains as after an activation. |
+| `stop` | Once each process follows the new plan, within `plugin_plan_poll`, the work's next call to that version fails instead. The processing of an article stops with the diagnostic `pinned_plan_stopped`, with the same outcome as `pinned_plugin_unavailable` (see [below](#work-finishes-on-the-version-it-started-with)). A rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the new plan. |
+
+Quivr first checks that every plugin the rollback brings back still answers at its address. If one does not, or a different build answers, the call is refused with `409 plugin_unreachable`, naming the plugin and the cause, and the plan stays as it was. Start the plugin again, then retry. A rollback that would break one of the rules under [Limits](#limits) is refused like an activation.
+
+`GET /v0/admin/plugins/plans` lists the latest plans, newest first. Each plan shows what recorded it (`source`: `configuration`, `activation` or `rollback`) and the plan it replaced.
 
 ## Work finishes on the version it started with
 

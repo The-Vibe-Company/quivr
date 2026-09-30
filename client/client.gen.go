@@ -388,6 +388,7 @@ func (e OperationState) Valid() bool {
 const (
 	Activation    PipelinePlanSource = "activation"
 	Configuration PipelinePlanSource = "configuration"
+	Rollback      PipelinePlanSource = "rollback"
 )
 
 // Valid indicates whether the value is a known member of the PipelinePlanSource enum.
@@ -396,6 +397,26 @@ func (e PipelinePlanSource) Valid() bool {
 	case Activation:
 		return true
 	case Configuration:
+		return true
+	case Rollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PipelinePlanRollbackRequestPinnedWork.
+const (
+	Drain PipelinePlanRollbackRequestPinnedWork = "drain"
+	Stop  PipelinePlanRollbackRequestPinnedWork = "stop"
+)
+
+// Valid indicates whether the value is a known member of the PipelinePlanRollbackRequestPinnedWork enum.
+func (e PipelinePlanRollbackRequestPinnedWork) Valid() bool {
+	switch e {
+	case Drain:
+		return true
+	case Stop:
 		return true
 	default:
 		return false
@@ -1440,6 +1461,10 @@ type DeliveryAttemptPage struct {
 //     moved to the plugin that
 //     replaced it: the Version is quarantined, or, when its text was already searchable, its
 //     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
+//     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
+//     work stopped instead of calling it, with the same outcome and fields as
+//     pinned_plugin_unavailable.
 //
 // Quarantined Versions keep their input reference and reason; reprocessing them is not available
 // yet.
@@ -1449,13 +1474,13 @@ type Diagnostic struct {
 	InvocationId *string `json:"invocation_id,omitempty"`
 	Message      string  `json:"message"`
 
-	// Plan Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic.
+	// Plan Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
 	Plan *string `json:"plan,omitempty"`
 
 	// Plugin Plugin id of the invocation.
 	Plugin *string `json:"plugin,omitempty"`
 
-	// PluginVersion Plugin version of a pinned_plugin_unavailable diagnostic.
+	// PluginVersion Plugin version of a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
 	PluginVersion *string `json:"plugin_version,omitempty"`
 
 	// Retryable Whether the same input may succeed if processed again.
@@ -1647,15 +1672,23 @@ type PipelinePlan struct {
 	CreatedAt   time.Time `json:"created_at"`
 	PlanId      string    `json:"plan_id"`
 
+	// PreviousPlanId The plan this one replaced; absent for the first plan of the deployment.
+	PreviousPlanId *string `json:"previous_plan_id,omitempty"`
+
 	// Roles One entry per role, sorted by role.
 	Roles []PipelinePlanRole `json:"roles"`
 
-	// Source What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+	// Source What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles.
 	Source PipelinePlanSource `json:"source"`
 }
 
-// PipelinePlanSource What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+// PipelinePlanSource What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles.
 type PipelinePlanSource string
+
+// PipelinePlanList defines model for PipelinePlanList.
+type PipelinePlanList struct {
+	Items []PipelinePlan `json:"items"`
+}
 
 // PipelinePlanRole defines model for PipelinePlanRole.
 type PipelinePlanRole struct {
@@ -1664,6 +1697,20 @@ type PipelinePlanRole struct {
 	Role           string `json:"role"`
 	Version        string `json:"version"`
 }
+
+// PipelinePlanRollbackRequest defines model for PipelinePlanRollbackRequest.
+type PipelinePlanRollbackRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// PinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
+	PinnedWork *PipelinePlanRollbackRequestPinnedWork `json:"pinned_work,omitempty"`
+
+	// PlanId The plan whose roles become active again; absent returns to the plan the active one replaced (its previous_plan_id).
+	PlanId *string `json:"plan_id,omitempty"`
+}
+
+// PipelinePlanRollbackRequestPinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
+type PipelinePlanRollbackRequestPinnedWork string
 
 // PluginCallStats defines model for PluginCallStats.
 type PluginCallStats struct {
@@ -2422,6 +2469,11 @@ type ListAdminDocumentsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListPipelinePlansParams defines parameters for ListPipelinePlans.
+type ListPipelinePlansParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetPluginCallStatsParams defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParams struct {
 	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -2512,6 +2564,9 @@ type ListSubscriptionsParams struct {
 
 // RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
 type RegisterPluginJSONRequestBody = PluginRegistrationRequest
+
+// RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
+type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
@@ -2895,6 +2950,23 @@ type ClientInterface interface {
 	//
 	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 	GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListPipelinePlans performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
+	//
+	// The latest Pipeline Plans this deployment recorded, newest first. Each names the plan it replaced (previous_plan_id) and what recorded it (source), so this list is the history of plan changes; earlier plans stay reachable through previous_plan_id. Requires plugins:admin.
+	ListPipelinePlans(ctx context.Context, params *ListPipelinePlansParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPipelinePlan performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
 	//
@@ -3466,6 +3538,53 @@ func (c *Client) RegisterPlugin(ctx context.Context, body RegisterPluginJSONRequ
 // The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it, which api and worker follow. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
 func (c *Client) GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetActivePipelinePlanRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
+// with any type of body and a specified content type.
+//
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+func (c *Client) RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRollbackPipelinePlanRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+func (c *Client) RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRollbackPipelinePlanRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListPipelinePlans performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
+//
+// The latest Pipeline Plans this deployment recorded, newest first. Each names the plan it replaced (previous_plan_id) and what recorded it (source), so this list is the history of plan changes; earlier plans stay reachable through previous_plan_id. Requires plugins:admin.
+func (c *Client) ListPipelinePlans(ctx context.Context, params *ListPipelinePlansParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelinePlansRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5017,6 +5136,100 @@ func NewGetActivePipelinePlanRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRollbackPipelinePlanRequest calls the generic RollbackPipelinePlan builder with application/json body
+func NewRollbackPipelinePlanRequest(server string, body RollbackPipelinePlanJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRollbackPipelinePlanRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRollbackPipelinePlanRequestWithBody constructs an http.Request for the RollbackPipelinePlan method, with any body, and a specified content type
+func NewRollbackPipelinePlanRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/plan/rollback")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListPipelinePlansRequest constructs an http.Request for the ListPipelinePlans method
+func NewListPipelinePlansRequest(server string, params *ListPipelinePlansParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/plans")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -7872,6 +8085,27 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetActivePipelinePlanWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetActivePipelinePlanResponse, error)
 
+	// RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
+
+	// RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
+
+	// ListPipelinePlansWithResponse performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
+	//
+	// The latest Pipeline Plans this deployment recorded, newest first. Each names the plan it replaced (previous_plan_id) and what recorded it (source), so this list is the history of plan changes; earlier plans stay reachable through previous_plan_id. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListPipelinePlansWithResponse(ctx context.Context, params *ListPipelinePlansParams, reqEditors ...RequestEditorFn) (*ListPipelinePlansResponse, error)
+
 	// GetPipelinePlanWithResponse performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
 	//
 	// Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
@@ -8723,6 +8957,102 @@ func (r GetActivePipelinePlanResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetActivePipelinePlanResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RollbackPipelinePlanResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PipelinePlan
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RollbackPipelinePlanResponse) GetJSON200() *PipelinePlan {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RollbackPipelinePlanResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RollbackPipelinePlanResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RollbackPipelinePlanResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RollbackPipelinePlanResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RollbackPipelinePlanResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListPipelinePlansResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PipelinePlanList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListPipelinePlansResponse) GetJSON200() *PipelinePlanList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListPipelinePlansResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListPipelinePlansResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPipelinePlansResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPipelinePlansResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListPipelinePlansResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11707,6 +12037,45 @@ func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Cont
 	return ParseGetActivePipelinePlanResponse(rsp)
 }
 
+// RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
+// with any type of body and a specified content type.
+//
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
+	rsp, err := c.RollbackPipelinePlanWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRollbackPipelinePlanResponse(rsp)
+}
+
+// RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+func (c *ClientWithResponses) RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
+	rsp, err := c.RollbackPipelinePlan(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRollbackPipelinePlanResponse(rsp)
+}
+
+// ListPipelinePlansWithResponse performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
+//
+// The latest Pipeline Plans this deployment recorded, newest first. Each names the plan it replaced (previous_plan_id) and what recorded it (source), so this list is the history of plan changes; earlier plans stay reachable through previous_plan_id. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListPipelinePlansWithResponse(ctx context.Context, params *ListPipelinePlansParams, reqEditors ...RequestEditorFn) (*ListPipelinePlansResponse, error) {
+	rsp, err := c.ListPipelinePlans(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPipelinePlansResponse(rsp)
+}
+
 // GetPipelinePlanWithResponse performs a GET /v0/admin/plugins/plans/{plan_id} (the `GetPipelinePlan` operationId) request.
 //
 // Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, so an earlier plan stays readable after an activation. Requires plugins:admin.
@@ -12999,6 +13368,72 @@ func ParseGetActivePipelinePlanResponse(rsp *http.Response) (*GetActivePipelineP
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRollbackPipelinePlanResponse parses an HTTP response from a RollbackPipelinePlanWithResponse call
+func ParseRollbackPipelinePlanResponse(rsp *http.Response) (*RollbackPipelinePlanResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RollbackPipelinePlanResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPipelinePlansResponse parses an HTTP response from a ListPipelinePlansWithResponse call
+func ParseListPipelinePlansResponse(rsp *http.Response) (*ListPipelinePlansResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPipelinePlansResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PipelinePlanList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

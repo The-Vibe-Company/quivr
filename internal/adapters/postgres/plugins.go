@@ -145,7 +145,7 @@ func (s PluginStore) ApplyConfiguration(ctx context.Context, seed registry.Seed)
 		applied.Plan = current.ID
 	}
 	if applied.Changed {
-		if applied.Plan, err = recordPlan(ctx, tx, registry.SourceConfiguration, applied.Roles); err != nil {
+		if applied.Plan, err = recordPlan(ctx, tx, registry.SourceConfiguration, applied.Plan, applied.Roles); err != nil {
 			return registry.Applied{}, err
 		}
 	}
@@ -159,15 +159,15 @@ func (s PluginStore) ApplyConfiguration(ctx context.Context, seed registry.Seed)
 	return applied, tx.Commit(ctx)
 }
 
-// recordPlan writes a new plan, makes it active, and moves registrations in
-// and out of the active state.
-func recordPlan(ctx context.Context, tx pgx.Tx, source string, roles []registry.Assignment) (string, error) {
+// recordPlan writes a new plan replacing previous ("" when none is active),
+// makes it active, and moves registrations in and out of the active state.
+func recordPlan(ctx context.Context, tx pgx.Tx, source, previous string, roles []registry.Assignment) (string, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", err
 	}
 	plan := "plan_" + hex.EncodeToString(id[:])
-	if _, err := tx.Exec(ctx, "INSERT INTO pipeline_plans(id,source) VALUES($1,$2)", plan, source); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO pipeline_plans(id,source,previous_plan_id) VALUES($1,$2,NULLIF($3,''))", plan, source, previous); err != nil {
 		return "", err
 	}
 	members := []string{}
@@ -231,7 +231,7 @@ func (s PluginStore) PipelinePlan(ctx context.Context, id string) (registry.Plan
 
 func pipelinePlan(ctx context.Context, q querier, id string) (registry.Plan, error) {
 	var plan registry.Plan
-	err := q.QueryRow(ctx, `SELECT p.id,p.created_at,coalesce(a.activated_at,p.created_at),p.source FROM pipeline_plans p LEFT JOIN active_pipeline_plan a ON a.plan_id=p.id WHERE p.id=$1`, id).Scan(&plan.ID, &plan.CreatedAt, &plan.ActivatedAt, &plan.Source)
+	err := q.QueryRow(ctx, `SELECT p.id,p.created_at,coalesce(a.activated_at,p.created_at),p.source,coalesce(p.previous_plan_id,'') FROM pipeline_plans p LEFT JOIN active_pipeline_plan a ON a.plan_id=p.id WHERE p.id=$1`, id).Scan(&plan.ID, &plan.CreatedAt, &plan.ActivatedAt, &plan.Source, &plan.PreviousPlanID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return plan, registry.ErrNotFound
 	}
@@ -278,16 +278,16 @@ func (s PluginStore) PlanMembers(ctx context.Context, id string) (registry.Plan,
 
 // PinWork pins a piece of work to plan unless it is pinned already, and
 // returns the plan it is pinned to: its first attempt's, whatever the active
-// plan is when it retries. A connector run pinned past connectorRunPinExpiry
-// no longer counts as draining work, so a run dispatched again under the same
-// identity is pinned again, to plan.
-func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (string, error) {
-	var pinned string
-	err := s.Pool.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,$4)
- ON CONFLICT (kind,organization,work_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,pinned_at=now(),unavailable_attempts=0
- WHERE pipeline_plan_work.kind='connector_run' AND pipeline_plan_work.pinned_at<=now()-interval '`+connectorRunPinExpiry+`' RETURNING plan_id)
- SELECT plan_id FROM pinned UNION ALL SELECT plan_id FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned)
-	return pinned, err
+// plan is when it retries. stopped reports that a rollback stopped the work
+// (registry.PinnedWorkStop). A connector run pinned past
+// connectorRunPinExpiry no longer counts as draining work, so a run
+// dispatched again under the same identity is pinned again, to plan.
+func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (pinned string, stopped bool, err error) {
+	err = s.Pool.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,$4)
+ ON CONFLICT (kind,organization,work_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,pinned_at=now(),unavailable_attempts=0,stopped_at=NULL
+ WHERE pipeline_plan_work.kind='connector_run' AND pipeline_plan_work.pinned_at<=now()-interval '`+connectorRunPinExpiry+`' RETURNING plan_id,stopped_at IS NOT NULL)
+ SELECT * FROM pinned UNION ALL SELECT plan_id,stopped_at IS NOT NULL FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned, &stopped)
+	return pinned, stopped, err
 }
 
 // ReleaseWork forgets a finished piece of work; a registration it kept
@@ -306,6 +306,14 @@ func (s PluginStore) CountUnavailable(ctx context.Context, kind, org, id string)
 		return 0, fmt.Errorf("%s %s is not pinned to a plan", kind, id)
 	}
 	return n, err
+}
+
+// WorkStopped reports whether a rollback stopped a piece of work
+// (registry.PinnedWorkStop); work that is not pinned is not stopped.
+func (s PluginStore) WorkStopped(ctx context.Context, kind, org, id string) (bool, error) {
+	var stopped bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 AND stopped_at IS NOT NULL)`, kind, org, id).Scan(&stopped)
+	return stopped, err
 }
 
 // ActiveMembers returns the active plan and its registrations by id.
@@ -425,8 +433,111 @@ func (s PluginStore) Activate(ctx context.Context, id string, decide func(regist
 			return registry.Plan{}, err
 		}
 	}
-	plan, err := recordPlan(ctx, tx, registry.SourceActivation, activation.Roles)
+	plan, err := recordPlan(ctx, tx, registry.SourceActivation, active.ID, activation.Roles)
 	if err != nil {
+		return registry.Plan{}, err
+	}
+	out, err := pipelinePlan(ctx, tx, plan)
+	if err != nil {
+		return out, err
+	}
+	return out, tx.Commit(ctx)
+}
+
+// PipelinePlans returns the latest limit plans, newest first.
+func (s PluginStore) PipelinePlans(ctx context.Context, limit int) ([]registry.Plan, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id FROM pipeline_plans ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	plans := make([]registry.Plan, 0, len(ids))
+	for _, id := range ids {
+		plan, err := pipelinePlan(ctx, s.Pool, id)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+// Rollback records the plan decide returns for the rollback target under the
+// plan lock, with its vector spaces, and with Stop marks the work pinned to a
+// plan naming a registration that leaves the plan. The request's key replays
+// the plan it recorded.
+func (s PluginStore) Rollback(ctx context.Context, req registry.RollbackRequest, decide func(active, target registry.Plan, members map[string]registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", pluginPlanLock); err != nil {
+		return registry.Plan{}, err
+	}
+	request, err := json.Marshal(map[string]string{"plan_id": req.Plan, "pinned_work": req.PinnedWork})
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	var keyed string
+	var same bool
+	switch err = tx.QueryRow(ctx, `SELECT plan_id,request=$2::jsonb FROM pipeline_plan_requests WHERE request_key=$1`, req.Key, request).Scan(&keyed, &same); {
+	case err == nil && !same:
+		return registry.Plan{}, registry.ErrIdempotencyConflict
+	case err == nil:
+		return pipelinePlan(ctx, tx, keyed)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return registry.Plan{}, err
+	}
+	active, members, err := activeMembers(ctx, tx)
+	if errors.Is(err, registry.ErrNoPlan) {
+		return registry.Plan{}, registry.ErrNoPreviousPlan
+	}
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	targetID := req.Plan
+	if targetID == "" {
+		if targetID = active.PreviousPlanID; targetID == "" {
+			return registry.Plan{}, registry.ErrNoPreviousPlan
+		}
+	}
+	target, err := pipelinePlan(ctx, tx, targetID)
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	list, err := registrations(ctx, tx, `WHERE id IN (SELECT registration_id FROM pipeline_plan_roles WHERE plan_id=$1)`, target.ID)
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	for _, r := range list {
+		members[r.ID] = r
+	}
+	a, err := decide(active, target, members)
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	plan := active.ID
+	if !a.Unchanged {
+		if a.Spaces != nil {
+			if err = registerSpaces(ctx, tx, a.Spaces); err != nil {
+				return registry.Plan{}, err
+			}
+		}
+		if plan, err = recordPlan(ctx, tx, registry.SourceRollback, active.ID, a.Roles); err != nil {
+			return registry.Plan{}, err
+		}
+		if req.Stop() && len(a.Retired) > 0 {
+			if _, err = tx.Exec(ctx, `UPDATE pipeline_plan_work SET stopped_at=now() WHERE stopped_at IS NULL
+ AND plan_id IN (SELECT plan_id FROM pipeline_plan_roles WHERE registration_id=ANY($1))`, a.Retired); err != nil {
+				return registry.Plan{}, err
+			}
+		}
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_requests(request_key,request,plan_id) VALUES($1,$2,$3)`, req.Key, request, plan); err != nil {
 		return registry.Plan{}, err
 	}
 	out, err := pipelinePlan(ctx, tx, plan)

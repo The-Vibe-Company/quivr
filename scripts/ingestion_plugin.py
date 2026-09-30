@@ -18,8 +18,11 @@ ingests and searches through 0.2.0 alone. Finally (THE-782) 0.1.0 runs again
 and 0.2.0 stops: TestPinnedWorkStarts pins a Record to 0.2.0's plan and
 activates 0.1.0, the step restarts the worker, and TestPinnedWorkDrains checks
 that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
-drains. The stack's configuration and processes are restored afterwards, even
-on failure.
+drains. Last (THE-783), 0.2.0 runs again as a bad release: TestRollbackStarts
+activates it and ingests through it, the step stops it, and TestRollback rolls
+back to 0.1.0 in one call, stopping the Record pinned to 0.2.0 and ingesting
+the next one through 0.1.0 alone. The stack's configuration and processes are
+restored afterwards, even on failure.
 """
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -116,6 +119,13 @@ def verify(stack):
         stack.stop_worker()
         stack.start_worker()
         stack.tests('^TestPinnedWorkDrains$', pinned)
+        # One-call rollback (THE-783): 0.2.0 runs again and is activated as a
+        # bad release, then stops; TestRollback rolls back to 0.1.0.
+        next_plugin = start_plugin(directory, binary, next_port, next_manifest, 'plugin-0.2.0.log')
+        await_healthy(next_plugin, next_port, directory / 'plugin-0.2.0.log')
+        stack.tests('^TestRollbackStarts$', pinned)
+        stop_plugin(next_plugin)
+        stack.tests('^TestRollback$', pinned)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

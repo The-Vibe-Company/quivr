@@ -111,6 +111,9 @@ func refused(format string, args ...any) error {
 // is retried by the caller; a terminal error or an answer the output checks
 // refuse is content.ErrIngestionRefused.
 func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, keys []string) ([]processing.PluginSegment, error) {
+	if err := halted(ctx, i.Pin); err != nil {
+		return nil, err
+	}
 	ids := make([]string, 0, len(keys))
 	byID := map[string]string{}
 	for _, key := range keys {

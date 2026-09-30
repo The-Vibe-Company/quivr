@@ -69,9 +69,11 @@ func resolvePlanByID(ctx context.Context, store registry.Store, id string) (*plu
 
 // WorkStore records the plan each piece of work is pinned to.
 type WorkStore interface {
-	PinWork(ctx context.Context, kind, org, id, plan string) (string, error)
+	PinWork(ctx context.Context, kind, org, id, plan string) (pinned string, stopped bool, err error)
 	ReleaseWork(ctx context.Context, kind, org, id string) error
 	CountUnavailable(ctx context.Context, kind, org, id string) (int, error)
+	// WorkStopped reports whether a rollback stopped a piece of work.
+	WorkStopped(ctx context.Context, kind, org, id string) (bool, error)
 }
 
 // workPins pins each piece of work to the Pipeline Plan the process follows
@@ -91,12 +93,15 @@ func (p workPins) Pin(ctx context.Context, kind, org, id string) (context.Contex
 	if current == "" {
 		return ctx, nil
 	}
-	plan, err := p.store.PinWork(ctx, kind, org, id, current)
+	plan, stopped, err := p.store.PinWork(ctx, kind, org, id, current)
 	if err != nil {
 		return ctx, err
 	}
 	attempt := func(ctx context.Context) (int, error) { return p.store.CountUnavailable(ctx, kind, org, id) }
-	pinned, err := p.live.Pin(ctx, plugins.Work{Kind: kind, Organization: org, ID: id, Plan: plan}, attempt, p.budget)
+	// A read that fails keeps the work going: stop is best effort within an
+	// attempt, and the next attempt reads the mark again when it is pinned.
+	marked := func(ctx context.Context) bool { s, err := p.store.WorkStopped(ctx, kind, org, id); return err == nil && s }
+	pinned, err := p.live.Pin(ctx, plugins.Work{Kind: kind, Organization: org, ID: id, Plan: plan, Stopped: stopped, StopMarked: marked}, attempt, p.budget)
 	if err != nil {
 		slog.Error("the plan this work is pinned to cannot be resolved; it retries", "kind", kind, "work_id", id, "plan", plan, "error", err)
 	}

@@ -77,6 +77,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins/{registration_id}`](#get-v0adminpluginsregistration_id) | `getPluginRegistration` | `plugins:admin` |
 | [`POST /v0/admin/plugins/{registration_id}/activate`](#post-v0adminpluginsregistration_idactivate) | `activatePlugin` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plans/{plan_id}`](#get-v0adminpluginsplansplan_id) | `getPipelinePlan` | `plugins:admin` |
+| [`GET /v0/admin/plugins/plans`](#get-v0adminpluginsplans) | `listPipelinePlans` | `plugins:admin` |
+| [`POST /v0/admin/plugins/plan/rollback`](#post-v0adminpluginsplanrollback) | `rollbackPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/documents`](#get-v0admindocuments) | `listAdminDocuments` | `observability:read` |
 | [`GET /v0/admin/documents/{version_id}/timeline`](#get-v0admindocumentsversion_idtimeline) | `getDocumentTimeline` | `observability:read` |
@@ -1212,6 +1214,40 @@ Any Pipeline Plan this deployment recorded, active or not. Plans are immutable, 
 | `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 503 storage unavailable. |
 
+#### `GET /v0/admin/plugins/plans`
+
+Operation `listPipelinePlans`. Requires `plugins:admin`.
+
+The latest Pipeline Plans this deployment recorded, newest first. Each names the plan it replaced (previous_plan_id) and what recorded it (source), so this list is the history of plan changes; earlier plans stay reachable through previous_plan_id. Requires plugins:admin.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `limit` | query | integer |  | Default `20`. Minimum `1`. Maximum `100`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PipelinePlanList`](#pipelineplanlist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 422 invalid_limit, 503 storage unavailable. |
+
+#### `POST /v0/admin/plugins/plan/rollback`
+
+Operation `rollbackPipelinePlan`. Requires `plugins:admin`.
+
+Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+
+**Request body** (required): `application/json` [`PipelinePlanRollbackRequest`](#pipelineplanrollbackrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 409 idempotency_conflict, no_previous_plan, plugin_conflict, plugin_unreachable or registration_not_validated, 422 invalid_schema or unsupported_role, 503 storage unavailable. |
+
 #### `GET /v0/admin/plugins/plan`
 
 Operation `getActivePipelinePlan`. Requires `plugins:admin`.
@@ -1510,6 +1546,10 @@ Plan names it; the Receipt shows plugin_unavailable while it retries.
   moved to the plugin that
   replaced it: the Version is quarantined, or, when its text was already searchable, its
   enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+- pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
+  rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
+  work stopped instead of calling it, with the same outcome and fields as
+  pinned_plugin_unavailable.
 
 Quarantined Versions keep their input reference and reason; reprocessing them is not available
 yet.
@@ -1520,8 +1560,8 @@ yet.
 | `message` | string | yes | Minimum length `1`. |
 | `retryable` | boolean | yes | Whether the same input may succeed if processed again. |
 | `plugin` | string |  | Plugin id of the invocation. Minimum length `1`. |
-| `plugin_version` | string |  | Plugin version of a pinned_plugin_unavailable diagnostic. Minimum length `1`. |
-| `plan` | string |  | Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic. Minimum length `1`. |
+| `plugin_version` | string |  | Plugin version of a pinned_plugin_unavailable or pinned_plan_stopped diagnostic. Minimum length `1`. |
+| `plan` | string |  | Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable or pinned_plan_stopped diagnostic. Minimum length `1`. |
 | `contribution` | string |  | Minimum length `1`. |
 | `invocation_id` | string |  | Minimum length `1`. |
 
@@ -1566,6 +1606,10 @@ description: |-
     moved to the plugin that
     replaced it: the Version is quarantined, or, when its text was already searchable, its
     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+  - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
+    rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
+    work stopped instead of calling it, with the same outcome and fields as
+    pinned_plugin_unavailable.
 
   Quarantined Versions keep their input reference and reason; reprocessing them is not available
   yet.
@@ -1586,11 +1630,11 @@ properties:
   plugin_version:
     type: string
     minLength: 1
-    description: Plugin version of a pinned_plugin_unavailable diagnostic.
+    description: Plugin version of a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
   plan:
     type: string
     minLength: 1
-    description: Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic.
+    description: Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
   contribution:
     type: string
     minLength: 1
@@ -4192,6 +4236,65 @@ required:
 
 </details>
 
+### `PipelinePlanList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`PipelinePlan`](#pipelineplan) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/PipelinePlan'
+required:
+  - items
+```
+
+</details>
+
+### `PipelinePlanRollbackRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `idempotency_key` | string | yes | Minimum length `1`. Maximum length `200`. |
+| `plan_id` | string |  | The plan whose roles become active again; absent returns to the plan the active one replaced (its previous_plan_id). Minimum length `1`. |
+| `pinned_work` | string |  | What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan. One of `drain`, `stop`. Default `drain`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  idempotency_key:
+    type: string
+    minLength: 1
+    maxLength: 200
+  plan_id:
+    type: string
+    minLength: 1
+    description: The plan whose roles become active again; absent returns to the plan the active one replaced (its previous_plan_id).
+  pinned_work:
+    type: string
+    enum:
+      - drain
+      - stop
+    default: drain
+    description: What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
+required:
+  - idempotency_key
+```
+
+</details>
+
 ### `PipelinePlan`
 
 | Field | Type | Required | Description |
@@ -4199,7 +4302,8 @@ required:
 | `plan_id` | string | yes | Minimum length `1`. |
 | `created_at` | string (date-time) | yes |  |
 | `activated_at` | string (date-time) | yes |  |
-| `source` | string | yes | What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. One of `configuration`, `activation`. |
+| `source` | string | yes | What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles. One of `configuration`, `activation`, `rollback`. |
+| `previous_plan_id` | string |  | The plan this one replaced; absent for the first plan of the deployment. Minimum length `1`. |
 | `roles` | array of [`PipelinePlanRole`](#pipelineplanrole) | yes | One entry per role, sorted by role. |
 
 Example `pipeline_plan`:
@@ -4248,7 +4352,12 @@ properties:
     enum:
       - configuration
       - activation
-    description: What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+      - rollback
+    description: What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles.
+  previous_plan_id:
+    type: string
+    minLength: 1
+    description: The plan this one replaced; absent for the first plan of the deployment.
   roles:
     type: array
     description: One entry per role, sorted by role.

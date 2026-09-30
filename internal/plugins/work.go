@@ -23,6 +23,12 @@ const (
 // to another plugin version.
 const CodePinnedPluginUnavailable = "pinned_plugin_unavailable"
 
+// CodePinnedPlanStopped is the diagnostic of work a rollback stopped
+// (pinned_work=stop): at its first call to a plugin of its plan that left the
+// active plan, the work stops instead of calling that version. The work is
+// never moved to another plugin version.
+const CodePinnedPlanStopped = "pinned_plan_stopped"
+
 // Work is a piece of work pinned to the Pipeline Plan it started on (Spec 5):
 // its retries and restarts resolve every plugin in that plan, never in a
 // plan activated since.
@@ -30,6 +36,13 @@ type Work struct {
 	Kind, Organization, ID string
 	// Plan is the id of the plan the work is pinned to.
 	Plan string
+	// Stopped reports that a rollback stopped the work when it was pinned:
+	// it never calls a plugin of its plan that left the active plan again.
+	Stopped bool
+	// StopMarked reads whether a rollback stopped the work since it was
+	// pinned, so an attempt already running stops at its next call to such a
+	// plugin; nil reads Stopped only.
+	StopMarked func(context.Context) bool
 
 	snapshot *snapshot
 	live     *Live
@@ -57,6 +70,10 @@ func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.D
 	if !ok || pin == nil || w.live.Active(pin) {
 		return nil, nil
 	}
+	if w.stopped(ctx) {
+		return &content.Diagnostic{Code: CodePinnedPlanStopped, Retryable: true, Plan: w.Plan, Plugin: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, Contribution: contribution,
+			Message: fmt.Sprintf("a rollback stopped the work pinned to plan %s before it called %s@%s again; the work was not moved to another plugin version.", w.Plan, pin.Manifest.ID, pin.Manifest.Version)}, nil
+	}
 	attempts := 1
 	if w.attempt != nil {
 		var err error
@@ -69,4 +86,19 @@ func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.D
 	}
 	return &content.Diagnostic{Code: CodePinnedPluginUnavailable, Retryable: true, Plan: w.Plan, Plugin: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, Contribution: contribution,
 		Message: fmt.Sprintf("%s@%s, named by plan %s, could not be reached or could no longer serve this work after it left the active plan (%d attempts); the work was not moved to another plugin version.", pin.Manifest.ID, pin.Manifest.Version, w.Plan, attempts)}, nil
+}
+
+// Stopped reports whether the work ctx carries must not call pin: a rollback
+// stopped it and pin has left the active plan. The caller fails the call as
+// unavailable, and Unreachable then stops the work.
+func Stopped(ctx context.Context, pin *Pin) bool {
+	w, ok := WorkOf(ctx)
+	return ok && pin != nil && !w.live.Active(pin) && w.stopped(ctx)
+}
+
+// stopped reports a stop recorded when the work was pinned or since. It is
+// read only for a plugin that left the active plan, so work calling the
+// plugins of the active plan never pays for it.
+func (w *Work) stopped(ctx context.Context) bool {
+	return w.Stopped || (w.StopMarked != nil && w.StopMarked(ctx))
 }

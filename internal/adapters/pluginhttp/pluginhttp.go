@@ -80,6 +80,9 @@ func (c Client) CheckDiscovery(ctx context.Context) error {
 // Discover is CheckDiscovery that also returns the Plugin API version the
 // plugin serves.
 func (c Client) Discover(ctx context.Context) (string, error) {
+	if err := halted(ctx, c.Pin); err != nil {
+		return "", err
+	}
 	served, issues, err := devhost.Discover(ctx, c.Pin.Endpoint, c.Pin.Report())
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
@@ -95,6 +98,9 @@ func (c Client) Discover(ctx context.Context) (string, error) {
 // Contract Runner applies: at most plugins.MaxResponseBytes are read. ctx
 // carries the invocation deadline.
 func (c Client) Normalize(ctx context.Context, request []byte, oc plugins.OutputContext) (Response, error) {
+	if err := halted(ctx, c.Pin); err != nil {
+		return Response{}, err
+	}
 	check := func(body []byte) []plugins.Issue { return plugins.CheckNormalizerOutput(ctx, body, oc) }
 	started := time.Now()
 	result, err := devhost.InvokeNormalizerWith(ctx, c.Pin.Endpoint, request, plugins.MaxResponseBytes(oc.Manifest), check)
@@ -116,6 +122,16 @@ func (c Client) Normalize(ctx context.Context, request []byte, oc plugins.Output
 		return Response{}, &InvalidOutput{Issues: []plugins.Issue{{Code: plugins.CodeSchema, Message: err.Error()}}}
 	}
 	return response, nil
+}
+
+// halted refuses a call that work a rollback stopped must not make: the
+// plugin has left the active plan (plugins.Stopped). It fails as
+// unavailable, so the caller stops the work with plugins.Unreachable.
+func halted(ctx context.Context, pin *plugins.Pin) error {
+	if plugins.Stopped(ctx, pin) {
+		return fmt.Errorf("%w: a rollback stopped this work, and %s@%s has left the active plan", ErrUnavailable, pin.Manifest.ID, pin.Manifest.Version)
+	}
+	return nil
 }
 
 // requestOrganization reads the organization_id of a request body built by

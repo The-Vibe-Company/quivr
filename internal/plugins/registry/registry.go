@@ -41,10 +41,12 @@ const (
 	StateRejected   = "rejected"
 )
 
-// Plan sources: the startup configuration, or an operator activation.
+// Plan sources: the startup configuration, an operator activation, or an
+// operator rollback.
 const (
 	SourceConfiguration = "configuration"
 	SourceActivation    = "activation"
+	SourceRollback      = "rollback"
 )
 
 var (
@@ -68,6 +70,11 @@ var (
 	// ErrUnsupportedRole refuses to activate a plugin for a role that cannot
 	// switch without a restart yet.
 	ErrUnsupportedRole = errors.New("unsupported_role")
+	// ErrUnreachable refuses a rollback to a plugin that does not answer
+	// discovery with its manifest; the error lists the issues.
+	ErrUnreachable = errors.New("plugin_unreachable")
+	// ErrNoPreviousPlan refuses a rollback when no earlier plan exists.
+	ErrNoPreviousPlan = errors.New("no_previous_plan")
 )
 
 // IssueError carries the issues of an ErrInvalid or ErrConflict refusal.
@@ -230,10 +237,12 @@ type Plan struct {
 	ID          string
 	CreatedAt   time.Time
 	ActivatedAt time.Time
-	// Source says what recorded the plan: the startup configuration or an
-	// operator activation.
+	// Source says what recorded the plan: the startup configuration, an
+	// operator activation or a rollback.
 	Source string
-	Roles  []Assignment
+	// PreviousPlanID is the plan this one replaced, "" for the first.
+	PreviousPlanID string
+	Roles          []Assignment
 }
 
 // Seed is what the startup configuration declares: the registrations of the
@@ -257,6 +266,8 @@ type Store interface {
 	ActivePlan(ctx context.Context) (Plan, error)
 	// PipelinePlan returns any plan, active or not, or ErrNotFound.
 	PipelinePlan(ctx context.Context, id string) (Plan, error)
+	// PipelinePlans returns the latest limit plans, newest first.
+	PipelinePlans(ctx context.Context, limit int) ([]Plan, error)
 	// ActivePlanID is the active plan's id, or "" when none is.
 	ActivePlanID(ctx context.Context) (string, error)
 	// ActiveMembers returns the active plan and its registrations by id.
@@ -278,6 +289,14 @@ type Store interface {
 	// and makes it active, with the vector spaces it registers, in one
 	// transaction serialized with every other plan change.
 	Activate(ctx context.Context, id string, decide func(active Plan, members map[string]Registration, target Registration) (Activation, error)) (Plan, error)
+	// Rollback records the plan decide returns for the rollback target, the
+	// request's plan or the plan the active one replaced, with its vector
+	// spaces, in one transaction serialized with every other plan change.
+	// The request's key replays the plan it recorded; the key with another
+	// request is ErrIdempotencyConflict. members holds the registrations of
+	// both plans. With Stop, work pinned to a plan naming a registration that
+	// leaves the plan is marked stopped.
+	Rollback(ctx context.Context, req RollbackRequest, decide func(active, target Plan, members map[string]Registration) (Activation, error)) (Plan, error)
 }
 
 // Applied is what ApplyConfiguration did.
@@ -300,9 +319,12 @@ type Service struct {
 	Validate func(*plugins.PinSet) error
 	// Wake nudges the checker after a registration is queued.
 	Wake chan struct{}
-	// Activated runs after an activation commits, so the process that served
-	// it follows the new plan at once.
+	// Activated runs after an activation or a rollback commits, so the
+	// process that served it follows the new plan at once.
 	Activated func(context.Context)
+	// Reach checks that a registration a rollback brings back answers at its
+	// endpoint; nil uses Discover.
+	Reach func(context.Context, Registration) error
 }
 
 // Registrations lists every registration, oldest first.
@@ -336,6 +358,15 @@ func (s Service) PipelinePlan(ctx context.Context, scope corpus.Scope, id string
 		return Plan{}, corpus.ErrForbidden
 	}
 	return s.Store.PipelinePlan(ctx, id)
+}
+
+// PipelinePlans returns the latest limit plans, newest first: the history of
+// plan changes, each naming the plan it replaced and what recorded it.
+func (s Service) PipelinePlans(ctx context.Context, scope corpus.Scope, limit int) ([]Plan, error) {
+	if !scope.Allows(Action) {
+		return nil, corpus.ErrForbidden
+	}
+	return s.Store.PipelinePlans(ctx, limit)
 }
 
 // Role names.

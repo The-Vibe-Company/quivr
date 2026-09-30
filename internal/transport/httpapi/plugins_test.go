@@ -68,6 +68,12 @@ func (m memoryRegistry) RecordCheck(context.Context, string, registry.CheckRepor
 func (m memoryRegistry) Activate(context.Context, string, func(registry.Plan, map[string]registry.Registration, registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
 	return *m.plan, nil
 }
+func (m memoryRegistry) PipelinePlans(context.Context, int) ([]registry.Plan, error) {
+	return []registry.Plan{*m.plan}, nil
+}
+func (m memoryRegistry) Rollback(context.Context, registry.RollbackRequest, func(registry.Plan, registry.Plan, map[string]registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
+	return *m.plan, nil
+}
 
 const (
 	pluginOperator = "plugin-operator-token-0123456789abcdef012345"
@@ -142,7 +148,7 @@ func TestPluginRegistryReadsNeedPluginsAdmin(t *testing.T) {
 // plan reads answer the plan.
 func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 	at := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
-	plan := registry.Plan{ID: "plan_1", CreatedAt: at, ActivatedAt: at, Source: registry.SourceActivation}
+	plan := registry.Plan{ID: "plan_1", CreatedAt: at, ActivatedAt: at, Source: registry.SourceActivation, PreviousPlanID: "plan_0"}
 	server := pluginServer(t, memoryRegistry{plan: &plan})
 	manifest, err := os.ReadFile("../../../sdks/go/examples/hash-embedder/quivr-plugin.yaml")
 	if err != nil {
@@ -176,5 +182,28 @@ func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 	}
 	if res, body := operationCall(t, server, "POST", "/v0/admin/plugins/plugin_registration_x/activate", pluginOperator, "application/json", "{}"); res.StatusCode != 200 || body["plan_id"] != "plan_1" {
 		t.Fatalf("activate: %d %v", res.StatusCode, body)
+	}
+
+	rollback := "/v0/admin/plugins/plan/rollback"
+	if res, body := operationCall(t, server, "POST", rollback, organizationAdmin, "application/json", `{"idempotency_key":"r"}`); res.StatusCode != 403 || body["code"] != "forbidden" {
+		t.Fatalf("rollback with an Organization key: %d %v", res.StatusCode, body)
+	}
+	if res, _ := operationCall(t, server, "GET", rollback, pluginOperator, "", ""); res.StatusCode != 405 {
+		t.Fatalf("GET rollback: %d, want 405", res.StatusCode)
+	}
+	for _, invalid := range []string{`{}`, `{"idempotency_key":"r","pinned_work":"cancel"}`} {
+		if res, body := operationCall(t, server, "POST", rollback, pluginOperator, "application/json", invalid); res.StatusCode != 422 || body["code"] != "invalid_schema" {
+			t.Fatalf("rollback %s: %d %v, want 422 invalid_schema", invalid, res.StatusCode, body)
+		}
+	}
+	if res, body := operationCall(t, server, "POST", rollback, pluginOperator, "application/json", `{"idempotency_key":"r","plan_id":"plan_0","pinned_work":"stop"}`); res.StatusCode != 200 || body["plan_id"] != "plan_1" || body["previous_plan_id"] != "plan_0" {
+		t.Fatalf("rollback: %d %v, want the plan naming the one it replaced", res.StatusCode, body)
+	}
+	res, list := operationCall(t, server, "GET", "/v0/admin/plugins/plans", pluginOperator, "", "")
+	if items, _ := list["items"].([]any); res.StatusCode != 200 || len(items) != 1 || items[0].(map[string]any)["plan_id"] != "plan_1" {
+		t.Fatalf("plan history: %d %v", res.StatusCode, list)
+	}
+	if res, body := operationCall(t, server, "GET", "/v0/admin/plugins/plans?limit=101", pluginOperator, "", ""); res.StatusCode != 422 || body["code"] != "invalid_limit" {
+		t.Fatalf("plan history over the limit: %d %v", res.StatusCode, body)
 	}
 }

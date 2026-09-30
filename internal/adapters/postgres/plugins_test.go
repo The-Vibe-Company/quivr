@@ -75,7 +75,7 @@ func TestPluginConfigurationReconcilesAnEarlierPlan(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work)\.sql$`))); err != nil {
+	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work|plan_rollback)\.sql$`))); err != nil {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
@@ -243,7 +243,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
-	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", first.Plan); err != nil || pinned != first.Plan {
+	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", first.Plan); err != nil || pinned != first.Plan {
 		t.Fatalf("pinning work to the active plan: %q (%v)", pinned, err)
 	}
 
@@ -258,10 +258,10 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", second.ID); err != nil || pinned != first.Plan {
+	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", second.ID); err != nil || pinned != first.Plan {
 		t.Fatalf("a retry after the activation is pinned to %q (%v), want its first plan %s", pinned, err, first.Plan)
 	}
-	if pinned, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", second.ID); err != nil || pinned != second.ID {
+	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", second.ID); err != nil || pinned != second.ID {
 		t.Fatalf("new work is pinned to %q (%v), want the active plan", pinned, err)
 	}
 	if plan, byID, err := store.PlanMembers(ctx, first.Plan); err != nil || roles(plan)["ingestion"] != "example.hash_embedder@0.1.0" || len(byID) != 1 {
@@ -293,5 +293,107 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	}
 	if s, n := state(old); s != registry.StateInactive || n != 0 {
 		t.Fatalf("0.1.0 once its work is released: %s with %d pinned, want inactive", s, n)
+	}
+}
+
+// TestRollbackRestoresThePreviousPlan owns the rollback on real PostgreSQL
+// (THE-783): with no earlier plan there is nothing to return to; after an
+// activation, one call records the previous plan's roles as a new plan naming
+// the one it replaced, the version it brings back serves again and the one it
+// takes out drains; with pinned_work=stop only work pinned to a plan naming
+// that version is stopped; the key replays the plan and refuses another
+// request; a plugin that does not answer leaves the plan as it was; and the
+// history lists the plans newest first.
+func TestRollbackRestoresThePreviousPlan(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.PluginStore{Pool: pool}
+	var unreachable error
+	service := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return unreachable }}
+	seed := configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces})
+	first, err := store.ApplyConfiguration(ctx, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, members, _ := store.ActiveMembers(ctx)
+	set, _, err := registry.Resolve(seed.Roles, members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "too-early"}); !errors.Is(err, registry.ErrNoPreviousPlan) {
+		t.Fatalf("a rollback of the first plan: %v, want ErrNoPreviousPlan", err)
+	}
+
+	next := embedderVersion(t, "0.2.0")
+	if _, _, err = store.RegisterPlugin(ctx, next, "register-0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
+		t.Fatal(err)
+	}
+	bad, err := service.Activate(ctx, operatorScope, next.ID)
+	if err != nil || bad.PreviousPlanID != first.Plan {
+		t.Fatalf("activation: %+v (%v), want a plan naming %s as previous", bad, err, first.Plan)
+	}
+	for _, w := range []struct{ id, plan string }{{"receipt_on_old", first.Plan}, {"receipt_on_bad", bad.ID}} {
+		if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", w.id, w.plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unreachable = errors.New("connection refused")
+	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "down"}); !errors.Is(err, registry.ErrUnreachable) || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("a rollback to a plugin that does not answer: %v, want ErrUnreachable with the cause", err)
+	}
+	if active, _ := store.ActivePlanID(ctx); active != bad.ID {
+		t.Fatalf("a refused rollback changed the plan to %s", active)
+	}
+	unreachable = nil
+	stop := registry.RollbackRequest{Key: "rollback-1", PinnedWork: registry.PinnedWorkStop}
+	back, err := service.Rollback(ctx, operatorScope, stop)
+	if err != nil || back.Source != registry.SourceRollback || back.PreviousPlanID != bad.ID || roles(back)["ingestion"] != "example.hash_embedder@0.1.0" {
+		t.Fatalf("rollback: %+v (%v), want a rollback plan after %s with 0.1.0 serving ingestion", back, err, bad.ID)
+	}
+	if active, _ := store.ActivePlanID(ctx); active != back.ID {
+		t.Fatalf("active plan %s, want the rollback's %s", active, back.ID)
+	}
+	if r, _ := store.PluginRegistration(ctx, seed.Registrations[0].ID); r.State != registry.StateActive {
+		t.Fatalf("0.1.0 after the rollback: %s, want active", r.State)
+	}
+	if r, _ := store.PluginRegistration(ctx, next.ID); r.State != registry.StateDraining || r.PinnedWork != 1 {
+		t.Fatalf("0.2.0 after the rollback: %s with %d pinned, want draining with the work pinned to it", r.State, r.PinnedWork)
+	}
+	for id, want := range map[string]bool{"receipt_on_bad": true, "receipt_on_old": false} {
+		if _, stopped, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", id, back.ID); err != nil || stopped != want {
+			t.Fatalf("%s stopped: %v (%v), want %v", id, stopped, err, want)
+		}
+		if stopped, err := store.WorkStopped(ctx, plugins.WorkIngestion, "org_a", id); err != nil || stopped != want {
+			t.Fatalf("%s read as stopped: %v (%v), want %v", id, stopped, err, want)
+		}
+	}
+
+	if replay, err := service.Rollback(ctx, operatorScope, stop); err != nil || replay.ID != back.ID {
+		t.Fatalf("the same request again: %+v (%v), want plan %s", replay, err, back.ID)
+	}
+	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "rollback-1"}); !errors.Is(err, registry.ErrIdempotencyConflict) {
+		t.Fatalf("the key with another request: %v, want ErrIdempotencyConflict", err)
+	}
+	named, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "rollback-2", Plan: bad.ID})
+	if err != nil || named.PreviousPlanID != back.ID || roles(named)["ingestion"] != "example.hash_embedder@0.2.0" {
+		t.Fatalf("a rollback to a named plan: %+v (%v), want 0.2.0 serving again", named, err)
+	}
+	if replay, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "rollback-2", Plan: bad.ID, PinnedWork: registry.PinnedWorkDrain}); err != nil || replay.ID != named.ID {
+		t.Fatalf("a retry naming the default drain: %+v (%v), want plan %s", replay, err, named.ID)
+	}
+	history, err := store.PipelinePlans(ctx, 2)
+	if err != nil || len(history) != 2 || history[0].ID != named.ID || history[1].ID != back.ID {
+		t.Fatalf("history %+v (%v), want the two latest plans newest first", history, err)
 	}
 }

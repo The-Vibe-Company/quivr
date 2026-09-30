@@ -388,6 +388,7 @@ func (e OperationState) Valid() bool {
 const (
 	Activation    PipelinePlanSource = "activation"
 	Configuration PipelinePlanSource = "configuration"
+	Rollback      PipelinePlanSource = "rollback"
 )
 
 // Valid indicates whether the value is a known member of the PipelinePlanSource enum.
@@ -396,6 +397,26 @@ func (e PipelinePlanSource) Valid() bool {
 	case Activation:
 		return true
 	case Configuration:
+		return true
+	case Rollback:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PipelinePlanRollbackRequestPinnedWork.
+const (
+	Drain PipelinePlanRollbackRequestPinnedWork = "drain"
+	Stop  PipelinePlanRollbackRequestPinnedWork = "stop"
+)
+
+// Valid indicates whether the value is a known member of the PipelinePlanRollbackRequestPinnedWork enum.
+func (e PipelinePlanRollbackRequestPinnedWork) Valid() bool {
+	switch e {
+	case Drain:
+		return true
+	case Stop:
 		return true
 	default:
 		return false
@@ -1440,6 +1461,10 @@ type DeliveryAttemptPage struct {
 //     moved to the plugin that
 //     replaced it: the Version is quarantined, or, when its text was already searchable, its
 //     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
+//     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
+//     work stopped instead of calling it, with the same outcome and fields as
+//     pinned_plugin_unavailable.
 //
 // Quarantined Versions keep their input reference and reason; reprocessing them is not available
 // yet.
@@ -1449,13 +1474,13 @@ type Diagnostic struct {
 	InvocationId *string `json:"invocation_id,omitempty"`
 	Message      string  `json:"message"`
 
-	// Plan Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable diagnostic.
+	// Plan Pipeline Plan the stopped work was pinned to, in a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
 	Plan *string `json:"plan,omitempty"`
 
 	// Plugin Plugin id of the invocation.
 	Plugin *string `json:"plugin,omitempty"`
 
-	// PluginVersion Plugin version of a pinned_plugin_unavailable diagnostic.
+	// PluginVersion Plugin version of a pinned_plugin_unavailable or pinned_plan_stopped diagnostic.
 	PluginVersion *string `json:"plugin_version,omitempty"`
 
 	// Retryable Whether the same input may succeed if processed again.
@@ -1647,15 +1672,23 @@ type PipelinePlan struct {
 	CreatedAt   time.Time `json:"created_at"`
 	PlanId      string    `json:"plan_id"`
 
+	// PreviousPlanId The plan this one replaced; absent for the first plan of the deployment.
+	PreviousPlanId *string `json:"previous_plan_id,omitempty"`
+
 	// Roles One entry per role, sorted by role.
 	Roles []PipelinePlanRole `json:"roles"`
 
-	// Source What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+	// Source What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles.
 	Source PipelinePlanSource `json:"source"`
 }
 
-// PipelinePlanSource What recorded the plan. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation.
+// PipelinePlanSource What recorded the plan, and so why the plan changed. configuration is the startup configuration, which applies the roles its pins changed since it last applied, even over an earlier activation of the same role. activation is an operator activation. rollback is an operator rollback to an earlier plan's roles.
 type PipelinePlanSource string
+
+// PipelinePlanList defines model for PipelinePlanList.
+type PipelinePlanList struct {
+	Items []PipelinePlan `json:"items"`
+}
 
 // PipelinePlanRole defines model for PipelinePlanRole.
 type PipelinePlanRole struct {
@@ -1664,6 +1697,20 @@ type PipelinePlanRole struct {
 	Role           string `json:"role"`
 	Version        string `json:"version"`
 }
+
+// PipelinePlanRollbackRequest defines model for PipelinePlanRollbackRequest.
+type PipelinePlanRollbackRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// PinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
+	PinnedWork *PipelinePlanRollbackRequestPinnedWork `json:"pinned_work,omitempty"`
+
+	// PlanId The plan whose roles become active again; absent returns to the plan the active one replaced (its previous_plan_id).
+	PlanId *string `json:"plan_id,omitempty"`
+}
+
+// PipelinePlanRollbackRequestPinnedWork What happens to work pinned to a plan naming a plugin version the rollback takes out. drain lets it finish on that version, which stays draining meanwhile. stop keeps it from calling that version again once each process follows the new plan (within plugin_plan_poll). Its next call fails instead. The processing of a Version then stops with the diagnostic pinned_plan_stopped, with the outcome of pinned_plugin_unavailable, and a rebuild fails with that code. A connector run fails as when its plugin is unavailable, and its next run uses the active plan.
+type PipelinePlanRollbackRequestPinnedWork string
 
 // PluginCallStats defines model for PluginCallStats.
 type PluginCallStats struct {
@@ -2422,6 +2469,11 @@ type ListAdminDocumentsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListPipelinePlansParams defines parameters for ListPipelinePlans.
+type ListPipelinePlansParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetPluginCallStatsParams defines parameters for GetPluginCallStats.
 type GetPluginCallStatsParams struct {
 	Window *GetPluginCallStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -2512,6 +2564,9 @@ type ListSubscriptionsParams struct {
 
 // RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
 type RegisterPluginJSONRequestBody = PluginRegistrationRequest
+
+// RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
+type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
@@ -2807,6 +2862,12 @@ type ServerInterface interface {
 
 	// (GET /v0/admin/plugins/plan)
 	GetActivePipelinePlan(w http.ResponseWriter, r *http.Request)
+
+	// (POST /v0/admin/plugins/plan/rollback)
+	RollbackPipelinePlan(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/admin/plugins/plans)
+	ListPipelinePlans(w http.ResponseWriter, r *http.Request, params ListPipelinePlansParams)
 
 	// (GET /v0/admin/plugins/plans/{plan_id})
 	GetPipelinePlan(w http.ResponseWriter, r *http.Request, planId string)
@@ -3106,6 +3167,53 @@ func (siw *ServerInterfaceWrapper) GetActivePipelinePlan(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetActivePipelinePlan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackPipelinePlan operation middleware
+func (siw *ServerInterfaceWrapper) RollbackPipelinePlan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackPipelinePlan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPipelinePlans operation middleware
+func (siw *ServerInterfaceWrapper) ListPipelinePlans(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPipelinePlansParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPipelinePlans(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5055,6 +5163,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}", wrapper.GetPluginRegistration)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}/activate", wrapper.ActivatePlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans/{plan_id}", wrapper.GetPipelinePlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans", wrapper.ListPipelinePlans)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/plan/rollback", wrapper.RollbackPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents", wrapper.ListAdminDocuments)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents/{version_id}/timeline", wrapper.GetDocumentTimeline)
@@ -5262,6 +5372,84 @@ type GetActivePipelinePlandefaultJSONResponse struct {
 }
 
 func (response GetActivePipelinePlandefaultJSONResponse) VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackPipelinePlanRequestObject struct {
+	Body *RollbackPipelinePlanJSONRequestBody
+}
+
+type RollbackPipelinePlanResponseObject interface {
+	VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+type RollbackPipelinePlan200JSONResponse PipelinePlan
+
+func (response RollbackPipelinePlan200JSONResponse) VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackPipelinePlandefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RollbackPipelinePlandefaultJSONResponse) VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPipelinePlansRequestObject struct {
+	Params ListPipelinePlansParams
+}
+
+type ListPipelinePlansResponseObject interface {
+	VisitListPipelinePlansResponse(w http.ResponseWriter) error
+}
+
+type ListPipelinePlans200JSONResponse PipelinePlanList
+
+func (response ListPipelinePlans200JSONResponse) VisitListPipelinePlansResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPipelinePlansdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListPipelinePlansdefaultJSONResponse) VisitListPipelinePlansResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -7733,6 +7921,12 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/plugins/plan)
 	GetActivePipelinePlan(ctx context.Context, request GetActivePipelinePlanRequestObject) (GetActivePipelinePlanResponseObject, error)
 
+	// (POST /v0/admin/plugins/plan/rollback)
+	RollbackPipelinePlan(ctx context.Context, request RollbackPipelinePlanRequestObject) (RollbackPipelinePlanResponseObject, error)
+
+	// (GET /v0/admin/plugins/plans)
+	ListPipelinePlans(ctx context.Context, request ListPipelinePlansRequestObject) (ListPipelinePlansResponseObject, error)
+
 	// (GET /v0/admin/plugins/plans/{plan_id})
 	GetPipelinePlan(ctx context.Context, request GetPipelinePlanRequestObject) (GetPipelinePlanResponseObject, error)
 
@@ -8080,6 +8274,63 @@ func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetActivePipelinePlanResponseObject); ok {
 		if err := validResponse.VisitGetActivePipelinePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackPipelinePlan operation middleware
+func (sh *strictHandler) RollbackPipelinePlan(w http.ResponseWriter, r *http.Request) {
+	var request RollbackPipelinePlanRequestObject
+
+	var body RollbackPipelinePlanJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackPipelinePlan(ctx, request.(RollbackPipelinePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackPipelinePlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RollbackPipelinePlanResponseObject); ok {
+		if err := validResponse.VisitRollbackPipelinePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPipelinePlans operation middleware
+func (sh *strictHandler) ListPipelinePlans(w http.ResponseWriter, r *http.Request, params ListPipelinePlansParams) {
+	var request ListPipelinePlansRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPipelinePlans(ctx, request.(ListPipelinePlansRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPipelinePlans")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPipelinePlansResponseObject); ok {
+		if err := validResponse.VisitListPipelinePlansResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

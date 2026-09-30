@@ -191,6 +191,9 @@ func (c Connector) served(ctx context.Context, pageInRun int) (string, error) {
 // anything from it is used.
 func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
 	started := time.Now()
+	if halted(ctx, c.Pin) != nil {
+		return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
+	}
 	served, err := c.served(ctx, r.PageInRun)
 	if err != nil {
 		observe(c.Pin, r.Organization, OpConnectorFetch, started, nil, err)

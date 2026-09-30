@@ -119,3 +119,66 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 		t.Fatalf("observed error codes %q; want %q", codes, want)
 	}
 }
+
+// Work a rollback stopped (pinned_work=stop), even during an attempt already
+// running, never calls a plugin of its plan once that plugin has left the
+// active plan: the call fails as unavailable without reaching the plugin, and
+// the work stops at once with pinned_plan_stopped naming its plan, without
+// spending the attempt budget. While the plugin still serves the active plan,
+// the work calls it.
+func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(503)
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
+	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin.Registration = "registration_b"
+	set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := plugins.NewLive("plan_b", set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	count := func(context.Context) (int, error) { attempts++; return attempts, nil }
+	// The rollback marks the work after this attempt was pinned.
+	marked := false
+	stopMarked := func(context.Context) bool { return marked }
+	work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkIngestion, Organization: "org", ID: "receipt", Plan: "plan_b", StopMarked: stopMarked}, count, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingestor := pluginhttp.Ingestor{Pin: pin}
+	version := content.Version{RecordID: "record", ID: "version", Manifest: content.Manifest{Kind: "document", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a paragraph"}}}}}
+	space := []string{plugins.SpaceKey("acme.embedder.small", "1")}
+	if _, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space); calls != 1 {
+		t.Fatalf("while its plugin serves the active plan, stopped work called it %d times (%v); want 1", calls, err)
+	}
+
+	marked = true
+	if _, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space); calls != 2 {
+		t.Fatalf("stopped while its plugin still serves the active plan: %d calls (%v), want the plugin called", calls, err)
+	}
+	if err = live.Store("plan_a", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space)
+	if !errors.Is(err, pluginhttp.ErrUnavailable) || calls != 2 {
+		t.Fatalf("after the rollback: %v with %d calls, want unavailable without calling the plugin", err, calls)
+	}
+	reason, err := ingestor.Gone(work, err)
+	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPlanStopped || reason.Plan != "plan_b" || reason.PluginVersion != "0.1.0" || attempts != 0 {
+		t.Fatalf("the stopped work: %+v (%v), %d attempts; want pinned_plan_stopped naming plan_b at once", reason, err, attempts)
+	}
+}

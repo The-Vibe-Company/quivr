@@ -223,6 +223,8 @@ func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 		registry.ErrConflict:             {409, "plugin_conflict"},
 		registry.ErrInvalid:              {422, "invalid_plugin"},
 		registry.ErrUnsupportedRole:      {422, "unsupported_role"},
+		registry.ErrUnreachable:          {409, "plugin_unreachable"},
+		registry.ErrNoPreviousPlan:       {409, "no_previous_plan"},
 		content.ErrSpaceChanged:          {409, "plugin_conflict"},
 		content.ErrSpaceOwner:            {409, "plugin_conflict"},
 		errors.New("connection refused"): {503, "storage_unavailable"},

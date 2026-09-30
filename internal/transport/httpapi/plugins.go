@@ -3,7 +3,9 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -22,6 +24,7 @@ const pluginsPath = "/v0/admin/plugins"
 
 // pluginRoutes serves the plugin registry, every route behind plugins:admin:
 // GET and POST /v0/admin/plugins, GET /v0/admin/plugins/plan,
+// POST /v0/admin/plugins/plan/rollback, GET /v0/admin/plugins/plans,
 // GET /v0/admin/plugins/plans/{plan_id}, GET /v0/admin/plugins/{registration_id}
 // and POST /v0/admin/plugins/{registration_id}/activate.
 func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
@@ -38,6 +41,8 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 			method = "POST"
 		}
 	case len(segments) == 2 && segments[0] == "plans" && segments[1] != "":
+	case rest == "plan/rollback":
+		method = "POST"
 	case len(segments) == 2 && segments[1] == "activate" && segments[0] != "":
 		method = "POST"
 	case len(segments) == 1:
@@ -68,6 +73,10 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 	case rest == "plan":
 		plan, err := a.Plugins.ActivePlan(r.Context(), scope)
 		sendPlan(w, plan, err)
+	case rest == "plan/rollback":
+		a.rollbackPlan(w, r, scope)
+	case rest == "plans":
+		a.listPlans(w, r, scope)
 	case segments[0] == "plans":
 		plan, err := a.Plugins.PipelinePlan(r.Context(), scope, segments[1])
 		sendPlan(w, plan, err)
@@ -112,6 +121,51 @@ func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpu
 	send(w, 202, registrationToTransport(reg))
 }
 
+// pluginRollbackRequest is the rollback command.
+type pluginRollbackRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	PlanID         string `json:"plan_id"`
+	PinnedWork     string `json:"pinned_work"`
+}
+
+func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	var in pluginRollbackRequest
+	if !decodeInto(w, r, a.pluginRollbackSchema, &in) {
+		return
+	}
+	plan, err := a.Plugins.Rollback(r.Context(), scope, registry.RollbackRequest{Key: in.IdempotencyKey, Plan: in.PlanID, PinnedWork: in.PinnedWork})
+	if err == nil {
+		slog.Info("pipeline plan rolled back", "plan", plan.ID, "previous", plan.PreviousPlanID, "pinned_work", in.PinnedWork)
+	}
+	sendPlan(w, plan, err)
+}
+
+// maxPlanList bounds one read of the plan history; earlier plans stay
+// reachable through each plan's previous_plan_id.
+const maxPlanList = 100
+
+func (a *API) listPlans(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxPlanList {
+			failure(w, 422, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	plans, err := a.Plugins.PipelinePlans(r.Context(), scope, limit)
+	if err != nil {
+		pluginFailure(w, err)
+		return
+	}
+	out := transport.PipelinePlanList{Items: make([]transport.PipelinePlan, 0, len(plans))}
+	for _, plan := range plans {
+		out.Items = append(out.Items, planToTransport(plan))
+	}
+	send(w, 200, out)
+}
+
 func registrationToTransport(reg registry.Registration) transport.PluginRegistration {
 	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), PinnedWork: reg.PinnedWork, CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
 	if reg.ArtifactDigest != "" {
@@ -141,14 +195,18 @@ func sendPlan(w http.ResponseWriter, plan registry.Plan, err error) {
 		pluginFailure(w, err)
 		return
 	}
-	out := transport.PipelinePlan{PlanId: plan.ID, CreatedAt: plan.CreatedAt, ActivatedAt: plan.ActivatedAt, Source: transport.PipelinePlanSource(plan.Source), Roles: make([]transport.PipelinePlanRole, 0, len(plan.Roles))}
+	send(w, 200, planToTransport(plan))
+}
+
+func planToTransport(plan registry.Plan) transport.PipelinePlan {
+	out := transport.PipelinePlan{PlanId: plan.ID, CreatedAt: plan.CreatedAt, ActivatedAt: plan.ActivatedAt, Source: transport.PipelinePlanSource(plan.Source), PreviousPlanId: optionalString(plan.PreviousPlanID), Roles: make([]transport.PipelinePlanRole, 0, len(plan.Roles))}
 	if out.Source == "" {
 		out.Source = transport.PipelinePlanSource(registry.SourceConfiguration)
 	}
 	for _, role := range plan.Roles {
 		out.Roles = append(out.Roles, transport.PipelinePlanRole{Role: role.Role, RegistrationId: role.RegistrationID, PluginId: role.PluginID, Version: role.Version})
 	}
-	send(w, 200, out)
+	return out
 }
 
 // pluginFailure maps registry errors; refusals that list issues carry them
@@ -174,6 +232,10 @@ func pluginFailure(w http.ResponseWriter, err error) {
 		detailed(409, "registration_not_validated")
 	case errors.Is(err, registry.ErrConflict):
 		detailed(409, "plugin_conflict")
+	case errors.Is(err, registry.ErrUnreachable):
+		detailed(409, "plugin_unreachable")
+	case errors.Is(err, registry.ErrNoPreviousPlan):
+		failure(w, 409, "no_previous_plan")
 	case errors.Is(err, content.ErrSpaceOwner), errors.Is(err, content.ErrSpaceChanged):
 		// The vector space registry refuses the plan's spaces.
 		detailed(409, "plugin_conflict")

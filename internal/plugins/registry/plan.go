@@ -92,6 +92,11 @@ type Activation struct {
 	Retired []string
 	// Spaces are the vector spaces the new plan registers.
 	Spaces []content.RegisteredSpace
+	// Returning are the registrations a rollback brings back into the plan.
+	Returning []Registration
+	// Unchanged reports a rollback to the active plan's roles: nothing is
+	// recorded.
+	Unchanged bool
 }
 
 // PlanActivation computes the plan that activates target on top of the active
