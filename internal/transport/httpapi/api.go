@@ -27,6 +27,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
@@ -63,6 +64,8 @@ type API struct {
 	Commands telemetry.Commands
 	// Relay serves the public webhook routes of push Connector Instances.
 	Relay *connectors.Relay
+	// Plugins serves the operator reads of the plugin registry.
+	Plugins registry.Service
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -204,6 +207,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.monitoringRoutes(w, r, scope) {
+		return
+	}
+	if a.pluginRoutes(w, r, scope) {
 		return
 	}
 	if a.operationRoutes(w, r, scope) {

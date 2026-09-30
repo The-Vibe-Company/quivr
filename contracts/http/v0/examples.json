@@ -1147,5 +1147,69 @@
       "idempotency_key": "rename-1",
       "name": "Storms and hail"
     }
+  },
+  {
+    "name": "plugin_registrations",
+    "schema": "PluginRegistrationList",
+    "value": {
+      "items": [
+        {
+          "registration_id": "plugin_registration_3f1c",
+          "plugin_id": "pdf-text",
+          "version": "0.1.0",
+          "endpoint": "http://127.0.0.1:9900",
+          "manifest_digest": "sha256:5b2e",
+          "contributions": [
+            "normalizer"
+          ],
+          "roles": [
+            "normalizer:application/pdf"
+          ],
+          "state": "active",
+          "created_at": "2026-09-30T10:00:00Z",
+          "updated_at": "2026-09-30T10:00:00Z"
+        },
+        {
+          "registration_id": "plugin_registration_9a7d",
+          "plugin_id": "connector.rss",
+          "version": "1.0.0",
+          "endpoint": "http://127.0.0.1:9920",
+          "manifest_digest": "sha256:c41a",
+          "artifact_digest": "sha256:0d9e",
+          "contributions": [
+            "connector"
+          ],
+          "roles": [
+            "connector:rss"
+          ],
+          "state": "active",
+          "created_at": "2026-09-30T10:00:00Z",
+          "updated_at": "2026-09-30T10:00:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "pipeline_plan",
+    "schema": "PipelinePlan",
+    "value": {
+      "plan_id": "plan_6e0b",
+      "created_at": "2026-09-30T10:00:00Z",
+      "activated_at": "2026-09-30T10:00:00Z",
+      "roles": [
+        {
+          "role": "connector:rss",
+          "registration_id": "plugin_registration_9a7d",
+          "plugin_id": "connector.rss",
+          "version": "1.0.0"
+        },
+        {
+          "role": "normalizer:application/pdf",
+          "registration_id": "plugin_registration_3f1c",
+          "plugin_id": "pdf-text",
+          "version": "0.1.0"
+        }
+      ]
+    }
   }
 ]

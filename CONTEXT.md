@@ -219,8 +219,12 @@ A versioned installation unit that contributes one or more extensions to the eng
 _Avoid_: One plugin type per extension point
 
 **Plugin Package**:
-An immutable distribution unit containing a plugin manifest, schemas, and references to its executable artifacts.
+An immutable distribution unit containing a plugin manifest, schemas, and references to its executable artifacts. The operator deploys and runs it; the engine never starts it and only records the artifact digest the plugin reports.
 _Avoid_: Mutable image tag, contribution
+
+**Plugin Registration**:
+A plugin version the operator runs at an address, as the engine records it: identity, version, endpoint, manifest digest, the roles its manifest declares and a lifecycle state (registered, validated, active, draining, inactive or rejected). The first start registers the plugins pinned in the startup configuration.
+_Avoid_: Installation, pin, deployment
 
 **Contribution**:
 A named, typed extension supplied by a plugin, such as a connector, normalizer, enricher, projector, retriever, or subscription.
@@ -243,11 +247,11 @@ The deployment-specific rules that determine whether a plugin package may be ins
 _Avoid_: Permission grant, runtime sandbox
 
 **Plugin Generation**:
-An activated, internally consistent set of plugin versions and configuration that owns a bounded set of work while newer generations may coexist.
-_Avoid_: Deployment, plugin version
+An activated, internally consistent set of plugin registrations and configuration, captured as one Pipeline Plan, that owns the work started under it while newer generations may coexist and older ones drain.
+_Avoid_: Deployment, plugin version, started process
 
 **Pipeline Plan**:
-The immutable set and ordering of contributions resolved for one bounded processing execution.
+The immutable mapping of every role of a deployment (a normalizer per media type, an alert rule per plugin, a connector per kind) to the plugin registration that serves it. One plan is active at a time, and each bounded processing execution keeps the plan it started with.
 _Avoid_: Live plugin registry, mutable workflow configuration
 
 **Quarantine**:

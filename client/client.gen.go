@@ -354,6 +354,36 @@ func (e OperationState) Valid() bool {
 	}
 }
 
+// Defines values for PluginRegistrationState.
+const (
+	PluginRegistrationStateActive     PluginRegistrationState = "active"
+	PluginRegistrationStateDraining   PluginRegistrationState = "draining"
+	PluginRegistrationStateInactive   PluginRegistrationState = "inactive"
+	PluginRegistrationStateRegistered PluginRegistrationState = "registered"
+	PluginRegistrationStateRejected   PluginRegistrationState = "rejected"
+	PluginRegistrationStateValidated  PluginRegistrationState = "validated"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationState enum.
+func (e PluginRegistrationState) Valid() bool {
+	switch e {
+	case PluginRegistrationStateActive:
+		return true
+	case PluginRegistrationStateDraining:
+		return true
+	case PluginRegistrationStateInactive:
+		return true
+	case PluginRegistrationStateRegistered:
+		return true
+	case PluginRegistrationStateRejected:
+		return true
+	case PluginRegistrationStateValidated:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProcessingSummaryPhase.
 const (
 	Baseline        ProcessingSummaryPhase = "baseline"
@@ -551,25 +581,25 @@ func (e TextContentKind) Valid() bool {
 
 // Defines values for UploadState.
 const (
-	AwaitingUpload UploadState = "awaiting_upload"
-	Expired        UploadState = "expired"
-	Rejected       UploadState = "rejected"
-	Verified       UploadState = "verified"
-	Verifying      UploadState = "verifying"
+	UploadStateAwaitingUpload UploadState = "awaiting_upload"
+	UploadStateExpired        UploadState = "expired"
+	UploadStateRejected       UploadState = "rejected"
+	UploadStateVerified       UploadState = "verified"
+	UploadStateVerifying      UploadState = "verifying"
 )
 
 // Valid indicates whether the value is a known member of the UploadState enum.
 func (e UploadState) Valid() bool {
 	switch e {
-	case AwaitingUpload:
+	case UploadStateAwaitingUpload:
 		return true
-	case Expired:
+	case UploadStateExpired:
 		return true
-	case Rejected:
+	case UploadStateRejected:
 		return true
-	case Verified:
+	case UploadStateVerified:
 		return true
-	case Verifying:
+	case UploadStateVerifying:
 		return true
 	default:
 		return false
@@ -1197,6 +1227,52 @@ type Part struct {
 // Part_Content defines model for Part.Content.
 type Part_Content struct {
 	union json.RawMessage
+}
+
+// PipelinePlan defines model for PipelinePlan.
+type PipelinePlan struct {
+	ActivatedAt time.Time `json:"activated_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	PlanId      string    `json:"plan_id"`
+
+	// Roles One entry per role, sorted by role.
+	Roles []PipelinePlanRole `json:"roles"`
+}
+
+// PipelinePlanRole defines model for PipelinePlanRole.
+type PipelinePlanRole struct {
+	PluginId       string `json:"plugin_id"`
+	RegistrationId string `json:"registration_id"`
+	Role           string `json:"role"`
+	Version        string `json:"version"`
+}
+
+// PluginRegistration defines model for PluginRegistration.
+type PluginRegistration struct {
+	// ArtifactDigest Artifact digest the plugin reports, recorded as information. Absent when it reports none.
+	ArtifactDigest *string   `json:"artifact_digest,omitempty"`
+	Contributions  []string  `json:"contributions"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// Endpoint Base URL where the operator runs this plugin version.
+	Endpoint       string `json:"endpoint"`
+	ManifestDigest string `json:"manifest_digest"`
+	PluginId       string `json:"plugin_id"`
+	RegistrationId string `json:"registration_id"`
+
+	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
+	Roles     []string                `json:"roles"`
+	State     PluginRegistrationState `json:"state"`
+	UpdatedAt time.Time               `json:"updated_at"`
+	Version   string                  `json:"version"`
+}
+
+// PluginRegistrationState defines model for PluginRegistration.State.
+type PluginRegistrationState string
+
+// PluginRegistrationList defines model for PluginRegistrationList.
+type PluginRegistrationList struct {
+	Items []PluginRegistration `json:"items"`
 }
 
 // ProcessingSummary Live read view, not a Receipt lifecycle or public workflow identifier. blocked means an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently pending, not a promise of final enrichment. Phase is omitted when idle; required and optional progress do not override Version Availability.
@@ -2020,6 +2096,16 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// ListPluginRegistrations performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
+	//
+	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+	ListPluginRegistrations(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetActivePipelinePlan performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
+	//
+	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+	GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
 	// Inspect verified Blob metadata within authorized Organization scope; ID possession does not grant access.
@@ -2461,6 +2547,36 @@ type ClientInterface interface {
 	//
 	// Start or observe checksum/size verification; SDK polls until verified before referencing the Blob in ingestion. Confirmation is repeatable for this session.
 	ConfirmUpload(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// ListPluginRegistrations performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
+//
+// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+func (c *Client) ListPluginRegistrations(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPluginRegistrationsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetActivePipelinePlan performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
+//
+// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+func (c *Client) GetActivePipelinePlan(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetActivePipelinePlanRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
@@ -3683,6 +3799,60 @@ func (c *Client) ConfirmUpload(ctx context.Context, uploadId string, reqEditors 
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewListPluginRegistrationsRequest constructs an http.Request for the ListPluginRegistrations method
+func NewListPluginRegistrationsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetActivePipelinePlanRequest constructs an http.Request for the GetActivePipelinePlan method
+func NewGetActivePipelinePlanRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/plugins/plan")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewGetBlobRequest constructs an http.Request for the GetBlob method
@@ -6097,6 +6267,20 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// ListPluginRegistrationsWithResponse performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
+	//
+	// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListPluginRegistrationsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPluginRegistrationsResponse, error)
+
+	// GetActivePipelinePlanWithResponse performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
+	//
+	// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetActivePipelinePlanWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetActivePipelinePlanResponse, error)
+
 	// GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
 	// Inspect verified Blob metadata within authorized Organization scope; ID possession does not grant access.
@@ -6642,6 +6826,102 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ConfirmUploadWithResponse(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*ConfirmUploadResponse, error)
+}
+
+type ListPluginRegistrationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginRegistrationList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListPluginRegistrationsResponse) GetJSON200() *PluginRegistrationList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListPluginRegistrationsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListPluginRegistrationsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPluginRegistrationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPluginRegistrationsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListPluginRegistrationsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetActivePipelinePlanResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PipelinePlan
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetActivePipelinePlanResponse) GetJSON200() *PipelinePlan {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetActivePipelinePlanResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetActivePipelinePlanResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetActivePipelinePlanResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetActivePipelinePlanResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetActivePipelinePlanResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type GetBlobResponse struct {
@@ -9112,6 +9392,32 @@ func (r ConfirmUploadResponse) ContentType() string {
 	return ""
 }
 
+// ListPluginRegistrationsWithResponse performs a GET /v0/admin/plugins (the `ListPluginRegistrations` operationId) request.
+//
+// Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListPluginRegistrationsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPluginRegistrationsResponse, error) {
+	rsp, err := c.ListPluginRegistrations(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPluginRegistrationsResponse(rsp)
+}
+
+// GetActivePipelinePlanWithResponse performs a GET /v0/admin/plugins/plan (the `GetActivePipelinePlan` operationId) request.
+//
+// The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetActivePipelinePlanResponse, error) {
+	rsp, err := c.GetActivePipelinePlan(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetActivePipelinePlanResponse(rsp)
+}
+
 // GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 //
 // Inspect verified Blob metadata within authorized Organization scope; ID possession does not grant access.
@@ -10124,6 +10430,72 @@ func (c *ClientWithResponses) ConfirmUploadWithResponse(ctx context.Context, upl
 		return nil, err
 	}
 	return ParseConfirmUploadResponse(rsp)
+}
+
+// ParseListPluginRegistrationsResponse parses an HTTP response from a ListPluginRegistrationsWithResponse call
+func ParseListPluginRegistrationsResponse(rsp *http.Response) (*ListPluginRegistrationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPluginRegistrationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginRegistrationList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetActivePipelinePlanResponse parses an HTTP response from a GetActivePipelinePlanWithResponse call
+func ParseGetActivePipelinePlanResponse(rsp *http.Response) (*GetActivePipelinePlanResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetActivePipelinePlanResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseGetBlobResponse parses an HTTP response from a GetBlobWithResponse call

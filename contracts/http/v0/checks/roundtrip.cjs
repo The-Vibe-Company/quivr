@@ -17,8 +17,17 @@ for (const c of cases) {
     ConnectorCreate: [['credential', 'expires_at']],
     Connector: [['created_at'], ['credential', 'deposited_at'], ['credential', 'expires_at'], ['health', 'evaluated_at'],
       ['health', 'last_success_at'], ['health', 'last_item_at'], ['health', 'last_error', 'at']],
+    PipelinePlan: [['created_at'], ['activated_at']],
+    // '*' stands for every index of an array.
+    PluginRegistrationList: [['items', '*', 'created_at'], ['items', '*', 'updated_at']],
   };
-  for (const parts of timestampPaths[c.schema] || []) {
+  const expand = (parts) => {
+    const star = parts.indexOf('*');
+    if (star < 0) return [parts];
+    const items = parts.slice(0, star).reduce((v, key) => v[key], c.value);
+    return items.flatMap((_, i) => expand([...parts.slice(0, star), i, ...parts.slice(star + 1)]));
+  };
+  for (const parts of (timestampPaths[c.schema] || []).flatMap(expand)) {
     const parents = parts.slice(0, -1);
     const actualParent = parents.reduce((v, key) => v[key], output);
     const expectedParent = parents.reduce((v, key) => v[key], c.value);

@@ -71,7 +71,7 @@ class Stack:
         ports.reserve([v for k,v in self.state.items() if k.endswith('_port')]+[self.state.get('custom_plugin',{}).get('port')])
         for key in PORT_KEYS:
             if key not in self.state:self.state[key]=port()
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention','operator']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -106,6 +106,8 @@ class Stack:
             # Change-journal prune acceptance owns org_r, the only Organization the harness prunes.
             s['retention']:scope('org_r',['corpora:read','corpora:write','content:read','content:write','changes:read'],['*']),
             s['reader']:scope('org_a',['corpora:read'],['*']),
+            # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets.
+            s['operator']:scope('org_ops',['plugins:admin'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
             s['writer']:scope('org_a',['content:write'],['*']),
             s['denied']:scope('org_a',['content:read'],['*']),
@@ -260,7 +262,7 @@ class Stack:
                 if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         self.go_test(['-count=1','-run',pattern,'./tests/acceptance'],env,'acceptance')
     def go_test(self,args,env,name):
         """go test with its text in <name>.log; failed tests and every test's duration reach the report (THE-755)."""
@@ -501,6 +503,8 @@ def parts():
             step('validate_captures',validate_captures)],
         # Normalizer and alert-rule plugins, the keyless core, then the harness lifecycle.
         'plugins':setup+[
+            # First, while the stack still runs on the pins it was seeded from: the plugin registry lists them.
+            acceptance('plugin_registry','^TestPluginRegistry$'),
             # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
             # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
             acceptance('normalizer','TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings'),

@@ -354,6 +354,36 @@ func (e OperationState) Valid() bool {
 	}
 }
 
+// Defines values for PluginRegistrationState.
+const (
+	PluginRegistrationStateActive     PluginRegistrationState = "active"
+	PluginRegistrationStateDraining   PluginRegistrationState = "draining"
+	PluginRegistrationStateInactive   PluginRegistrationState = "inactive"
+	PluginRegistrationStateRegistered PluginRegistrationState = "registered"
+	PluginRegistrationStateRejected   PluginRegistrationState = "rejected"
+	PluginRegistrationStateValidated  PluginRegistrationState = "validated"
+)
+
+// Valid indicates whether the value is a known member of the PluginRegistrationState enum.
+func (e PluginRegistrationState) Valid() bool {
+	switch e {
+	case PluginRegistrationStateActive:
+		return true
+	case PluginRegistrationStateDraining:
+		return true
+	case PluginRegistrationStateInactive:
+		return true
+	case PluginRegistrationStateRegistered:
+		return true
+	case PluginRegistrationStateRejected:
+		return true
+	case PluginRegistrationStateValidated:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProcessingSummaryPhase.
 const (
 	Baseline        ProcessingSummaryPhase = "baseline"
@@ -551,25 +581,25 @@ func (e TextContentKind) Valid() bool {
 
 // Defines values for UploadState.
 const (
-	AwaitingUpload UploadState = "awaiting_upload"
-	Expired        UploadState = "expired"
-	Rejected       UploadState = "rejected"
-	Verified       UploadState = "verified"
-	Verifying      UploadState = "verifying"
+	UploadStateAwaitingUpload UploadState = "awaiting_upload"
+	UploadStateExpired        UploadState = "expired"
+	UploadStateRejected       UploadState = "rejected"
+	UploadStateVerified       UploadState = "verified"
+	UploadStateVerifying      UploadState = "verifying"
 )
 
 // Valid indicates whether the value is a known member of the UploadState enum.
 func (e UploadState) Valid() bool {
 	switch e {
-	case AwaitingUpload:
+	case UploadStateAwaitingUpload:
 		return true
-	case Expired:
+	case UploadStateExpired:
 		return true
-	case Rejected:
+	case UploadStateRejected:
 		return true
-	case Verified:
+	case UploadStateVerified:
 		return true
-	case Verifying:
+	case UploadStateVerifying:
 		return true
 	default:
 		return false
@@ -1197,6 +1227,52 @@ type Part struct {
 // Part_Content defines model for Part.Content.
 type Part_Content struct {
 	union json.RawMessage
+}
+
+// PipelinePlan defines model for PipelinePlan.
+type PipelinePlan struct {
+	ActivatedAt time.Time `json:"activated_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	PlanId      string    `json:"plan_id"`
+
+	// Roles One entry per role, sorted by role.
+	Roles []PipelinePlanRole `json:"roles"`
+}
+
+// PipelinePlanRole defines model for PipelinePlanRole.
+type PipelinePlanRole struct {
+	PluginId       string `json:"plugin_id"`
+	RegistrationId string `json:"registration_id"`
+	Role           string `json:"role"`
+	Version        string `json:"version"`
+}
+
+// PluginRegistration defines model for PluginRegistration.
+type PluginRegistration struct {
+	// ArtifactDigest Artifact digest the plugin reports, recorded as information. Absent when it reports none.
+	ArtifactDigest *string   `json:"artifact_digest,omitempty"`
+	Contributions  []string  `json:"contributions"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// Endpoint Base URL where the operator runs this plugin version.
+	Endpoint       string `json:"endpoint"`
+	ManifestDigest string `json:"manifest_digest"`
+	PluginId       string `json:"plugin_id"`
+	RegistrationId string `json:"registration_id"`
+
+	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
+	Roles     []string                `json:"roles"`
+	State     PluginRegistrationState `json:"state"`
+	UpdatedAt time.Time               `json:"updated_at"`
+	Version   string                  `json:"version"`
+}
+
+// PluginRegistrationState defines model for PluginRegistration.State.
+type PluginRegistrationState string
+
+// PluginRegistrationList defines model for PluginRegistrationList.
+type PluginRegistrationList struct {
+	Items []PluginRegistration `json:"items"`
 }
 
 // ProcessingSummary Live read view, not a Receipt lifecycle or public workflow identifier. blocked means an outstanding contribution needs intervention; diagnostics describe why. idle means no work currently pending, not a promise of final enrichment. Phase is omitted when idle; required and optional progress do not override Version Availability.
@@ -1949,6 +2025,12 @@ func (t *Part_Content) UnmarshalJSON(b []byte) error {
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
+	// (GET /v0/admin/plugins)
+	ListPluginRegistrations(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/admin/plugins/plan)
+	GetActivePipelinePlan(w http.ResponseWriter, r *http.Request)
+
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(w http.ResponseWriter, r *http.Request, blobId string)
 
@@ -2114,6 +2196,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListPluginRegistrations operation middleware
+func (siw *ServerInterfaceWrapper) ListPluginRegistrations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPluginRegistrations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetActivePipelinePlan operation middleware
+func (siw *ServerInterfaceWrapper) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetActivePipelinePlan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetBlob operation middleware
 func (siw *ServerInterfaceWrapper) GetBlob(w http.ResponseWriter, r *http.Request) {
@@ -3787,10 +3897,88 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/schedule", wrapper.ChangeConnectorSchedule)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/search", wrapper.SearchRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/rebuilds", wrapper.RebuildCorpusProjection)
 
 	return m
+}
+
+type ListPluginRegistrationsRequestObject struct {
+}
+
+type ListPluginRegistrationsResponseObject interface {
+	VisitListPluginRegistrationsResponse(w http.ResponseWriter) error
+}
+
+type ListPluginRegistrations200JSONResponse PluginRegistrationList
+
+func (response ListPluginRegistrations200JSONResponse) VisitListPluginRegistrationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPluginRegistrationsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListPluginRegistrationsdefaultJSONResponse) VisitListPluginRegistrationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActivePipelinePlanRequestObject struct {
+}
+
+type GetActivePipelinePlanResponseObject interface {
+	VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error
+}
+
+type GetActivePipelinePlan200JSONResponse PipelinePlan
+
+func (response GetActivePipelinePlan200JSONResponse) VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActivePipelinePlandefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetActivePipelinePlandefaultJSONResponse) VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type GetBlobRequestObject struct {
@@ -5888,6 +6076,12 @@ func (response ConfirmUploaddefaultJSONResponse) VisitConfirmUploadResponse(w ht
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /v0/admin/plugins)
+	ListPluginRegistrations(ctx context.Context, request ListPluginRegistrationsRequestObject) (ListPluginRegistrationsResponseObject, error)
+
+	// (GET /v0/admin/plugins/plan)
+	GetActivePipelinePlan(ctx context.Context, request GetActivePipelinePlanRequestObject) (GetActivePipelinePlanResponseObject, error)
+
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(ctx context.Context, request GetBlobRequestObject) (GetBlobResponseObject, error)
 
@@ -6082,6 +6276,54 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListPluginRegistrations operation middleware
+func (sh *strictHandler) ListPluginRegistrations(w http.ResponseWriter, r *http.Request) {
+	var request ListPluginRegistrationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPluginRegistrations(ctx, request.(ListPluginRegistrationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPluginRegistrations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPluginRegistrationsResponseObject); ok {
+		if err := validResponse.VisitListPluginRegistrationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetActivePipelinePlan operation middleware
+func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
+	var request GetActivePipelinePlanRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetActivePipelinePlan(ctx, request.(GetActivePipelinePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetActivePipelinePlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetActivePipelinePlanResponseObject); ok {
+		if err := validResponse.VisitGetActivePipelinePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetBlob operation middleware

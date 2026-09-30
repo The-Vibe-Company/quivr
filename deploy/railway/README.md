@@ -57,9 +57,9 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 
 ## Operator key (optional)
 
-`QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, which the web
-app never gets. Use it from inside the deployment (`railway ssh --service api`, port
-8080) to rebuild a Corpus projection, for example after a migration adds a projected field.
+`QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild` and `plugins:admin`,
+which the web app never gets. Use it from inside the deployment (`railway ssh --service api`,
+port 8080) to rebuild a Corpus projection or to read the plugin registry (`GET /v0/admin/plugins`).
 
 ## Connectors in the web app (optional)
 

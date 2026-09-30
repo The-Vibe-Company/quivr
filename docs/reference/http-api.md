@@ -71,6 +71,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/connector-webhooks/{connector_id}`](#get-v0connector-webhooksconnector_id) | `relayConnectorChallenge` |  |
 | [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
+| [`GET /v0/admin/plugins`](#get-v0adminplugins) | `listPluginRegistrations` | `plugins:admin` |
+| [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 
 ### Records
@@ -1091,6 +1093,34 @@ Connector kinds enabled in this deployment, with the JSON Schemas that validate 
 | --- | --- | --- |
 | `200` | `application/json` [`ConnectorKindCatalog`](#connectorkindcatalog) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+### Admin
+
+#### `GET /v0/admin/plugins`
+
+Operation `listPluginRegistrations`. Requires `plugins:admin`.
+
+Every plugin version this deployment has registered, oldest first, with its endpoint, manifest digest, the roles its manifest declares and its state. Quivr never starts a plugin; the operator runs it at its endpoint. On first start the registry is seeded, as active registrations, from the plugins pinned in the startup configuration. Deployment-wide and not paginated. Requires plugins:admin, an operator action that organization keys do not get.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PluginRegistrationList`](#pluginregistrationlist) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 503 storage unavailable. |
+
+#### `GET /v0/admin/plugins/plan`
+
+Operation `getActivePipelinePlan`. Requires `plugins:admin`.
+
+The active Pipeline Plan, an immutable mapping of every role of the deployment to the registration serving it. 404 not_found when no plan is active, because the startup configuration pins no plugin. Requires plugins:admin.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 no active plan, 503 storage unavailable. |
 
 ### Search
 
@@ -3140,6 +3170,253 @@ required:
   - config_schema
   - credential
   - default_interval_seconds
+```
+
+</details>
+
+### `PluginRegistration`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `registration_id` | string | yes | Minimum length `1`. |
+| `plugin_id` | string | yes | Minimum length `1`. |
+| `version` | string | yes | Minimum length `1`. |
+| `endpoint` | string | yes | Base URL where the operator runs this plugin version. Minimum length `1`. |
+| `manifest_digest` | string | yes | Minimum length `1`. |
+| `artifact_digest` | string |  | Artifact digest the plugin reports, recorded as information. Absent when it reports none. Minimum length `1`. |
+| `contributions` | array of string | yes |  |
+| `roles` | array of string | yes | Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves. |
+| `state` | string | yes | One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `created_at` | string (date-time) | yes |  |
+| `updated_at` | string (date-time) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  registration_id:
+    type: string
+    minLength: 1
+  plugin_id:
+    type: string
+    minLength: 1
+  version:
+    type: string
+    minLength: 1
+  endpoint:
+    type: string
+    minLength: 1
+    description: Base URL where the operator runs this plugin version.
+  manifest_digest:
+    type: string
+    minLength: 1
+  artifact_digest:
+    type: string
+    minLength: 1
+    description: Artifact digest the plugin reports, recorded as information. Absent when it reports none.
+  contributions:
+    type: array
+    items:
+      type: string
+  roles:
+    type: array
+    items:
+      type: string
+    description: Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
+  state:
+    type: string
+    enum:
+      - registered
+      - validated
+      - active
+      - draining
+      - inactive
+      - rejected
+  created_at:
+    type: string
+    format: date-time
+  updated_at:
+    type: string
+    format: date-time
+required:
+  - registration_id
+  - plugin_id
+  - version
+  - endpoint
+  - manifest_digest
+  - contributions
+  - roles
+  - state
+  - created_at
+  - updated_at
+```
+
+</details>
+
+### `PluginRegistrationList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`PluginRegistration`](#pluginregistration) | yes |  |
+
+Example `plugin_registrations`:
+
+```json
+{
+  "items": [
+    {
+      "registration_id": "plugin_registration_3f1c",
+      "plugin_id": "pdf-text",
+      "version": "0.1.0",
+      "endpoint": "http://127.0.0.1:9900",
+      "manifest_digest": "sha256:5b2e",
+      "contributions": [
+        "normalizer"
+      ],
+      "roles": [
+        "normalizer:application/pdf"
+      ],
+      "state": "active",
+      "created_at": "2026-09-30T10:00:00Z",
+      "updated_at": "2026-09-30T10:00:00Z"
+    },
+    {
+      "registration_id": "plugin_registration_9a7d",
+      "plugin_id": "connector.rss",
+      "version": "1.0.0",
+      "endpoint": "http://127.0.0.1:9920",
+      "manifest_digest": "sha256:c41a",
+      "artifact_digest": "sha256:0d9e",
+      "contributions": [
+        "connector"
+      ],
+      "roles": [
+        "connector:rss"
+      ],
+      "state": "active",
+      "created_at": "2026-09-30T10:00:00Z",
+      "updated_at": "2026-09-30T10:00:00Z"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/PluginRegistration'
+required:
+  - items
+```
+
+</details>
+
+### `PipelinePlanRole`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `role` | string | yes | Minimum length `1`. |
+| `registration_id` | string | yes | Minimum length `1`. |
+| `plugin_id` | string | yes | Minimum length `1`. |
+| `version` | string | yes | Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  role:
+    type: string
+    minLength: 1
+  registration_id:
+    type: string
+    minLength: 1
+  plugin_id:
+    type: string
+    minLength: 1
+  version:
+    type: string
+    minLength: 1
+required:
+  - role
+  - registration_id
+  - plugin_id
+  - version
+```
+
+</details>
+
+### `PipelinePlan`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plan_id` | string | yes | Minimum length `1`. |
+| `created_at` | string (date-time) | yes |  |
+| `activated_at` | string (date-time) | yes |  |
+| `roles` | array of [`PipelinePlanRole`](#pipelineplanrole) | yes | One entry per role, sorted by role. |
+
+Example `pipeline_plan`:
+
+```json
+{
+  "plan_id": "plan_6e0b",
+  "created_at": "2026-09-30T10:00:00Z",
+  "activated_at": "2026-09-30T10:00:00Z",
+  "roles": [
+    {
+      "role": "connector:rss",
+      "registration_id": "plugin_registration_9a7d",
+      "plugin_id": "connector.rss",
+      "version": "1.0.0"
+    },
+    {
+      "role": "normalizer:application/pdf",
+      "registration_id": "plugin_registration_3f1c",
+      "plugin_id": "pdf-text",
+      "version": "0.1.0"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plan_id:
+    type: string
+    minLength: 1
+  created_at:
+    type: string
+    format: date-time
+  activated_at:
+    type: string
+    format: date-time
+  roles:
+    type: array
+    description: One entry per role, sorted by role.
+    items:
+      $ref: '#/components/schemas/PipelinePlanRole'
+required:
+  - plan_id
+  - created_at
+  - activated_at
+  - roles
 ```
 
 </details>

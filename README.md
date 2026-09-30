@@ -179,6 +179,11 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.
+- **Plugin registry**: the plugins pinned at startup are recorded in the database on first
+  start, with the active Pipeline Plan saying which plugin serves each role (a media type, an
+  alert rule, a connector kind). An operator key with `plugins:admin`, which no Organization
+  key gets, reads them with `GET /v0/admin/plugins` and `GET /v0/admin/plugins/plan`; a later
+  start with other pins only logs a warning. Quivr never starts a plugin process.
 - **External normalizer**: the startup configuration pins one plugin and routes Blob
   media types to its normalizer. A Blob of a routed type, ingested by reference,
   becomes searchable through the plugin's Parts, and its Version shows

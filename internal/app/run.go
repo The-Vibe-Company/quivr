@@ -20,6 +20,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	orchestration "github.com/The-Vibe-Company/quivr-v2/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	pluginregistry "github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
@@ -327,6 +328,10 @@ func Run(command string) error {
 		slog.Error("schema readiness failed", "error", err)
 		return errors.New("database/schema unavailable; run migrate")
 	}
+	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}}
+	if err = seedPluginRegistry(ctx, pluginRegistry, pins); err != nil {
+		return err
+	}
 	// Load the tokenizer before serving so the first search does not pay for it.
 	warm, cancel := context.WithTimeout(ctx, 15*time.Second)
 	if _, err = encoder.Encode(warm, []processing.TokenInput{{Text: "tokenizer readiness"}}); err != nil {
@@ -374,6 +379,8 @@ func Run(command string) error {
 		previews := postgres.EvaluationStore{ContentStore: store}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands),
+			// Operators read the plugin registry (plugins:admin).
+			httpapi.WithPlugins(pluginRegistry),
 			// Push deliveries are relayed by the API, which the source reaches.
 			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))
 		if err != nil {
