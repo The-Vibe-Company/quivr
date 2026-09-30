@@ -1,0 +1,23 @@
+internal/adapters/postgres/embeddings_test.go
+  s_54b80c92daa9cb::t_496521217e4abd 76-83,87,103,134
+internal/adapters/postgres/main_test.go
+  s_54b80c92daa9cb::t_b00f61acf90092 18-20,57-60
+internal/adapters/postgres/spaces_test.go
+  s_54b80c92daa9cb::t_eab5e095d9a43b 34-48,50-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b49c30851475a42a34200aa39e812ad72aae74a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
