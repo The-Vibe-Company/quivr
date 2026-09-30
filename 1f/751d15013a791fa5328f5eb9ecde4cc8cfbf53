@@ -1,0 +1,133 @@
+client/client.gen.go
+  s_54b80c92daa9cb::t_92c1a8c73fc0a8 1452-1455,1561,1563-1565
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_6f1952f75772b3 549,571,589
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_c5989a6c98b544 1775-1777,3312-3315,3916-3919,3941-3942
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_f248a18da34cba 566-569
+deploy/railway/check_public.py
+  s_54b80c92daa9cb::t_30fd49cccdd0fe 51
+docs-site/agents/evaluation.mdx
+  s_54b80c92daa9cb::t_c3729127c63c6d 72-74,82-83
+docs-site/api-walkthrough.mdx
+  s_54b80c92daa9cb::t_dd1f62f8a15754 241,245-246
+docs-site/contracts/plugins/v0/index.mdx
+  s_54b80c92daa9cb::t_75d67845d33441 569-572
+docs-site/keyword-alerts.mdx
+  s_54b80c92daa9cb::t_0dd9a652ba8eeb 78
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_77f2a7c6198fe7 1862-1863,3567-3570,4164-4166,4188
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_794c40fed42b6f 95-96
+docs-site/reference/http-api.mdx
+  s_54b80c92daa9cb::t_0f050b7c5b41b8 1162,4617,4639,4675,4724,4805,5909,5912,5940,5960
+docs/agents/evaluation.md
+  s_54b80c92daa9cb::t_437b564956c7f5 69-71,79-80
+docs/api-walkthrough.md
+  s_54b80c92daa9cb::t_db4e01cbb3e8ac 238,242-243
+docs/keyword-alerts.md
+  s_54b80c92daa9cb::t_cfdea984f49d1e 75
+docs/plugins/write-a-retrieval-plugin.md
+  s_54b80c92daa9cb::t_19a35180959330 92-93
+docs/reference/http-api.md
+  s_54b80c92daa9cb::t_535868c9646b40 1161,4678,4701,4737,4787,4870,5994,5997,6026,6046
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_56e09a1c37d41b 16,171-186,202-205,226-228
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_b9a452d222d863 1-68
+internal/adapters/postgres/corrections_test.go
+  s_54b80c92daa9cb::t_47a0e0faec8c31 430
+internal/adapters/postgres/delivery_fixture_test.go
+  s_54b80c92daa9cb::t_85dded5a4f1eff 47
+internal/adapters/postgres/evaluation_batch_test.go
+  s_54b80c92daa9cb::t_8f1a09322f14f8 77,200
+internal/adapters/postgres/evaluation_test.go
+  s_54b80c92daa9cb::t_edaa562d6ab828 99
+internal/adapters/postgres/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_3f5eb978121c0f 101,360
+internal/adapters/postgres/monitoring_owner_test.go
+  s_54b80c92daa9cb::t_65ffdeb1b164d4 92
+internal/adapters/postgres/monitoring_test.go
+  s_54b80c92daa9cb::t_12c364bedcf7b3 98,228
+internal/adapters/postgres/prune_test.go
+  s_54b80c92daa9cb::t_e2ff4e24f56ead 166
+internal/adapters/weaviate/attach_test.go
+  s_54b80c92daa9cb::t_0e2770d8c95d67 160
+internal/adapters/weaviate/generation_test.go
+  s_54b80c92daa9cb::t_cfba6a171a85f8 59
+internal/adapters/weaviate/mapping_test.go
+  s_54b80c92daa9cb::t_f9de5b72e999eb 67
+internal/adapters/weaviate/parity_test.go
+  s_54b80c92daa9cb::t_d71caa0cbda55f 46
+internal/adapters/weaviate/purge_test.go
+  s_54b80c92daa9cb::t_71671dcb86047a 149
+internal/adapters/weaviate/relevance_test.go
+  s_54b80c92daa9cb::t_8921aa34323fb7 102
+internal/app/run.go
+  s_54b80c92daa9cb::t_716988c60a7f21 263,410
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_c72c537eaeca94 219-224,229-231,263-265,280-287
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_9138b934d4b916 219,245,250-281
+internal/online/online.go
+  s_54b80c92daa9cb::t_58ff721d1783a2 198
+internal/online/search_test.go
+  s_54b80c92daa9cb::t_b15b75ac85557c 21,66
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_8993828ff701fd 80-88,393-395
+internal/retrieval/plugin_test.go
+  s_54b80c92daa9cb::t_3c21b5b1e84e4e 80
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_79c0e8bf10ce72 13,38-42,163-165,274-275,278-287,296-298
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_21ac4ad1c59964 12,110-135
+internal/retrieval/spaces_test.go
+  s_54b80c92daa9cb::t_052cb3cb63c485 10,83
+internal/transport/generated/transport.gen.go
+  s_54b80c92daa9cb::t_4c2d91a7206532 1452-1455,1561,1563-1565
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_ab05c9365e7756 244,303,385
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_54f718d2cc9a62 168,180-191
+internal/transport/httpapi/search.go
+  s_54b80c92daa9cb::t_6c06b0a5325958 9,44-45,79-89,97-98
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_0f3dd982654820 167
+quivr-search/src/lib/search.ts
+  s_54b80c92daa9cb::t_65564e22d99c04 38-42,65
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_0daee5fd3e8f69 291,294
+scripts/eval/run.py
+  s_54b80c92daa9cb::t_d094c52e27df27 39,69-72,75,78,183-184,187,222-226,232-233
+scripts/eval/test_report.py
+  s_54b80c92daa9cb::t_d001459341ddcd 18,23-25,27-28,35
+scripts/measure.py
+  s_54b80c92daa9cb::t_76cdf8bd4f08f2 238-239
+tests/acceptance/described_alerts_test.go
+  s_54b80c92daa9cb::t_532d7f21c77461 61
+tests/acceptance/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_6d7b0f4795d8c0 67
+tests/acceptance/monitoring_plugin_test.go
+  s_54b80c92daa9cb::t_072a205e6c1bf8 41
+tests/acceptance/monitoring_test.go
+  s_54b80c92daa9cb::t_47c679bff19ac8 25
+tests/acceptance/subscription_preview_test.go
+  s_54b80c92daa9cb::t_28b58f40b0fd58 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f751d15013a791fa5328f5eb9ecde4cc8cfbf53",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
