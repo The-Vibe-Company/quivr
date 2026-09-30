@@ -12,6 +12,7 @@ import (
 type controlStore struct {
 	ops       map[string]operations.Operation
 	canceled  []string
+	paused    []string
 	canonical string
 	resolved  string
 }
@@ -33,6 +34,14 @@ func (s *controlStore) Operation(_ context.Context, org, id string) (operations.
 }
 func (s *controlStore) CancelOperation(_ context.Context, _, id string) (operations.Operation, error) {
 	s.canceled = append(s.canceled, id)
+	return s.ops[id], nil
+}
+func (s *controlStore) PauseOperation(_ context.Context, _, id string) (operations.Operation, error) {
+	s.paused = append(s.paused, "pause "+id)
+	return s.ops[id], nil
+}
+func (s *controlStore) ResumeOperation(_ context.Context, _, id string) (operations.Operation, error) {
+	s.paused = append(s.paused, "resume "+id)
 	return s.ops[id], nil
 }
 func (s *controlStore) AcceptRerun(_ context.Context, org, source, _ string, canonical []byte) (operations.Operation, error) {
@@ -158,5 +167,46 @@ func TestConfigureRetrievalAuthorizesAndCanonicalizes(t *testing.T) {
 	}
 	if op, err = service.Cancel(ctx, owner, "config", "c"); err != nil || op.ID != "config" {
 		t.Fatalf("cancel %+v %v", op, err)
+	}
+}
+
+// Only a backfill pauses and resumes, and only for a caller who holds both
+// operations:write and the command's plugins:admin on its Corpus.
+func TestPauseAndResumeNeedAPausableKindAndItsPermission(t *testing.T) {
+	store := &controlStore{ops: map[string]operations.Operation{
+		"fill":    {ID: "fill", Organization: "org", Kind: operations.KindBackfill, CorpusID: "corpus_a", State: operations.StateRunning},
+		"rebuild": {ID: "rebuild", Organization: "org", Kind: operations.KindProjectionRebuild, CorpusID: "corpus_a", State: operations.StateRunning},
+	}}
+	service := operations.Service{Store: store}
+	ctx := context.Background()
+	operator := corpus.Scope{Organization: "org", Actions: []string{"operations:write", operations.BackfillPermission, "projections:rebuild"}, Corpora: []string{"*"}}
+	for _, tc := range []struct {
+		name  string
+		scope corpus.Scope
+		id    string
+		want  error
+	}{
+		{"missing plugins:admin", corpus.Scope{Organization: "org", Actions: []string{"operations:write"}, Corpora: []string{"*"}}, "fill", corpus.ErrForbidden},
+		{"missing operations:write", corpus.Scope{Organization: "org", Actions: []string{operations.BackfillPermission}, Corpora: []string{"*"}}, "fill", corpus.ErrForbidden},
+		{"a rebuild cannot pause", operator, "rebuild", operations.ErrUnsupportedKind},
+	} {
+		if _, err := service.Pause(ctx, tc.scope, tc.id); !errors.Is(err, tc.want) {
+			t.Errorf("pause %s: %v, want %v", tc.name, err, tc.want)
+		}
+		if _, err := service.Resume(ctx, tc.scope, tc.id); !errors.Is(err, tc.want) {
+			t.Errorf("resume %s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if len(store.paused) != 0 {
+		t.Fatalf("rejected actions reached the store: %v", store.paused)
+	}
+	if _, err := service.Pause(ctx, operator, "fill"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Resume(ctx, operator, "fill"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.paused) != 2 || store.paused[0] != "pause fill" || store.paused[1] != "resume fill" {
+		t.Fatalf("store calls %v", store.paused)
 	}
 }

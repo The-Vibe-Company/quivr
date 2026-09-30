@@ -38,6 +38,10 @@ func registerSpaces(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredS
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
 		return err
 	}
+	spaces, err := keepPromotion(ctx, tx, spaces)
+	if err != nil {
+		return err
+	}
 	ids := make([]string, 0, len(spaces))
 	for _, sp := range spaces {
 		ids = append(ids, sp.ID)
@@ -75,7 +79,7 @@ func registerSpaces(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredS
 			return err
 		}
 	}
-	_, err := tx.Exec(ctx, `UPDATE vector_spaces SET role='retired' WHERE NOT (id=ANY($1)) AND role<>'retired'`, ids)
+	_, err = tx.Exec(ctx, `UPDATE vector_spaces SET role='retired' WHERE NOT (id=ANY($1)) AND role<>'retired'`, ids)
 	return err
 }
 

@@ -1,13 +1,14 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.8.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.9.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
 connector attachments, `0.5.0` the connector push mode (`receive`), and
 `0.6.0` the `ingestion` Contribution, `0.7.0` the `retrieval` Contribution, and
-`0.8.0` segment-only `segment_and_embed` requests (`spaces: []`). JSON Schemas in this
+`0.8.0` segment-only `segment_and_embed` requests (`spaces: []`), and `0.9.0`
+a vector space's declared `input_price`. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -66,13 +67,13 @@ are **reserved** (declare `retrieval` for search). A manifest that declares them
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.8.0` and still serves every `0.1` to `0.7` plugin unchanged: a
+implements `0.9.0` and still serves every `0.1` to `0.8` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0` or `0.8.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0` or `0.9.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
-at its `modes`.
+at its `modes` and a vector space's `input_price` (0.9) at that field.
 A patch version only adds optional fields; a plugin that validates requests
 strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
@@ -134,7 +135,7 @@ version.
 | `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
-| `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`; the id is the plugin id or starts with `<id>.` |
+| `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`, and since 0.9 an optional `input_price` (`usd_per_million_tokens`) that backfill estimates use, the cost being unknown without it; the id is the plugin id or starts with `<id>.` |
 | `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
 | `contributions.ingestion.limits` | `max_segments` per Version (default 256, at most 1024) and `max_response_bytes` (default and cap 16 MiB) |
 | `configuration.schema` | JSON Schema 2020-12 for installer configuration |

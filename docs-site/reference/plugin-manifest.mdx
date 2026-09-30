@@ -80,6 +80,8 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.ingestion.spaces.<name>.indexes` | array of `text` | yes | Modalities of the content this space embeds. Plugin API 0.6 knows only text. |
 | `contributions.ingestion.spaces.<name>.query_modalities` | array of `text` | yes | Modalities of the queries embed_query encodes into this space. Plugin API 0.6 knows only text. |
 | `contributions.ingestion.spaces.<name>.description` | string | no | 1 to 1024 characters. |
+| `contributions.ingestion.spaces.<name>.input_price` | object | no | Since Plugin API 0.9: what embedding text in this space costs, for the estimate a backfill shows before it starts. Absent, the cost of a backfill is unknown. |
+| `contributions.ingestion.spaces.<name>.input_price.usd_per_million_tokens` | number | yes | US dollars per million input tokens. 0 to 1000000. |
 | `contributions.ingestion.timeout_ms` | integer | no | Deadline of one segment_and_embed invocation. 1000 to 300000. Default `30000`. |
 | `contributions.ingestion.query_timeout_ms` | integer | no | Deadline of one embed_query invocation; a search waits for it. 100 to 10000. Default `2000`. |
 | `contributions.ingestion.limits` | object | no | — |

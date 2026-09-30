@@ -75,7 +75,7 @@ class Stack:
         ports.reserve([v for k,v in self.state.items() if k.endswith('_port')]+[self.state.get('custom_plugin',{}).get('port')])
         for key in PORT_KEYS:
             if key not in self.state:self.state[key]=port()
-        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention','operator','observer']:
+        for key in ['s3_access','s3_secret','writer','connector','connector_scoped','credential_key','configurer','keyless','demo','retention','operator','observer','backfiller']:
             self.state.setdefault(key,secrets.token_hex(24))
         self.save()
         identities={'identities':[{'name':'local-core','credentials':[{'accessKey':self.state['s3_access'],'secretKey':self.state['s3_secret']}],'actions':['Admin','Read','Write','List','Tagging']}]}
@@ -102,6 +102,8 @@ class Stack:
             plugin_plan_poll='200ms',
             # Work pinned to a plan whose plugin left it and cannot be reached stops after two attempts (THE-782).
             pinned_plugin_attempts=2,
+            # Backfills fill one Version a second, so the acceptance pauses one halfway; a paused one checks every 200ms (THE-784).
+            backfill=dict(rate=1,poll='200ms'),
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
@@ -120,6 +122,8 @@ class Stack:
             # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets,
             # and the admin views (observability:read).
             s['operator']:scope('org_ops',['plugins:admin','observability:read'],['*']),
+            # An operator of org_a: backfills its Corpora and promotes vector spaces (THE-784).
+            s['backfiller']:scope('org_a',['plugins:admin','operations:read','operations:write'],['*']),
             # Observability acceptance owns org_o: its stats reads see only its own ingestion and searches.
             s['observer']:scope('org_o',['corpora:read','corpora:write','content:read','content:write','search:query','observability:read'],['*']),
             s['scoped']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write'],[s.get('scoped_id','corpus_not_granted')]),
@@ -284,7 +288,7 @@ class Stack:
                 if not crashed or attempt==attempts:raise RuntimeError(f'dependencies not ready after {attempt} bounded attempt(s) (exited: {crashed or "none"}); inspect services.json and the service logs') from error
     def tests(self,pattern,extra_env=None):
         s=self.state
-        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator','observer']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
+        env={**os.environ,**(extra_env or {}),'QUIVR_TEST_CAPTURES':str(self.directory),'QUIVR_TEST_BINARY':str(self.directory/'quivr'),'QUIVR_TEST_URL':f"http://127.0.0.1:{s['api_port']}",**{'QUIVR_TEST_'+k.upper():s[k] for k in ['admin','other','reader','scoped','denied','writer','connector','connector_scoped','configurer','keyless','retention','operator','observer','backfiller']},'QUIVR_TEST_SHORT_RETENTION_URL':f"http://127.0.0.1:{s['short_api_port']}",'QUIVR_TEST_RECEIVER_ADDR':f"127.0.0.1:{s['receiver_port']}",'QUIVR_TEST_RECEIVER_SECRET':CAPTURE_SECRET,'QUIVR_TEST_WORKER_PROBE_URL':f"http://127.0.0.1:{s['worker_probe_port']}",'QUIVR_TEST_FAKE_GRAPH_URL':f"http://127.0.0.1:{s['graph_port']}",'QUIVR_TEST_FAKE_X_URL':f"http://127.0.0.1:{s['fake_x_port']}"}
         self.go_test(['-count=1','-run',pattern,'./tests/acceptance'],env,'acceptance')
     def go_test(self,args,env,name,cwd=ROOT):
         """go test with its text in <name>.log; failed tests and every test's duration reach the report (THE-755)."""

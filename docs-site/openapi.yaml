@@ -676,9 +676,10 @@ paths:
   /v0/operations/{operation_id}/rerun:
     post:
       operationId: rerunOperation
-      description: Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key
-        replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain
-        subject to domain idempotency.
+      description: Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun
+        while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin
+        left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate
+        current scope and command eligibility; completed effects remain subject to domain idempotency.
       responses:
         '202':
           description: Successful response
@@ -710,6 +711,83 @@ paths:
       tags:
       - Operations
       summary: Rerun operation
+  /v0/operations/{operation_id}/pause:
+    post:
+      operationId: pauseOperation
+      description: Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress,
+        keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned
+        unchanged, so repeating the request is safe. Only backfills pause.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; 403 without operations:write or the permission of the command that created the Operation
+            (plugins:admin for a backfill), 404 unknown Operation, 422 unsupported_operation_kind for a kind that cannot pause,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      x-required-permissions:
+      - operations:write
+      tags:
+      - Operations
+      summary: Pause operation
+  /v0/operations/{operation_id}/resume:
+    post:
+      operationId: resumeOperation
+      description: Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state
+        is returned unchanged, so repeating the request is safe. Only backfills resume.
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; 403 without operations:write or the permission of the command that created the Operation
+            (plugins:admin for a backfill), 404 unknown Operation, 422 unsupported_operation_kind for a kind that cannot pause,
+            503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      x-required-permissions:
+      - operations:write
+      tags:
+      - Operations
+      summary: Resume operation
   /v0/saved-queries:
     post:
       operationId: createSavedQuery
@@ -1982,6 +2060,103 @@ paths:
       tags:
       - Admin
       summary: List pipeline plans
+  /v0/admin/backfills:
+    post:
+      operationId: requestBackfill
+      description: Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation
+        the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when
+        Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a
+        target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started.
+        A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same
+        body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded
+        under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation
+        needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict,
+        and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress.
+        The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when
+        it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates
+        Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped
+        and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's
+        Organization that grants the Corpus.
+      x-required-permissions:
+      - plugins:admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackfillRequest'
+      responses:
+        '200':
+          description: The dry run's estimate, recorded under the key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackfillEstimate'
+        '202':
+          description: The accepted backfill Operation; read it at the Location.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown Corpus,
+            409 dry_run_required, cost_confirmation_required, idempotency_conflict, backfill_in_progress, registration_not_active
+            or rebuild_required (the Corpus's generation predates named vector spaces), 422 invalid_schema or invalid_backfill
+            (a space the plugin does not declare or the deployment does not enable, or an empty window), 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Request backfill
+  /v0/admin/spaces/{vector_space_id}/promote:
+    post:
+      operationId: promoteVectorSpace
+      description: Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage
+        must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment.
+        Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force
+        is true. Every generation that carries the space and served the previous one serves it from then on, the default one
+        included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors,
+        so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin
+        still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - name: vector_space_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorSpacePromotionRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorSpacePromotion'
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown space,
+            409 coverage_incomplete, 422 invalid_schema or not_evaluation_space (a retired space), 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Promote vector space
   /v0/admin/plugins/plan/rollback:
     post:
       operationId: rollbackPipelinePlan
@@ -3323,6 +3498,7 @@ components:
           enum:
           - queued
           - running
+          - paused
           - succeeded
           - failed
           - cancel_requested
@@ -3350,6 +3526,8 @@ components:
           minLength: 1
         result:
           $ref: '#/components/schemas/ProjectionRebuildResult'
+        backfill:
+          $ref: '#/components/schemas/OperationBackfill'
       required:
       - operation_id
       - kind
@@ -3357,15 +3535,17 @@ components:
       - counters
       - errors
       description: Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id.
-        Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild
-        and retrieval_configuration Operations require corpus_id; when succeeded they require result naming the activated
-        logical generation. This result shape covers those two command kinds only.
+        Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild,
+        retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated
+        logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters
+        versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
       if:
         properties:
           kind:
             enum:
             - projection_rebuild
             - retrieval_configuration
+            - backfill
         required:
         - kind
       then:
@@ -3790,6 +3970,176 @@ components:
             $ref: '#/components/schemas/PipelinePlan'
       required:
       - items
+    BackfillRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+        corpus_id:
+          type: string
+          minLength: 1
+        accepted_after:
+          type: string
+          format: date-time
+          description: Only Versions Quivr accepted at or after this time; absent, from the first.
+        accepted_before:
+          type: string
+          format: date-time
+          description: Only Versions Quivr accepted before this time; absent, up to now.
+        registration_id:
+          type: string
+          minLength: 1
+          description: The ingestion plugin registration to run; absent, the active plan's. Another one is 409 registration_not_active.
+        spaces:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+          description: The vector spaces to fill, which the plugin declares and the deployment serves or evaluates; absent,
+            the deployment's evaluation spaces the plugin owns.
+        dry_run:
+          type: boolean
+          description: true reports the estimate and records it; false starts the backfill a dry run with the same key and
+            scope preceded.
+        confirm_cost:
+          type: boolean
+          default: false
+          description: Accept an estimated cost above the deployment's backfill.max_cost_without_confirmation.
+      required:
+      - idempotency_key
+      - corpus_id
+      - dry_run
+    BackfillEstimate:
+      type: object
+      additionalProperties: false
+      properties:
+        registration_id:
+          type: string
+          minLength: 1
+        spaces:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        versions:
+          type: integer
+          minimum: 0
+          description: Versions in scope that miss a vector in a target space.
+        segments:
+          type: integer
+          minimum: 0
+          description: Their segments, which the plugin embeds.
+        input_tokens:
+          type: integer
+          minimum: 0
+          description: Estimated tokens the plugin embeds, one per four code points of segment text.
+        estimated_seconds:
+          type: number
+          format: double
+          minimum: 0
+          description: How long the backfill should take, at the deployment's backfill.rate or the recent throughput, whichever
+            is slower.
+        duration_basis:
+          type: string
+          enum:
+          - rate
+          - recent_backfills
+          - recent_plugin_calls
+          description: What the duration comes from.
+        estimated_cost_usd:
+          type: number
+          format: double
+          minimum: 0
+          description: Estimated cost in US dollars, rounded up to the cent, of the target spaces that declare an input_price
+            in the plugin manifest; a space without one adds nothing. Absent when none declares one, so the cost is unknown.
+        confirmation_required:
+          type: boolean
+          description: The cost exceeds backfill.max_cost_without_confirmation, so starting the backfill needs confirm_cost.
+      required:
+      - registration_id
+      - spaces
+      - versions
+      - segments
+      - input_tokens
+      - estimated_seconds
+      - duration_basis
+      - confirmation_required
+    OperationBackfill:
+      type: object
+      additionalProperties: false
+      description: What a backfill fills and how far it got.
+      properties:
+        registration_id:
+          type: string
+          minLength: 1
+        spaces:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        accepted_after:
+          type: string
+          format: date-time
+        accepted_before:
+          type: string
+          format: date-time
+        plan_id:
+          type: string
+          minLength: 1
+          description: The Pipeline Plan the backfill is pinned to, once it started.
+        checkpoint:
+          type: string
+          minLength: 1
+          description: The last Version id it finished; it resumes after it, in Version id order.
+        estimate:
+          $ref: '#/components/schemas/BackfillEstimate'
+      required:
+      - registration_id
+      - spaces
+      - estimate
+    VectorSpacePromotionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        force:
+          type: boolean
+          default: false
+          description: Promote even though some current segments have no vector in the space; those lose their semantic hits
+            until a backfill fills them.
+    VectorSpacePromotion:
+      type: object
+      additionalProperties: false
+      properties:
+        served_space_id:
+          type: string
+          minLength: 1
+        previous_space_id:
+          type: string
+          description: The space it replaced, now for evaluation; empty when none was served.
+        generations_switched:
+          type: integer
+          minimum: 0
+          description: Generations that now serve the space.
+        corpora_incomplete:
+          type: integer
+          minimum: 0
+          description: Corpora whose routed generation lacks the space or a vector in it.
+        segments_missing:
+          type: integer
+          minimum: 0
+          description: Current segments without a vector in the space.
+      required:
+      - served_space_id
+      - previous_space_id
+      - generations_switched
+      - corpora_incomplete
+      - segments_missing
     PipelinePlanRollbackRequest:
       type: object
       additionalProperties: false

@@ -1383,6 +1383,16 @@
       "description": "The ingestion Contribution exists since Plugin API 0.6."
     },
     {
+      "file": "manifests/invalid/ingestion-price-plugin-api-0.8.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "A vector space's input_price exists since Plugin API 0.9."
+    },
+    {
       "file": "manifests/invalid/ingestion-bad-space.yaml",
       "schema": "plugin-manifest.schema.json",
       "valid": false,

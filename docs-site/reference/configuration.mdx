@@ -31,6 +31,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
 | `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
+| `backfill` | no | How backfills run and when their cost needs a confirmation. See [Backfill](#backfill). |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
 | `connector_fixtures` | no | `true` enables the deterministic `fixture` connector kind. Local and CI stacks only. |
@@ -66,7 +67,7 @@ Durations are Go durations: `30s`, `10m`, `168h`.
 | `connectors:read`, `connectors:write` | reading and managing Connector Instances |
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
-| `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`); give it only to an operator key |
+| `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
 
 ## Object storage
@@ -125,6 +126,16 @@ Each item of `plugins` pins one plugin. [Pin a plugin](/plugins/pin) explains ho
 | `retention` | `change_retention` | How long events are kept; it may only be longer than `change_retention` |
 | `organizations` | every Organization | Prune only these Organizations |
 | `allow_short_retention` | `false` | Allow a `retention` shorter than `change_retention` for the listed `organizations`. Test stacks only. |
+
+## Backfill
+
+`backfill` tunes [backfills](/plugins/backfill-a-vector-space). Every field is optional.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `rate` | `2` | The most Versions per second one backfill processes. Worker only. |
+| `poll` | `5s` | How often a paused backfill checks whether it was resumed or canceled. Worker only. |
+| `max_cost_without_confirmation` | `0` | The estimated cost, in US dollars, above which starting a backfill needs `confirm_cost`. With `0`, any backfill into a priced space needs it. Api only. |
 
 ## Observability
 

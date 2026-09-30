@@ -72,6 +72,27 @@ func (e AvailabilityState) Valid() bool {
 	}
 }
 
+// Defines values for BackfillEstimateDurationBasis.
+const (
+	Rate              BackfillEstimateDurationBasis = "rate"
+	RecentBackfills   BackfillEstimateDurationBasis = "recent_backfills"
+	RecentPluginCalls BackfillEstimateDurationBasis = "recent_plugin_calls"
+)
+
+// Valid indicates whether the value is a known member of the BackfillEstimateDurationBasis enum.
+func (e BackfillEstimateDurationBasis) Valid() bool {
+	switch e {
+	case Rate:
+		return true
+	case RecentBackfills:
+		return true
+	case RecentPluginCalls:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlobContentKind.
 const (
 	BlobContentKindBlob BlobContentKind = "blob"
@@ -359,6 +380,7 @@ const (
 	OperationStateCancelRequested OperationState = "cancel_requested"
 	OperationStateCanceled        OperationState = "canceled"
 	OperationStateFailed          OperationState = "failed"
+	OperationStatePaused          OperationState = "paused"
 	OperationStateQueued          OperationState = "queued"
 	OperationStateRunning         OperationState = "running"
 	OperationStateSucceeded       OperationState = "succeeded"
@@ -372,6 +394,8 @@ func (e OperationState) Valid() bool {
 	case OperationStateCanceled:
 		return true
 	case OperationStateFailed:
+		return true
+	case OperationStatePaused:
 		return true
 	case OperationStateQueued:
 		return true
@@ -1147,6 +1171,58 @@ type Availability struct {
 // AvailabilityState defines model for Availability.State.
 type AvailabilityState string
 
+// BackfillEstimate defines model for BackfillEstimate.
+type BackfillEstimate struct {
+	// ConfirmationRequired The cost exceeds backfill.max_cost_without_confirmation, so starting the backfill needs confirm_cost.
+	ConfirmationRequired bool `json:"confirmation_required"`
+
+	// DurationBasis What the duration comes from.
+	DurationBasis BackfillEstimateDurationBasis `json:"duration_basis"`
+
+	// EstimatedCostUsd Estimated cost in US dollars, rounded up to the cent, of the target spaces that declare an input_price in the plugin manifest; a space without one adds nothing. Absent when none declares one, so the cost is unknown.
+	EstimatedCostUsd *float64 `json:"estimated_cost_usd,omitempty"`
+
+	// EstimatedSeconds How long the backfill should take, at the deployment's backfill.rate or the recent throughput, whichever is slower.
+	EstimatedSeconds float64 `json:"estimated_seconds"`
+
+	// InputTokens Estimated tokens the plugin embeds, one per four code points of segment text.
+	InputTokens    int    `json:"input_tokens"`
+	RegistrationId string `json:"registration_id"`
+
+	// Segments Their segments, which the plugin embeds.
+	Segments int      `json:"segments"`
+	Spaces   []string `json:"spaces"`
+
+	// Versions Versions in scope that miss a vector in a target space.
+	Versions int `json:"versions"`
+}
+
+// BackfillEstimateDurationBasis What the duration comes from.
+type BackfillEstimateDurationBasis string
+
+// BackfillRequest defines model for BackfillRequest.
+type BackfillRequest struct {
+	// AcceptedAfter Only Versions Quivr accepted at or after this time; absent, from the first.
+	AcceptedAfter *time.Time `json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Only Versions Quivr accepted before this time; absent, up to now.
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+
+	// ConfirmCost Accept an estimated cost above the deployment's backfill.max_cost_without_confirmation.
+	ConfirmCost *bool  `json:"confirm_cost,omitempty"`
+	CorpusId    string `json:"corpus_id"`
+
+	// DryRun true reports the estimate and records it; false starts the backfill a dry run with the same key and scope preceded.
+	DryRun         bool   `json:"dry_run"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// RegistrationId The ingestion plugin registration to run; absent, the active plan's. Another one is 409 registration_not_active.
+	RegistrationId *string `json:"registration_id,omitempty"`
+
+	// Spaces The vector spaces to fill, which the plugin declares and the deployment serves or evaluates; absent, the deployment's evaluation spaces the plugin owns.
+	Spaces *[]string `json:"spaces,omitempty"`
+}
+
 // BatchItem defines model for BatchItem.
 type BatchItem struct {
 	Error *Error `json:"error,omitempty"`
@@ -1721,14 +1797,16 @@ type NormalizationProvenance struct {
 // NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
 type NormalizationProvenanceContribution string
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild and retrieval_configuration Operations require corpus_id; when succeeded they require result naming the activated logical generation. This result shape covers those two command kinds only.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
 type Operation struct {
-	CorpusId            *string        `json:"corpus_id,omitempty"`
-	Counters            map[string]int `json:"counters"`
-	Errors              []Error        `json:"errors"`
-	Kind                string         `json:"kind"`
-	OperationId         string         `json:"operation_id"`
-	PreviousOperationId *string        `json:"previous_operation_id,omitempty"`
+	// Backfill What a backfill fills and how far it got.
+	Backfill            *OperationBackfill `json:"backfill,omitempty"`
+	CorpusId            *string            `json:"corpus_id,omitempty"`
+	Counters            map[string]int     `json:"counters"`
+	Errors              []Error            `json:"errors"`
+	Kind                string             `json:"kind"`
+	OperationId         string             `json:"operation_id"`
+	PreviousOperationId *string            `json:"previous_operation_id,omitempty"`
 
 	// Progress Approximate fraction, omitted when unknown.
 	Progress *float32 `json:"progress,omitempty"`
@@ -1740,6 +1818,21 @@ type Operation struct {
 
 // OperationState defines model for Operation.State.
 type OperationState string
+
+// OperationBackfill What a backfill fills and how far it got.
+type OperationBackfill struct {
+	AcceptedAfter  *time.Time `json:"accepted_after,omitempty"`
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+
+	// Checkpoint The last Version id it finished; it resumes after it, in Version id order.
+	Checkpoint *string          `json:"checkpoint,omitempty"`
+	Estimate   BackfillEstimate `json:"estimate"`
+
+	// PlanId The Pipeline Plan the backfill is pinned to, once it started.
+	PlanId         *string  `json:"plan_id,omitempty"`
+	RegistrationId string   `json:"registration_id"`
+	Spaces         []string `json:"spaces"`
+}
 
 // Part defines model for Part.
 type Part struct {
@@ -2510,6 +2603,28 @@ type VectorSpaceList struct {
 	Segments int `json:"segments"`
 }
 
+// VectorSpacePromotion defines model for VectorSpacePromotion.
+type VectorSpacePromotion struct {
+	// CorporaIncomplete Corpora whose routed generation lacks the space or a vector in it.
+	CorporaIncomplete int `json:"corpora_incomplete"`
+
+	// GenerationsSwitched Generations that now serve the space.
+	GenerationsSwitched int `json:"generations_switched"`
+
+	// PreviousSpaceId The space it replaced, now for evaluation; empty when none was served.
+	PreviousSpaceId string `json:"previous_space_id"`
+
+	// SegmentsMissing Current segments without a vector in the space.
+	SegmentsMissing int    `json:"segments_missing"`
+	ServedSpaceId   string `json:"served_space_id"`
+}
+
+// VectorSpacePromotionRequest defines model for VectorSpacePromotionRequest.
+type VectorSpacePromotionRequest struct {
+	// Force Promote even though some current segments have no vector in the space; those lose their semantic hits until a backfill fills them.
+	Force *bool `json:"force,omitempty"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// AcceptedAt When Quivr accepted the revision this Version publishes, before any processing.
@@ -2703,11 +2818,17 @@ type ListSubscriptionsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// RequestBackfillJSONRequestBody defines body for RequestBackfill for application/json ContentType.
+type RequestBackfillJSONRequestBody = BackfillRequest
+
 // RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
 type RegisterPluginJSONRequestBody = PluginRegistrationRequest
 
 // RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
 type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
+
+// PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
+type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
@@ -2736,8 +2857,14 @@ type ConfigureRetrievalJSONRequestBody = ConfigUpdate
 // CancelOperationJSONRequestBody defines body for CancelOperation for application/json ContentType.
 type CancelOperationJSONRequestBody = ActionRequest
 
+// PauseOperationJSONRequestBody defines body for PauseOperation for application/json ContentType.
+type PauseOperationJSONRequestBody = ActionRequest
+
 // RerunOperationJSONRequestBody defines body for RerunOperation for application/json ContentType.
 type RerunOperationJSONRequestBody = ActionRequest
+
+// ResumeOperationJSONRequestBody defines body for ResumeOperation for application/json ContentType.
+type ResumeOperationJSONRequestBody = ActionRequest
 
 // IngestRecordJSONRequestBody defines body for IngestRecord for application/json ContentType.
 type IngestRecordJSONRequestBody = IngestCommand
@@ -3065,6 +3192,18 @@ type ClientInterface interface {
 	// The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
 	ListActivePlugins(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RequestBackfillWithBody performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	RequestBackfillWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RequestBackfill performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	RequestBackfill(ctx context.Context, body RequestBackfillJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListAdminDocuments performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 	//
 	// The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -3128,6 +3267,18 @@ type ClientInterface interface {
 	//
 	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	PromoteVectorSpaceWithBody(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PromoteVectorSpace performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	PromoteVectorSpace(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetMatchStats performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 	//
@@ -3352,17 +3503,41 @@ type ClientInterface interface {
 	// Idempotent cancellation request; does not undo committed effects. Terminal operation returns its existing state. A racing completion may win. Cancellation becomes terminal only after work stops safely; no partial active projection cutover.
 	CancelOperation(ctx context.Context, operationId string, body CancelOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PauseOperationWithBody performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+	PauseOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PauseOperation performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+	PauseOperation(ctx context.Context, operationId string, body PauseOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RerunOperationWithBody performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RerunOperation performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperation(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResumeOperationWithBody performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+	ResumeOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResumeOperation performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+	ResumeOperation(ctx context.Context, operationId string, body ResumeOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRecords performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
@@ -3627,6 +3802,38 @@ func (c *Client) ListActivePlugins(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+// RequestBackfillWithBody performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
+// with any type of body and a specified content type.
+//
+// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *Client) RequestBackfillWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestBackfillRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RequestBackfill performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *Client) RequestBackfill(ctx context.Context, body RequestBackfillJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRequestBackfillRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListAdminDocuments performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 //
 // The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -3801,6 +4008,38 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 // Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
 func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActivatePluginRequest(c.Server, registrationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
+// with any type of body and a specified content type.
+//
+// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+func (c *Client) PromoteVectorSpaceWithBody(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPromoteVectorSpaceRequestWithBody(c.Server, vectorSpaceId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PromoteVectorSpace performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+func (c *Client) PromoteVectorSpace(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPromoteVectorSpaceRequest(c.Server, vectorSpaceId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4444,10 +4683,42 @@ func (c *Client) CancelOperation(ctx context.Context, operationId string, body C
 	return c.Client.Do(req)
 }
 
+// PauseOperationWithBody performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request,
+// with any type of body and a specified content type.
+//
+// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+func (c *Client) PauseOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPauseOperationRequestWithBody(c.Server, operationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PauseOperation performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+func (c *Client) PauseOperation(ctx context.Context, operationId string, body PauseOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPauseOperationRequest(c.Server, operationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RerunOperationWithBody performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 // with any type of body and a specified content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *Client) RerunOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunOperationRequestWithBody(c.Server, operationId, contentType, body)
 	if err != nil {
@@ -4463,9 +4734,41 @@ func (c *Client) RerunOperationWithBody(ctx context.Context, operationId string,
 // RerunOperation performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *Client) RerunOperation(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunOperationRequest(c.Server, operationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResumeOperationWithBody performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
+// with any type of body and a specified content type.
+//
+// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+func (c *Client) ResumeOperationWithBody(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResumeOperationRequestWithBody(c.Server, operationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResumeOperation performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+func (c *Client) ResumeOperation(ctx context.Context, operationId string, body ResumeOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResumeOperationRequest(c.Server, operationId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5180,6 +5483,46 @@ func NewListActivePluginsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewRequestBackfillRequest calls the generic RequestBackfill builder with application/json body
+func NewRequestBackfillRequest(server string, body RequestBackfillJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRequestBackfillRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRequestBackfillRequestWithBody constructs an http.Request for the RequestBackfill method, with any body, and a specified content type
+func NewRequestBackfillRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/backfills")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListAdminDocumentsRequest constructs an http.Request for the ListAdminDocuments method
 func NewListAdminDocumentsRequest(server string, params *ListAdminDocumentsParams) (*http.Request, error) {
 	var err error
@@ -5566,6 +5909,53 @@ func NewActivatePluginRequest(server string, registrationId string) (*http.Reque
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewPromoteVectorSpaceRequest calls the generic PromoteVectorSpace builder with application/json body
+func NewPromoteVectorSpaceRequest(server string, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPromoteVectorSpaceRequestWithBody(server, vectorSpaceId, "application/json", bodyReader)
+}
+
+// NewPromoteVectorSpaceRequestWithBody constructs an http.Request for the PromoteVectorSpace method, with any body, and a specified content type
+func NewPromoteVectorSpaceRequestWithBody(server string, vectorSpaceId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "vector_space_id", vectorSpaceId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/spaces/%s/promote", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -7136,6 +7526,53 @@ func NewCancelOperationRequestWithBody(server string, operationId string, conten
 	return req, nil
 }
 
+// NewPauseOperationRequest calls the generic PauseOperation builder with application/json body
+func NewPauseOperationRequest(server string, operationId string, body PauseOperationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPauseOperationRequestWithBody(server, operationId, "application/json", bodyReader)
+}
+
+// NewPauseOperationRequestWithBody constructs an http.Request for the PauseOperation method, with any body, and a specified content type
+func NewPauseOperationRequestWithBody(server string, operationId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "operation_id", operationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/operations/%s/pause", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRerunOperationRequest calls the generic RerunOperation builder with application/json body
 func NewRerunOperationRequest(server string, operationId string, body RerunOperationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -7164,6 +7601,53 @@ func NewRerunOperationRequestWithBody(server string, operationId string, content
 	}
 
 	operationPath := fmt.Sprintf("/v0/operations/%s/rerun", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewResumeOperationRequest calls the generic ResumeOperation builder with application/json body
+func NewResumeOperationRequest(server string, operationId string, body ResumeOperationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewResumeOperationRequestWithBody(server, operationId, "application/json", bodyReader)
+}
+
+// NewResumeOperationRequestWithBody constructs an http.Request for the ResumeOperation method, with any body, and a specified content type
+func NewResumeOperationRequestWithBody(server string, operationId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "operation_id", operationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/operations/%s/resume", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -8398,6 +8882,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	ListActivePluginsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListActivePluginsResponse, error)
 
+	// RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RequestBackfillWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestBackfillResponse, error)
+
+	// RequestBackfillWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+	RequestBackfillWithResponse(ctx context.Context, body RequestBackfillJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestBackfillResponse, error)
+
 	// ListAdminDocumentsWithResponse performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 	//
 	// The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -8481,6 +8979,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
+
+	// PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	PromoteVectorSpaceWithBodyWithResponse(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error)
+
+	// PromoteVectorSpaceWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+	PromoteVectorSpaceWithResponse(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error)
 
 	// GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 	//
@@ -8769,10 +9281,24 @@ type ClientWithResponsesInterface interface {
 	// Idempotent cancellation request; does not undo committed effects. Terminal operation returns its existing state. A racing completion may win. Cancellation becomes terminal only after work stops safely; no partial active projection cutover.
 	CancelOperationWithResponse(ctx context.Context, operationId string, body CancelOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*CancelOperationResponse, error)
 
+	// PauseOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	PauseOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PauseOperationResponse, error)
+
+	// PauseOperationWithResponse performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+	PauseOperationWithResponse(ctx context.Context, operationId string, body PauseOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*PauseOperationResponse, error)
+
 	// RerunOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	RerunOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error)
@@ -8780,8 +9306,22 @@ type ClientWithResponsesInterface interface {
 	// RerunOperationWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+	// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 	RerunOperationWithResponse(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error)
+
+	// ResumeOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ResumeOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResumeOperationResponse, error)
+
+	// ResumeOperationWithResponse performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+	ResumeOperationWithResponse(ctx context.Context, operationId string, body ResumeOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*ResumeOperationResponse, error)
 
 	// ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
@@ -9127,6 +9667,68 @@ func (r ListActivePluginsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListActivePluginsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// RequestBackfillResponse202Headers the declared response headers of an HTTP 202 response for RequestBackfill
+type RequestBackfillResponse202Headers struct {
+	Location string
+}
+
+type RequestBackfillResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BackfillEstimate
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers202 the parsed response headers for an HTTP 202 response
+	Headers202 *RequestBackfillResponse202Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RequestBackfillResponse) GetJSON200() *BackfillEstimate {
+	return r.JSON200
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RequestBackfillResponse) GetJSON202() *Operation {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RequestBackfillResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RequestBackfillResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RequestBackfillResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RequestBackfillResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RequestBackfillResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9614,6 +10216,54 @@ func (r ActivatePluginResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ActivatePluginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PromoteVectorSpaceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *VectorSpacePromotion
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PromoteVectorSpaceResponse) GetJSON200() *VectorSpacePromotion {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PromoteVectorSpaceResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PromoteVectorSpaceResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PromoteVectorSpaceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PromoteVectorSpaceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PromoteVectorSpaceResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11128,6 +11778,54 @@ func (r CancelOperationResponse) ContentType() string {
 	return ""
 }
 
+type PauseOperationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r PauseOperationResponse) GetJSON202() *Operation {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PauseOperationResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PauseOperationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PauseOperationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PauseOperationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PauseOperationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RerunOperationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11170,6 +11868,54 @@ func (r RerunOperationResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RerunOperationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ResumeOperationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Operation
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ResumeOperationResponse) GetJSON202() *Operation {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ResumeOperationResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ResumeOperationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ResumeOperationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResumeOperationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ResumeOperationResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -12485,6 +13231,32 @@ func (c *ClientWithResponses) ListActivePluginsWithResponse(ctx context.Context,
 	return ParseListActivePluginsResponse(rsp)
 }
 
+// RequestBackfillWithBodyWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request,
+// with any type of body and a specified content type.
+//
+// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RequestBackfillWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestBackfillResponse, error) {
+	rsp, err := c.RequestBackfillWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestBackfillResponse(rsp)
+}
+
+// RequestBackfillWithResponse performs a POST /v0/admin/backfills (the `RequestBackfill` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+func (c *ClientWithResponses) RequestBackfillWithResponse(ctx context.Context, body RequestBackfillJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestBackfillResponse, error) {
+	rsp, err := c.RequestBackfill(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRequestBackfillResponse(rsp)
+}
+
 // ListAdminDocumentsWithResponse performs a GET /v0/admin/documents (the `ListAdminDocuments` operationId) request.
 //
 // The Organization's most recently accepted Record Versions across all its Corpora, newest first, with their Source, title, current state and step times, read in one query. Requires observability:read on a key for all Corpora; a key limited to some Corpora gets 403. Versions accepted before step times were recorded are not listed. Pages are independent reads, not a snapshot; the cursor is bound to the key's scope.
@@ -12639,6 +13411,32 @@ func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, re
 		return nil, err
 	}
 	return ParseActivatePluginResponse(rsp)
+}
+
+// PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
+// with any type of body and a specified content type.
+//
+// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) PromoteVectorSpaceWithBodyWithResponse(ctx context.Context, vectorSpaceId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error) {
+	rsp, err := c.PromoteVectorSpaceWithBody(ctx, vectorSpaceId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePromoteVectorSpaceResponse(rsp)
+}
+
+// PromoteVectorSpaceWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
+func (c *ClientWithResponses) PromoteVectorSpaceWithResponse(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error) {
+	rsp, err := c.PromoteVectorSpace(ctx, vectorSpaceId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePromoteVectorSpaceResponse(rsp)
 }
 
 // GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
@@ -13174,10 +13972,36 @@ func (c *ClientWithResponses) CancelOperationWithResponse(ctx context.Context, o
 	return ParseCancelOperationResponse(rsp)
 }
 
+// PauseOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request,
+// with any type of body and a specified content type.
+//
+// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) PauseOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PauseOperationResponse, error) {
+	rsp, err := c.PauseOperationWithBody(ctx, operationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePauseOperationResponse(rsp)
+}
+
+// PauseOperationWithResponse performs a POST /v0/operations/{operation_id}/pause (the `PauseOperation` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Holds a backfill until it is resumed. A queued or running backfill becomes paused and makes no progress, keeping its checkpoint and the Pipeline Plan it is pinned to. Nothing committed is undone. Any other state is returned unchanged, so repeating the request is safe. Only backfills pause.
+func (c *ClientWithResponses) PauseOperationWithResponse(ctx context.Context, operationId string, body PauseOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*PauseOperationResponse, error) {
+	rsp, err := c.PauseOperation(ctx, operationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePauseOperationResponse(rsp)
+}
+
 // RerunOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request,
 // with any type of body and a specified content type.
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) RerunOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error) {
@@ -13191,13 +14015,39 @@ func (c *ClientWithResponses) RerunOperationWithBodyWithResponse(ctx context.Con
 // RerunOperationWithResponse performs a POST /v0/operations/{operation_id}/rerun (the `RerunOperation` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
+// Only terminal Operations can be intentionally rerun; otherwise 409 operation_not_terminal. A backfill rerun while another backfill of its Corpus has not finished is 409 backfill_in_progress, and one whose ingestion plugin left the active plan is 409 registration_not_active. A request key replays the same new linked Operation. Revalidate current scope and command eligibility; completed effects remain subject to domain idempotency.
 func (c *ClientWithResponses) RerunOperationWithResponse(ctx context.Context, operationId string, body RerunOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*RerunOperationResponse, error) {
 	rsp, err := c.RerunOperation(ctx, operationId, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseRerunOperationResponse(rsp)
+}
+
+// ResumeOperationWithBodyWithResponse performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request,
+// with any type of body and a specified content type.
+//
+// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ResumeOperationWithBodyWithResponse(ctx context.Context, operationId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResumeOperationResponse, error) {
+	rsp, err := c.ResumeOperationWithBody(ctx, operationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResumeOperationResponse(rsp)
+}
+
+// ResumeOperationWithResponse performs a POST /v0/operations/{operation_id}/resume (the `ResumeOperation` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Lets a paused backfill continue from its checkpoint, on the Pipeline Plan it is pinned to. Any other state is returned unchanged, so repeating the request is safe. Only backfills resume.
+func (c *ClientWithResponses) ResumeOperationWithResponse(ctx context.Context, operationId string, body ResumeOperationJSONRequestBody, reqEditors ...RequestEditorFn) (*ResumeOperationResponse, error) {
+	rsp, err := c.ResumeOperation(ctx, operationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResumeOperationResponse(rsp)
 }
 
 // ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
@@ -13792,6 +14642,59 @@ func ParseListActivePluginsResponse(rsp *http.Response) (*ListActivePluginsRespo
 	return response, nil
 }
 
+// ParseRequestBackfillResponse parses an HTTP response from a RequestBackfillWithResponse call
+func ParseRequestBackfillResponse(rsp *http.Response) (*RequestBackfillResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RequestBackfillResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BackfillEstimate
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		var headers RequestBackfillResponse202Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = value
+		}
+		response.Headers202 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseListAdminDocumentsResponse parses an HTTP response from a ListAdminDocumentsWithResponse call
 func ParseListAdminDocumentsResponse(rsp *http.Response) (*ListAdminDocumentsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -14118,6 +15021,39 @@ func ParseActivatePluginResponse(rsp *http.Response) (*ActivatePluginResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest PipelinePlan
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePromoteVectorSpaceResponse parses an HTTP response from a PromoteVectorSpaceWithResponse call
+func ParsePromoteVectorSpaceResponse(rsp *http.Response) (*PromoteVectorSpaceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PromoteVectorSpaceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VectorSpacePromotion
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -15163,6 +16099,39 @@ func ParseCancelOperationResponse(rsp *http.Response) (*CancelOperationResponse,
 	return response, nil
 }
 
+// ParsePauseOperationResponse parses an HTTP response from a PauseOperationWithResponse call
+func ParsePauseOperationResponse(rsp *http.Response) (*PauseOperationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PauseOperationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRerunOperationResponse parses an HTTP response from a RerunOperationWithResponse call
 func ParseRerunOperationResponse(rsp *http.Response) (*RerunOperationResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -15172,6 +16141,39 @@ func ParseRerunOperationResponse(rsp *http.Response) (*RerunOperationResponse, e
 	}
 
 	response := &RerunOperationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResumeOperationResponse parses an HTTP response from a ResumeOperationWithResponse call
+func ParseResumeOperationResponse(rsp *http.Response) (*ResumeOperationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResumeOperationResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

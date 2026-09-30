@@ -15,7 +15,7 @@ import (
 func TestInvalidPluginPinRefusesStartup(t *testing.T) {
 	const compatible = "compatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
 	for name, tc := range map[string]struct{ body, code string }{
-		"plugin api range":   {"id: acme.markdown\nversion: 1.0.0\n" + strings.Replace(compatible, "plugin_api: \">=0.1.0 <0.2.0\"", "plugin_api: \">=0.9.0 <1.0.0\"", 1), "incompatible_plugin_api"},
+		"plugin api range":   {"id: acme.markdown\nversion: 1.0.0\n" + strings.Replace(compatible, "plugin_api: \">=0.1.0 <0.2.0\"", "plugin_api: \">=0.10.0 <1.0.0\"", 1), "incompatible_plugin_api"},
 		"foreign namespace":  {"id: acme.markdown\nversion: 1.0.0\n" + compatible + "extensions:\n  other.outline:\n    \"1\": {type: object}\n", "foreign_namespace"},
 		"built-in namespace": {"id: example\nversion: 1.0.0\n" + compatible + "extensions:\n  example.editorial:\n    \"1\": {type: object}\n", "namespace_conflict"},
 	} {

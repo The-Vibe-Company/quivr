@@ -21,8 +21,12 @@ that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
 drains. Last (THE-783), 0.2.0 runs again as a bad release: TestRollbackStarts
 activates it and ingests through it, the step stops it, and TestRollback rolls
 back to 0.1.0 in one call, stopping the Record pinned to 0.2.0 and ingesting
-the next one through 0.1.0 alone. The stack's configuration and processes are
-restored afterwards, even on failure.
+the next one through 0.1.0 alone. Then (THE-784) TestBackfillStarts builds a
+Corpus that predates the large space and starts a backfill of a window into
+it, paused halfway; the step restarts the worker, and TestBackfillResumes
+resumes it, checks what it filled and promotes the large space and back. The
+stack's configuration and processes are restored afterwards, even on
+failure.
 """
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
@@ -126,6 +130,13 @@ def verify(stack):
         stack.tests('^TestRollbackStarts$', pinned)
         stop_plugin(next_plugin)
         stack.tests('^TestRollback$', pinned)
+        # Backfill (THE-784): a Corpus built while 0.1.0 enabled its small
+        # space alone gets the large one from a paced backfill, which is
+        # paused, survives a worker restart, resumes and is promoted.
+        stack.tests('^TestBackfillStarts$', pinned)
+        stack.stop_worker()
+        stack.start_worker()
+        stack.tests('^TestBackfillResumes$', pinned)
     finally:
         for name, text in configs.items():
             (stack.directory / name).write_text(text)

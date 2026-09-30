@@ -180,6 +180,58 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 	return seg, data, nil
 }
 
+// ErrSegmentsDiffer reports that the plugin cuts a Version into other
+// segments than the segmentation being filled: only a rebuild can move the
+// Version to them.
+var ErrSegmentsDiffer = errors.New("segments differ")
+
+// Fill returns the vectors of seg's segments in the given spaces, for a
+// backfill. seg is the segmentation a generation projects, which an earlier
+// version of the plugin may have made. Stored artifacts are reused;
+// otherwise the plugin embeds the Version in those spaces only, and its
+// segments must have seg's Parts and offsets (ErrSegmentsDiffer). Each
+// vector is stored as an Embedding Artifact of seg's segment.
+func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string) ([]content.EmbeddingData, error) {
+	d = d.resolved(ctx)
+	for _, key := range spaces {
+		if !d.owns(key) {
+			return nil, fmt.Errorf("%w: the pinned ingestion plugin does not own space %s", ErrSpaceUnowned, key)
+		}
+	}
+	data, complete, err := d.stored(ctx, org, corpusID, v, seg, spaces)
+	if err != nil || complete {
+		return data, err
+	}
+	segments, err := d.Plugin.SegmentAndEmbed(ctx, org, corpusID, v, spaces)
+	if err != nil {
+		return nil, err
+	}
+	if len(segments) != len(seg.Segments) {
+		return nil, ErrSegmentsDiffer
+	}
+	for i, p := range seg.Segments {
+		if s := segments[i]; s.PartKey != p.PartKey || s.Start != p.Start || s.End != p.End {
+			return nil, ErrSegmentsDiffer
+		}
+	}
+	data = make([]content.EmbeddingData, 0, len(seg.Segments)*len(spaces))
+	for i, p := range seg.Segments {
+		for _, key := range spaces {
+			space, _ := d.Plugin.VectorSpace(key)
+			vector := segments[i].Vectors[key]
+			artifact, err := d.Content.SaveEmbedding(ctx, content.EmbeddingInput(org, corpusID, v, seg, p, space, d.Plugin.Producer()), space, vector)
+			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
+				return nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
+			}
+			if err != nil {
+				return nil, err
+			}
+			data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
+		}
+	}
+	return data, nil
+}
+
 // save stores the plugin's segments as the Version's segmentation. Another
 // answer already stored for the Version is a refusal: the plugin is not
 // deterministic, and search would change under a rebuild.

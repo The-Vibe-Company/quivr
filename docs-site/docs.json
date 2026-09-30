@@ -54,6 +54,7 @@
               },
               "plugins/pin",
               "plugins/switch-plugins-without-restarting",
+              "plugins/backfill-a-vector-space",
               "plugins/catalog"
             ]
           },

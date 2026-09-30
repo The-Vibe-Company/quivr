@@ -268,6 +268,13 @@ class ConnectorContribution(Model):
 
 
 @dataclass(kw_only=True)
+class VectorSpaceInputPrice(Model):
+    "Since Plugin API 0.9: what embedding text in this space costs, for the estimate a backfill shows before it starts. Absent, the cost of a backfill is unknown."
+
+    usd_per_million_tokens: float
+
+
+@dataclass(kw_only=True)
 class VectorSpace(Model):
     "One vector space the plugin owns. Its identity is the id and the version together: vectors of another version belong to another space."
 
@@ -278,6 +285,7 @@ class VectorSpace(Model):
     indexes: list[Literal["text"]]
     query_modalities: list[Literal["text"]]
     description: str | None = None
+    input_price: VectorSpaceInputPrice | None = None
 
 
 @dataclass(kw_only=True)
@@ -1244,4 +1252,5 @@ __all__ = [
     "UploadAttachmentItem",
     "UploadGrant",
     "VectorSpace",
+    "VectorSpaceInputPrice",
 ]

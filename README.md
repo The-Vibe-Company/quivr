@@ -198,6 +198,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
   disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
   the new version. Quivr never starts a plugin process.
+- **Backfill and vector space promotion**: an operator fills a new embedding model's
+  evaluation space for a Corpus's past articles, whole or for a window, after a dry run
+  of the volume, duration and cost (`POST /v0/admin/backfills`). The backfill runs paced
+  below live ingestion, can be paused, resumed or cancelled, and resumes from its
+  checkpoint after a restart. One call then makes search use the space, and the same
+  call on the former space goes back
+  ([Fill a new vector space for past articles](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space)).
 - **Plugin and search counters**: each process counts every plugin call, search,
   processing step, document received (per source namespace) and Match, with errors and
   latency, and writes the counts to PostgreSQL every few seconds

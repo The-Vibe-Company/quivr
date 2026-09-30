@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
@@ -49,6 +50,16 @@ func (m *memoryOperations) CancelOperation(_ context.Context, _, id string) (ope
 	}
 	return m.byID[id], nil
 }
+func (m *memoryOperations) PauseOperation(_ context.Context, _, id string) (operations.Operation, error) {
+	op := m.byID[id]
+	op.State = operations.StatePaused
+	return op, m.fail
+}
+func (m *memoryOperations) ResumeOperation(_ context.Context, _, id string) (operations.Operation, error) {
+	op := m.byID[id]
+	op.State = operations.StateRunning
+	return op, m.fail
+}
 func (m *memoryOperations) AcceptRerun(_ context.Context, org, source, key string, _ []byte) (operations.Operation, error) {
 	if m.fail != nil {
 		return operations.Operation{}, m.fail
@@ -64,6 +75,7 @@ const (
 	rebuildScoped = "rebuild-scoped-b-token-0123456789abcdef012345"
 	noRebuild     = "rebuild-denied-token-0123456789abcdef01234567"
 	controller    = "operations-writer-token-0123456789abcdef0123"
+	backfiller    = "backfill-operator-token-0123456789abcdef0123"
 )
 
 func operationServer(t *testing.T, store *memoryOperations) *httptest.Server {
@@ -72,6 +84,7 @@ func operationServer(t *testing.T, store *memoryOperations) *httptest.Server {
 		rebuilder:     {Organization: "org_a", Actions: []string{"projections:rebuild", "operations:read", "operations:write"}, Corpora: []string{"*"}},
 		rebuildScoped: {Organization: "org_a", Actions: []string{"projections:rebuild", "operations:read", "operations:write", "corpora:write"}, Corpora: []string{"corpus_b"}},
 		controller:    {Organization: "org_a", Actions: []string{"operations:write"}, Corpora: []string{"*"}},
+		backfiller:    {Organization: "org_a", Actions: []string{"operations:write", operations.BackfillPermission}, Corpora: []string{"*"}},
 		noRebuild:     {Organization: "org_a", Actions: []string{"corpora:read", "corpora:write"}, Corpora: []string{"*"}},
 		configurer:    {Organization: "org_a", Actions: []string{"corpora:write", "operations:write", "operations:read"}, Corpora: []string{"*"}},
 	}
@@ -178,11 +191,19 @@ func TestCancelAndRerunOperationRoutes(t *testing.T) {
 	running := seed("operation_running", operations.KindProjectionRebuild, operations.StateCancelRequested)
 	done := seed("operation_done", operations.KindProjectionRebuild, operations.StateSucceeded)
 	future := seed("operation_future", "cold_restoration", operations.StateSucceeded)
+	filling := seed("operation_backfill", operations.KindBackfill, operations.StateRunning)
 
 	// Cancel renders the state the store reports and names no new resource.
 	res, body := operationCall(t, server, "POST", "/v0/operations/"+running+"/cancel", controller, "application/json", `{"idempotency_key":"c1"}`)
 	if res.StatusCode != 202 || body["operation_id"] != running || body["state"] != "cancel_requested" || res.Header.Get("Location") != "" {
 		t.Fatalf("cancel %d %v Location %q", res.StatusCode, body, res.Header.Get("Location"))
+	}
+	// Pause and resume render the state the store reports.
+	for action, state := range map[string]string{"pause": "paused", "resume": "running"} {
+		res, body = operationCall(t, server, "POST", "/v0/operations/"+filling+"/"+action, backfiller, "application/json", `{"idempotency_key":"p1"}`)
+		if res.StatusCode != 202 || body["operation_id"] != filling || body["state"] != state {
+			t.Fatalf("%s %d %v", action, res.StatusCode, body)
+		}
 	}
 	// A rerun is a new Operation, linked to its source and located by its own identity.
 	res, rerun := operationCall(t, server, "POST", "/v0/operations/"+done+"/rerun", rebuilder, "application/json", `{"idempotency_key":"r1"}`)
@@ -208,7 +229,11 @@ func TestCancelAndRerunOperationRoutes(t *testing.T) {
 		{"rerun storage outage", "POST", "/v0/operations/" + done + "/rerun", rebuilder, "application/json", `{"idempotency_key":"x"}`, errors.New("database unavailable"), 503, "storage_unavailable"},
 		{"cancel missing key", "POST", "/v0/operations/" + done + "/cancel", rebuilder, "application/json", `{}`, nil, 422, "invalid_schema"},
 		{"cancel method", "GET", "/v0/operations/" + done + "/cancel", rebuilder, "", "", nil, 405, "method_not_allowed"},
-		{"unknown action", "POST", "/v0/operations/" + done + "/pause", rebuilder, "application/json", `{"idempotency_key":"x"}`, nil, 404, "not_found"},
+		{"unknown action", "POST", "/v0/operations/" + done + "/suspend", rebuilder, "application/json", `{"idempotency_key":"x"}`, nil, 404, "not_found"},
+		{"backfill rerun while another runs", "POST", "/v0/operations/" + done + "/rerun", rebuilder, "application/json", `{"idempotency_key":"x"}`, backfill.ErrInProgress, 409, "backfill_in_progress"},
+		{"backfill rerun after its plugin left the plan", "POST", "/v0/operations/" + done + "/rerun", rebuilder, "application/json", `{"idempotency_key":"x"}`, backfill.ErrRegistrationNotActive, 409, "registration_not_active"},
+		{"a rebuild cannot pause", "POST", "/v0/operations/" + done + "/pause", backfiller, "application/json", `{"idempotency_key":"x"}`, nil, 422, "unsupported_operation_kind"},
+		{"pause without plugins:admin", "POST", "/v0/operations/" + filling + "/pause", controller, "application/json", `{"idempotency_key":"x"}`, nil, 403, "forbidden"},
 	} {
 		store.fail = tc.store
 		res, body := operationCall(t, server, tc.method, tc.path, tc.token, tc.contentType, tc.body)

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"io"
 	"log/slog"
 	"mime"
@@ -78,6 +79,12 @@ type API struct {
 	Recorder *observability.Recorder
 	// Stats serves the admin stats reads; without a Store they answer 404.
 	Stats observability.Reader
+	// Backfills and Promotions serve the backfill and vector space promotion
+	// commands; nil answers 404.
+	Backfills       *backfill.Service
+	Promotions      *backfill.Promotions
+	backfillSchema  *jsonschema.Schema
+	promotionSchema *jsonschema.Schema
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
@@ -141,7 +148,15 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	backfillSchema, err := compiler.Compile(contracts.HTTPSchema("BackfillRequest"))
+	if err != nil {
+		return nil, err
+	}
+	promotionSchema, err := compiler.Compile(contracts.HTTPSchema("VectorSpacePromotionRequest"))
+	if err != nil {
+		return nil, err
+	}
+	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	for _, option := range options {
 		option(a)
 	}
@@ -240,6 +255,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.pluginRoutes(w, r, scope) {
+		return
+	}
+	if a.backfillRoutes(w, r, scope) {
 		return
 	}
 	if a.adminDocumentRoutes(w, r, scope) {

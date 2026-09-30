@@ -10,6 +10,7 @@ import (
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -108,6 +109,12 @@ type Config struct {
 	// flush_interval (default 5s) is how often each process writes its
 	// counts, so how much a crash can lose.
 	Observability observability.Config `json:"observability"`
+	// Backfill sets how backfills run (Spec 5): rate (Versions per second,
+	// default 2) and poll (how often a paused backfill checks for resume,
+	// default 5s) in the worker, and max_cost_without_confirmation (US
+	// dollars, default 0) in the api: a dry run estimated above it needs
+	// confirm_cost.
+	Backfill BackfillConfig `json:"backfill"`
 }
 
 // connectorSealer builds the Deposited Credential sealer. credential_key is
@@ -224,6 +231,10 @@ func Run(command string) error {
 		if planPoll, err = time.ParseDuration(cfg.PluginPlanPoll); err != nil || planPoll <= 0 {
 			return errors.New("plugin_plan_poll must be a positive duration")
 		}
+	}
+	backfillSettings, err := cfg.Backfill.settings()
+	if err != nil {
+		return err
 	}
 	pinnedAttempts := 10
 	switch {
@@ -444,6 +455,10 @@ func Run(command string) error {
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
 	rebuilder.Plugin = deriver
+	// Backfills fill spaces through the plan each one is pinned to, paced
+	// below live ingestion on their own task queue.
+	pinnedIngestion := planIngestion{store: planStore, live: live}
+	backfiller := &backfill.Backfiller{Store: store, Content: contents, Plugin: deriver, Projection: projection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
 	// The retrieval plugin, normally core.retrieve, answers every search: it
 	// requests candidates, which search serves after authorization and
 	// hydration, and ranks them. The api refuses to start without one.
@@ -506,6 +521,8 @@ func Run(command string) error {
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
+			// Operators backfill past Versions and promote vector spaces (plugins:admin).
+			httpapi.WithBackfills(backfill.Service{Store: store, Plans: pinnedIngestion, Throughput: backfillThroughput{reader: observability.Reader{Store: rollups}}, Settings: backfillSettings}, backfill.Promotions{Store: store}),
 			// Operators follow documents through their steps (observability:read).
 			httpapi.WithActivity(content.Activities{Store: store}),
 			// Searches are counted, and the rollups read back (observability:read).
@@ -585,7 +602,7 @@ func Run(command string) error {
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, workPinner)
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, backfiller, workPinner)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

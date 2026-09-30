@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
@@ -127,6 +128,9 @@ func (unpinned) Release(context.Context, string, string, string) error          
 type Runtime struct {
 	Client client.Client
 	Worker worker.Worker
+	// BackfillWorker serves backfills on their own task queue, one activity
+	// at a time, below live content processing.
+	BackfillWorker worker.Worker
 	// ConnectorWorker serves acquisition on its own task queue so scheduled
 	// polling is never starved by content processing, and the reverse.
 	ConnectorWorker worker.Worker
@@ -135,10 +139,11 @@ type Runtime struct {
 }
 
 // Start runs the worker. A non-nil conns also schedules Connector Instance
-// acquisition runs on their own task queue. pins pins the processing of each
-// receipt, each Operation and each connector run to the plan it started on;
-// nil leaves them on the active plan.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, pins Pinner) (*Runtime, error) {
+// acquisition runs on their own task queue, and a non-nil backfiller serves
+// backfills on theirs. pins pins the processing of each receipt, each
+// Operation and each connector run to the plan it started on; nil leaves
+// them on the active plan.
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, pins Pinner) (*Runtime, error) {
 	if pins == nil {
 		pins = unpinned{}
 	}
@@ -201,15 +206,30 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 			return nil, err
 		}
 	}
+	var bw worker.Worker
+	if backfiller != nil {
+		bw = worker.New(c, backfillTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
+		registerBackfill(bw, *backfiller, pins)
+		if err = bw.Start(); err != nil {
+			if cw != nil {
+				cw.Stop()
+			}
+			c.Close()
+			return nil, err
+		}
+	}
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
 		if cw != nil {
 			cw.Stop()
 		}
+		if bw != nil {
+			bw.Stop()
+		}
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{Client: c, Worker: w, ConnectorWorker: cw, Store: store, Connectors: conns}
+	runtime := &Runtime{Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	go runtime.dispatch(ctx)
 	if conns != nil {
 		go runtime.scheduleConnectors(ctx)
@@ -243,6 +263,9 @@ func (r *Runtime) Close() {
 	r.Worker.Stop()
 	if r.ConnectorWorker != nil {
 		r.ConnectorWorker.Stop()
+	}
+	if r.BackfillWorker != nil {
+		r.BackfillWorker.Stop()
 	}
 	r.Client.Close()
 }

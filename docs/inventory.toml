@@ -97,7 +97,7 @@ excluded = [
 # Maximum number of lines per page, in path order.
 [budgets]
 "AGENTS.md" = 45
-"CONTEXT.md" = 319
+"CONTEXT.md" = 327
 "deploy/railway/README.md" = 217
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45

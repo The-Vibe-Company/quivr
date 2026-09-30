@@ -72,6 +72,27 @@ func (e AvailabilityState) Valid() bool {
 	}
 }
 
+// Defines values for BackfillEstimateDurationBasis.
+const (
+	Rate              BackfillEstimateDurationBasis = "rate"
+	RecentBackfills   BackfillEstimateDurationBasis = "recent_backfills"
+	RecentPluginCalls BackfillEstimateDurationBasis = "recent_plugin_calls"
+)
+
+// Valid indicates whether the value is a known member of the BackfillEstimateDurationBasis enum.
+func (e BackfillEstimateDurationBasis) Valid() bool {
+	switch e {
+	case Rate:
+		return true
+	case RecentBackfills:
+		return true
+	case RecentPluginCalls:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BlobContentKind.
 const (
 	BlobContentKindBlob BlobContentKind = "blob"
@@ -359,6 +380,7 @@ const (
 	OperationStateCancelRequested OperationState = "cancel_requested"
 	OperationStateCanceled        OperationState = "canceled"
 	OperationStateFailed          OperationState = "failed"
+	OperationStatePaused          OperationState = "paused"
 	OperationStateQueued          OperationState = "queued"
 	OperationStateRunning         OperationState = "running"
 	OperationStateSucceeded       OperationState = "succeeded"
@@ -372,6 +394,8 @@ func (e OperationState) Valid() bool {
 	case OperationStateCanceled:
 		return true
 	case OperationStateFailed:
+		return true
+	case OperationStatePaused:
 		return true
 	case OperationStateQueued:
 		return true
@@ -1147,6 +1171,58 @@ type Availability struct {
 // AvailabilityState defines model for Availability.State.
 type AvailabilityState string
 
+// BackfillEstimate defines model for BackfillEstimate.
+type BackfillEstimate struct {
+	// ConfirmationRequired The cost exceeds backfill.max_cost_without_confirmation, so starting the backfill needs confirm_cost.
+	ConfirmationRequired bool `json:"confirmation_required"`
+
+	// DurationBasis What the duration comes from.
+	DurationBasis BackfillEstimateDurationBasis `json:"duration_basis"`
+
+	// EstimatedCostUsd Estimated cost in US dollars, rounded up to the cent, of the target spaces that declare an input_price in the plugin manifest; a space without one adds nothing. Absent when none declares one, so the cost is unknown.
+	EstimatedCostUsd *float64 `json:"estimated_cost_usd,omitempty"`
+
+	// EstimatedSeconds How long the backfill should take, at the deployment's backfill.rate or the recent throughput, whichever is slower.
+	EstimatedSeconds float64 `json:"estimated_seconds"`
+
+	// InputTokens Estimated tokens the plugin embeds, one per four code points of segment text.
+	InputTokens    int    `json:"input_tokens"`
+	RegistrationId string `json:"registration_id"`
+
+	// Segments Their segments, which the plugin embeds.
+	Segments int      `json:"segments"`
+	Spaces   []string `json:"spaces"`
+
+	// Versions Versions in scope that miss a vector in a target space.
+	Versions int `json:"versions"`
+}
+
+// BackfillEstimateDurationBasis What the duration comes from.
+type BackfillEstimateDurationBasis string
+
+// BackfillRequest defines model for BackfillRequest.
+type BackfillRequest struct {
+	// AcceptedAfter Only Versions Quivr accepted at or after this time; absent, from the first.
+	AcceptedAfter *time.Time `json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Only Versions Quivr accepted before this time; absent, up to now.
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+
+	// ConfirmCost Accept an estimated cost above the deployment's backfill.max_cost_without_confirmation.
+	ConfirmCost *bool  `json:"confirm_cost,omitempty"`
+	CorpusId    string `json:"corpus_id"`
+
+	// DryRun true reports the estimate and records it; false starts the backfill a dry run with the same key and scope preceded.
+	DryRun         bool   `json:"dry_run"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// RegistrationId The ingestion plugin registration to run; absent, the active plan's. Another one is 409 registration_not_active.
+	RegistrationId *string `json:"registration_id,omitempty"`
+
+	// Spaces The vector spaces to fill, which the plugin declares and the deployment serves or evaluates; absent, the deployment's evaluation spaces the plugin owns.
+	Spaces *[]string `json:"spaces,omitempty"`
+}
+
 // BatchItem defines model for BatchItem.
 type BatchItem struct {
 	Error *Error `json:"error,omitempty"`
@@ -1721,14 +1797,16 @@ type NormalizationProvenance struct {
 // NormalizationProvenanceContribution defines model for NormalizationProvenance.Contribution.
 type NormalizationProvenanceContribution string
 
-// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild and retrieval_configuration Operations require corpus_id; when succeeded they require result naming the activated logical generation. This result shape covers those two command kinds only.
+// Operation Administrative execution only. Retries keep identity. Intentional terminal rerun has a new ID and previous_operation_id. Cancellation does not promise universal rollback; already-terminal state and racing completion may win. projection_rebuild, retrieval_configuration and backfill Operations require corpus_id; when succeeded they require result naming the activated logical generation, or for a backfill the generation it filled. A backfill also carries backfill, and its counters versions_in_scope, versions_done, versions_skipped (with skipped_<reason>) and segments. Only a backfill can be paused.
 type Operation struct {
-	CorpusId            *string        `json:"corpus_id,omitempty"`
-	Counters            map[string]int `json:"counters"`
-	Errors              []Error        `json:"errors"`
-	Kind                string         `json:"kind"`
-	OperationId         string         `json:"operation_id"`
-	PreviousOperationId *string        `json:"previous_operation_id,omitempty"`
+	// Backfill What a backfill fills and how far it got.
+	Backfill            *OperationBackfill `json:"backfill,omitempty"`
+	CorpusId            *string            `json:"corpus_id,omitempty"`
+	Counters            map[string]int     `json:"counters"`
+	Errors              []Error            `json:"errors"`
+	Kind                string             `json:"kind"`
+	OperationId         string             `json:"operation_id"`
+	PreviousOperationId *string            `json:"previous_operation_id,omitempty"`
 
 	// Progress Approximate fraction, omitted when unknown.
 	Progress *float32 `json:"progress,omitempty"`
@@ -1740,6 +1818,21 @@ type Operation struct {
 
 // OperationState defines model for Operation.State.
 type OperationState string
+
+// OperationBackfill What a backfill fills and how far it got.
+type OperationBackfill struct {
+	AcceptedAfter  *time.Time `json:"accepted_after,omitempty"`
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+
+	// Checkpoint The last Version id it finished; it resumes after it, in Version id order.
+	Checkpoint *string          `json:"checkpoint,omitempty"`
+	Estimate   BackfillEstimate `json:"estimate"`
+
+	// PlanId The Pipeline Plan the backfill is pinned to, once it started.
+	PlanId         *string  `json:"plan_id,omitempty"`
+	RegistrationId string   `json:"registration_id"`
+	Spaces         []string `json:"spaces"`
+}
 
 // Part defines model for Part.
 type Part struct {
@@ -2510,6 +2603,28 @@ type VectorSpaceList struct {
 	Segments int `json:"segments"`
 }
 
+// VectorSpacePromotion defines model for VectorSpacePromotion.
+type VectorSpacePromotion struct {
+	// CorporaIncomplete Corpora whose routed generation lacks the space or a vector in it.
+	CorporaIncomplete int `json:"corpora_incomplete"`
+
+	// GenerationsSwitched Generations that now serve the space.
+	GenerationsSwitched int `json:"generations_switched"`
+
+	// PreviousSpaceId The space it replaced, now for evaluation; empty when none was served.
+	PreviousSpaceId string `json:"previous_space_id"`
+
+	// SegmentsMissing Current segments without a vector in the space.
+	SegmentsMissing int    `json:"segments_missing"`
+	ServedSpaceId   string `json:"served_space_id"`
+}
+
+// VectorSpacePromotionRequest defines model for VectorSpacePromotionRequest.
+type VectorSpacePromotionRequest struct {
+	// Force Promote even though some current segments have no vector in the space; those lose their semantic hits until a backfill fills them.
+	Force *bool `json:"force,omitempty"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// AcceptedAt When Quivr accepted the revision this Version publishes, before any processing.
@@ -2703,11 +2818,17 @@ type ListSubscriptionsParams struct {
 	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// RequestBackfillJSONRequestBody defines body for RequestBackfill for application/json ContentType.
+type RequestBackfillJSONRequestBody = BackfillRequest
+
 // RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
 type RegisterPluginJSONRequestBody = PluginRegistrationRequest
 
 // RollbackPipelinePlanJSONRequestBody defines body for RollbackPipelinePlan for application/json ContentType.
 type RollbackPipelinePlanJSONRequestBody = PipelinePlanRollbackRequest
+
+// PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
+type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
@@ -2736,8 +2857,14 @@ type ConfigureRetrievalJSONRequestBody = ConfigUpdate
 // CancelOperationJSONRequestBody defines body for CancelOperation for application/json ContentType.
 type CancelOperationJSONRequestBody = ActionRequest
 
+// PauseOperationJSONRequestBody defines body for PauseOperation for application/json ContentType.
+type PauseOperationJSONRequestBody = ActionRequest
+
 // RerunOperationJSONRequestBody defines body for RerunOperation for application/json ContentType.
 type RerunOperationJSONRequestBody = ActionRequest
+
+// ResumeOperationJSONRequestBody defines body for ResumeOperation for application/json ContentType.
+type ResumeOperationJSONRequestBody = ActionRequest
 
 // IngestRecordJSONRequestBody defines body for IngestRecord for application/json ContentType.
 type IngestRecordJSONRequestBody = IngestCommand
@@ -2992,6 +3119,9 @@ type ServerInterface interface {
 	// (GET /v0/admin/active-plugins)
 	ListActivePlugins(w http.ResponseWriter, r *http.Request)
 
+	// (POST /v0/admin/backfills)
+	RequestBackfill(w http.ResponseWriter, r *http.Request)
+
 	// (GET /v0/admin/documents)
 	ListAdminDocuments(w http.ResponseWriter, r *http.Request, params ListAdminDocumentsParams)
 
@@ -3021,6 +3151,9 @@ type ServerInterface interface {
 
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(w http.ResponseWriter, r *http.Request, registrationId string)
+
+	// (POST /v0/admin/spaces/{vector_space_id}/promote)
+	PromoteVectorSpace(w http.ResponseWriter, r *http.Request, vectorSpaceId string)
 
 	// (GET /v0/admin/stats/matches)
 	GetMatchStats(w http.ResponseWriter, r *http.Request, params GetMatchStatsParams)
@@ -3118,8 +3251,14 @@ type ServerInterface interface {
 	// (POST /v0/operations/{operation_id}/cancel)
 	CancelOperation(w http.ResponseWriter, r *http.Request, operationId string)
 
+	// (POST /v0/operations/{operation_id}/pause)
+	PauseOperation(w http.ResponseWriter, r *http.Request, operationId string)
+
 	// (POST /v0/operations/{operation_id}/rerun)
 	RerunOperation(w http.ResponseWriter, r *http.Request, operationId string)
+
+	// (POST /v0/operations/{operation_id}/resume)
+	ResumeOperation(w http.ResponseWriter, r *http.Request, operationId string)
 
 	// (GET /v0/records)
 	ListRecords(w http.ResponseWriter, r *http.Request, params ListRecordsParams)
@@ -3217,6 +3356,20 @@ func (siw *ServerInterfaceWrapper) ListActivePlugins(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListActivePlugins(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestBackfill operation middleware
+func (siw *ServerInterfaceWrapper) RequestBackfill(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestBackfill(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3456,6 +3609,32 @@ func (siw *ServerInterfaceWrapper) ActivatePlugin(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ActivatePlugin(w, r, registrationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PromoteVectorSpace operation middleware
+func (siw *ServerInterfaceWrapper) PromoteVectorSpace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "vector_space_id" -------------
+	var vectorSpaceId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vector_space_id", r.PathValue("vector_space_id"), &vectorSpaceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vector_space_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PromoteVectorSpace(w, r, vectorSpaceId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4518,6 +4697,32 @@ func (siw *ServerInterfaceWrapper) CancelOperation(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// PauseOperation operation middleware
+func (siw *ServerInterfaceWrapper) PauseOperation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "operation_id" -------------
+	var operationId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PauseOperation(w, r, operationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RerunOperation operation middleware
 func (siw *ServerInterfaceWrapper) RerunOperation(w http.ResponseWriter, r *http.Request) {
 
@@ -4535,6 +4740,32 @@ func (siw *ServerInterfaceWrapper) RerunOperation(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RerunOperation(w, r, operationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeOperation operation middleware
+func (siw *ServerInterfaceWrapper) ResumeOperation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "operation_id" -------------
+	var operationId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeOperation(w, r, operationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5371,6 +5602,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/changes/stream", wrapper.StreamChanges)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/operations/{operation_id}/cancel", wrapper.CancelOperation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/operations/{operation_id}/rerun", wrapper.RerunOperation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/operations/{operation_id}/pause", wrapper.PauseOperation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/operations/{operation_id}/resume", wrapper.ResumeOperation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/saved-queries", wrapper.CreateSavedQuery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}", wrapper.GetSavedQuery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/saved-queries/{saved_query_id}/versions/{version_id}", wrapper.GetSavedQueryVersion)
@@ -5407,6 +5640,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}/activate", wrapper.ActivatePlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans/{plan_id}", wrapper.GetPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans", wrapper.ListPipelinePlans)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/backfills", wrapper.RequestBackfill)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/spaces/{vector_space_id}/promote", wrapper.PromoteVectorSpace)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/plan/rollback", wrapper.RollbackPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/active-plugins", wrapper.ListActivePlugins)
@@ -5453,6 +5688,67 @@ type ListActivePluginsdefaultJSONResponse struct {
 }
 
 func (response ListActivePluginsdefaultJSONResponse) VisitListActivePluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBackfillRequestObject struct {
+	Body *RequestBackfillJSONRequestBody
+}
+
+type RequestBackfillResponseObject interface {
+	VisitRequestBackfillResponse(w http.ResponseWriter) error
+}
+
+type RequestBackfill200JSONResponse BackfillEstimate
+
+func (response RequestBackfill200JSONResponse) VisitRequestBackfillResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBackfill202ResponseHeaders struct {
+	Location string
+}
+
+type RequestBackfill202JSONResponse struct {
+	Body    Operation
+	Headers RequestBackfill202ResponseHeaders
+}
+
+func (response RequestBackfill202JSONResponse) VisitRequestBackfillResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestBackfilldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RequestBackfilldefaultJSONResponse) VisitRequestBackfillResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5851,6 +6147,46 @@ type ActivatePlugindefaultJSONResponse struct {
 }
 
 func (response ActivatePlugindefaultJSONResponse) VisitActivatePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteVectorSpaceRequestObject struct {
+	VectorSpaceId string `json:"vector_space_id"`
+	Body          *PromoteVectorSpaceJSONRequestBody
+}
+
+type PromoteVectorSpaceResponseObject interface {
+	VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error
+}
+
+type PromoteVectorSpace200JSONResponse VectorSpacePromotion
+
+func (response PromoteVectorSpace200JSONResponse) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PromoteVectorSpacedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PromoteVectorSpacedefaultJSONResponse) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -7162,6 +7498,46 @@ func (response CancelOperationdefaultJSONResponse) VisitCancelOperationResponse(
 	return err
 }
 
+type PauseOperationRequestObject struct {
+	OperationId string `json:"operation_id"`
+	Body        *PauseOperationJSONRequestBody
+}
+
+type PauseOperationResponseObject interface {
+	VisitPauseOperationResponse(w http.ResponseWriter) error
+}
+
+type PauseOperation202JSONResponse Operation
+
+func (response PauseOperation202JSONResponse) VisitPauseOperationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PauseOperationdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PauseOperationdefaultJSONResponse) VisitPauseOperationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RerunOperationRequestObject struct {
 	OperationId string `json:"operation_id"`
 	Body        *RerunOperationJSONRequestBody
@@ -7191,6 +7567,46 @@ type RerunOperationdefaultJSONResponse struct {
 }
 
 func (response RerunOperationdefaultJSONResponse) VisitRerunOperationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeOperationRequestObject struct {
+	OperationId string `json:"operation_id"`
+	Body        *ResumeOperationJSONRequestBody
+}
+
+type ResumeOperationResponseObject interface {
+	VisitResumeOperationResponse(w http.ResponseWriter) error
+}
+
+type ResumeOperation202JSONResponse Operation
+
+func (response ResumeOperation202JSONResponse) VisitResumeOperationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeOperationdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ResumeOperationdefaultJSONResponse) VisitResumeOperationResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -8271,6 +8687,9 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/active-plugins)
 	ListActivePlugins(ctx context.Context, request ListActivePluginsRequestObject) (ListActivePluginsResponseObject, error)
 
+	// (POST /v0/admin/backfills)
+	RequestBackfill(ctx context.Context, request RequestBackfillRequestObject) (RequestBackfillResponseObject, error)
+
 	// (GET /v0/admin/documents)
 	ListAdminDocuments(ctx context.Context, request ListAdminDocumentsRequestObject) (ListAdminDocumentsResponseObject, error)
 
@@ -8300,6 +8719,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/admin/plugins/{registration_id}/activate)
 	ActivatePlugin(ctx context.Context, request ActivatePluginRequestObject) (ActivatePluginResponseObject, error)
+
+	// (POST /v0/admin/spaces/{vector_space_id}/promote)
+	PromoteVectorSpace(ctx context.Context, request PromoteVectorSpaceRequestObject) (PromoteVectorSpaceResponseObject, error)
 
 	// (GET /v0/admin/stats/matches)
 	GetMatchStats(ctx context.Context, request GetMatchStatsRequestObject) (GetMatchStatsResponseObject, error)
@@ -8397,8 +8819,14 @@ type StrictServerInterface interface {
 	// (POST /v0/operations/{operation_id}/cancel)
 	CancelOperation(ctx context.Context, request CancelOperationRequestObject) (CancelOperationResponseObject, error)
 
+	// (POST /v0/operations/{operation_id}/pause)
+	PauseOperation(ctx context.Context, request PauseOperationRequestObject) (PauseOperationResponseObject, error)
+
 	// (POST /v0/operations/{operation_id}/rerun)
 	RerunOperation(ctx context.Context, request RerunOperationRequestObject) (RerunOperationResponseObject, error)
+
+	// (POST /v0/operations/{operation_id}/resume)
+	ResumeOperation(ctx context.Context, request ResumeOperationRequestObject) (ResumeOperationResponseObject, error)
 
 	// (GET /v0/records)
 	ListRecords(ctx context.Context, request ListRecordsRequestObject) (ListRecordsResponseObject, error)
@@ -8538,6 +8966,37 @@ func (sh *strictHandler) ListActivePlugins(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListActivePluginsResponseObject); ok {
 		if err := validResponse.VisitListActivePluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RequestBackfill operation middleware
+func (sh *strictHandler) RequestBackfill(w http.ResponseWriter, r *http.Request) {
+	var request RequestBackfillRequestObject
+
+	var body RequestBackfillJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestBackfill(ctx, request.(RequestBackfillRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestBackfill")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestBackfillResponseObject); ok {
+		if err := validResponse.VisitRequestBackfillResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8804,6 +9263,39 @@ func (sh *strictHandler) ActivatePlugin(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ActivatePluginResponseObject); ok {
 		if err := validResponse.VisitActivatePluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PromoteVectorSpace operation middleware
+func (sh *strictHandler) PromoteVectorSpace(w http.ResponseWriter, r *http.Request, vectorSpaceId string) {
+	var request PromoteVectorSpaceRequestObject
+
+	request.VectorSpaceId = vectorSpaceId
+
+	var body PromoteVectorSpaceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PromoteVectorSpace(ctx, request.(PromoteVectorSpaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PromoteVectorSpace")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PromoteVectorSpaceResponseObject); ok {
+		if err := validResponse.VisitPromoteVectorSpaceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -9701,6 +10193,39 @@ func (sh *strictHandler) CancelOperation(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// PauseOperation operation middleware
+func (sh *strictHandler) PauseOperation(w http.ResponseWriter, r *http.Request, operationId string) {
+	var request PauseOperationRequestObject
+
+	request.OperationId = operationId
+
+	var body PauseOperationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PauseOperation(ctx, request.(PauseOperationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PauseOperation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PauseOperationResponseObject); ok {
+		if err := validResponse.VisitPauseOperationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RerunOperation operation middleware
 func (sh *strictHandler) RerunOperation(w http.ResponseWriter, r *http.Request, operationId string) {
 	var request RerunOperationRequestObject
@@ -9727,6 +10252,39 @@ func (sh *strictHandler) RerunOperation(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RerunOperationResponseObject); ok {
 		if err := validResponse.VisitRerunOperationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeOperation operation middleware
+func (sh *strictHandler) ResumeOperation(w http.ResponseWriter, r *http.Request, operationId string) {
+	var request ResumeOperationRequestObject
+
+	request.OperationId = operationId
+
+	var body ResumeOperationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeOperation(ctx, request.(ResumeOperationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeOperation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeOperationResponseObject); ok {
+		if err := validResponse.VisitResumeOperationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

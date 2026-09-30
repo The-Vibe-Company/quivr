@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
@@ -20,6 +21,11 @@ const KindProjectionRebuild = "projection_rebuild"
 // when that generation is validated and routed.
 const KindRetrievalConfiguration = "retrieval_configuration"
 
+// KindBackfill fills vector spaces of a Corpus's routed generation for the
+// Versions it already serves, through the active ingestion plugin, below live
+// ingestion (Spec 5). It never creates a Record Version.
+const KindBackfill = "backfill"
+
 // Operation states follow the public contract.
 const (
 	StateQueued    = "queued"
@@ -30,6 +36,9 @@ const (
 	// StateCanceled once no further effect can commit.
 	StateCancelRequested = "cancel_requested"
 	StateCanceled        = "canceled"
+	// StatePaused holds a backfill: it makes no progress until resumed, and
+	// keeps its checkpoint and its pinned plan.
+	StatePaused = "paused"
 )
 
 // Terminal reports whether an Operation has a final outcome.
@@ -62,7 +71,14 @@ var (
 // commandPermissions names, per controllable Operation kind, the permission of
 // the command that created it. Rerun revalidates it. Register a kind only once
 // its worker honors cancel_requested and the store can create its rerun target.
-var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write"}
+var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write", KindBackfill: BackfillPermission}
+
+// BackfillPermission is the operator permission that starts, pauses and
+// resumes backfills: the plugin registry's plugins:admin.
+const BackfillPermission = "plugins:admin"
+
+// pausable lists the kinds whose worker honors paused.
+var pausable = map[string]bool{KindBackfill: true}
 
 // Error is a bounded, terminal diagnostic recorded on the Operation.
 type Error struct {
@@ -83,10 +99,54 @@ type Operation struct {
 	Errors             []Error
 	// ResultGenerationID names the activated logical generation once succeeded.
 	ResultGenerationID string
+	// Backfill describes a backfill Operation; nil for other kinds.
+	Backfill *Backfill
+}
+
+// Backfill is what a backfill Operation fills and how far it got.
+type Backfill struct {
+	// RegistrationID is the ingestion plugin registration it runs with.
+	RegistrationID string `json:"registration_id"`
+	// Spaces are the vector space ids it fills.
+	Spaces []string `json:"spaces"`
+	// AcceptedAfter and AcceptedBefore bound, when set, the time Quivr
+	// accepted the Versions it covers: after inclusive, before exclusive.
+	AcceptedAfter  *time.Time `json:"accepted_after,omitempty"`
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+	// PlanID is the Pipeline Plan its first step was pinned to.
+	PlanID string `json:"plan_id,omitempty"`
+	// Checkpoint is the last Version id it finished, in Version id order.
+	Checkpoint string `json:"checkpoint,omitempty"`
+	// Estimate is the dry run it was accepted after.
+	Estimate BackfillEstimate `json:"estimate"`
+}
+
+// BackfillEstimate is what a backfill dry run reports before anything starts.
+type BackfillEstimate struct {
+	RegistrationID string   `json:"registration_id"`
+	Spaces         []string `json:"spaces"`
+	// Versions and Segments count the Versions in scope that miss a vector
+	// in a target space, and their segments.
+	Versions int64 `json:"versions"`
+	Segments int64 `json:"segments"`
+	// InputTokens estimates the text the plugin embeds: one token per four
+	// code points of the segments.
+	InputTokens int64 `json:"input_tokens"`
+	// EstimatedSeconds is how long the backfill should take at the
+	// deployment's pace and the recent throughput; DurationBasis names what
+	// the throughput came from.
+	EstimatedSeconds float64 `json:"estimated_seconds"`
+	DurationBasis    string  `json:"duration_basis"`
+	// EstimatedCostUSD is nil, the cost unknown, when no target space
+	// declares a price.
+	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
+	// ConfirmationRequired reports that the cost exceeds the deployment's
+	// threshold, so the backfill needs confirm_cost.
+	ConfirmationRequired bool `json:"confirmation_required"`
 }
 
 // Dispatch is committed intent to start an Operation's durable execution.
-type Dispatch struct{ Organization, OperationID string }
+type Dispatch struct{ Organization, OperationID, Kind string }
 
 type Store interface {
 	// AcceptRebuild commits a queued rebuild Operation, its target generation,
@@ -106,6 +166,12 @@ type Store interface {
 	// supersedes older pending configuration Operations, or returns the
 	// existing Operation for the same Organization + Corpus + key + request.
 	AcceptRetrievalConfiguration(ctx context.Context, org, corpusID, key string, canonical, resolved []byte) (Operation, error)
+	// PauseOperation pauses a queued or running Operation and otherwise
+	// returns it unchanged.
+	PauseOperation(ctx context.Context, org, id string) (Operation, error)
+	// ResumeOperation resumes a paused Operation and otherwise returns it
+	// unchanged.
+	ResumeOperation(ctx context.Context, org, id string) (Operation, error)
 }
 
 type Service struct{ Store Store }
@@ -195,6 +261,40 @@ func (s Service) Cancel(ctx context.Context, scope corpus.Scope, id, key string)
 		return Operation{}, err
 	}
 	return s.Store.CancelOperation(ctx, scope.Organization, id)
+}
+
+// Pause holds a pausable Operation (a backfill) until it is resumed, without
+// undoing what it committed. Like cancel, repeating it returns the current
+// state, and a terminal Operation keeps its outcome.
+func (s Service) Pause(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
+	if _, err := s.pausable(ctx, scope, id); err != nil {
+		return Operation{}, err
+	}
+	return s.Store.PauseOperation(ctx, scope.Organization, id)
+}
+
+// Resume lets a paused Operation continue from its checkpoint.
+func (s Service) Resume(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
+	if _, err := s.pausable(ctx, scope, id); err != nil {
+		return Operation{}, err
+	}
+	return s.Store.ResumeOperation(ctx, scope.Organization, id)
+}
+
+// pausable loads an Operation the caller may pause or resume: a pausable
+// kind, with the permission of the command that created it.
+func (s Service) pausable(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
+	op, err := s.controlled(ctx, scope, id)
+	if err != nil {
+		return op, err
+	}
+	if !pausable[op.Kind] {
+		return Operation{}, ErrUnsupportedKind
+	}
+	if !scope.Allows(commandPermissions[op.Kind]) {
+		return Operation{}, corpus.ErrForbidden
+	}
+	return op, nil
 }
 
 // Rerun intentionally repeats a terminal Operation under a new linked identity,

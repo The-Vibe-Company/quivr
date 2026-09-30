@@ -65,8 +65,12 @@ The single ingestion plugin (or, for the legacy E5 space generations built befor
 _Avoid_: Shared space, embedder
 
 **Served Space**:
-The vector space a deployment answers search with; each projection generation pins one when it is built.
+The vector space a deployment answers search with; each projection generation pins one when it is built, and a space promotion can switch it to another space the generation carries.
 _Avoid_: Default embedding, active model
+
+**Space Promotion**:
+An operator's switch of the served space to an evaluation space, in the registry and in every projection generation that carries it; the former served space stays for evaluation with its vectors, so promoting it again reverts.
+_Avoid_: Model switch, reindex
 
 **Evaluation Space**:
 A vector space a deployment indexes on the same segments as its served space so the two can be compared, but never uses to answer search.
@@ -161,6 +165,10 @@ _Avoid_: Processing completion, search availability
 **Operation**:
 A durable, trackable execution of a long-running administrative command such as a backfill, rebuild, cold-data restoration, or purge. Technical retries and restarts preserve its identity; rerunning a terminal operation creates a new linked operation.
 _Avoid_: Workflow, ingestion receipt
+
+**Backfill**:
+An operation that reprocesses a corpus's past record versions with the active ingestion plugin to fill vector spaces of its routed projection generation, paced below live ingestion, after a dry run of its volume, duration and cost. It never creates a record version or a content change event.
+_Avoid_: Re-ingestion, reindex
 
 **Change Event**:
 An immutable, uniquely identified public fact describing a committed domain change, ordered within its organization for clients that consume the resumable change feed.

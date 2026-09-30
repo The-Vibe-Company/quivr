@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.8.0"
+const PluginAPIVersion = "0.9.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
@@ -84,6 +84,14 @@ type Space struct {
 	Metric          string   `json:"metric"`
 	Indexes         []string `json:"indexes"`
 	QueryModalities []string `json:"query_modalities"`
+	// InputPrice is what embedding text in the space costs (Plugin API 0.9),
+	// for the estimate a backfill shows before it starts.
+	InputPrice *InputPrice `json:"input_price,omitempty"`
+}
+
+// InputPrice is the declared price of embedding text in a vector space.
+type InputPrice struct {
+	USDPerMillionTokens float64 `json:"usd_per_million_tokens"`
 }
 
 // ConnectorContribution is the connector Contribution of a manifest.

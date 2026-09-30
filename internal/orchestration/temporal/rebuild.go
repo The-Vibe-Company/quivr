@@ -98,7 +98,11 @@ func (r *Runtime) dispatchOperation(ctx context.Context) {
 		slog.Warn("operation outbox temporarily unavailable")
 		return
 	}
-	_, err = r.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: content.StableID(rebuildWorkflowName, d.Organization, d.OperationID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, rebuildWorkflowName, RebuildInput{Organization: d.Organization, OperationID: d.OperationID})
+	name, queue := rebuildWorkflowName, taskQueue
+	if d.Kind == operations.KindBackfill {
+		name, queue = backfillWorkflowName, backfillTaskQueue
+	}
+	_, err = r.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: content.StableID(name, d.Organization, d.OperationID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, name, RebuildInput{Organization: d.Organization, OperationID: d.OperationID})
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if err == nil || errors.As(err, &already) {
 		err = r.Store.OperationDispatched(ctx, d)

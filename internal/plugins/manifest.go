@@ -19,13 +19,13 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.8.0"
+const PluginAPIVersion = "0.9.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -49,6 +49,10 @@ const PushSince = "0.5.0"
 // for no space: the segments only, without vectors. The core then segments a
 // Version before, and independently of, embedding it.
 const SegmentOnlySince = "0.8.0"
+
+// InputPriceSince is the Plugin API version that lets a vector space declare
+// what embedding text in it costs (input_price), for backfill estimates.
+const InputPriceSince = "0.9.0"
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
@@ -202,6 +206,13 @@ type VectorSpace struct {
 	Indexes         []string `json:"indexes"`
 	QueryModalities []string `json:"query_modalities"`
 	Description     string   `json:"description,omitempty"`
+	// InputPrice is what embedding text in the space costs, if declared.
+	InputPrice *InputPrice `json:"input_price,omitempty"`
+}
+
+// InputPrice is the declared price of embedding text in a vector space.
+type InputPrice struct {
+	USDPerMillionTokens float64 `json:"usd_per_million_tokens"`
 }
 
 // IngestionLimits bound one segment_and_embed answer.
@@ -706,6 +717,18 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 		if minimum, admitted := admits(r, since); !admitted {
 			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: pointer,
 				Message: fmt.Sprintf("%s exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", pointer, since, r.String(), since, minimum.Major, minimum.Minor+1)})
+		}
+	}
+	ingestion, _ := contributions["ingestion"].(map[string]any)
+	spaces, _ := ingestion["spaces"].(map[string]any)
+	for _, name := range sortedKeys(spaces) {
+		space, _ := spaces[name].(map[string]any)
+		if _, priced := space["input_price"]; !priced {
+			continue
+		}
+		if minimum, admitted := admits(r, InputPriceSince); !admitted {
+			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/ingestion/spaces/" + pointerToken(name) + "/input_price",
+				Message: fmt.Sprintf("vector space %q declares input_price, which exists since Plugin API %s and the declared plugin_api range %q excludes; widen it, for example to \">=%s <%d.%d.0\"", name, InputPriceSince, r.String(), InputPriceSince, minimum.Major, minimum.Minor+1)})
 		}
 	}
 	connector, _ := contributions["connector"].(map[string]any)

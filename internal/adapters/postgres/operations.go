@@ -23,18 +23,22 @@ func operationEvent(ctx context.Context, tx pgx.Tx, org, corpusID, id, state str
 	return appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "operation.updated", Resource: "operation", ResourceID: id, MutationID: mutation})
 }
 
-const operationColumns = `id,organization,kind,corpus_id,state,coalesce(previous_operation_id,''),target_generation_id,counters,errors,coalesce(result->>'projection_generation_id','')`
+const operationColumns = `id,organization,kind,corpus_id,state,coalesce(previous_operation_id,''),target_generation_id,counters,errors,coalesce(result->>'projection_generation_id',''),
+ (SELECT to_jsonb(b) FROM backfills b WHERE b.organization=operations.organization AND b.operation_id=operations.id)`
 
 func scanOperation(row pgx.Row) (operations.Operation, error) {
 	var op operations.Operation
-	var counters, errs []byte
-	err := row.Scan(&op.ID, &op.Organization, &op.Kind, &op.CorpusID, &op.State, &op.PreviousID, &op.TargetGenerationID, &counters, &errs, &op.ResultGenerationID)
+	var counters, errs, fill []byte
+	err := row.Scan(&op.ID, &op.Organization, &op.Kind, &op.CorpusID, &op.State, &op.PreviousID, &op.TargetGenerationID, &counters, &errs, &op.ResultGenerationID, &fill)
 	if err != nil {
 		return op, notFound(err)
 	}
 	op.Counters, op.Errors = map[string]int{}, []operations.Error{}
 	if err = json.Unmarshal(counters, &op.Counters); err == nil {
 		err = json.Unmarshal(errs, &op.Errors)
+	}
+	if err == nil {
+		op.Backfill, err = backfillOf(fill)
 	}
 	return op, err
 }
@@ -202,7 +206,8 @@ func (s ContentStore) CancelOperation(ctx context.Context, org, id string) (oper
 	case operations.StateQueued:
 		// No step has begun, so no effect can be in flight.
 		next = operations.StateCanceled
-	case operations.StateRunning:
+	case operations.StateRunning, operations.StatePaused:
+		// A paused backfill may still be finishing its last Version.
 		next = operations.StateCancelRequested
 	}
 	if next != "" {
@@ -210,6 +215,12 @@ func (s ContentStore) CancelOperation(ctx context.Context, org, id string) (oper
 			return operations.Operation{}, err
 		}
 		op.State = next
+	}
+	if next == operations.StateCanceled && op.Kind == operations.KindBackfill {
+		// Pinned at acceptance, it never ran a step that would release it.
+		if _, err = tx.Exec(ctx, `DELETE FROM pipeline_plan_work WHERE kind='operation' AND organization=$1 AND work_id=$2`, org, id); err != nil {
+			return operations.Operation{}, err
+		}
 	}
 	return op, tx.Commit(ctx)
 }
@@ -277,6 +288,17 @@ func (s ContentStore) AcceptRerun(ctx context.Context, org, sourceID, key string
 	if !operations.Terminal(source.State) {
 		return operations.Operation{}, operations.ErrNotTerminal
 	}
+	if source.Kind == operations.KindBackfill && source.Backfill != nil {
+		// A backfill rerun fills the same scope and spaces from the start;
+		// the Versions already filled are no longer candidates.
+		spec := *source.Backfill
+		spec.PlanID, spec.Checkpoint = "", ""
+		op, err := insertBackfill(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), source.CorpusID, key, canonical, sourceID, spec)
+		if err != nil {
+			return op, err
+		}
+		return op, tx.Commit(ctx)
+	}
 	// A configuration rerun re-targets its source's configuration; a rebuild
 	// rerun rebuilds with whatever configuration is effective now.
 	var target *pin
@@ -300,7 +322,8 @@ func (s ContentStore) Operation(ctx context.Context, org, id string) (operations
 // ClaimOperation leases one undispatched Operation, mirroring the ingestion outbox.
 func (s ContentStore) ClaimOperation(ctx context.Context) (operations.Dispatch, error) {
 	var d operations.Dispatch
-	err := s.Pool.QueryRow(ctx, `UPDATE operation_outbox SET lease_until=now()+interval '5 seconds' WHERE (organization,operation_id)=(SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING organization,operation_id`).Scan(&d.Organization, &d.OperationID)
+	err := s.Pool.QueryRow(ctx, `UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds' WHERE (organization,operation_id)=(SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id FOR UPDATE SKIP LOCKED LIMIT 1)
+RETURNING o.organization,o.operation_id,(SELECT p.kind FROM operations p WHERE p.organization=o.organization AND p.id=o.operation_id)`).Scan(&d.Organization, &d.OperationID, &d.Kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = operations.ErrNoDispatch
 	}

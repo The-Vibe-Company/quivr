@@ -1,0 +1,563 @@
+package postgres
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/jackc/pgx/v5"
+)
+
+// backfillScopeSQL selects the current eligible Versions of Corpus $2 that
+// generation $3 projects with a plugin segmentation, accepted in the window
+// [$4, $5) when one is set, whose segments are all enriched (a vector in the
+// served space $6 or in another space than the targets $7) and one of which
+// misses a vector in a target space. A Version not yet enriched is left to
+// live enrichment, which fills the target spaces once the generation carries
+// them; a target already promoted to served still finds the Versions it
+// misses. It requires parameters $1
+// (organization) to $7 and exposes aliases r, v and pc.
+const backfillScopeSQL = `records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
+ JOIN projection_coverage pc ON pc.organization=v.organization AND pc.version_id=v.id AND pc.generation_id=$3
+ JOIN segmentations s ON s.organization=pc.organization AND s.id=pc.segmentation_id
+ LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND s.recipe LIKE 'plugin:%'
+ AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4) AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
+ AND NOT EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
+  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND (ec.space_id=$6 OR ec.space_id<>ALL($7::text[]))))
+ AND EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($7::text[]) t(space) WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
+  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=t.space))`
+
+// RegisteredSpaces lists the vector space registry.
+func (s ContentStore) RegisteredSpaces(ctx context.Context) ([]content.RegisteredSpace, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []content.RegisteredSpace{}
+	for rows.Next() {
+		var sp content.RegisteredSpace
+		if err = rows.Scan(&sp.ID, &sp.Manifest, &sp.Name, &sp.Version, &sp.OwnerPluginID, &sp.OwnerPluginVersion, &sp.Model, &sp.Dimensions, &sp.Metric, &sp.Indexes, &sp.QueryModalities, &sp.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// BackfillSize measures a backfill scope in the Corpus's routed generation.
+func (s ContentStore) BackfillSize(ctx context.Context, org string, spec operations.Backfill, corpusID string) (backfill.Size, error) {
+	var size backfill.Size
+	g, err := s.Generation(ctx, org, corpusID)
+	if err != nil {
+		return size, notFound(err)
+	}
+	if !g.SpacesProjected {
+		return size, backfill.ErrRebuildRequired
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT sg.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0) FROM segments sg
+WHERE (sg.organization,sg.version_id,sg.segmentation_id) IN (SELECT v.organization,v.id,pc.segmentation_id FROM `+backfillScopeSQL+`)`,
+		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces).Scan(&size.Versions, &size.Segments, &size.CodePoints)
+	return size, err
+}
+
+// RecordEstimate keeps a dry run under its key.
+func (s ContentStore) RecordEstimate(ctx context.Context, org, corpusID, key string, canonical []byte, e operations.BackfillEstimate) error {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `INSERT INTO backfill_estimates(organization,corpus_id,request_key,canonical_request,estimate) VALUES($1,$2,$3,$4,$5)
+ON CONFLICT(organization,corpus_id,request_key) DO UPDATE SET estimate=EXCLUDED.estimate,created_at=now() WHERE backfill_estimates.canonical_request=EXCLUDED.canonical_request`, org, corpusID, key, canonical, raw)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return operations.ErrConflict
+	}
+	return nil
+}
+
+// BackfillEstimate returns the dry run recorded under a key.
+func (s ContentStore) BackfillEstimate(ctx context.Context, org, corpusID, key string) ([]byte, operations.BackfillEstimate, error) {
+	var canonical, raw []byte
+	var e operations.BackfillEstimate
+	err := s.Pool.QueryRow(ctx, `SELECT canonical_request,estimate FROM backfill_estimates WHERE organization=$1 AND corpus_id=$2 AND request_key=$3`, org, corpusID, key).Scan(&canonical, &raw)
+	if err != nil {
+		return nil, e, notFound(err)
+	}
+	return canonical, e, json.Unmarshal(raw, &e)
+}
+
+// AcceptBackfill commits a queued backfill Operation with its spec, dispatch
+// intent and journal event. Its target generation is the Corpus's routed
+// one at acceptance; each step follows the route.
+func (s ContentStore) AcceptBackfill(ctx context.Context, org, corpusID, key string, canonical []byte, spec operations.Backfill) (operations.Operation, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return operations.Operation{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return operations.Operation{}, err
+	}
+	var id string
+	var previous []byte
+	err = tx.QueryRow(ctx, `SELECT id,canonical_request FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, operations.KindBackfill, corpusID, key).Scan(&id, &previous)
+	if err == nil {
+		if !bytes.Equal(previous, canonical) {
+			return operations.Operation{}, operations.ErrConflict
+		}
+		op, err := scanOperation(tx.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+		if err != nil {
+			return op, err
+		}
+		return op, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return operations.Operation{}, err
+	}
+	op, err := insertBackfill(ctx, tx, org, content.StableID("operation", org, operations.KindBackfill, corpusID, key), corpusID, key, canonical, "", spec)
+	if err != nil {
+		return op, err
+	}
+	return op, tx.Commit(ctx)
+}
+
+// insertBackfill commits a queued backfill Operation, optionally a rerun of
+// previous.
+func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key string, canonical []byte, previous string, spec operations.Backfill) (operations.Operation, error) {
+	// Two backfills of one Corpus would each rewrite its segments' vectors
+	// from what they read; the caller holds the journal lock.
+	var busy bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operations WHERE organization=$1 AND corpus_id=$2 AND kind=$3 AND state NOT IN ('succeeded','failed','canceled'))`, org, corpusID, operations.KindBackfill).Scan(&busy); err != nil {
+		return operations.Operation{}, err
+	}
+	if busy {
+		return operations.Operation{}, backfill.ErrInProgress
+	}
+	// The backfill is pinned to the plan active when it is accepted, which
+	// must still name its registration for ingestion: its first step then
+	// runs on that plan even if a worker has not followed it yet.
+	var plan string
+	err := tx.QueryRow(ctx, `SELECT a.plan_id FROM active_pipeline_plan a JOIN pipeline_plan_roles r ON r.plan_id=a.plan_id AND r.role='ingestion' AND r.registration_id=$1`, spec.RegistrationID).Scan(&plan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return operations.Operation{}, backfill.ErrRegistrationNotActive
+	}
+	if err != nil {
+		return operations.Operation{}, err
+	}
+	var generation string
+	if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+` FROM corpora WHERE organization=$1 AND id=$2`, org, corpusID).Scan(&generation); err != nil {
+		return operations.Operation{}, notFound(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,previous_operation_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))`, org, id, operations.KindBackfill, corpusID, key, canonical, generation, previous); err != nil {
+		return operations.Operation{}, err
+	}
+	estimate, err := json.Marshal(spec.Estimate)
+	if err != nil {
+		return operations.Operation{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO backfills(organization,operation_id,registration_id,spaces,accepted_after,accepted_before,estimate,plan_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, org, id, spec.RegistrationID, spec.Spaces, spec.AcceptedAfter, spec.AcceptedBefore, estimate, plan); err != nil {
+		return operations.Operation{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES('operation',$1,$2,$3)`, org, id, plan); err != nil {
+		return operations.Operation{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
+		return operations.Operation{}, err
+	}
+	if err = operationEvent(ctx, tx, org, corpusID, id, operations.StateQueued); err != nil {
+		return operations.Operation{}, err
+	}
+	return scanOperation(tx.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+}
+
+// BeginBackfill starts a backfill step: see backfill.RunStore.
+func (s ContentStore) BeginBackfill(ctx context.Context, org, id, plan string) (backfill.Target, error) {
+	var out backfill.Target
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return out, err
+	}
+	op, err := lockOperation(ctx, tx, org, id)
+	if err != nil {
+		return out, err
+	}
+	if op.Kind != operations.KindBackfill || op.Backfill == nil {
+		return out, operations.ErrUnsupportedKind
+	}
+	if op.State == operations.StateQueued {
+		if err = transition(ctx, tx, op, operations.StateRunning); err != nil {
+			return out, err
+		}
+		op.State = operations.StateRunning
+	}
+	out.Operation = op
+	if op.State != operations.StateRunning {
+		return out, tx.Commit(ctx)
+	}
+	if out.Generation, err = routedGeneration(ctx, tx, org, op.CorpusID); err != nil {
+		return out, err
+	}
+	if op.Backfill.PlanID == "" && plan != "" {
+		if _, err = tx.Exec(ctx, `UPDATE backfills SET plan_id=$3 WHERE organization=$1 AND operation_id=$2`, org, id, plan); err != nil {
+			return out, err
+		}
+		out.Operation.Backfill.PlanID = plan
+	}
+	return out, tx.Commit(ctx)
+}
+
+// CarryBackfillSpaces adds the target spaces to the Corpus's routed
+// generation, so live enrichment fills them for every Version it enriches
+// afterwards (a generation routed later, by a rebuild, gets them too), and
+// counts the scope the first time.
+func (s ContentStore) CarryBackfillSpaces(ctx context.Context, org, id string) (content.Generation, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return content.Generation{}, err
+	}
+	defer tx.Rollback(ctx)
+	op, err := runningBackfill(ctx, tx, org, id)
+	if err != nil {
+		return content.Generation{}, err
+	}
+	g, err := routedGeneration(ctx, tx, org, op.CorpusID)
+	if err != nil || !g.SpacesProjected {
+		return g, err
+	}
+	if g, err = carrySpaces(ctx, tx, g, op.Backfill.Spaces); err != nil {
+		return g, err
+	}
+	if _, counted := op.Counters["versions_in_scope"]; !counted {
+		var size int64
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces).Scan(&size); err != nil {
+			return g, err
+		}
+		if err = addCounters(ctx, tx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
+			return g, err
+		}
+	}
+	return g, tx.Commit(ctx)
+}
+
+// BackfillByKey returns the backfill accepted under a key, or
+// corpus.ErrNotFound.
+func (s ContentStore) BackfillByKey(ctx context.Context, org, corpusID, key string) (operations.Operation, error) {
+	return scanOperation(s.Pool.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, operations.KindBackfill, corpusID, key))
+}
+
+// routedGeneration reads the generation a Corpus is routed to inside tx.
+func routedGeneration(ctx context.Context, tx pgx.Tx, org, corpusID string) (content.Generation, error) {
+	var g content.Generation
+	var spaces []byte
+	err := tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected FROM projection_generations g WHERE g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).
+		Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected)
+	if err != nil {
+		return g, notFound(err)
+	}
+	g.Spaces, err = scanSpaces(spaces)
+	return g, err
+}
+
+// carrySpaces adds to a generation the spaces it does not carry yet, with
+// the registry's metric, after its existing ones.
+func carrySpaces(ctx context.Context, tx pgx.Tx, g content.Generation, spaces []string) (content.Generation, error) {
+	var missing []string
+	for _, id := range spaces {
+		if !g.Carries(id) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return g, nil
+	}
+	// Backfills of other Organizations may extend the same shared generation:
+	// read its spaces again under its row lock before adding any.
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT spaces FROM projection_generations WHERE id=$1 FOR UPDATE`, g.ID).Scan(&raw); err != nil {
+		return g, err
+	}
+	current, err := scanSpaces(raw)
+	if err != nil {
+		return g, err
+	}
+	g.Spaces, missing = current, missing[:0]
+	for _, id := range spaces {
+		if !g.Carries(id) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return g, nil
+	}
+	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric) ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
+WHERE id=$1 RETURNING spaces`, g.ID, missing).Scan(&raw)
+	if err != nil {
+		return g, err
+	}
+	g.Spaces, err = scanSpaces(raw)
+	return g, err
+}
+
+// addCounters adds to an Operation's counters.
+func addCounters(ctx context.Context, tx pgx.Tx, org, id string, add map[string]int64) error {
+	raw, err := json.Marshal(add)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE operations SET counters=(SELECT jsonb_object_agg(k,COALESCE((counters->>k)::bigint,0)+COALESCE((($3::jsonb)->>k)::bigint,0))
+ FROM (SELECT jsonb_object_keys(counters) k UNION SELECT jsonb_object_keys($3::jsonb)) keys),updated_at=now() WHERE organization=$1 AND id=$2`, org, id, raw)
+	return err
+}
+
+// BackfillCandidates lists the next Versions to fill after the checkpoint.
+func (s ContentStore) BackfillCandidates(ctx context.Context, org, id string, g content.Generation, limit int) ([]backfill.Candidate, error) {
+	op, err := s.Operation(ctx, org, id)
+	if err != nil {
+		return nil, err
+	}
+	if op.Backfill == nil {
+		return nil, operations.ErrUnsupportedKind
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,(SELECT s2.recipe FROM segmentations s2 WHERE s2.organization=pc.organization AND s2.id=pc.segmentation_id) FROM `+backfillScopeSQL+` AND v.id>$8 ORDER BY v.id LIMIT $9`,
+		org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.Checkpoint, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []backfill.Candidate{}
+	for rows.Next() {
+		var c backfill.Candidate
+		if err = rows.Scan(&c.RecordID, &c.VersionID, &c.Recipe); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CoveredEmbeddings lists the artifacts a generation holds for the segments
+// of seg.
+func (s ContentStore) CoveredEmbeddings(ctx context.Context, org, generationID string, seg content.Segmentation) ([]content.Embedding, error) {
+	ids := make([]string, len(seg.Segments))
+	for i, p := range seg.Segments {
+		ids[i] = p.ID
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT a.metadata FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id)
+WHERE ec.organization=$1 AND ec.generation_id=$2 AND ec.segment_id=ANY($3) ORDER BY ec.segment_id,ec.space_id`, org, generationID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []content.Embedding{}
+	for rows.Next() {
+		var raw []byte
+		var e content.Embedding
+		if err = rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(raw, &e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// runningBackfill locks a backfill Operation for an effect: shared, so a
+// pause or a cancellation, which lock it exclusively, waits for the effect
+// and every later effect sees it. It is operations.ErrNotRunning otherwise.
+func runningBackfill(ctx context.Context, tx pgx.Tx, org, id string) (operations.Operation, error) {
+	op, err := scanOperation(tx.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2 FOR SHARE`, org, id))
+	if err != nil {
+		return op, err
+	}
+	if op.State != operations.StateRunning || op.Backfill == nil {
+		return op, operations.ErrNotRunning
+	}
+	return op, nil
+}
+
+// CoverBackfill records the target vectors of one Version, with no journal
+// event, and moves the checkpoint past it.
+func (s ContentStore) CoverBackfill(ctx context.Context, org, id string, g content.Generation, versionID string, artifacts []content.Embedding) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	op, err := runningBackfill(ctx, tx, org, id)
+	if err != nil {
+		return err
+	}
+	var eligible, routed bool
+	err = tx.QueryRow(ctx, `SELECT `+eligibleVersionSQL+` AND r.corpus_id=$3 AND r.current_version_id=v.id,`+routedGenerationSQL("r.organization", "r.corpus_id")+`=$4
+FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR SHARE OF r,v`, org, versionID, op.CorpusID, g.ID).Scan(&eligible, &routed)
+	if err != nil {
+		return notFound(err)
+	}
+	if !routed {
+		// A rebuild routed another generation meanwhile: the next step fills
+		// that one.
+		return ErrGenerationChanged
+	}
+	segments := map[string]bool{}
+	if eligible {
+		for _, e := range artifacts {
+			if e.Organization != org || e.VersionID != versionID || !g.Carries(e.SpaceID) {
+				return content.ErrInvalid
+			}
+			var stored string
+			if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
+				return notFound(err)
+			}
+			if stored != e.ID {
+				return content.ErrConflict
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID); err != nil {
+				return err
+			}
+			segments[e.SegmentID] = true
+		}
+	}
+	counters := map[string]int64{"versions_done": 1, "segments": int64(len(segments))}
+	if !eligible {
+		// Withdrawn or superseded meanwhile; search no longer serves it.
+		counters = map[string]int64{"versions_skipped": 1, "skipped_" + backfill.SkipUnavailable: 1}
+	}
+	if err = advance(ctx, tx, org, id, versionID, counters); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// advance moves a backfill's checkpoint and adds to its counters.
+func advance(ctx context.Context, tx pgx.Tx, org, id, versionID string, counters map[string]int64) error {
+	if _, err := tx.Exec(ctx, `UPDATE backfills SET checkpoint=GREATEST(checkpoint,$3) WHERE organization=$1 AND operation_id=$2`, org, id, versionID); err != nil {
+		return err
+	}
+	return addCounters(ctx, tx, org, id, counters)
+}
+
+// SkipBackfill moves the checkpoint past a Version the backfill cannot fill.
+func (s ContentStore) SkipBackfill(ctx context.Context, org, id, versionID, code string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = runningBackfill(ctx, tx, org, id); err != nil {
+		return err
+	}
+	if err = advance(ctx, tx, org, id, versionID, map[string]int64{"versions_skipped": 1, "skipped_" + code: 1}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// CompleteBackfill records a backfill's success; its result names the
+// generation it filled.
+func (s ContentStore) CompleteBackfill(ctx context.Context, org, id, generationID string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return err
+	}
+	op, err := lockOperation(ctx, tx, org, id)
+	if err != nil {
+		return err
+	}
+	if op.State != operations.StateRunning {
+		return tx.Commit(ctx)
+	}
+	result, _ := json.Marshal(map[string]string{"projection_generation_id": generationID})
+	if err = s.succeed(ctx, tx, op, result); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// FailBackfill records a terminal failure of a queued or running backfill.
+func (s ContentStore) FailBackfill(ctx context.Context, org, id string, failure operations.Error) error {
+	return s.FailRebuild(ctx, org, id, failure)
+}
+
+// PauseOperation pauses a queued or running Operation.
+func (s ContentStore) PauseOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+	return s.control(ctx, org, id, map[string]string{operations.StateQueued: operations.StatePaused, operations.StateRunning: operations.StatePaused})
+}
+
+// ResumeOperation resumes a paused Operation. One that never started runs
+// its first step when the worker next reads it.
+func (s ContentStore) ResumeOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+	return s.control(ctx, org, id, map[string]string{operations.StatePaused: operations.StateRunning})
+}
+
+// control applies an operator transition under the journal lock and the
+// Operation row lock that every effect also takes; other states are
+// returned unchanged.
+func (s ContentStore) control(ctx context.Context, org, id string, next map[string]string) (operations.Operation, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return operations.Operation{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return operations.Operation{}, err
+	}
+	op, err := lockOperation(ctx, tx, org, id)
+	if err != nil {
+		return op, err
+	}
+	if state, ok := next[op.State]; ok {
+		if err = transition(ctx, tx, op, state); err != nil {
+			return operations.Operation{}, err
+		}
+		op.State = state
+	}
+	return op, tx.Commit(ctx)
+}
+
+// backfillOf decodes the backfill columns of an Operation row.
+func backfillOf(raw []byte) (*operations.Backfill, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var row struct {
+		Registration   string                      `json:"registration_id"`
+		Spaces         []string                    `json:"spaces"`
+		AcceptedAfter  *time.Time                  `json:"accepted_after"`
+		AcceptedBefore *time.Time                  `json:"accepted_before"`
+		Plan           *string                     `json:"plan_id"`
+		Checkpoint     string                      `json:"checkpoint"`
+		Estimate       operations.BackfillEstimate `json:"estimate"`
+	}
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return nil, err
+	}
+	b := &operations.Backfill{RegistrationID: row.Registration, Spaces: row.Spaces, AcceptedAfter: row.AcceptedAfter, AcceptedBefore: row.AcceptedBefore, Checkpoint: row.Checkpoint, Estimate: row.Estimate}
+	if row.Plan != nil {
+		b.PlanID = *row.Plan
+	}
+	return b, nil
+}
+
+var (
+	_ backfill.Store    = ContentStore{}
+	_ backfill.RunStore = ContentStore{}
+)

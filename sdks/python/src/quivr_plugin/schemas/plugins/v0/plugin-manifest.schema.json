@@ -478,6 +478,22 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 1024
+        },
+        "input_price": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "usd_per_million_tokens"
+          ],
+          "description": "Since Plugin API 0.9: what embedding text in this space costs, for the estimate a backfill shows before it starts. Absent, the cost of a backfill is unknown.",
+          "properties": {
+            "usd_per_million_tokens": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000,
+              "description": "US dollars per million input tokens."
+            }
+          }
         }
       }
     },
