@@ -58,6 +58,12 @@ func (s ContentStore) EnrichmentProgress(ctx context.Context, org, id, state, co
 	_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, state, code)
 	return err
 }
+func (s ContentStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
+	var timeouts int
+	err := s.Pool.QueryRow(ctx, `INSERT INTO enrichment_timeouts(organization,version_id,timeouts) VALUES($1,$2,1)
+ON CONFLICT(organization,version_id) DO UPDATE SET timeouts=enrichment_timeouts.timeouts+1,updated_at=now() RETURNING timeouts`, org, id).Scan(&timeouts)
+	return timeouts, err
+}
 func (s ContentStore) EnrichmentEligible(ctx context.Context, org, id string) (bool, error) {
 	var eligible bool
 	err := s.Pool.QueryRow(ctx, `SELECT coalesce(r.current_version_id=v.id,false) AND `+eligibleVersionSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&eligible)

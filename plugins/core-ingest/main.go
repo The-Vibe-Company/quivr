@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
 )
@@ -22,7 +23,15 @@ import (
 type configuration struct {
 	TEIURL    string          `json:"tei_url"`
 	Tokenizer TokenizerConfig `json:"tokenizer"`
+	// BatchSize is how many windows one TEI request carries; 1 when unset.
+	BatchSize int `json:"batch_size,omitempty"`
 }
+
+// CallBudget is how long one segment_and_embed call keeps starting TEI
+// requests before it answers the retryable embedding_incomplete: far within
+// the manifest's timeout_ms, so a slow TEI makes a long Version take several
+// calls instead of reaching the engine's deadline.
+const CallBudget = 30 * time.Second
 
 // backend is what one configuration needs: one tokenizer process, loaded once
 // and kept for the life of the plugin, and the TEI client.
@@ -34,6 +43,11 @@ type backend struct {
 type ingester struct {
 	mu       sync.Mutex
 	backends map[string]*backend
+	// vectors keeps the window vectors this process embedded, so a call the
+	// engine retries resumes (Encoder.Passages).
+	vectors VectorCache
+	// budget is CallBudget; tests shorten it.
+	budget time.Duration
 }
 
 func (i *ingester) backend(raw json.RawMessage) (*backend, error) {
@@ -47,7 +61,7 @@ func (i *ingester) backend(raw json.RawMessage) (*backend, error) {
 	if b, ok := i.backends[string(key)]; ok {
 		return b, nil
 	}
-	b := &backend{windows: TokenWindows{Tokenizer: &Server{Config: c.Tokenizer}}, encoder: Encoder{Endpoint: c.TEIURL}}
+	b := &backend{windows: TokenWindows{Tokenizer: &Server{Config: c.Tokenizer}}, encoder: Encoder{Endpoint: c.TEIURL, Batch: c.BatchSize}}
 	i.backends[string(key)] = b
 	return b, nil
 }
@@ -68,20 +82,33 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 	case err != nil:
 		return nil, quivrplugin.RetryableIngestError("tokenizer_unavailable", "the pinned tokenizer is unavailable")
 	}
+	var vectors [][]float32
+	if len(req.Spaces) > 0 {
+		inputs := make([]string, len(windows))
+		for n, w := range windows {
+			inputs[n] = w.Derivation.ModelInput
+		}
+		vectors, err = b.encoder.Passages(ctx, &i.vectors, inputs, i.budget)
+		var incomplete *Incomplete
+		switch {
+		case errors.As(err, &incomplete):
+			return nil, quivrplugin.RetryableIngestError("embedding_incomplete", incomplete.Error()+"; the next call resumes")
+		case errors.Is(err, errRefused):
+			return nil, quivrplugin.TerminalIngestError("inference_refused", "the embedding service refuses a window of this Version")
+		case err != nil:
+			return nil, quivrplugin.RetryableIngestError("inference_unavailable", "the embedding service is unavailable")
+		}
+	}
 	segments := make([]quivrplugin.Segment, len(windows))
 	for n, w := range windows {
 		var provenance map[string]any
 		raw, _ := json.Marshal(w.Derivation)
 		_ = json.Unmarshal(raw, &provenance)
-		vectors := map[string][]float32{}
+		spaces := map[string][]float32{}
 		for _, space := range req.Spaces {
-			vector, err := b.encoder.Embed(ctx, w.Derivation.ModelInput)
-			if err != nil {
-				return nil, quivrplugin.RetryableIngestError("inference_unavailable", "the embedding service is unavailable")
-			}
-			vectors[space] = vector
+			spaces[space] = vectors[n]
 		}
-		segments[n] = quivrplugin.Segment{PartKey: w.PartKey, Start: w.Start, End: w.End, Vectors: vectors, Provenance: provenance}
+		segments[n] = quivrplugin.Segment{PartKey: w.PartKey, Start: w.Start, End: w.End, Vectors: spaces, Provenance: provenance}
 	}
 	return segments, nil
 }
@@ -109,7 +136,7 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 func main() {
 	plugin, err := quivrplugin.New("")
 	if err == nil {
-		err = plugin.Ingestion(&ingester{backends: map[string]*backend{}})
+		err = plugin.Ingestion(&ingester{backends: map[string]*backend{}, budget: CallBudget})
 	}
 	if err == nil {
 		m := plugin.Manifest()

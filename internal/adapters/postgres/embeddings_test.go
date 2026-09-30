@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -136,5 +137,25 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	h, _, err = store.Hydrate(ctx, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
 	if err != nil || h.EmbeddingID != artifact.ID || h.SpaceID != g.SpaceID {
 		t.Fatal("unpaired provenance", h, err)
+	}
+}
+
+// Enrichment deadlines are counted per Version and survive the worker, so
+// the bound on them holds across retries and restarts.
+func TestEnrichmentTimeoutsCountPerVersion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	store := postgres.ContentStore{Pool: rebuildAdapterPool(t, ctx)}
+	org := "adapter-timeouts-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	var got []int
+	for _, version := range []string{"version_a", "version_a", "version_b", "version_a"} {
+		n, err := store.CountEnrichmentTimeout(ctx, org, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, n)
+	}
+	if want := []int{1, 2, 1, 3}; !slices.Equal(got, want) {
+		t.Fatalf("counts %v, want %v", got, want)
 	}
 }

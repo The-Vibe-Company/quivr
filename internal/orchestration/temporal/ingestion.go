@@ -88,8 +88,16 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 			}
 		}
 	}
-	return workflow.ExecuteActivity(ctx, "enrich-e5", input).Get(ctx, nil)
+	enrich := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: enrichmentActivityTimeout, HeartbeatTimeout: normalizationHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	return workflow.ExecuteActivity(enrich, "enrich-e5", input).Get(ctx, nil)
 }
+
+// enrichmentActivityTimeout bounds one enrichment attempt: the engine cap of
+// a segment_and_embed call plus storage and indexing. It was the flat 30 s of
+// the other steps, which cut any ingestion plugin declaring a longer
+// timeout_ms before its deadline (THE-810). The attempt heartbeats, so one
+// that no worker runs is retried after the heartbeat timeout.
+const enrichmentActivityTimeout = processing.SegmentAndEmbedTimeoutCap + time.Minute
 
 // Pinner pins each piece of work to the Pipeline Plan it started on (Spec 5):
 // every activity of the work, retries and restarts included, resolves its
@@ -178,7 +186,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		if err != nil {
 			return err
 		}
-		if err = service.Enrich(pinnedCtx, in.Organization, in.ReceiptID); err != nil {
+		if err = heartbeating(ctx, normalizationHeartbeatTimeout/3, func() error { return service.Enrich(pinnedCtx, in.Organization, in.ReceiptID) }); err != nil {
 			return err
 		}
 		return pins.Release(ctx, workIngestion, in.Organization, in.ReceiptID)

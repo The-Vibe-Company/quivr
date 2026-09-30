@@ -178,23 +178,40 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 		pinned.TEIURL = "http://127.0.0.1:9"
 		config, _ = json.Marshal(pinned)
 	}
-	plugin, err := quivrplugin.New("quivr-plugin.yaml")
-	if err != nil {
-		t.Fatal(err)
+	// Each pass has its own plugin process state, so the batched pass asks
+	// TEI itself instead of reusing the vectors the first pass kept.
+	newPost := func() func(route string, body map[string]any) (int, []byte) {
+		plugin, err := quivrplugin.New("quivr-plugin.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = plugin.Ingestion(&ingester{backends: map[string]*backend{}, budget: CallBudget}); err != nil {
+			t.Fatal(err)
+		}
+		handler, err := plugin.Handler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return func(route string, body map[string]any) (int, []byte) {
+			b, _ := json.Marshal(body)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, route, bytes.NewReader(b)))
+			return rec.Code, rec.Body.Bytes()
+		}
 	}
-	impl := &ingester{backends: map[string]*backend{}}
-	if err = plugin.Ingestion(impl); err != nil {
-		t.Fatal(err)
+	post := newPost()
+	// Batched TEI requests must answer the same vectors as one-input requests.
+	type pass struct {
+		spaces []string
+		config json.RawMessage
+		post   func(string, map[string]any) (int, []byte)
 	}
-	handler, err := plugin.Handler()
-	if err != nil {
-		t.Fatal(err)
-	}
-	post := func(route string, body map[string]any) (int, []byte) {
-		b, _ := json.Marshal(body)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, route, bytes.NewReader(b)))
-		return rec.Code, rec.Body.Bytes()
+	passes := []pass{{[]string{}, config, post}}
+	if vectors {
+		batched := pinned
+		batched.BatchSize = 8
+		batchedConfig, _ := json.Marshal(batched)
+		passes = append(passes, pass{[]string{space}, config, post}, pass{[]string{space}, batchedConfig, newPost()})
 	}
 	var input struct {
 		Documents []struct {
@@ -224,14 +241,11 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 		for _, p := range d.Parts {
 			parts = append(parts, map[string]any{"key": p.Key, "role": p.Role, "text": p.Text.value})
 		}
-		spaces := [][]string{{}}
-		if vectors {
-			spaces = append(spaces, []string{space})
-		}
-		for _, requested := range spaces {
-			status, body := post("/v0/contributions/ingestion/segment_and_embed", map[string]any{
+		for _, run := range passes {
+			requested := run.spaces
+			status, body := run.post("/v0/contributions/ingestion/segment_and_embed", map[string]any{
 				"invocation_id": "parity-" + d.ID, "idempotency_key": "parity:" + d.ID, "contribution": "ingestion", "organization_id": "org-parity",
-				"configuration": json.RawMessage(config), "version": map[string]string{"corpus_id": "c", "record_id": "r", "record_version_id": "v-" + d.ID},
+				"configuration": run.config, "version": map[string]string{"corpus_id": "c", "record_id": "r", "record_version_id": "v-" + d.ID},
 				"parts": parts, "spaces": requested})
 			if g.Refused {
 				var e struct{ Code string }

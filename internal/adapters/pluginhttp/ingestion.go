@@ -143,13 +143,16 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	}
 	view := plugins.IngestionRequestView{Parts: parts, Spaces: ids}
 	m := &i.Pin.Manifest
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().TimeoutMS)*time.Millisecond)
+	callCtx, cancel := context.WithTimeout(ctx, min(time.Duration(i.contribution().TimeoutMS)*time.Millisecond, processing.SegmentAndEmbedTimeoutCap))
 	defer cancel()
 	started := time.Now()
 	result, err := devhost.InvokeSegmentAndEmbed(callCtx, i.Pin.Endpoint, body, plugins.IngestionMaxResponseBytes(m), func(b []byte) []plugins.Issue {
 		return plugins.CheckSegmentAndEmbedOutput(b, view, m)
 	})
 	observe(i.Pin, org, OpSegmentAndEmbed, started, result, err)
+	if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("%w: %w: %v", ErrUnavailable, processing.ErrPluginDeadline, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

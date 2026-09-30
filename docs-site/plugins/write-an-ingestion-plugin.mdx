@@ -64,6 +64,8 @@ Replace `hashWords` with a call to your model. Both methods must be deterministi
 
 Return `quivrplugin.RetryableIngestError` when your model is unavailable: the Version waits and is retried. Return `TerminalIngestError` for content you can never handle: the Version is blocked with `ingestion_refused`.
 
+A call that runs past `timeout_ms` (at most 5 minutes) is cancelled and retried, and after three such calls the Version's enrichment stops. If your model is slow on long Versions, keep the vectors you already computed and return a retryable error before the deadline: the next call resumes instead of starting over.
+
 </Step>
 <Step title="Certify it">
 
@@ -117,5 +119,6 @@ The response lists the Corpus's spaces with their owner, their role (`served` or
 | --- | --- |
 | New Versions wait, semantic search answers 503 | The plugin is down or returns a retryable error. Keyword search keeps working. |
 | A Version is blocked with `ingestion_refused` | The plugin returned a terminal error, or segments and vectors the checks refuse (offsets out of range, wrong dimensions, too many segments). |
-| Enrichment is blocked with `derivation_conflict` | The segments returned with vectors differ from those first returned alone. |
+| Enrichment is blocked with `derivation_conflict` | The segments returned with vectors differ from those first returned alone, or the plugin answered the request for vectors with a terminal error. |
+| Enrichment is blocked with `enrichment_timeout` | Three calls for the Version ran past `timeout_ms`. The Version stays searchable by keyword. |
 | Searches fail with `422 query_too_long` | `embed_query` refused the query with the code `query_too_long`; its message, such as `query exceeds 256 tokens`, is returned to the client. |

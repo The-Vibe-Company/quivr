@@ -19,9 +19,10 @@ contributions:
         metric: cosine
         indexes: [text]
         query_modalities: [text]
-    # One TEI request per segment, as before: a Version of 256 windows stays
-    # within the worker's 30 s activity.
-    timeout_ms: 25000
+    # A call stops starting TEI requests after 30 s and answers the retryable
+    # embedding_incomplete; it keeps what it embedded, so the next call
+    # resumes. This deadline leaves room for the last request of a call.
+    timeout_ms: 120000
     query_timeout_ms: 5000
     limits:
       max_segments: 256
@@ -48,5 +49,11 @@ configuration:
           model:
             type: string
             description: Path of the pinned tokenizer.json.
+      batch_size:
+        type: integer
+        minimum: 1
+        maximum: 32
+        default: 1
+        description: Windows per TEI request, within TEI's max_client_batch_size. Above 1, searches wait longer for TEI while long Versions are embedded.
 run:
   command: [go, run, .]

@@ -15,13 +15,14 @@ one unless another ingestion plugin is pinned (`scripts/connector_plugin.py`
   `profile.json`. A request with no space answers the segments alone (Plugin
   API 0.8), which is how a Version becomes searchable by keyword while the
   embedding service is down.
-- **Embeds.** One vector per window in space `core.ingest.e5-small@1` (384
-  dimensions, cosine): `passage: <title, at most 64 tokens>\n\n<window>`, one
-  request per window to the deployment's TEI. `embed_query` encodes
-  `query: <query>` and refuses a query over 256 tokens.
+- **Embeds** each window as `passage: <title, at most 64 tokens>\n\n<window>`
+  through the deployment's TEI (`core.ingest.e5-small@1`, 384 dims, cosine). A
+  call stops after 30 s with the retryable `embedding_incomplete`, keeping its
+  vectors for the next one. `embed_query` encodes `query: <at most 256 tokens>`.
 - **Refuses** (`segmentation_limit`, the Version is blocked as
   `ingestion_refused`) text over 256 KiB, more than 64 Parts or 256 windows, a
-  window over 4,096 code points or a model input over 512 tokens.
+  window over 4,096 code points or a model input over 512 tokens. A window TEI
+  refuses (`inference_refused`) blocks enrichment: keyword search only.
 - **Provenance.** Each segment records its token range, overlap, hard cuts,
   title and model-input token counts and the SHA-256 of its model input.
 
@@ -37,16 +38,18 @@ plugin process, loaded once (`tokenizer.py`).
                "model": "/app/.scratch/tokenizer/tokenizer.json"}}
 ```
 
+Optional `batch_size` (1 to 32, default 1): windows per TEI request. Same
+vectors, but a search waits behind bigger requests.
+
 ## Parity and certification
 
 `testdata/golden.json` holds what the engine produced before the move, for
 `testdata/parity-input.json`: segments, offsets, derivations, refusals and the
 SHA-256 of every float32 vector. `parity_test.go` holds the plugin to it bit
-for bit. TEI's CPU kernels round differently across processor families, so on
-another processor than the capture's the vectors are compared with the engine's
-former TEI request, sent to the same TEI in the same run. It needs TEI and the tokenizer, so the verify stack runs it and
-certifies the plugin with `quivr plugin test` (`scripts/core_ingest_plugin.py`);
-`make check` only vets and unit-tests it.
+for bit, with one window per TEI request and with 8. On another processor
+family than the capture's, where TEI rounds differently, it compares with the
+engine's former request to the same TEI. The verify stack runs it and certifies
+the plugin (`scripts/core_ingest_plugin.py`); `make check` only unit-tests it.
 
 ## Moving an existing deployment
 

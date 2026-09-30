@@ -38,6 +38,19 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", reason.Code)
 		}
 	}
+	if errors.Is(err, ErrPluginDeadline) {
+		// The plugin is reachable but never finishes this Version: stop after
+		// a bounded number of deadlines; the Version stays searchable by keyword.
+		timeouts, countErr := s.Content.CountEnrichmentTimeout(ctx, org, v.ID)
+		if countErr != nil {
+			return countErr
+		}
+		if timeouts >= EnrichmentTimeoutBudget {
+			slog.Warn("enrichment stops after repeated plugin deadlines", "component", "worker", "version_id", v.ID, "timeouts", timeouts, "error", err.Error())
+			s.outcome(org, "enrichment", "blocked", receiptID, v, started, content.CodeEnrichmentTimeout)
+			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", content.CodeEnrichmentTimeout)
+		}
+	}
 	if err != nil {
 		state, code := "retrying", "enrichment_unavailable"
 		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrIngestionRefused) {
@@ -45,6 +58,9 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 			// Name why: a plugin whose segments with vectors differ from the
 			// segments it returned alone at baseline, or another refusal.
 			slog.Warn("enrichment blocked", "component", "worker", "version_id", v.ID, "error", err.Error())
+		} else {
+			// Name what is retried: a deadline, an outage, a plugin error.
+			slog.Warn("enrichment retrying", "component", "worker", "version_id", v.ID, "error", err.Error())
 		}
 		s.outcome(org, "enrichment", state, receiptID, v, started, code)
 		_ = s.Content.EnrichmentProgress(ctx, org, v.ID, state, code)

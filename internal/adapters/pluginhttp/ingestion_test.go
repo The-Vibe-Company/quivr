@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
@@ -180,5 +182,36 @@ func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	reason, err := ingestor.Gone(work, err)
 	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPlanStopped || reason.Plan != "plan_b" || reason.PluginVersion != "0.1.0" || attempts != 0 {
 		t.Fatalf("the stopped work: %+v (%v), %d attempts; want pinned_plan_stopped naming plan_b at once", reason, err, attempts)
+	}
+}
+
+// A segment_and_embed call that reaches the plugin's deadline is told apart
+// from an outage: enrichment counts deadlines toward a bound, never outages.
+func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
+	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // the server notices the caller leave once the body is read
+		<-r.Context().Done()
+	}))
+	defer hang.Close()
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
+	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	version := content.Version{ID: "version", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "text"}}}}}
+	for _, c := range []struct {
+		name, endpoint string
+		deadline       bool
+	}{{"hanging plugin", hang.URL, true}, {"plugin down", down.URL, false}} {
+		pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: c.endpoint})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin.Manifest.Contributions.Ingestion.TimeoutMS = 50
+		_, err = pluginhttp.Ingestor{Pin: pin}.SegmentAndEmbed(context.Background(), "org", "corpus", version, []string{plugins.SpaceKey("acme.embedder.small", "1")})
+		if !errors.Is(err, pluginhttp.ErrUnavailable) || errors.Is(err, processing.ErrPluginDeadline) != c.deadline {
+			t.Errorf("%s: %v; want unavailability, a deadline: %v", c.name, err, c.deadline)
+		}
 	}
 }

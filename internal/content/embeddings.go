@@ -63,6 +63,9 @@ type EmbeddingRepository interface {
 	Embedding(context.Context, string, string) (Embedding, error)
 	SaveEmbedding(context.Context, Embedding, VectorSpace) error
 	EnrichmentProgress(context.Context, string, string, string, string) error
+	// CountEnrichmentTimeout records that an enrichment call for a Version
+	// ended at the plugin's deadline and returns how many have.
+	CountEnrichmentTimeout(ctx context.Context, org, versionID string) (int, error)
 	CommitEnrichment(context.Context, string, Segmentation, Generation, []Embedding) error
 	// EnrichmentEligible reports whether a Version is its Record's current,
 	// eligible Version, the only kind search can serve.
@@ -199,14 +202,27 @@ type EmbeddingData struct {
 	Vector   []float32
 }
 
+// CodeEnrichmentTimeout is the diagnostic of a Version whose enrichment
+// stopped because the ingestion plugin reached its deadline too many times.
+const CodeEnrichmentTimeout = "enrichment_timeout"
+
 func (s Service) EnrichmentProgress(ctx context.Context, org, versionID, state, code string) error {
 	if org == "" || versionID == "" {
 		return ErrInvalid
 	}
-	if (state != "running" || code != "") && (state != "retrying" || code != "enrichment_unavailable") && (state != "blocked" || code != "derivation_conflict") {
+	if (state != "running" || code != "") && (state != "retrying" || code != "enrichment_unavailable") && (state != "blocked" || (code != "derivation_conflict" && code != CodeEnrichmentTimeout)) {
 		return ErrInvalid
 	}
 	return s.Embeddings.EnrichmentProgress(ctx, org, versionID, state, code)
+}
+
+// CountEnrichmentTimeout records an enrichment call for a Version that ended
+// at the plugin's deadline and returns how many have.
+func (s Service) CountEnrichmentTimeout(ctx context.Context, org, versionID string) (int, error) {
+	if org == "" || versionID == "" {
+		return 0, ErrInvalid
+	}
+	return s.Embeddings.CountEnrichmentTimeout(ctx, org, versionID)
 }
 
 // CommitEnrichment records the vectors attached to a generation: every

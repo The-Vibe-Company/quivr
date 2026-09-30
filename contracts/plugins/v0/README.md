@@ -569,9 +569,13 @@ within `query_timeout_ms`, which a search waits for.
 
 **Errors.** Unavailability or a `retryable: true` envelope delays the Version,
 retried with backoff; a terminal envelope, or an answer the checks below
-refuse, blocks it as `ingestion_refused`. For `embed_query`, a terminal
-envelope refuses the search (422) and anything else makes it unavailable
-(503). A query longer than the space accepts is refused with code
+refuse, blocks it as `ingestion_refused` (at enrichment, `derivation_conflict`:
+the Version keeps its keyword search). The core caps `timeout_ms` at 5
+minutes. A call that reaches it counts; after 3 for one Version, enrichment
+stops as `enrichment_timeout`. A plugin with long work answers a retryable
+error before its deadline and resumes on the next call, keeping what it
+computed. For `embed_query`, a terminal envelope refuses the search (422) and
+anything else makes it unavailable (503). A query longer than the space accepts is refused with code
 `query_too_long` and a message naming the limit, such as `query exceeds 256
 tokens`: the search fails with `422 query_too_long` and that message (at most
 256 code points). Any other terminal code is `422 unsupported_search`.
