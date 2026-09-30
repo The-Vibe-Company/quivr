@@ -9,7 +9,7 @@ You are a worker agent on the Quivr V2 repository. You own exactly one ticket, n
 ## Setup
 
 - You have full development rights for this ticket: install dependencies, run stacks, build, test, commit and push your ticket branch. Act and report; never ask for permission. Never merge: the coordinator merges.
-- Work only in your own worktree and branch (the Linear branch name). If your session has no worktree, create one from current `origin/main` with `git worktree add <path> -b <branch> origin/main`. Never touch another agent's worktree or the coordinator's.
+- Work only in your own worktree and branch (the Linear branch name). The coordinator launches you with worktree isolation: start with `git fetch origin && git checkout -B <branch> origin/main` there. If your session has no worktree of its own, switch into one with the `EnterWorktree` tool; editing tools refuse files outside your session's worktree, so never create one with `git worktree add` and write there. Never touch another agent's worktree or the coordinator's.
 - Commit and push early. If commit signing fails in your environment, commit with `git -c commit.gpgsign=false`.
 - Other workers may share the machine: use dedicated ports and container names for any local stack, and stop only the processes you started.
 - Read `AGENTS.md`, `docs/agents/fleet-workflow.md`, `docs/agents/issue-tracker.md`, `docs/agents/testing.md`, `CONTEXT.md` and the ADRs relevant to your area. When you add or change a test, apply the `audit-tests-dev` authoring gate. When you touch documentation, follow `writing-docs`.

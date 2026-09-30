@@ -33,6 +33,13 @@ The reader is a developer with a task and little time. Write the way a senior en
 - Show the output the reader should see, so they know it worked.
 - One example that teaches beats three that repeat.
 
+## Runnable examples
+
+- Mark each API request with `{/* runnable */}` on the line before its fence; `make verify` replays it against the local stack in page order.
+- Use the variables the dev stack exports (`eval "$(make -s env)"`): `QUIVR_API_URL`, `QUIVR_API_KEY`, and the ones a page defines itself. Carry an identifier forward with `export X=<the x above>` and say where it comes from.
+- Send JSON bodies with a heredoc, and pipe responses through `jq` so the printed output matches the page exactly.
+- Every verify command exits 0 under `pipefail`: no `| head`, and no bare command that prints usage and exits 2.
+
 ## Mintlify components
 
 Use a component when it changes how the reader moves through the page:
@@ -44,6 +51,12 @@ Use a component when it changes how the reader moves through the page:
 - Mermaid for one diagram per concept page, with five to eight boxes.
 
 Plain Markdown is the default; a page with no component is fine.
+
+Mintlify traps:
+
+- Any word after the fence language becomes the block's title. Title partial code `file.py (excerpt)`, never a bare path.
+- `<Step>` titles create no anchors, so `mint broken-links --check-anchors` fails on links to them; link to a heading instead.
+- Troubleshooting, lifecycle actions and option lists read better as tables than as bullets with bold lead-ins.
 
 ## Final pass
 

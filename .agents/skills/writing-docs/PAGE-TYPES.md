@@ -10,6 +10,7 @@ A lesson. The reader learns by building something that works, following you step
 ---
 title: <outcome in the reader's words>
 description: <what they will have built, in one sentence>
+keywords: [<3 to 5 search terms>]
 ---
 <one paragraph: what you will build, how long it takes, what you need>
 
@@ -28,13 +29,14 @@ A recipe for a reader who knows what they want. Example: "Connect an RSS feed", 
 ---
 title: <task as a verb phrase>
 description: <when you need this>
+keywords: [<3 to 5 search terms>]
 ---
 <one sentence: the goal and the result>
 
 ## Prerequisites         only what this task needs
 ## Steps                 numbered, minimal, with the command or request for each
 ## Check it worked       the observable result
-## Troubleshooting       optional: symptom → cause → fix, for failures readers actually hit
+## Troubleshooting       optional: a table symptom | cause | fix, for failures readers actually hit
 ```
 
 Rules: start from the reader's goal, not from the feature; link to reference for every field instead of explaining them all.
@@ -47,6 +49,7 @@ Exact facts, looked up, never read top to bottom. Example: "Plugin contract", "C
 ---
 title: <thing described>
 description: <what it lists>
+keywords: [<3 to 5 search terms>]
 ---
 <one sentence: what this reference covers and its source of truth>
 
@@ -65,6 +68,7 @@ Understanding: why it works this way and how the parts fit. Example: "How plugin
 ---
 title: <topic>
 description: <the question this page answers>
+keywords: [<3 to 5 search terms>]
 ---
 <the answer in two sentences>
 <one diagram>
@@ -85,5 +89,5 @@ The "Plugin types" overview and each type's how-to share one shape, so a reader 
 | When Quivr calls it | the moment in the flow (on ingestion, on search, on a schedule, on a Change) |
 | Operations | the contract operations with a one-line purpose each, linked to the reference |
 | Minimal example | the smallest working manifest and handler, run with `quivr plugin test` |
-| Pin it | the `QUIVR_CONFIG` snippet that makes Quivr use it |
+| Pin it | the `QUIVR_CONFIG` snippet that makes Quivr use it, and how to switch to it at runtime; say which types `make dev` can pin for an author today |
 | First-party examples | the plugins in `plugins/` of this type |
