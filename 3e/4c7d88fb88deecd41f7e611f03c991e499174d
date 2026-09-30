@@ -1,0 +1,23 @@
+internal/processing/parity_capture_test.go
+  s_54b80c92daa9cb::t_55636f55ce4a1c 1-175
+plugins/core-ingest/testdata/parity-input.json
+  s_54b80c92daa9cb::t_7ba5efccb594a3 1-1376
+scripts/local.py
+  s_54b80c92daa9cb::t_a01c1d1f605eba 417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3e4c7d88fb88deecd41f7e611f03c991e499174d",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
