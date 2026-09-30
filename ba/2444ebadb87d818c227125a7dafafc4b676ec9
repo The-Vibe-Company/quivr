@@ -21,6 +21,7 @@ internal/adapters/pluginhttp/ingestion.go
   s_54b80c92daa9cb::t_451e1455e964e3 193-198,203,207
 contracts/plugins/v0/README.md
   s_54b80c92daa9cb::t_6b4e87b5476631 572-573
+  s_54b80c92daa9cb::t_5e18f17a30e2af 574
 plugins/core-ingest/tokenizer.go
   s_54b80c92daa9cb::t_20b6588f27191b 221,228,235
 tests/acceptance/embedding_test.go
@@ -33,9 +34,12 @@ plugins/core-ingest/tokenizer_test.go
   s_54b80c92daa9cb::t_f476fc22dc774a 6,154-155
 plugins/core-ingest/README.md
   s_54b80c92daa9cb::t_02f35283fe01b3 20-23
+  s_54b80c92daa9cb::t_fcbd958e083c0c 24-25
+  s_54b80c92daa9cb::t_4df8093124eb83 12-15
 plugins/core-ingest/windows.go
   s_54b80c92daa9cb::t_45c4e9fcd2307c 69,72-78,372-374,399,409-410,414,425
   s_54b80c92daa9cb::t_7e696de42f3fac 10,52,56-57,59-68,70-71,159,166,171,178-179,183-189,201,219,242-243,259,263-277,279,293,302,308
+  s_54b80c92daa9cb::t_55c719a6a8f25d 53-55,58
 tests/acceptance/manifest_test.go
   s_54b80c92daa9cb::t_78a516010ce497 8
   s_54b80c92daa9cb::t_fa9b209a2d34b9 46-79
