@@ -14,7 +14,10 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,6 +244,34 @@ func TestErrorsNeverCarryTheSecretOrToken(t *testing.T) {
 	_, err := fetch(t, g, g.connector(), nil)
 	if strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "token-") {
 		t.Fatalf("error leaks a secret: %v", err)
+	}
+}
+
+// The bearer token only goes to the configured Graph endpoint: a stored
+// checkpoint link or an attachment listing's next page on another host is
+// never followed, and collection carries on within Graph.
+func TestLinksOutsideTheGraphEndpointAreNeverFollowed(t *testing.T) {
+	var mu sync.Mutex
+	var foreign []string
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		foreign = append(foreign, r.URL.String()+" with "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}, "@odata.deltaLink": "http://" + r.Host + "/v1.0/done"})
+	}))
+	t.Cleanup(elsewhere.Close)
+	g := newFakeGraph(t)
+	g.addMessage("m1", "2026-09-28T10:00:00Z", fileAttachment("a1", "r.pdf", "application/pdf", "%PDF", 0))
+	g.attachmentsNext = elsewhere.URL + "/v1.0/users/monitoring@example.org/messages/m1/attachments?$skiptoken=1"
+	stored := json.RawMessage(`{"since":"2026-09-28T09:00:00Z","link":"` + elsewhere.URL + `/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?$deltatoken=0"}`)
+	page, err := fetch(t, g, g.connector(), stored)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(foreign) != 0 {
+		t.Fatalf("requests sent to another host: %v", foreign)
+	}
+	if err != nil || len(page.Items) != 1 || len(page.Items[0].Attachments) != 2 {
+		t.Fatalf("collection within Graph: page %+v err %v", page, err)
 	}
 }
 

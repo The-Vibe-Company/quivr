@@ -35,6 +35,8 @@ type fakeGraph struct {
 	fail      map[string][]failure
 	pageSize  int
 	expireTok bool // next delta with a delta token fails with syncStateNotFound
+	// attachmentsNext is the @odata.nextLink of every attachment listing.
+	attachmentsNext string
 }
 
 type failure struct {
@@ -166,7 +168,11 @@ func (g *fakeGraph) serve(w http.ResponseWriter, r *http.Request) {
 		for _, a := range files {
 			list = append(list, a.meta)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"value": list})
+		out := map[string]any{"value": list}
+		if g.attachmentsNext != "" {
+			out["@odata.nextLink"] = g.attachmentsNext
+		}
+		_ = json.NewEncoder(w).Encode(out)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
