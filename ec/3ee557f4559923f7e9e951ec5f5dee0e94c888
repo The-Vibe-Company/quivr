@@ -1,0 +1,55 @@
+scripts/prepare_tokenizer.py
+  s_54b80c92daa9cb::t_852b3a54c8a961 13
+  s_54b80c92daa9cb::t_8bd5b81809a835 6-12,14,17,24
+  s_54b80c92daa9cb::t_5e75ec948d02c5 20-21
+README.md
+  s_54b80c92daa9cb::t_c098e508f1685a 62,75-76
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_c098e508f1685a 48
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_c098e508f1685a 24-27
+docs-site/plugins/first-plugin.mdx
+  s_54b80c92daa9cb::t_c098e508f1685a 11
+third_party/tokenizer/NOTICE.md
+  s_54b80c92daa9cb::t_c098e508f1685a 8-10
+scripts/test_local.py
+  s_54b80c92daa9cb::t_58630a0f43e737 7,11,111-137
+  s_54b80c92daa9cb::t_1efe44e35feb1f 138-139
+third_party/README.md
+  s_54b80c92daa9cb::t_c098e508f1685a 11,27-30
+docs-site/quickstart.mdx
+  s_54b80c92daa9cb::t_1114a5e946caa9 20
+  s_54b80c92daa9cb::t_c098e508f1685a 11,15
+scripts/inventory.py
+  s_54b80c92daa9cb::t_c098e508f1685a 15
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_b9a18080b6f17d 41-48
+  s_54b80c92daa9cb::t_b3142d6f9408da 301-302
+  s_54b80c92daa9cb::t_1114a5e946caa9 33
+scripts/prepare_embeddings.py
+  s_54b80c92daa9cb::t_8bd5b81809a835 3-4,11
+deploy/compose/compose.macos.yaml
+  s_54b80c92daa9cb::t_6db8132d935eb1 1-13
+third_party/tokenizer/requirements-macos-arm64.txt
+  s_54b80c92daa9cb::t_8bd5b81809a835 1-2
+scripts/local.py
+  s_54b80c92daa9cb::t_dd209c07577fef 2
+  s_54b80c92daa9cb::t_6db8132d935eb1 22-28,31,96-97,105-108,241
+  s_54b80c92daa9cb::t_3da69439bdd5a3 3,703-706,708
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ec3ee557f4559923f7e9e951ec5f5dee0e94c888",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
