@@ -80,7 +80,7 @@ class BaseRef(unittest.TestCase):
         (self.root / 'migrations').mkdir()
         (self.root / 'migrations' / '001_a.sql').write_text('SELECT 1;\n')
         git(self.root, 'add', '.')
-        git(self.root, 'commit', '-q', '-m', 'base')
+        git(self.root, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'base')
 
     def tearDown(self):
         self.tmp.cleanup()
