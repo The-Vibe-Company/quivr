@@ -1,0 +1,32 @@
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_bba12e3a41e056 178-179
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_614ad13917c889 258-264,266,271,274,276,283-286,292-313
+  s_54b80c92daa9cb::t_09aa4268545aff 225,235-236
+  s_54b80c92daa9cb::t_ef0ef574802280 314-315
+internal/content/searchable_test.go
+  s_54b80c92daa9cb::t_01c63f528e97bf 1-11,15-25,27-29,31-55,57-59,66-70
+  s_54b80c92daa9cb::t_0a2972ca203af4 61-64
+  s_54b80c92daa9cb::t_91bf15e259f4a4 30
+  s_54b80c92daa9cb::t_276224b33a0a5f 26,56,60,65
+  s_54b80c92daa9cb::t_531f9f474b7515 12-14
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_1073a2e2592b34 276-278
+  s_54b80c92daa9cb::t_067c2c325107d3 357-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a8916373ddbda72e7b35f724b304c5e31ec373de",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
