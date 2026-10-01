@@ -14,6 +14,7 @@ python3 -m pip install -r scripts/eval/requirements.txt
 make eval                                   # every public set, on an isolated local stack
 make eval args='--sets scifact'             # one set
 make eval args='--baseline <report.json>'   # also compare with an earlier run, query by query
+make eval args='--sets miracl-fr --compare-to main'  # also measure main, on this machine
 ```
 
 The local stack needs Linux x86_64, like `make measure`; it runs the engine with only its
@@ -86,10 +87,19 @@ licence on its ticket.
   second pass timed only, limit 10. Encoding share is the part of the engine's time spent
   encoding queries: the most a query-vector cache could save.
 
+## Compare speed before and after a change
+
+Latency differs between runners, even with the same CPU model, by more than most changes.
+`--compare-to <ref>` (a branch, tag or full commit SHA) checks it out in a worktree and starts
+a second local stack from it in the same run; each set is ingested into both, and each query
+is searched on both, alternating which goes first. The report opens with base, branch and
+Δ p50 and p95 per system, under the CPU model, and compares scores with the base query by
+query. Ingestion takes twice as long, so one set is usually enough.
+
 ## The lane
 
 The `Search quality` workflow (`.github/workflows/measure-search.yml`) runs nightly and on
 demand, never on pull requests: `gh workflow run measure-search.yml --ref <branch>`,
-optionally with `-f baseline_run_id=<run>`. By default it compares with the latest successful
-run on `main`. Its artifact `search-quality` holds `report.md`, `report.json` and the stack
-logs, and the report is on the run page.
+optionally with `-f baseline_run_id=<run>`; by default it compares with the latest successful
+run on `main`. `-f compare_to=main -f sets=miracl-fr` compares in one job instead. Its artifact
+`search-quality` holds `report.md`, `report.json` and the stack logs; the report is on the run page.

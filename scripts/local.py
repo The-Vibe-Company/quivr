@@ -17,7 +17,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
 
 def run(args, **kwargs):
-    return subprocess.run(args, check=True, cwd=ROOT, **kwargs)
+    return subprocess.run(args, **{'check':True,'cwd':ROOT,**kwargs})
 
 # macOS has no /proc: process checks ask ps, and TEI is reached on a published loopback port (THE-808).
 MACOS=sys.platform=='darwin'
@@ -72,8 +72,11 @@ def docker_disk():
     return root,round(100*(disk.f_blocks-disk.f_bfree)/disk.f_blocks,1)
 
 class Stack:
-    def __init__(self, name):
+    def __init__(self, name, source=ROOT):
         self.name=name
+        # The source tree its engine, core plugins and dependencies come from: another checkout
+        # when make eval compares two revisions (THE-874).
+        self.source=pathlib.Path(source)
         # Verification refuses a nearly full disk; a dev stack only warns (THE-758).
         self.verifying=False
         self.directory=ROOT/'.scratch'/name
@@ -98,7 +101,7 @@ class Stack:
     def save(self):
         self.statefile.write_text(json.dumps(self.state));self.statefile.chmod(0o600)
     def compose(self,*args,**kwargs):
-        files=['-f','deploy/compose/compose.yaml']+(['-f','deploy/compose/compose.macos.yaml'] if MACOS else [])
+        files=['-f',str(self.source/'deploy/compose/compose.yaml')]+(['-f',str(self.source/'deploy/compose/compose.macos.yaml')] if MACOS else [])
         return run(['docker','compose','-p',self.name,*files,*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory),'QUIVR_MODEL_ROOT':str(MODEL)},**kwargs)
     def config(self):
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()
@@ -296,7 +299,7 @@ class Stack:
         self.stop_processes()
         prepare_tokenizer()
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
-        run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'])
+        run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'],cwd=self.source)
         self.start_dependencies()
         normalizer_plugin.prepare(self);subscription_plugin.prepare(self)
         self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);connector_plugin.start_first_party(self);self.start_processes()

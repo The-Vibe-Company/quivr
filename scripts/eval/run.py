@@ -8,6 +8,8 @@ rankings (scoring.py). Writes report.json and report.md; see docs/agents/evaluat
 
 By default it starts an isolated local stack (Linux x86_64 only, like make measure). With
 --api-url it measures an existing installation instead, using the key in QUIVR_EVAL_API_KEY.
+With --compare-to <ref> it also starts a stack built from that revision, in the same process
+and on the same CPU, and searches the two stacks alternately to compare their latency (THE-874).
 Harness and dependency errors exit nonzero; scores are findings, never a pass/fail threshold.
 """
 import argparse
@@ -189,52 +191,59 @@ def time_summary(timings, failures):
     return out
 
 
-def measure_set(client, name, directory, run_id, options):
+def measure_set(clients, name, directory, run_id, options):
+    """One result per client, in order. With two clients (--compare-to) each query is searched on
+    both, alternating which goes first, so drift on the machine weighs on both sides alike."""
     import scoring
     data = trec.load(directory)
     manifest_path = pathlib.Path(directory) / 'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'name': name, 'fingerprint': trec.fingerprint(directory)}
     namespace = f'eval-{name}'
-    _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
-    corpus = created['corpus_id']
-    print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
-    records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
-    advertised = advertised_profiles(client)
-    served, refused = serving_profiles(client, corpus, advertised)
-    out = {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
-           'dropped_queries': len(data['dropped_queries']), 'ingestion': ingestion,
-           'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}
+    sides = []
+    for client in clients:
+        _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
+        corpus = created['corpus_id']
+        print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
+        records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
+        advertised = advertised_profiles(client)
+        served, refused = serving_profiles(client, corpus, advertised)
+        sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
+                      'out': {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
+                              'dropped_queries': len(data['dropped_queries']), 'ingestion': ingestion,
+                              'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}})
     queries = sorted(data['queries'])
-    for profile in served:
+    for profile in dict.fromkeys(p for side in sides for p in side['served']):
         for mode in MODES:
+            serving = [side for side in sides if profile in side['served']]
             for q in queries[:WARMUP_QUERIES]:
-                search(client, corpus, data['queries'][q], mode, profile, records)
-            ranking, timings, errors = {}, {limit: [] for limit in TIMING_LIMITS}, []
-            failed = {limit: 0 for limit in TIMING_LIMITS}
-            for q in queries:
-                ranking[q], timing, error = search(client, corpus, data['queries'][q], mode, profile, records)
-                if error:
-                    errors.append(error)
-                    failed[LIMIT] += 1
-                else:
-                    timings[LIMIT].append(timing)
+                for side in serving:
+                    search(side['client'], side['corpus'], data['queries'][q], mode, profile, side['records'])
+            for side in serving:
+                side.update(ranking={}, errors=[], timings={limit: [] for limit in TIMING_LIMITS}, failed={limit: 0 for limit in TIMING_LIMITS})
             # The other limits are timed only, after the scored pass, so they never change what it measures.
-            for limit in TIMING_LIMITS[1:]:
-                for q in queries:
-                    _, timing, error = search(client, corpus, data['queries'][q], mode, profile, records, limit)
-                    if error:
-                        failed[limit] += 1
-                    else:
-                        timings[limit].append(timing)
-            latencies = [t['client_ms'] for t in timings[LIMIT]]
+            for limit in TIMING_LIMITS:
+                for n, q in enumerate(queries):
+                    for side in serving if n % 2 == 0 else serving[::-1]:
+                        ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, profile, side['records'], limit)
+                        if limit == LIMIT:
+                            side['ranking'][q] = ranked
+                            if error:
+                                side['errors'].append(error)
+                        if error:
+                            side['failed'][limit] += 1
+                        else:
+                            side['timings'][limit].append(timing)
             system = f'{mode}/{profile}'
             print(f'[eval] {name}: {system} searched', flush=True)
-            out['systems'][system] = {**scoring.score(data['qrels'], ranking), 'profile_version': served[profile],
-                                      'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
-                                      'time_by_limit': {str(limit): time_summary(t, failed[limit]) for limit, t in timings.items()},
-                                      'failures': len(errors), 'errors': sorted(set(errors))[:3], 'paid_calls_per_query': options.paid_calls}
-    compare_within(out)
-    return out
+            for side in serving:
+                latencies = [t['client_ms'] for t in side['timings'][LIMIT]]
+                side['out']['systems'][system] = {**scoring.score(data['qrels'], side['ranking']), 'profile_version': side['served'][profile],
+                                                  'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
+                                                  'time_by_limit': {str(limit): time_summary(t, side['failed'][limit]) for limit, t in side['timings'].items()},
+                                                  'failures': len(side['errors']), 'errors': sorted(set(side['errors']))[:3], 'paid_calls_per_query': options.paid_calls}
+    for side in sides:
+        compare_within(side['out'])
+    return [side['out'] for side in sides]
 
 
 def rounded(v):
@@ -273,8 +282,22 @@ def git(*args):
     return subprocess.run(['git', *args], cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
-def start_stack(phases):
-    """An isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it."""
+def checkout(ref):
+    """(commit, directory) of ref checked out in a detached worktree; fetched from origin when this clone lacks it."""
+    commit = git('rev-parse', '--verify', '--quiet', ref + '^{commit}')
+    if not commit:
+        subprocess.run(['git', 'fetch', '--quiet', '--no-tags', '--depth=1', 'origin', ref], cwd=ROOT, check=True)
+        commit = git('rev-parse', '--verify', '--quiet', 'FETCH_HEAD^{commit}')
+    directory = ROOT / '.scratch' / 'eval' / f'source-{commit[:12]}'
+    git('worktree', 'remove', '--force', str(directory))
+    git('worktree', 'prune')
+    subprocess.run(['git', 'worktree', 'add', '--quiet', '--detach', str(directory), commit], cwd=ROOT, check=True)
+    return commit, directory
+
+
+def start_stack(phases, stacks, source=ROOT, suffix=''):
+    """A client of an isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it,
+    built from source; appended to stacks as soon as it exists, so a failed start is still cleaned up."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         sys.exit(f'eval: the local stack needs Linux x86_64 (this is {platform.system()}/{platform.machine()}); use --api-url for an existing installation')
     import connector_plugin
@@ -283,20 +306,21 @@ def start_stack(phases):
     from local import GO, Stack, run
     from prepare_embeddings import prepare as prepare_embeddings
     from prepare_tokenizer import prepare as prepare_tokenizer
-    stack = Stack('quivr-eval-' + uuid.uuid4().hex[:10])
+    stack = Stack('quivr-eval-' + uuid.uuid4().hex[:10] + suffix, source)
+    stacks.append(stack)
     normalizer_plugin.select(stack, 'none')
     subscription_plugin.select(stack, False)
     connector_plugin.select(stack, False)
     connector_plugin.select_first_party(stack, connector_plugin.CORE)
     stack.check_disk()
     for label, step in [('prepare_tokenizer', prepare_tokenizer), ('prepare_model', prepare_embeddings),
-                        ('go_build', lambda: run([GO, 'build', '-o', str(stack.directory / 'quivr'), './cmd/quivr'])),
+                        ('go_build', lambda: run([GO, 'build', '-o', str(stack.directory / 'quivr'), './cmd/quivr'], cwd=source)),
                         ('start_dependencies', lambda: stack.compose('up', '-d', '--wait', '--wait-timeout', '300')),
                         ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack), stack.start_processes()))]:
         started = time.monotonic()
         step()
         phases[label] = round(time.monotonic() - started, 3)
-    return stack, Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'])
+    return Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'])
 
 
 def resolve_sets(options):
@@ -321,11 +345,14 @@ def main():
     parser.add_argument('--private-name', default='private', help='name of the private set in the report')
     parser.add_argument('--baseline', help='report.json of an earlier run to compare each system with, per query')
     parser.add_argument('--api-url', help='measure this installation instead of a local stack; key in QUIVR_EVAL_API_KEY')
+    parser.add_argument('--compare-to', metavar='REF', help='also measure this git revision on a second local stack, searched alternately with this checkout')
     parser.add_argument('--out', default=str(ROOT / '.scratch/eval/runs' / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     parser.add_argument('--cache', default=str(ROOT / '.scratch/eval/cache'))
     parser.add_argument('--ingest-timeout', type=int, default=5400, help='seconds for one set to become searchable with vectors')
     parser.add_argument('--stall', type=int, default=600, help='seconds without a Record gaining vectors before failing')
     options = parser.parse_args()
+    if options.compare_to and (options.api_url or options.baseline):
+        parser.error('--compare-to measures two local stacks; it excludes --api-url and --baseline')
     try:
         import scoring  # noqa: F401
         import ranx  # noqa: F401
@@ -344,22 +371,35 @@ def main():
                                           'github': {k: os.environ[k] for k in ['GITHUB_RUN_ID', 'GITHUB_REF_NAME', 'GITHUB_EVENT_NAME'] if k in os.environ},
                                           'phases_seconds': {}},
               'convention': None, 'test': None, 'baseline_system': BASELINE_SYSTEM, 'limit': LIMIT, 'sets': {}}
-    stack = None
+    stacks, worktree = [], None
+    print(f"[eval] host: {report['run']['host'].get('cpu_model', 'unknown CPU')}, {report['run']['host']['logical_cpus']} logical CPUs", flush=True)
     try:
         import scoring
         report.update(convention=scoring.CONVENTION, test=scoring.TEST)
         sets = resolve_sets(options)
+        clients = []
         if options.api_url:
             if not os.environ.get('QUIVR_EVAL_API_KEY'):
                 sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, content:read, content:write, changes:read, search:query)')
-            client, options.paid_calls = Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']), None
+            clients.append(Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']))
+            options.paid_calls = None
             report['run']['target'] = 'existing installation (--api-url)'
         else:
-            stack, client = start_stack(report['run']['phases_seconds'])
+            if options.compare_to:
+                commit, worktree = checkout(options.compare_to)
+                report['compare'] = {'ref': options.compare_to, 'source_revision': commit, 'phases_seconds': {}, 'sets': {}}
+                clients.append(start_stack(report['compare']['phases_seconds'], stacks, worktree, '-base'))
+            clients.append(start_stack(report['run']['phases_seconds'], stacks))
             options.paid_calls = 0  # the local stack embeds with its own TEI and calls no paid service
             report['run']['target'] = 'isolated local stack, core plugins only'
         for name, directory in sets:
-            report['sets'][name] = measure_set(client, name, directory, run_id, options)
+            *base, report['sets'][name] = measure_set(clients, name, directory, run_id, options)
+            if base:
+                report['compare']['sets'][name] = base[0]
+        if 'compare' in report:
+            report['baseline_run'] = {'ref': options.compare_to, 'source_revision': report['compare']['source_revision']}
+            compare_runs(report, report['compare'])
+            print('\n'.join(render.comparison(report)), flush=True)
         if options.baseline:
             baseline = json.loads(pathlib.Path(options.baseline).read_text())
             report['baseline_run'] = {k: baseline.get('run', {}).get(k) for k in ['id', 'started_at', 'source_revision', 'github']}
@@ -373,11 +413,14 @@ def main():
         (out / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False))
         (out / 'report.md').write_text(render.markdown(report))
         print('Evaluation report:', out / 'report.md', flush=True)
-        if stack is not None:
+        for stack in stacks:
             try:
                 stack.capture()
-            finally:
                 stack.down(True)
+            except Exception as error:  # the other stack and the worktree are still cleaned up
+                print(f'[eval] cleaning up {stack.name} failed: {error}', file=sys.stderr, flush=True)
+        if worktree is not None:
+            git('worktree', 'remove', '--force', str(worktree))
 
 
 def now():

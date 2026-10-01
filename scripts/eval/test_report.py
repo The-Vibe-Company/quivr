@@ -42,6 +42,23 @@ class Markdown(unittest.TestCase):
         self.assertIn('Against the same system in run 123 (source `old`)', text)
         self.assertIn('| tiny | 2 | 5 | seed 775, 9 eligible queries | MIT | 3 |', text)
 
+    def test_compared_run_tables_base_branch_and_change_on_one_cpu(self):
+        def timed(p50, p95):
+            return {**system(0.5), 'latency_ms': {'p50': p50, 'p95': p95, 'max': None}}
+        same = {'queries': 2, 'delta': 0.0, 'p_value': None, 'significant': False}
+        r = {'status': 'completed', 'run': {**RUN, 'source_revision': 'b' * 40, 'host': {'cpu_model': 'Example CPU 9000'}}, 'convention': None, 'test': None,
+             'baseline_system': 'hybrid/default', 'limit': 50,
+             'baseline_run': {'ref': 'main', 'source_revision': 'a' * 40},
+             'compare': {'ref': 'main', 'source_revision': 'a' * 40, 'sets': {'tiny': {'systems': {'hybrid/default': timed(200.0, 300.0)}}}},
+             'sets': {'tiny': {'manifest': {}, 'queries': 2, 'documents': 5, 'ingestion': {'searchable_with_vectors_seconds': 3.2}, 'profiles': {},
+                               'systems': {'hybrid/default': timed(100.0, 330.0), 'hybrid/deep': timed(90.0, 120.0)},
+                               'against_baseline_run': {'hybrid/default': {'ndcg@10': same, 'recall@10': same, 'mrr@10': same}}}}}
+        text = report.markdown(r)
+        self.assertIn(f"Base `main` (`{'a' * 12}`) against this checkout (`{'b' * 12}`), both on Example CPU 9000 in one job.", text)
+        self.assertIn('| tiny | hybrid/default | 200 | 100 | -100 (-50%) | 300 | 330 | +30 (+10%) |', text)
+        self.assertNotIn('| tiny | hybrid/deep |', text)  # the base did not serve it: nothing to compare
+        self.assertIn(f"Against the same system at `main` (source `{'a' * 40}`), measured in this run:", text)
+
     def test_failed_run_before_any_set_names_the_error(self):
         r = {'status': 'failed', 'error': 'RuntimeError: TEI never ready', 'run': RUN, 'convention': None, 'test': None,
              'baseline_system': 'hybrid/default', 'limit': 50, 'sets': {}}

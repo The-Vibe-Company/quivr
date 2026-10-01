@@ -15,6 +15,33 @@ def delta(c):
     return f"{c['delta']:+.4f} (p {p}){' *' if c['significant'] else ''}"
 
 
+def change(before, after):
+    """'-99 (-54%)' from base to branch, in ms."""
+    if before is None or after is None:
+        return '—'
+    return f"{after - before:+.0f}" + (f" ({100 * (after - before) / before:+.0f}%)" if before else '')
+
+
+def comparison(r):
+    """The latency table of a --compare-to run: base and branch measured in one job, on one CPU."""
+    c, run = r.get('compare'), r['run']
+    if not c:
+        return []
+    h = run.get('host', {})
+    lines = ['## Before and after on this machine', '',
+             f"Base `{c['ref']}` (`{c['source_revision'][:12]}`) against this checkout (`{run.get('source_revision', '')[:12]}`), "
+             f"both on {h.get('cpu_model', 'an unknown CPU')} in one job. Each query is searched on both, alternating which goes first.", '',
+             '| Set | System | Base p50 ms | Branch p50 ms | Δ p50 | Base p95 ms | Branch p95 ms | Δ p95 |', '| --- ' * 8 + '|']
+    for name, s in r['sets'].items():
+        base = c['sets'].get(name, {}).get('systems', {})
+        for system, v in s['systems'].items():
+            if system in base:
+                b, a = base[system]['latency_ms'], v['latency_ms']
+                lines.append(f"| {name} | {system} | {number(b['p50'], 0)} | {number(a['p50'], 0)} | {change(b['p50'], a['p50'])} "
+                             f"| {number(b['p95'], 0)} | {number(a['p95'], 0)} | {change(b['p95'], a['p95'])} |")
+    return lines + ['']
+
+
 def time_table(systems):
     """Where each system's search time goes, per limit; empty for a run before THE-873 timed phases."""
     rows = [(system, limit, t) for system, v in systems.items() for limit, t in v.get('time_by_limit', {}).items()]
@@ -42,6 +69,7 @@ def markdown(r):
     h = run.get('host', {})
     lines += [f"Host: {h.get('cpu_model', h.get('machine', ''))}, {h.get('logical_cpus')} logical CPUs. "
               f"Every query runs in each mode and each served profile, limit {r['limit']}, hits deduplicated by Record.", '']
+    lines += comparison(r)
     if r.get('convention'):
         lines += [f"Scoring: {r['convention']} Significance: {r['test']}; `*` marks p < 0.05.", '']
     if r['sets']:
@@ -74,7 +102,8 @@ def markdown(r):
                 lines += ['Not compared with the baseline run: that run did not measure this exact sample.', '']
             else:
                 b = r.get('baseline_run') or {}
-                lines += [f"Against the same system in run {b.get('github', {}).get('GITHUB_RUN_ID') or b.get('id')} (source `{b.get('source_revision', '')}`):", '',
+                where = f"at `{b['ref']}`" if b.get('ref') else f"in run {(b.get('github') or {}).get('GITHUB_RUN_ID') or b.get('id')}"
+                lines += [f"Against the same system {where} (source `{b.get('source_revision', '')}`){', measured in this run' if b.get('ref') else ''}:", '',
                           '| System | ' + ' | '.join('Δ ' + n for _, n in METRIC_NAMES) + ' |', '| --- ' * (len(METRIC_NAMES) + 1) + '|']
                 for system, c in s['against_baseline_run'].items():
                     lines.append(f'| {system} | ' + ' | '.join(delta(c[k]) for k, _ in METRIC_NAMES) + ' |')

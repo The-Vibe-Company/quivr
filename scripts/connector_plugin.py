@@ -100,13 +100,13 @@ def first_party_port(stack, row):
     return stack.state[key]
 
 
-def first_party_manifest(row):
-    return ROOT / 'plugins' / row['id'] / 'quivr-plugin.yaml'
+def first_party_manifest(stack, row):
+    return stack.source / 'plugins' / row['id'] / 'quivr-plugin.yaml'
 
 
 def first_party_pins(stack):
     """The `plugins` entries of QUIVR_CONFIG for the first-party Go plugins."""
-    return [{'manifest': str(first_party_manifest(row)), 'endpoint': f"http://127.0.0.1:{first_party_port(stack, row)}",
+    return [{'manifest': str(first_party_manifest(stack, row)), 'endpoint': f"http://127.0.0.1:{first_party_port(stack, row)}",
              'configuration': row['configuration'](stack)} for row in first_party(stack)]
 
 
@@ -133,11 +133,11 @@ def start_first_party(stack, only=None):
     for row in first_party(stack):
         if only is not None and row['id'] not in only:
             continue
-        directory, binary = ROOT / 'plugins' / row['id'], stack.directory / f"quivr-{row['id']}"
+        directory, binary = stack.source / 'plugins' / row['id'], stack.directory / f"quivr-{row['id']}"
         log = stack.directory / f"{row['id']}-plugin.log"
         subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, check=True)
         port = first_party_port(stack, row)
-        env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(row))}
+        env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         with log.open('a') as out:
             p = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=out, stderr=out, start_new_session=True)
         stack.state[f"{row['id']}_plugin_pid"] = p.pid
