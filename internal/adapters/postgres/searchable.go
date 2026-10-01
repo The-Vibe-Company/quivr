@@ -304,20 +304,30 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 }
 
 // hydrateSQL looks up a batch of candidates, given as parallel arrays of
-// segment and generation ids, in one query: a candidate is returned, with its
-// position in the batch, only while its segment belongs to the current
-// eligible Version of its Record and to the generation the Corpus routes to.
-// Its embedding in the generation's served space, if any, comes with it.
+// segment and generation ids with the Organization repeated for each, in one
+// query: a candidate is returned, with its position in the batch, only while
+// its segment belongs to the current eligible Version of its Record and to the
+// generation the Corpus routes to. Its embedding in the generation's served
+// space, if any, comes with it.
+//
+// Each row is reached by its primary key from the candidate's, in a LATERAL
+// subquery that OFFSET 0 keeps the planner from flattening, so a batch costs a
+// few index lookups per candidate whatever the Organization's size (THE-875).
+// Until the statistics count an Organization's new rows, the planner takes it
+// for one row: as plain joins, it then scanned every Record of the Organization
+// for each of its Versions, and with the Organization as a constant it picked
+// any index that starts with it. The Organization therefore comes from the
+// candidate row, a value the planner cannot see.
 var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,'')
-FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS c(segment_id,generation_id,n)
-JOIN segments sg ON sg.organization=$1 AND sg.id=c.segment_id
-JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id)
-JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
-JOIN version_parts p ON (p.organization,p.version_id,p.part_key)=(sg.organization,sg.version_id,sg.part_key)
-JOIN content_blobs b ON (b.organization,b.blob_id)=(p.organization,p.blob_id)
-JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id)=(sg.organization,sg.version_id,sg.segmentation_id) AND pc.generation_id=c.generation_id
+FROM unnest($1::text[],$2::text[],$3::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,n)
+CROSS JOIN LATERAL (SELECT sg.* FROM segments sg WHERE sg.organization=c.organization AND sg.id=c.segment_id OFFSET 0) sg
+CROSS JOIN LATERAL (SELECT v.* FROM record_versions v WHERE v.organization=c.organization AND v.id=sg.version_id OFFSET 0) v
+CROSS JOIN LATERAL (SELECT r.* FROM records r WHERE r.organization=c.organization AND r.id=v.record_id OFFSET 0) r
+CROSS JOIN LATERAL (SELECT p.blob_id FROM version_parts p WHERE p.organization=c.organization AND p.version_id=sg.version_id AND p.part_key=sg.part_key OFFSET 0) p
+CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blobs b WHERE b.organization=c.organization AND b.blob_id=p.blob_id OFFSET 0) b
+CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id OFFSET 0) pc
 LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND g.space_id=a.space_id
-  WHERE ec.organization=$1 AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
+  WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
 WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL
 
 // Hydrate looks a batch of candidates up in one query (hydrateSQL). A
@@ -327,11 +337,11 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []cont
 	if len(cs) == 0 {
 		return out, nil
 	}
-	segments, generations := make([]string, len(cs)), make([]string, len(cs))
+	orgs, segments, generations := make([]string, len(cs)), make([]string, len(cs)), make([]string, len(cs))
 	for i, c := range cs {
-		segments[i], generations[i] = c.SegmentID, c.GenerationID
+		orgs[i], segments[i], generations[i] = scope.Organization, c.SegmentID, c.GenerationID
 	}
-	rows, err := s.Pool.Query(ctx, hydrateSQL, scope.Organization, segments, generations)
+	rows, err := s.Pool.Query(ctx, hydrateSQL, orgs, segments, generations)
 	if err != nil {
 		return nil, err
 	}

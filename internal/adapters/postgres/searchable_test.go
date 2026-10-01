@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -207,4 +211,100 @@ func hydrateOne(ctx context.Context, store postgres.ContentStore, scope corpus.S
 		return content.Hydrated{}, corpus.ErrNotFound
 	}
 	return l.Hydrated, nil
+}
+
+// TestHydrationCostFollowsTheBatch owns hydration's cost (THE-875): a batch
+// reads a few index pages per candidate, whatever its Organization's size,
+// even while the planner's statistics do not count the Organization yet, as
+// on a new deployment or while a backfill grows it. PostgreSQL reports the
+// pages each lookup reads through auto_explain on the store's own connection.
+func TestHydrationCostFollowsTheBatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	org := "adapter-hydration-cost-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "cost", Name: "Cost"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Statistics taken now know nothing of the Records below.
+	if _, err = pool.Exec(ctx, `ANALYZE segments, record_versions, records, version_parts, content_blobs, projection_coverage`); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.ContentStore{Pool: pool}
+	service := content.Service{Repository: store, Baseline: store}
+	g, err := store.Generation(ctx, org, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var batch []content.Candidate
+	for i := range 150 {
+		key := "record-" + strconv.Itoa(i)
+		cmd := content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Cost of " + key}}
+		r, err := service.Accept(ctx, scope, cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		work, _, err := store.Work(ctx, org, r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/" + key, SHA256: "text-" + key, Size: 15}, content.Blob{Key: "fixture/manifest-" + key, SHA256: "manifest-" + key, Size: 2})); err != nil {
+			t.Fatal(err)
+		}
+		v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
+		seg, err := wholeParts(org, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = service.SaveSegmentation(ctx, org, v, seg); err != nil {
+			t.Fatal(err)
+		}
+		if err = service.Promote(ctx, org, seg, g); err != nil {
+			t.Fatal(err)
+		}
+		if i%30 == 0 {
+			batch = append(batch, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
+		}
+	}
+	cfg := pool.Config().Copy()
+	cfg.MaxConns = 1
+	var plans []string
+	cfg.ConnConfig.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { plans = append(plans, n.Message) }
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `LOAD 'auto_explain'; SET auto_explain.log_min_duration=0; SET auto_explain.log_analyze=on; SET auto_explain.log_buffers=on; SET auto_explain.log_format=json; SET auto_explain.log_level=notice`)
+		return err
+	}
+	explained, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explained.Close()
+	// pgx prepares the query: after five runs PostgreSQL may switch to a
+	// generic plan, which must be as cheap.
+	for run := range 7 {
+		plans = nil
+		found, err := (postgres.ContentStore{Pool: explained}).Hydrate(ctx, scope, batch)
+		if err != nil || len(found) != len(batch) {
+			t.Fatalf("run %d: hydrated %d of %d candidates, %v", run, len(found), len(batch), err)
+		}
+		if len(plans) != 1 {
+			t.Fatalf("run %d: %d plans reported, want the one of the batch query", run, len(plans))
+		}
+		var plan struct {
+			Plan struct {
+				SharedHitBlocks  int `json:"Shared Hit Blocks"`
+				SharedReadBlocks int `json:"Shared Read Blocks"`
+			} `json:"Plan"`
+		}
+		if err = json.Unmarshal([]byte(plans[0][strings.Index(plans[0], "{"):]), &plan); err != nil {
+			t.Fatal(err)
+		}
+		// A lookup by primary key reads about four pages; the batch reads
+		// each of its tables once per candidate.
+		if pages := plan.Plan.SharedHitBlocks + plan.Plan.SharedReadBlocks; pages > 50*len(batch) {
+			t.Fatalf("run %d: hydrating %d candidates of an Organization of 150 Records read %d pages, want at most %d; plan: %s", run, len(batch), pages, 50*len(batch), plans[0])
+		}
+	}
 }
