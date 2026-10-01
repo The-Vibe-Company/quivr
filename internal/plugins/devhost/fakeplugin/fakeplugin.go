@@ -26,7 +26,7 @@ const (
 	EnvEnable = "QUIVR_FAKE_PLUGIN"        // "1" serves instead of testing
 	EnvDigest = "QUIVR_FAKE_PLUGIN_DIGEST" // overrides the served manifest digest
 	// EnvMode selects the behaviour, unless the first argument does: ok
-	// (default), body (ok with a body Part ingestion can index), retry, terminal, invalid, large, garbage, exit, unhealthy, and
+	// (default), body (ok with a body Part ingestion can index), retry, terminal, invalid, large, garbage, exit, and
 	// the broken plugins of tests/plugin-contract: malformed-part, bad-checksum,
 	// undeclared-namespace, nondeterministic, slow, wrong-error-class,
 	// accept-invalid; hang, which never answers a normalizer request; and
@@ -163,10 +163,6 @@ func serve() error {
 		_ = json.NewEncoder(w).Encode(body)
 	}
 	mux.HandleFunc("GET /v0/health", func(w http.ResponseWriter, r *http.Request) {
-		if mode == "unhealthy" {
-			write(w, 503, map[string]any{"code": "warming_up", "message": "not ready", "retryable": true})
-			return
-		}
 		write(w, 200, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /v0/discovery", func(w http.ResponseWriter, r *http.Request) {

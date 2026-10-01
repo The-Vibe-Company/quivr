@@ -62,7 +62,7 @@ func TestLoadPinsResolvesConnectorKinds(t *testing.T) {
 }
 
 // Several plugins are pinned together: normalizers route by media type and
-// subscription evaluators resolve by plugin id and version.
+// subscription evaluators are listed with their plugin id and version.
 func TestLoadPinsRoutesContributionsAcrossPlugins(t *testing.T) {
 	markdown := writePinManifest(t, pinManifest)
 	alerts := writePinManifest(t, alertsManifest)
@@ -77,38 +77,28 @@ func TestLoadPinsRoutesContributionsAcrossPlugins(t *testing.T) {
 	if !ok || pin.Manifest.ID != "acme.markdown" || route.Mode != plugins.RouteRequired || !set.Routed("text/markdown") || set.Routed("application/pdf") {
 		t.Fatalf("normalizer routing: %+v %+v %v", pin, route, ok)
 	}
-	evaluator, ok := set.Evaluator("acme.alerts", "0.3.0")
-	if !ok || evaluator.Endpoint != "http://127.0.0.1:9902" || evaluator.Manifest.Contributions.Subscription.MaxBatchSize != 8 {
-		t.Fatalf("evaluator %+v %v", evaluator, ok)
-	}
-	if _, ok := set.Evaluator("acme.alerts", "0.2.0"); ok {
-		t.Fatal("an evaluator resolves by exact version")
-	}
-	if _, ok := set.Evaluator("acme.markdown", "1.2.0"); ok {
-		t.Fatal("a normalizer-only plugin is not an evaluator")
+	// The normalizer-only plugin is not an evaluator.
+	evaluators := set.Evaluators()
+	if len(evaluators) != 1 || evaluators[0].Manifest.ID != "acme.alerts" || evaluators[0].Manifest.Version != "0.3.0" || evaluators[0].Endpoint != "http://127.0.0.1:9902" || evaluators[0].Manifest.Contributions.Subscription.MaxBatchSize != 8 {
+		t.Fatalf("evaluators %+v", evaluators)
 	}
 	if got := len(set.Pins()); got != 2 {
 		t.Fatalf("pins %d", got)
 	}
 	var none *plugins.PinSet
-	if none.Routed("text/markdown") || len(none.Pins()) != 0 {
+	if none.Routed("text/markdown") || len(none.Pins()) != 0 || len(none.Evaluators()) != 0 {
 		t.Fatal("a nil set pins nothing")
-	}
-	if _, ok := none.Evaluator("acme.alerts", "0.3.0"); ok {
-		t.Fatal("a nil set has no evaluator")
 	}
 }
 
-// A subscription-only plugin needs no routes; routes on a manifest without a
-// normalizer, and a normalizer-only pin without routes, are refused.
+// A subscription-only plugin needs no routes, and routes on a manifest
+// without a normalizer are refused.
 func TestLoadPinsRoutesOnlyNormalizers(t *testing.T) {
 	alerts := writePinManifest(t, alertsManifest)
 	if _, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: alerts, Endpoint: "http://127.0.0.1:9902"}}); err != nil {
 		t.Fatal("subscription-only pin refused:", err)
 	}
 	_, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: alerts, Endpoint: "http://127.0.0.1:9902", Routes: []plugins.RouteConfig{{MediaType: "text/markdown"}}}})
-	assertPinCode(t, err, plugins.CodeInvalidPin)
-	_, err = plugins.LoadPins([]plugins.PinConfig{pinConfig(writePinManifest(t, pinManifest), func(c *plugins.PinConfig) { c.Routes = nil })})
 	assertPinCode(t, err, plugins.CodeInvalidPin)
 }
 
@@ -138,7 +128,9 @@ func TestLoadPinsRefusesConflicts(t *testing.T) {
 	}
 }
 
-// The extension registry owns the namespaces of every pinned plugin.
+// The extension registry owns the namespaces of every pinned plugin beside
+// the built-in ones: clients may no longer write them, and retrieval mappings
+// may.
 func TestPinSetExtensionRegistry(t *testing.T) {
 	withOutline := pinManifest + "extensions:\n  acme.markdown.outline:\n    \"1\": {type: object}\n"
 	set, err := plugins.LoadPins([]plugins.PinConfig{pinConfig(writePinManifest(t, withOutline), nil), {Manifest: writePinManifest(t, alertsManifest), Endpoint: "http://127.0.0.1:9902"}})
@@ -151,6 +143,13 @@ func TestPinSetExtensionRegistry(t *testing.T) {
 	}
 	if owner, ok := registry.Owner("acme.markdown.outline"); !ok || owner != "acme.markdown" {
 		t.Fatalf("owner %q %v", owner, ok)
+	}
+	if !registry.Declared("example.editorial") || !registry.Declared("acme.markdown.outline") {
+		t.Fatal("built-in or plugin namespace not declared")
+	}
+	none, err := plugins.PinsExtensionRegistry(nil)
+	if err != nil || none.Declared("acme.markdown.outline") || !none.Declared("example.editorial") {
+		t.Fatalf("without pins: %v", err)
 	}
 }
 

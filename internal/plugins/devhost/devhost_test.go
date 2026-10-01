@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,25 +75,48 @@ func start(t *testing.T, dir string, env ...string) *devhost.Process {
 	return p
 }
 
-func TestDiscoveryMatchesTheManifest(t *testing.T) {
-	dir, report := writePlugin(t)
-	p := start(t, dir)
-	issues, err := devhost.CheckDiscovery(context.Background(), p.BaseURL, report)
-	if err != nil || len(issues) != 0 {
-		t.Fatalf("issues %+v, err %v", issues, err)
+// TestDiscoveryIsComparedWithTheManifest owns the discovery comparison: the
+// manifest digest, the Plugin API version within the declared range, and the
+// Contributions in any order.
+func TestDiscoveryIsComparedWithTheManifest(t *testing.T) {
+	raw := []byte(`id: both
+version: 1.0.0
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.1.0 <0.3.0"}
+contributions:
+  normalizer: {media_types: [text/markdown]}
+  subscription: {expression_schema: {type: object}}
+`)
+	report := plugins.Validate(raw)
+	if !report.Valid {
+		t.Fatalf("%+v", report.Errors)
 	}
-}
-
-func TestDiscoveryDigestMismatchIsReported(t *testing.T) {
-	dir, report := writePlugin(t)
-	p := start(t, dir, fakeplugin.EnvDigest+"=sha256:"+strings.Repeat("ab", 32))
-	issues, err := devhost.CheckDiscovery(context.Background(), p.BaseURL, report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != "/manifest_digest" ||
-		!strings.Contains(issues[0].Message, report.ManifestDigest) {
-		t.Fatalf("issues %+v", issues)
+	stale := "sha256:" + strings.Repeat("ab", 32)
+	for name, c := range map[string]struct {
+		digest        string
+		pluginAPI     string
+		contributions []string
+		wantPath      string
+		says          string
+	}{
+		"any order":             {report.ManifestDigest, "0.2.0", []string{"subscription", "normalizer"}, "", ""},
+		"stale manifest digest": {stale, "0.2.0", []string{"normalizer", "subscription"}, "/manifest_digest", report.ManifestDigest},
+		"too old for its rules": {report.ManifestDigest, "0.1.0", []string{"normalizer", "subscription"}, "/plugin_api", ""},
+		"missing contribution":  {report.ManifestDigest, "0.2.0", []string{"normalizer"}, "/contributions", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": c.pluginAPI, "plugin": map[string]string{"id": "both", "version": "1.0.0"},
+					"manifest_digest": c.digest, "contributions": c.contributions})
+			}))
+			defer server.Close()
+			issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.wantPath == "" && len(issues) != 0 || c.wantPath != "" && (len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != c.wantPath || !strings.Contains(issues[0].Message, c.says)) {
+				t.Fatalf("issues %+v, want one at %q naming %q", issues, c.wantPath, c.says)
+			}
+		})
 	}
 }
 
@@ -114,17 +140,22 @@ func TestWaitHealthyFailsWhenTheProcessExits(t *testing.T) {
 	}
 }
 
-func TestWaitHealthyTimesOutWhileUnhealthy(t *testing.T) {
-	dir, _ := writePlugin(t)
-	p, err := devhost.Start(devhost.Options{Dir: dir, Command: fakeplugin.Command(), Manifest: filepath.Join(dir, plugins.ManifestFile),
-		Env: []string{fakeplugin.EnvEnable + "=1", fakeplugin.EnvMode + "=unhealthy"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer p.Stop(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+// A plugin that keeps answering 503 is reported with its last answer once
+// the wait ends. The context ends on the second health request, so the test
+// waits on no deadline.
+func TestWaitHealthyReportsTheLastAnswerWhileUnhealthy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := p.WaitHealthy(ctx); err == nil || !strings.Contains(err.Error(), "warming_up") {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 2 {
+			cancel()
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code": "warming_up", "message": "not ready", "retryable": true}`))
+	}))
+	defer server.Close()
+	if err := devhost.WaitHealthyAt(ctx, server.URL); err == nil || !strings.Contains(err.Error(), "warming_up") {
 		t.Fatalf("err %v", err)
 	}
 }

@@ -139,30 +139,6 @@ func TestLoadPinDefaultsConfigurationToAnEmptyObject(t *testing.T) {
 	}
 }
 
-// The pinned plugin's declared namespaces are registered beside the built-in
-// ones: clients may no longer write them, and retrieval mappings may.
-func TestPinRegistersItsExtensionNamespaces(t *testing.T) {
-	path := writePinManifest(t, pinManifest+"extensions:\n  acme.markdown.outline:\n    \"1\": {type: object}\n")
-	pin, err := plugins.LoadPin(pinConfig(path, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := plugins.ExtensionRegistry(pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if owner, ok := registry.Owner("acme.markdown.outline"); !ok || owner != "acme.markdown" {
-		t.Fatalf("owner %q %t", owner, ok)
-	}
-	if !registry.Declared("example.editorial") || !registry.Declared("acme.markdown.outline") {
-		t.Fatal("built-in or plugin namespace not declared")
-	}
-	none, err := plugins.ExtensionRegistry(nil)
-	if err != nil || none.Declared("acme.markdown.outline") || !none.Declared("example.editorial") {
-		t.Fatalf("without a pin: %v", err)
-	}
-}
-
 const kindsManifest = `id: acme.alerts
 version: 0.2.0
 compatibility:

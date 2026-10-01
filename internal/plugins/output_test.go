@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
@@ -28,6 +27,8 @@ extensions:
       required: [pages]
       properties:
         pages: {type: integer, minimum: 0}
+  acme.pages.notes:
+    "1": {type: object}
 `
 
 func outputContext(t *testing.T) plugins.OutputContext {
@@ -79,6 +80,14 @@ func TestCheckNormalizerOutput(t *testing.T) {
 			"extensions":{"acme.pages.stats":{"schema_version":"2","data":{"pages":1}}}}`, plugins.CodeUndeclaredSchemaVersion, `"2"`},
 		{"extension data invalid", `{"manifest":{"kind":"manifest","parts":[{"key":"a","role":"r","content":{"kind":"text","text":"x"}}]},
 			"extensions":{"acme.pages.stats":{"schema_version":"1","data":{"pages":-1}}}}`, plugins.CodeInvalidExtension, "pages"},
+		// Extension data is stored as JSON text, which cannot hold NUL: such
+		// output is invalid, never a storage failure retried.
+		{"NUL in extension data", `{"manifest":{"kind":"manifest","parts":[{"key":"a","role":"r","content":{"kind":"text","text":"x"}}]},
+			"extensions":{"acme.pages.notes":{"schema_version":"1","data":{"title":"a\u0000b"}}}}`, plugins.CodeInvalidExtension, "NUL"},
+		{"NUL in nested extension data on a Part", `{"manifest":{"kind":"manifest","parts":[{"key":"a","role":"r","content":{"kind":"text","text":"x"},
+			"extensions":{"acme.pages.notes":{"schema_version":"1","data":{"list":[{"x":"\u0000"}]}}}}]}}`, plugins.CodeInvalidExtension, "NUL"},
+		{"NUL in an extension data key", `{"manifest":{"kind":"manifest","parts":[{"key":"a","role":"r","content":{"kind":"text","text":"x"}}]},
+			"extensions":{"acme.pages.notes":{"schema_version":"1","data":{"a\u0000":1}}}}`, plugins.CodeInvalidExtension, "NUL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,46 +102,6 @@ func TestCheckNormalizerOutput(t *testing.T) {
 				t.Fatalf("want one %s issue mentioning %q, got %+v", tc.code, tc.want, issues)
 			}
 		})
-	}
-}
-
-func TestDeclaredExtensionsIsTheEngineValidatorSeam(t *testing.T) {
-	ctx := outputContext(t)
-	var validator content.ExtensionValidator = plugins.NewDeclaredExtensions(ctx.Manifest)
-	err := validator.Validate(context.Background(), content.Extensions{"acme.other": {SchemaVersion: "1", Data: map[string]any{}}})
-	if !errors.Is(err, content.ErrUnsupported) {
-		t.Fatalf("undeclared namespace: %v", err)
-	}
-	err = validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: map[string]any{"pages": "x"}}})
-	if !errors.Is(err, content.ErrInvalid) {
-		t.Fatalf("invalid data: %v", err)
-	}
-	if err := validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: map[string]any{"pages": 2}}}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Extension data is stored as JSON text the engine can persist: a NUL in a
-// string value or a key is invalid output, never a storage failure retried.
-func TestDeclaredExtensionsRejectNUL(t *testing.T) {
-	report := plugins.Validate([]byte(strings.Replace(outputManifest, "      additionalProperties: false\n      required: [pages]\n      properties:\n        pages: {type: integer, minimum: 0}\n", "", 1)))
-	if !report.Valid {
-		t.Fatalf("manifest: %+v", report.Errors)
-	}
-	validator := plugins.NewDeclaredExtensions(report.Manifest)
-	for name, data := range map[string]map[string]any{
-		"value":        {"title": "a\x00b"},
-		"nested value": {"list": []any{map[string]any{"x": "\x00"}}},
-		"key":          {"a\x00": 1},
-	} {
-		err := validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: data}})
-		var v *plugins.Violation
-		if !errors.As(err, &v) || v.Code != plugins.CodeInvalidExtension || !errors.Is(err, content.ErrInvalid) {
-			t.Fatalf("%s: %v", name, err)
-		}
-	}
-	if err := validator.Validate(context.Background(), content.Extensions{"acme.pages.stats": {SchemaVersion: "1", Data: map[string]any{"title": "ok"}}}); err != nil {
-		t.Fatal(err)
 	}
 }
 

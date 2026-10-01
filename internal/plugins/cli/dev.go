@@ -119,8 +119,8 @@ func dev(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		return ExitInvalid
 	}
-	s.status("watching %s for changes (Ctrl-C to stop)", opts.dir)
 	watcher := devhost.NewWatcher(opts.dir)
+	s.status("watching %s for changes (Ctrl-C to stop)", opts.dir)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	exited := processDone(proc)

@@ -1,12 +1,9 @@
 package devhost_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,43 +108,5 @@ func TestBuildSubscriptionRequestsRejectsInvalidFixtures(t *testing.T) {
 	_, report := writePlugin(t)
 	if _, issues, _ := devhost.BuildSubscriptionRequests(path, report.Manifest); len(issues) != 1 || issues[0].Path != "/contributions/subscription" {
 		t.Fatalf("issues %+v", issues)
-	}
-}
-
-func TestDiscoveryOfBothContributions(t *testing.T) {
-	raw := []byte(`id: both
-version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.1.0 <0.3.0"}
-contributions:
-  normalizer: {media_types: [text/markdown]}
-  subscription: {expression_schema: {type: object}}
-`)
-	report := plugins.Validate(raw)
-	if !report.Valid {
-		t.Fatalf("%+v", report.Errors)
-	}
-	for name, c := range map[string]struct {
-		pluginAPI     string
-		contributions []string
-		wantPath      string
-	}{
-		"any order":             {"0.2.0", []string{"subscription", "normalizer"}, ""},
-		"too old for its rules": {"0.1.0", []string{"normalizer", "subscription"}, "/plugin_api"},
-		"missing contribution":  {"0.2.0", []string{"normalizer"}, "/contributions"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": c.pluginAPI, "plugin": map[string]string{"id": "both", "version": "1.0.0"},
-					"manifest_digest": report.ManifestDigest, "contributions": c.contributions})
-			}))
-			defer server.Close()
-			issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if c.wantPath == "" && len(issues) != 0 || c.wantPath != "" && (len(issues) != 1 || issues[0].Path != c.wantPath) {
-				t.Fatalf("issues %+v", issues)
-			}
-		})
 	}
 }

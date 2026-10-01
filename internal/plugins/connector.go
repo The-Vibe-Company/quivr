@@ -195,7 +195,7 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 // size cap, then each item's content and extensions.
 func checkItems(ctx context.Context, items []ConnectorItem, m *Manifest) []Issue {
 	var issues []Issue
-	validator := NewDeclaredExtensions(m)
+	validator := newDeclaredExtensions(m)
 	seen := map[string]int{}
 	for i, item := range items {
 		path := fmt.Sprintf("/items/%d", i)
@@ -224,7 +224,7 @@ func checkItems(ctx context.Context, items []ConnectorItem, m *Manifest) []Issue
 	return issues
 }
 
-func checkConnectorItem(ctx context.Context, item ConnectorItem, validator *DeclaredExtensions) *Issue {
+func checkConnectorItem(ctx context.Context, item ConnectorItem, validator *declaredExtensions) *Issue {
 	hasContent := len(item.Content) > 0 && string(item.Content) != "null"
 	switch {
 	case item.Withdraw && hasContent:
@@ -324,7 +324,7 @@ func CheckAttachmentAnswer(ctx context.Context, raw []byte, m *Manifest) []Issue
 		return []Issue{{Code: CodeAttachmentTooLarge, Path: "/size_bytes",
 			Message: fmt.Sprintf("the attachment is %d bytes; attachments.max_bytes allows %d, so answer {\"skip\": \"too_large\"}", answer.SizeBytes, limit)}}
 	}
-	if err := withPrefix(content.CheckExtensions(ctx, NewDeclaredExtensions(m), answer.ItemExtensions), "/item_extensions"); err != nil {
+	if err := withPrefix(content.CheckExtensions(ctx, newDeclaredExtensions(m), answer.ItemExtensions), "/item_extensions"); err != nil {
 		return []Issue{issueFrom(err)}
 	}
 	return nil

@@ -22,7 +22,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestInitWritesATemplateThatPassesInspect(t *testing.T) {
+// TestInitWritesTheRequestedTemplate owns `quivr plugin init`: the kind (a
+// normalizer by default), the directory and the next steps it prints, and its
+// exit codes. The templates themselves are owned by the scaffold package.
+func TestInitWritesTheRequestedTemplate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "demo")
 	code, out, errOut := run("init", "demo", "--dir", dir)
 	if code != 0 {
@@ -33,8 +36,8 @@ func TestInitWritesATemplateThatPassesInspect(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	if code, out, _ := run("inspect", dir); code != 0 {
-		t.Fatalf("template fails inspect: %s", out)
+	if code, out, _ := run("inspect", dir); code != 0 || !strings.Contains(out, "Contribution normalizer") {
+		t.Fatalf("init wrote no normalizer in --dir: %s", out)
 	}
 	if code, _, errOut := run("init", "demo", "--dir", dir); code != 1 || !strings.Contains(errOut, "not empty") {
 		t.Fatalf("second init: exit %d %s", code, errOut)
@@ -44,12 +47,15 @@ func TestInitWritesATemplateThatPassesInspect(t *testing.T) {
 		t.Fatalf("init --kind subscription: exit %d %s %s", code, out, errOut)
 	}
 	if code, out, _ := run("inspect", alerts); code != 0 || !strings.Contains(out, "Contribution subscription") {
-		t.Fatalf("subscription template fails inspect: %s", out)
+		t.Fatalf("init --kind subscription wrote no alert rule: %s", out)
 	}
-	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}, {"init", "demo", "--kind"}, {"init", "demo", "--kind=connector"}} {
+	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}, {"init", "demo", "--kind"}} {
 		if code, _, errOut := run(args...); code != 2 {
 			t.Errorf("%v: exit %d %s", args, code, errOut)
 		}
+	}
+	if code, _, errOut := run("init", "demo", "--kind=connector"); code != 2 || !strings.Contains(errOut, "normalizer or subscription") {
+		t.Errorf("unknown kind: exit %d %s", code, errOut)
 	}
 }
 
@@ -247,16 +253,10 @@ func TestDevWatchRestartsOnSourceChange(t *testing.T) {
 		b, _ := os.ReadFile(marker)
 		return strings.Count(string(b), "start")
 	}
-	waitFor("first replay", func() bool { return strings.Count(stderr.String(), "response valid") == 1 })
-	// Ignored paths do not restart the plugin.
-	if err := os.MkdirAll(filepath.Join(dir, "__pycache__"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(dir, "__pycache__", "x.pyc"), []byte("x"))
-	time.Sleep(1500 * time.Millisecond)
-	if starts() != 1 {
-		t.Fatalf("restarted on an ignored change: %d starts", starts())
-	}
+	waitFor("first replay and watching", func() bool {
+		return starts() == 1 && strings.Count(stderr.String(), "response valid") == 1 && strings.Contains(stderr.String(), "watching")
+	})
+	// Which paths count as a change is owned by devhost.Watcher.
 	writeFile(t, filepath.Join(dir, "plugin.py"), []byte("changed"))
 	waitFor("restart and second replay", func() bool { return starts() == 2 && strings.Count(stderr.String(), "response valid") == 2 })
 	cancel()

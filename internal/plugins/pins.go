@@ -170,16 +170,6 @@ func (s *PinSet) Normalizer(mediaType string) (*Pin, RouteConfig, bool) {
 	return pin, route, true
 }
 
-// Evaluator returns the pin whose subscription Contribution is the evaluator
-// plugin id at exactly this version.
-func (s *PinSet) Evaluator(id, version string) (*Pin, bool) {
-	if s == nil {
-		return nil, false
-	}
-	pin, ok := s.evaluators[EvaluatorKey(id, version)]
-	return pin, ok
-}
-
 // Evaluators lists the pinned subscription evaluators, sorted by key.
 func (s *PinSet) Evaluators() []*Pin {
 	if s == nil {

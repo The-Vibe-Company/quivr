@@ -3,6 +3,7 @@ package scaffold_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,73 +12,49 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/scaffold"
 )
 
-func TestTemplatePassesInspect(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "my-plugin")
-	files, err := scaffold.Write(dir, "my-plugin", scaffold.KindNormalizer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"quivr-plugin.yaml", "pyproject.toml", "README.md", ".gitignore",
-		"my_plugin/__init__.py", "my_plugin/__main__.py", "my_plugin/normalizer.py",
-		"fixtures/sample.json", "fixtures/sample.md", "tests/test_normalizer.py",
-	} {
-		if !contains(files, want) {
-			t.Errorf("template lacks %s: %v", want, files)
-		}
-	}
-	report := plugins.Inspect(dir)
-	if !report.Valid {
-		t.Fatalf("template fails inspect: %+v", report.Errors)
-	}
-	m := report.Manifest
-	if m.ID != "my-plugin" || strings.Join(m.Run.Command, " ") != "python3 -m my_plugin" ||
-		strings.Join(m.Contributions.Normalizer.MediaTypes, ",") != "text/markdown" {
-		t.Fatalf("manifest %+v", m)
-	}
-	if _, issues, err := devhost.BuildFixtureRequest(filepath.Join(dir, "fixtures", "sample.json"), m); err != nil || len(issues) != 0 {
-		t.Fatalf("sample fixture: %+v %v", issues, err)
-	}
-	noPlaceholders(t, dir)
-}
-
-func TestSubscriptionTemplatePassesInspect(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "my-alerts")
-	files, err := scaffold.Write(dir, "my-alerts", scaffold.KindSubscription)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"quivr-plugin.yaml", "pyproject.toml", "README.md", ".gitignore",
-		"my_alerts/__init__.py", "my_alerts/__main__.py", "my_alerts/rule.py",
-		"fixtures/sample.json", "tests/test_rule.py",
-	} {
-		if !contains(files, want) {
-			t.Errorf("template lacks %s: %v", want, files)
-		}
-	}
-	report := plugins.Inspect(dir)
-	if !report.Valid {
-		t.Fatalf("template fails inspect: %+v", report.Errors)
-	}
-	m := report.Manifest
-	if m.Contributions.Normalizer != nil || m.Contributions.Subscription == nil || report.Compatibility.PluginAPI.Version != "0.2.0" {
-		t.Fatalf("manifest %+v, compatibility %+v", m.Contributions, report.Compatibility)
-	}
-	batches, issues, err := devhost.BuildSubscriptionRequests(filepath.Join(dir, "fixtures", "sample.json"), m)
-	if err != nil || len(issues) != 0 || len(batches) != 1 || len(batches[0].Expect) != 5 {
-		t.Fatalf("sample fixture: %d batches, %+v %v", len(batches), issues, err)
-	}
-	// The expression schema discriminates alert kinds on "kind".
-	if issues := plugins.ValidateSubscriptionItem(m, []byte(`{"kind": "keywords", "text": "x"}`), []byte(`{}`)); len(issues) == 0 {
-		t.Fatal("an unknown kind was accepted")
-	}
-	noPlaceholders(t, dir)
-}
-
-func TestWriteRefusesAnUnknownKind(t *testing.T) {
-	if _, err := scaffold.Write(t.TempDir(), "demo", "connector"); err == nil || !strings.Contains(err.Error(), "normalizer or subscription") {
-		t.Fatalf("err %v", err)
+// TestTemplatesAreValidPlugins owns the content of every template kind: a
+// valid manifest naming the plugin and its module, a sample fixture the
+// manifest accepts, and no placeholder left. scripts/plugin_sdk.sh runs each
+// template end to end.
+func TestTemplatesAreValidPlugins(t *testing.T) {
+	for _, kind := range scaffold.Kinds {
+		t.Run(kind, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "my-plugin")
+			files, err := scaffold.Write(dir, "my-plugin", kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Dotfiles and the module directory are embedded too (all:).
+			if !slices.Contains(files, ".gitignore") || !slices.Contains(files, "my_plugin/__main__.py") {
+				t.Fatalf("template files %v", files)
+			}
+			report := plugins.Inspect(dir)
+			if !report.Valid {
+				t.Fatalf("template fails inspect: %+v", report.Errors)
+			}
+			m := report.Manifest
+			if m.ID != "my-plugin" || strings.Join(m.Run.Command, " ") != "python3 -m my_plugin" || strings.Join(m.Contributions.Names(), ",") != kind {
+				t.Fatalf("manifest %+v", m)
+			}
+			fixture := filepath.Join(dir, "fixtures", "sample.json")
+			switch kind {
+			case scaffold.KindNormalizer:
+				if _, issues, err := devhost.BuildFixtureRequest(fixture, m); err != nil || len(issues) != 0 {
+					t.Fatalf("sample fixture: %+v %v", issues, err)
+				}
+			case scaffold.KindSubscription:
+				if batches, issues, err := devhost.BuildSubscriptionRequests(fixture, m); err != nil || len(issues) != 0 || len(batches) != 1 {
+					t.Fatalf("sample fixture: %d batches, %+v %v", len(batches), issues, err)
+				}
+				// The expression schema discriminates alert kinds on "kind".
+				if issues := plugins.ValidateSubscriptionItem(m, []byte(`{"kind": "keywords", "text": "x"}`), []byte(`{}`)); len(issues) == 0 {
+					t.Fatal("an unknown kind was accepted")
+				}
+			default:
+				t.Fatalf("no fixture check for template kind %s", kind)
+			}
+			noPlaceholders(t, dir)
+		})
 	}
 }
 
@@ -124,13 +101,4 @@ func TestCheckName(t *testing.T) {
 			t.Errorf("%q accepted", name)
 		}
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

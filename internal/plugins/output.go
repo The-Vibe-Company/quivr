@@ -110,7 +110,7 @@ func CheckNormalizerOutput(ctx context.Context, raw []byte, oc OutputContext) []
 				Message: fmt.Sprintf("%d Parts exceed the declared max_parts %d", len(m.Parts), limit)}}
 		}
 	}
-	validator := NewDeclaredExtensions(oc.Manifest)
+	validator := newDeclaredExtensions(oc.Manifest)
 	err := content.CheckManifest(m, func(i int) error {
 		p := m.Parts[i]
 		prefix := fmt.Sprintf("/manifest/parts/%d", i)
@@ -175,19 +175,19 @@ func issueFrom(err error) Issue {
 	return Issue{Code: CodeInvalidManifest, Path: "/manifest", Message: err.Error()}
 }
 
-// DeclaredExtensions validates extensions against the namespaces a plugin
+// declaredExtensions validates extensions against the namespaces a plugin
 // manifest declares. It implements content.ExtensionValidator, the seam the
 // engine uses to register plugin-owned namespaces. Errors are *Violation.
-type DeclaredExtensions struct {
+type declaredExtensions struct {
 	plugin  string
 	schemas map[string]map[string]*jsonschema.Schema
 	errs    map[string]error
 }
 
-// NewDeclaredExtensions compiles the manifest's declared extension schemas. A
+// newDeclaredExtensions compiles the manifest's declared extension schemas. A
 // nil manifest declares nothing.
-func NewDeclaredExtensions(m *Manifest) *DeclaredExtensions {
-	d := &DeclaredExtensions{schemas: map[string]map[string]*jsonschema.Schema{}, errs: map[string]error{}}
+func newDeclaredExtensions(m *Manifest) *declaredExtensions {
+	d := &declaredExtensions{schemas: map[string]map[string]*jsonschema.Schema{}, errs: map[string]error{}}
 	if m == nil {
 		return d
 	}
@@ -211,7 +211,7 @@ func NewDeclaredExtensions(m *Manifest) *DeclaredExtensions {
 }
 
 // Validate implements content.ExtensionValidator.
-func (d *DeclaredExtensions) Validate(_ context.Context, exts content.Extensions) error {
+func (d *declaredExtensions) Validate(_ context.Context, exts content.Extensions) error {
 	namespaces := make([]string, 0, len(exts))
 	for ns := range exts {
 		namespaces = append(namespaces, ns)

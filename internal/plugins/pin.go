@@ -360,23 +360,6 @@ func namespacesOf(m *Manifest) []string {
 	return namespaces
 }
 
-// ExtensionRegistry registers the pinned plugin's declared extension
-// namespaces beside the built-in ones; a nil pin registers none. API and
-// worker install it as the content.Service validator at startup, so clients
-// cannot write a plugin-owned namespace and retrieval mappings may address it.
-// The plugin's own output is validated by DeclaredExtensions of the same
-// manifest (CheckNormalizerOutput).
-func ExtensionRegistry(p *Pin) (*content.ExtensionRegistry, error) {
-	registry := content.NewExtensionRegistry()
-	if p == nil {
-		return registry, nil
-	}
-	if err := registry.Own(p.Manifest.ID, namespacesOf(&p.Manifest)...); err != nil {
-		return nil, &PinError{Path: p.Path, Issues: []Issue{{Code: CodeNamespaceConflict, Path: "/extensions", Message: err.Error()}}}
-	}
-	return registry, nil
-}
-
 // loopbackHost reports whether an endpoint host is a loopback literal or
 // localhost, where plain HTTP never leaves the machine.
 func loopbackHost(host string) bool {
