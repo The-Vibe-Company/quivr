@@ -100,5 +100,27 @@ class WebImageContextTest(unittest.TestCase):
         self.assertIsNone(image_context.check_web(root, root / 'Dockerfile', entry='web/server.mjs'))
 
 
+class PythonImageContextTest(unittest.TestCase):
+    """The stage that copies a Python script copies every repository module it imports."""
+    def repo(self, copy_line):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / 'scripts').mkdir()
+        (root / 'scripts' / 'prepare.py').write_text('import json\n\ndef run():\n    from helper import get\n')
+        (root / 'scripts' / 'helper.py').write_text('import shared.paths\n')
+        (root / 'scripts' / 'shared').mkdir()
+        (root / 'scripts' / 'shared' / '__init__.py').write_text('')
+        (root / 'Dockerfile').write_text(f'FROM python AS model\n{copy_line}\nRUN python scripts/prepare.py\nFROM tei\nCOPY scripts ./\n')
+        return root
+
+    def test_module_missing_from_the_stage_fails_and_names_it(self):
+        root = self.repo('COPY scripts/prepare.py ./scripts/prepare.py')
+        failure = image_context.check_python(root, root / 'Dockerfile', 'scripts/prepare.py')
+        self.assertIn('does not copy scripts/helper.py, scripts/shared/__init__.py', failure)
+
+    def test_directory_copy_covers_transitive_imports(self):
+        root = self.repo('COPY scripts ./scripts')
+        self.assertIsNone(image_context.check_python(root, root / 'Dockerfile', 'scripts/prepare.py'))
+
+
 if __name__ == '__main__':
     unittest.main()

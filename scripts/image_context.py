@@ -2,6 +2,8 @@
 
 Core: the build stage must copy every Go package ./cmd/quivr imports.
 Web: the runtime stage must copy every module quivr-search/server.mjs imports.
+TEI: the stage that copies scripts/prepare_embeddings.py must copy every
+repository module the script imports.
 
 The local stack builds the quivr binary natively, so nothing else notices when
 a new top-level Go package is imported but not copied by
@@ -14,6 +16,7 @@ the same way from exactly the COPY sources of the ``connectors`` stage.
 
     python3 scripts/image_context.py [Dockerfile]   # guard used by make verify
 """
+import ast
 import fnmatch
 import os
 import re
@@ -28,6 +31,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / 'deploy' / 'railway' / 'core.Dockerfile'
 WEB_DOCKERFILE = ROOT / 'deploy' / 'railway' / 'web.Dockerfile'
 WEB_ENTRY = 'quivr-search/server.mjs'
+TEI_DOCKERFILE = ROOT / 'deploy' / 'railway' / 'tei.Dockerfile'
+TEI_ENTRY = 'scripts/prepare_embeddings.py'
 IMPORT = re.compile(r"""(?:from\s+|import\s*\(\s*|import\s+)['"](\.{1,2}/[^'"]+)['"]""")
 
 
@@ -149,30 +154,39 @@ def check_connectors(root, dockerfile, go):
     return None
 
 
-def runtime_stage_sources(text):
-    """Return the build-context sources copied by the last stage (not --from)."""
-    stages, current = [], []
+def stages_sources(text):
+    """Return, for each stage, the build-context sources it copies (not --from)."""
+    stages, current = [], None
     for words in instructions(text):
         if words[0].upper() == 'FROM':
             current = []
             stages.append(current)
         elif words[0].upper() == 'COPY' and current is not None and not any(w.startswith('--from') for w in words[1:]):
             current.extend([w for w in words[1:] if not w.startswith('--')][:-1])
+    return stages
+
+
+def runtime_stage_sources(text):
+    """Return the build-context sources copied by the last stage (not --from)."""
+    stages = stages_sources(text)
     return stages[-1] if stages else []
+
+
+def copied(path, sources):
+    """Whether a COPY source (a file, a directory or a glob) brings path into the image."""
+    return any(fnmatch.fnmatch(path, s) or path.startswith(s.rstrip('/') + '/') for s in sources)
 
 
 def check_web(root, dockerfile, entry=WEB_ENTRY):
     """Return the failure text when a module the web server imports is not copied, or None."""
     sources = runtime_stage_sources(dockerfile.read_text())
-    def copied(path):
-        return any(fnmatch.fnmatch(path, s) or path.startswith(s.rstrip('/') + '/') for s in sources)
     seen, todo, missing = set(), [entry], []
     while todo:
         path = todo.pop()
         if path in seen:
             continue
         seen.add(path)
-        if not copied(path):
+        if not copied(path, sources):
             missing.append(path)
         for spec in IMPORT.findall((root / path).read_text()):
             target = (pathlib.PurePosixPath(path).parent / spec).as_posix()
@@ -185,11 +199,49 @@ def check_web(root, dockerfile, entry=WEB_ENTRY):
     return None
 
 
+def python_imports(root, path):
+    """Yield the repository modules a script imports; Python resolves them next to the script."""
+    folder = pathlib.PurePosixPath(path).parent
+    for node in ast.walk(ast.parse((root / path).read_text(), path)):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names = [node.module]
+        else:
+            continue
+        for name in names:
+            top = name.split('.')[0]
+            for candidate in (folder / f'{top}.py', folder / top / '__init__.py'):
+                if (root / candidate).is_file():
+                    yield candidate.as_posix()
+
+
+def check_python(root, dockerfile, entry):
+    """Return the failure text when the stage that copies a script misses a module it imports, or None."""
+    sources = next((s for s in stages_sources(dockerfile.read_text()) if copied(entry, s)), None)
+    if sources is None:
+        return f'{dockerfile.name}: no stage copies {entry}.'
+    seen, todo, missing = set(), [entry], []
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        if not copied(path, sources):
+            missing.append(path)
+        todo.extend(python_imports(root, path))
+    if missing:
+        return (f'{dockerfile.name}: the stage that copies {entry} does not copy {", ".join(sorted(missing))}, '
+                f'which the script imports.\nFix: COPY every module the script imports into that stage, '
+                f'or keep {entry} standalone.')
+    return None
+
+
 def main(argv):
     dockerfile = pathlib.Path(argv[1]).resolve() if len(argv) > 1 else DOCKERFILE
     failure = check(ROOT, dockerfile, os.environ.get('GO', 'go'))
     if not failure and len(argv) <= 1:
-        failure = check_web(ROOT, WEB_DOCKERFILE)
+        failure = check_web(ROOT, WEB_DOCKERFILE) or check_python(ROOT, TEI_DOCKERFILE, TEI_ENTRY)
     if failure:
         print(failure, file=sys.stderr)
         return 1
