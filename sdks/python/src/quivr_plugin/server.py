@@ -33,7 +33,7 @@ from .connector import CREDENTIAL_PATH, FETCH_PATH, MAX_CONNECTOR_REQUEST_BYTES,
 from .errors import PluginError, TerminalError
 from .logs import configure_logging, invocation_context
 from .manifest import LoadedManifest, load_manifest
-from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SubscriptionRequest
+from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SearchRequest, SearchResponse, SubscriptionRequest
 from .schema import protocol_errors
 from .subscription import SubscriptionInvocation, as_response, response_problems
 
@@ -41,16 +41,23 @@ DISCOVERY_PATH = "/v0/discovery"
 HEALTH_PATH = "/v0/health"
 NORMALIZER_PATH = "/v0/contributions/normalizer"
 SUBSCRIPTION_PATH = "/v0/contributions/subscription"
+RETRIEVAL_PATH = "/v0/contributions/retrieval/search"
 MAX_REQUEST_BYTES = 1 << 20
 # A subscription request carries the text of a Record Version; the core keeps it within 16 MiB.
 MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
+MAX_RETRIEVAL_REQUEST_BYTES = 16 << 20
 
 
 def max_request_bytes(path: str) -> int:
     """Largest request body accepted on a route."""
-    if path.split("?", 1)[0] in (FETCH_PATH, CREDENTIAL_PATH):
+    route = path.split("?", 1)[0]
+    if route in (FETCH_PATH, CREDENTIAL_PATH):
         return MAX_CONNECTOR_REQUEST_BYTES
-    return MAX_SUBSCRIPTION_REQUEST_BYTES if path.split("?", 1)[0] == SUBSCRIPTION_PATH else MAX_REQUEST_BYTES
+    if route == SUBSCRIPTION_PATH:
+        return MAX_SUBSCRIPTION_REQUEST_BYTES
+    if route == RETRIEVAL_PATH:
+        return MAX_RETRIEVAL_REQUEST_BYTES
+    return MAX_REQUEST_BYTES
 
 log = logging.getLogger("quivr_plugin.server")
 
@@ -78,6 +85,7 @@ class Invocation:
 
 Normalizer = Callable[[Invocation], "NormalizerResponse | dict[str, Any]"]
 SubscriptionHandler = Callable[[SubscriptionInvocation], Any]
+RetrievalHandler = Callable[[SearchRequest], SearchResponse | dict[str, Any]]
 HealthCheck = Callable[[], None]
 
 
@@ -109,6 +117,7 @@ class Plugin:
         self.manifest = load_manifest(manifest)
         self._normalizer: Normalizer | None = None
         self._subscription: SubscriptionHandler | None = None
+        self._retrieval: RetrievalHandler | None = None
         self._connectors: dict[str, Connector] = {}
         self._health: HealthCheck | None = None
 
@@ -129,6 +138,11 @@ class Plugin:
     def health_check(self, fn: HealthCheck) -> HealthCheck:
         """Decorator registering a readiness check; raise a PluginError to report not ready (503)."""
         self._health = fn
+        return fn
+
+    def retrieval(self, fn: RetrievalHandler) -> RetrievalHandler:
+        """Register a retrieval handler; each invocation answers one candidate round."""
+        self._retrieval = fn
         return fn
 
     def connector(self, kind: str):
@@ -160,7 +174,7 @@ class Plugin:
     def handle(self, method: str, path: str, body: bytes = b"") -> Reply:
         """Answer one protocol request; used by the HTTP server and by quivr_plugin.testing."""
         routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST", SUBSCRIPTION_PATH: "POST",
-                  FETCH_PATH: "POST", CREDENTIAL_PATH: "POST"}
+                  FETCH_PATH: "POST", CREDENTIAL_PATH: "POST", RETRIEVAL_PATH: "POST"}
         path = path.split("?", 1)[0]
         if path not in routes:
             return _error(404, "not_found", f"no Plugin Protocol v0 route {path}")
@@ -183,7 +197,40 @@ class Plugin:
             return Reply(200, Health().to_dict())
         if path == SUBSCRIPTION_PATH:
             return self._evaluate(body)
+        if path == RETRIEVAL_PATH:
+            return self._search(body)
         return self._invoke(body)
+
+    def _search(self, body: bytes) -> Reply:
+        contribution = self.manifest.model.contributions.retrieval
+        if contribution is None or self._retrieval is None:
+            return _error(501, "not_implemented", "the plugin declares or registers no retrieval Contribution")
+        if len(body) > MAX_RETRIEVAL_REQUEST_BYTES:
+            return _error(413, "request_too_large", "retrieval request exceeds the body bound")
+        try:
+            document = json.loads(body)
+        except (UnicodeDecodeError, ValueError):
+            return _error(400, "invalid_request", "retrieval request is not JSON")
+        problems = protocol_errors("retrieval-search-request.schema.json", document)
+        if problems:
+            return _error(400, "invalid_request", "; ".join(problems))
+        request = SearchRequest.from_dict(document)
+        if request.profile not in contribution.profiles:
+            return _error(400, "unknown_profile", "the retrieval profile is not declared")
+        with invocation_context(request.invocation_id, ""):
+            try:
+                self.manifest.validate_configuration(request.configuration)
+                result = self._retrieval(request)
+                result = result.to_dict() if isinstance(result, SearchResponse) else result
+            except PluginError as exc:
+                return _from_exception(exc)
+            except Exception:
+                log.error("retrieval handler failed")
+                return _error(503, "unexpected_error", "the retrieval handler failed", True)
+        problems = protocol_errors("retrieval-search-response.schema.json", result)
+        if problems:
+            return _error(500, "invalid_response", "the retrieval response violates the protocol")
+        return Reply(200, result)
 
     def invoke(self, request: NormalizerRequest | dict[str, Any]) -> Reply:
         """Run the normalizer route in process for a request model or JSON object."""
@@ -325,7 +372,7 @@ class Plugin:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
-            server_version = "quivr-plugin-sdk/0.2"
+            server_version = "quivr-plugin-sdk/0.4"
 
             def _serve(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"

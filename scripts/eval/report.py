@@ -45,6 +45,8 @@ def comparison(r):
 def time_table(systems):
     """Where each system's search time goes, per limit; empty for a run before THE-873 timed phases."""
     rows = [(system, limit, t) for system, v in systems.items() for limit, t in v.get('time_by_limit', {}).items()]
+    rows += [(system + ' (bounded-cache replay)', v.get('scored_limit', 10), v['warm_cache_timing'])
+             for system, v in systems.items() if 'warm_cache_timing' in v]
     if not rows:
         return []
     lines = ['Where search time goes, in ms, p50 / p95. Engine is the time the engine reports (`usage.elapsed_ms`); '
@@ -57,6 +59,42 @@ def time_table(systems):
         share = '—' if t['query_encoding_share'] is None else f"{t['query_encoding_share']:.0%}"
         lines.append(f'| {system} | {limit} | ' + ' | '.join(both) + f" | {share} | {t['failures']}/{t['searches'] + t['failures']} |")
     return lines + ['']
+
+
+def accounting_table(systems):
+    rows = [(system, value, phase, usage) for system, value in systems.items()
+            for phase, usage in value.get('accounting', {}).items() if value.get('reranker')]
+    if not rows:
+        return []
+    lines = ['### Reranker accounting', '',
+             'Scored searches exclude profile probes and startup warmups. Paid live runs have no paid probes, warmups or replay. '
+             'Each variant restarts the sidecar before its scored pass. Historical/offline replay rows reuse that same sidecar. '
+             'The bounded-cache replay is not an all-hit warm measurement: the default 4096-entry cache can evict '
+             'pairs during the full scored pass and sequential replay, so its hit rate and spend are measured, not assumed. '
+             'Spend includes paid work recorded for failed searches. Missing telemetry is unknown, not zero. '
+             'Actual tokens are provider-reported input tokens; reserved tokens are failed or unconfirmed attempts. '
+             'Cents/search uses pinned client pricing, not a billing receipt; ≤ marks an upper bound including reservations. '
+             'Cache hits are divided by candidate pairs. Fallback searches measure hybrid order, not Jev quality; '
+             'a payment refusal never supplies a Jev score.', '',
+             '| System | Pass | K | Trim | Fusion | nDCG@10 | Recall@10 | p50 ms | p95 ms | Actual tokens/search | Reserved tokens/search | Cents/search | Paid calls/search | Fallback rate | Cache hit rate | Log records/searches |',
+             '| --- ' * 16 + '|']
+    reasons = []
+    for system, value, phase, usage in rows:
+        config = value['reranker']
+        scored = phase == 'scored'
+        timing = value['latency_ms'] if scored else value['warm_cache_timing']['client_ms']
+        quality = ' | '.join(number(value['mean'][metric]) if scored else '—' for metric in ['ndcg@10', 'recall@10'])
+        rates = ['—' if usage.get(field) is None else f"{usage[field]:.1%}" for field in ['fallback_rate', 'cache_hit_rate']]
+        cost = ('≤ ' if usage.get('cost_is_upper_bound') else '') + number(usage.get('cost_cents_per_search'), 4)
+        lines.append(f"| {system} | {'cold/scored' if scored else 'bounded-cache replay'} | {config['k']} | {config['trim']} | {config['ranking']} | {quality} | "
+                     f"{number(timing['p50'], 0)} | {number(timing['p95'], 0)} | {number(usage.get('tokens_per_search'), 1)} | "
+                     f"{number(usage.get('estimated_tokens_per_search'), 1)} | {cost} | {number(usage.get('paid_calls_per_search'), 2)} | "
+                     f"{rates[0]} | {rates[1]} | {usage.get('log_records', 0)}/{usage['searches']} |")
+        if usage.get('fallback_reasons'):
+            reasons.append(f"Fallback reasons ({system}, {phase}): " + ', '.join(
+                f"{'provider refused (payment)' if reason == 'HTTP 402' else reason} {count}"
+                for reason, count in usage['fallback_reasons'].items()) + '.')
+    return lines + [''] + reasons + ([''] if reasons else [])
 
 
 def resources(r):
@@ -93,9 +131,21 @@ def markdown(r):
         if (r.get('resources') or {}).get('cause'):
             lines += ['Cause: ' + r['resources']['cause'] + '.', '']
         lines += [ 'Partial results: ' + (', '.join(r['sets']) or 'none'), '']
+    budget = run.get('jev_budget')
+    if budget:
+        lines += ['## Paid run budget', '',
+                  f"Admission cap: {budget['max_input_tokens']:,} input tokens and {budget['max_paid_searches']} searches. "
+                  f"Actual input: {budget['actual_input_tokens']:,}; reserved/unconfirmed: {budget['reserved_input_tokens']:,}; "
+                  f"actual priced cost: {budget['actual_cost_cents']:.4f} cents; cost upper bound: {budget['cost_upper_bound_cents']:.4f} cents. "
+                  f"Blocked searches: {budget['blocked_searches']}. Reservations include all three possible attempts; missing telemetry is not zero.", '']
     h = run.get('host', {})
     lines += [f"Host: {h.get('cpu_model', h.get('machine', ''))}, {h.get('logical_cpus')} logical CPUs. "
-              f"Every query runs in each mode and each served profile, limit {r['limit']}, hits deduplicated by Record.", '']
+              'Default runs in every mode; paid deep profiles run only hybrid. Paid matrix runs score both profiles '
+              'at API limit 10 before Record deduplication; no-key runs retain the historical default scored limit 50. '
+              'Optional private sets are excluded from paid probes and matrices and retain unpaid default measurement. '
+              'Hits are deduplicated by Record. All systems are scored at shared cutoffs @10: nDCG@10, Recall@10, '
+              'and MRR@10. Limit 50 is a retrieval page size, not a Recall@50 score. '
+              'Paired comparisons with past runs omit systems whose scored API page sizes differ.', '']
     lines += comparison(r)
     if r.get('convention'):
         lines += [f"Scoring: {r['convention']} Significance: {r['test']}; `*` marks p < 0.05.", '']
@@ -124,6 +174,7 @@ def markdown(r):
                          + f" | {number(v['latency_ms']['p50'], 0)} | {number(v['latency_ms']['p95'], 0)} | {v['failures']}/{s['queries']} | {paid} |")
         lines.append('')
         lines += time_table(s['systems'])
+        lines += accounting_table(s['systems'])
         if 'against_baseline_run' in s:
             if s['against_baseline_run'] is None:
                 lines += ['Not compared with the baseline run: that run did not measure this exact sample.', '']

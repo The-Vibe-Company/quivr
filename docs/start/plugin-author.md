@@ -10,6 +10,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 - [Local-vector calibration](../../plugins/alerts/calibration/README.md): the local E5 alert threshold measurements and their limits
 - [core.ingest](../../plugins/core-ingest/README.md): the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine
 - [core.retrieve](../../plugins/core-retrieve/README.md): the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine
+- [Jev reranking](../../plugins/jev-rerank/README.md): optional Jev reranking, bounded pair caching and hybrid fallback
 - [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests
 
 ## Guides
@@ -17,7 +18,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 - [pdf-text](../../plugins/pdf-text/README.md): the reference PDF normalizer, one Part per page
 - [RSS and Atom connector plugin](../../plugins/rss/README.md): the first-party RSS and Atom connector plugin
 - [Quivr Plugin SDK for Go](../../sdks/go/README.md): write, test and certify a source collector or an ingestion plugin in Go
-- [Quivr Plugin SDK for Python](../../sdks/python/README.md): write, test and run a Python normalizer
+- [Quivr Plugin SDK for Python](../../sdks/python/README.md): write, test and run Python plugins
 
 ## Other readers
 

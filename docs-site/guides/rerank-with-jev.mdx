@@ -1,0 +1,76 @@
+---
+title: "Re-rank with Jev"
+description: "Enable an optional paid re-ranker for deep searches, with hybrid fallback."
+---
+
+Use `jev.rerank` when you want to evaluate Jev over hybrid candidates. It is
+optional; installing it does not change `core.retrieve` or make `deep` the
+default. Run it as a separate Python sidecar.
+
+## Install and pin
+
+From the repository checkout, install both packages in a Python 3.12+ virtual
+environment:
+
+```bash
+python3 -m pip install ./sdks/python ./plugins/jev-rerank
+export QUIVR_PLUGIN_MANIFEST="$PWD/plugins/jev-rerank/quivr-plugin.yaml"
+export QUIVR_PLUGIN_HOST=127.0.0.1
+export QUIVR_PLUGIN_PORT=8083
+python3 -m jev_rerank
+```
+
+Supply `TYPESAFE_API_KEY` to this process through your secret manager or
+environment before starting it. Do not put the key in the plugin configuration.
+Without it, `deep` works in fallback mode, without a paid call.
+
+Replace the retrieval entry in your engine's [plugin pins](/plugins/pin):
+
+```yaml
+plugins:
+  - manifest: /path/to/quivr-v2/plugins/jev-rerank/quivr-plugin.yaml
+    endpoint: http://127.0.0.1:8083
+    configuration:
+      candidate_count: 30
+      trim_tokens: full
+      ranking: noul
+      cache_entries: 4096
+```
+
+Keep the ingestion plugin pinned. Do not pin `core.retrieve` and `jev.rerank`
+to the retrieval role together. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
+when changing an existing installation.
+
+## Search and inspect
+
+Send your ordinary [search request](/guides/search) with `profile: deep`.
+Round 1 retrieves a hybrid shortlist, regardless of the requested mode. Round 2
+scores it with `jev-1.13.0`. Hit explanations show the Noul probability, and
+`usage.paid_calls` and `usage.cost_cents` report the paid work. `default` follows
+the requested search mode and never calls Jev.
+
+`re-ranker unavailable: <reason>` means hybrid order was returned, without a
+Jev probability. Missing credentials, provider errors, invalid answers and
+the paid round's 2-second deadline all fall back this way. Failed attempts
+without provider usage reserve an upper-bound cost, not a claimed invoice.
+
+## Tune with measurements
+
+The paid lane uses only K=30, trim=256 and Noul on miracl-fr, capped at 150
+searches and 5M input tokens per run, with no paid probes, warmups or replay.
+It prints actual/reserved tokens and cost; missing usage stays reserved.
+K/trim/fusion sweeps are offline or deferred. RRF fuses the Noul rank with
+hybrid rank using constant 60. Trimming requires a local `tokenizer_path`
+and its `tokenizer_sha256`; by default the digest is the pinned E5 tokenizer.
+These trim lengths are tokenizer tokens, not provider billing tokens.
+
+The bounded pair cache reuses valid scores for repeated queries and immutable
+segments. Its scope includes organization, model, rubric and trim recipe.
+Case is preserved; whitespace is normalized. Set `cache_entries: 0` to disable
+it. Scores from a failed response never enter the cache.
+
+Watch relevance, p95 latency, input tokens, cost, fallback rate and cold/warm
+cache hit rates. The profile objective remains 3 seconds and 1 cent. TypeSafe's
+organization-wide limits are 100k input tokens/s and 40 requests/s; batching,
+trimming and caching matter more than price. A deployment must measure its
+own workload before relying on the optional re-ranker.

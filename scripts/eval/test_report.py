@@ -21,6 +21,26 @@ RUN = {'id': 'r1', 'source_revision': 'abc', 'finished_at': '2026-09-30T00:00:00
 
 
 class Markdown(unittest.TestCase):
+    def test_matrix_rows_separate_scored_quality_spend_and_warm_cache_statistics(self):
+        value = {**system(.75, 1), 'scored_limit': 10, 'reranker': {'k': 20, 'trim': '128', 'ranking': 'rrf'},
+                 'warm_cache_timing': timed(0),
+                 'accounting': {'scored': {'searches': 2, 'log_records': 2, 'tokens_per_search': 800,
+                                           'cost_cents_per_search': .2, 'paid_calls_per_search': 1,
+                                           'estimated_tokens_per_search': 32768, 'cost_is_upper_bound': True,
+                                           'fallback_rate': .5, 'cache_hit_rate': 0},
+                                'warm_cache': {'searches': 2, 'log_records': 2, 'tokens_per_search': 0,
+                                               'cost_cents_per_search': 0, 'paid_calls_per_search': 0,
+                                               'estimated_tokens_per_search': 0, 'cost_is_upper_bound': False,
+                                               'fallback_rate': 0, 'cache_hit_rate': 1}}}
+        text = '\n'.join(report.accounting_table({'hybrid/deep-k20-t128-rrf': value}))
+        self.assertIn('| cold/scored | 20 | 128 | rrf | 0.7500 | 0.5000 | 40 | 90 | 800.0 | 32768.0 | ≤ 0.2000 | 1.00 | 50.0% | 0.0% | 2/2 |', text)
+        self.assertIn('| bounded-cache replay | 20 | 128 | rrf | — | — | 40 | 90 | 0.0 | 0.0 | 0.0000 | 0.00 | 0.0% | 100.0% | 2/2 |', text)
+        self.assertIn('not an all-hit warm measurement', text)
+        value['accounting']['scored']['fallback_reasons'] = {'HTTP 402': 2}
+        refused = '\n'.join(report.accounting_table({'hybrid/deep-k20-t128-rrf': value}))
+        self.assertIn('provider refused (payment) 2', refused)
+        self.assertIn('Fallback searches measure hybrid order, not Jev quality', refused)
+
     def test_completed_run_shows_scores_deltas_and_what_was_not_served(self):
         significant = {'queries': 2, 'delta': -0.125, 'p_value': 0.01, 'significant': True}
         r = {'status': 'completed', 'run': RUN, 'convention': 'linear gain.', 'test': 'paired t-test', 'baseline_system': 'hybrid/default', 'limit': 50,
@@ -33,6 +53,16 @@ class Markdown(unittest.TestCase):
                                'against_baseline_system': {'lexical/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}},
                                'against_baseline_run': {'hybrid/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}}}}}
         text = report.markdown(r)
+        self.assertIn('All systems are scored at shared cutoffs @10', text)
+        self.assertIn('not a Recall@50 score', text)
+        r['run'] = {**RUN, 'jev_budget': {'max_input_tokens': 5_000_000, 'max_paid_searches': 150,
+                                        'actual_input_tokens': 1000, 'reserved_input_tokens': 65536,
+                                        'actual_cost_cents': .0042, 'cost_upper_bound_cents': .2794512,
+                                        'blocked_searches': 1}}
+        budgeted = report.markdown(r)
+        self.assertIn('Admission cap: 5,000,000 input tokens and 150 searches', budgeted)
+        self.assertIn('Actual input: 1,000; reserved/unconfirmed: 65,536', budgeted)
+        self.assertIn('actual priced cost: 0.0042 cents; cost upper bound: 0.2795 cents', budgeted)
         self.assertIn('| hybrid/default | 0.5000 | 0.5000 | 0.2500 | baseline | baseline | 40 | 90 | 1/2 | 0 |', text)
         self.assertIn('| lexical/default | 0.3750 | 0.5000 | 0.2500 | -0.1250 (p 0.010) * | -0.1250 (p 0.010) * | 40 | 90 | 1/2 | — |', text)
         self.assertIn('| hybrid/default | 50 | 40 / 90 | 30 / 70 | 12 / 12 | 4 / 9 | 6 / 12 | 2 / 3 | 40% | 1/10 |', text)

@@ -53,6 +53,10 @@ The default ingestion plugin. It cuts the `title` and `body` Parts of each Versi
 
 The default retrieval plugin: the search Quivr ran itself before it moved into a plugin, with the same rankings. It asks for one candidate list that follows the search mode, `bm25` on the title and body for `lexical`, `near_vector` in the served space for `semantic`, `hybrid` in the served space with alpha 0.5 and relative score fusion for `hybrid`, and returns it as the ranking. Candidates of exactly equal score rank by segment id. It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent), which ranks the same way until re-ranking is added. It has no configuration. The api refuses to start without a retrieval plugin.
 
+## jev-rerank
+
+The optional `jev.rerank` retrieval plugin uses a pinned Jev model to score a hybrid shortlist in one batch for `deep`. Each hit explains its probability; usage reports paid calls and cost. Its `default` profile stays unpaid. Errors and deadlines return the original hybrid order without a Jev score. It supports token trimming, overlap suppression, bounded pair caching and Noul/hybrid RRF fusion. See [Re-rank with Jev](/guides/rerank-with-jev) for configuration and the measurement caveats.
+
 ## rss
 
 Polls one feed per Connector Instance, with conditional requests and the feed's `ttl`. Each item becomes a Record keyed by its `guid` or `id`; an edited item becomes a new Version. It refuses private and loopback addresses unless `allow_private_addresses` is `true`, which only a local test deployment should set. See [RSS and Atom feeds](/guides/rss).

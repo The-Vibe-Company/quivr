@@ -33,6 +33,7 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 
 import public_sets  # noqa: E402
+import jev  # noqa: E402
 import report as render  # noqa: E402
 import resources  # noqa: E402
 import trec  # noqa: E402
@@ -45,13 +46,33 @@ TIMING_LIMITS = [LIMIT, 10]  # limit 10, the API default, is timed only, in a se
 PHASES = ['query_encoding_ms', 'index_query_ms', 'hydration_ms', 'plugin_rounds_ms']  # of usage.phases
 BATCH_ITEMS, BATCH_BYTES = 100, 8 << 20  # under the batch bounds of 100 entries and 10 MiB
 WARMUP_QUERIES = 3
+DEEP_LIMIT = 10
 
 
 class Client:
     def __init__(self, base, key, timeout=60):
         self.base, self.key, self.timeout = base.rstrip('/'), key, timeout
+        self.jev_log = None
+        self.stack = None
+        self.budget = None
+        self.deep_enabled = bool(os.environ.get('TYPESAFE_API_KEY'))
+        self.deep_skip_reason = 'TYPESAFE_API_KEY absent; paid deep evaluation skipped'
 
     def call(self, method, path, body=None, expected=(200,), attempts=5):
+        paid = method == 'POST' and path == '/v0/search' and body is not None and is_deep(body.get('profile', 'default'))
+        if not paid:
+            return self._call(method, path, body, expected, attempts)
+        if self.budget is None:
+            raise RuntimeError('paid deep evaluation requires a run input token budget')
+        with self.budget.request_lock:
+            self.budget.admit()
+            begin = jev.offset(self.jev_log)
+            try:
+                return self._call(method, path, body, expected, 1)
+            finally:
+                self.budget.settle(self.jev_log, begin)
+
+    def _call(self, method, path, body, expected, attempts):
         """JSON response of an expected status; 429 and 503 are retried with a bounded backoff."""
         data = json.dumps(body).encode() if body is not None else None
         for attempt in range(attempts):
@@ -77,16 +98,51 @@ def advertised_profiles(client):
     return [p['name'] for p in listed['items']]
 
 
-def serving_profiles(client, corpus, advertised):
+def serving_profiles(client, corpus, advertised, probe_query='profile probe', allow_paid=True):
     """Which advertised profiles the installation serves; a refused one is recorded, not measured."""
     served, refused = {}, {}
     for name in advertised:
-        status, body = client.call('POST', '/v0/search', {'query': 'profile probe', 'corpus_ids': [corpus], 'mode': 'lexical', 'profile': name, 'limit': 1}, expected=(200, 422))
+        if is_deep(name) and not allow_paid:
+            refused[name] = 'optional private set excluded from paid evaluation'
+            continue
+        if is_deep(name) and not client.deep_enabled:
+            refused[name] = client.deep_skip_reason
+            continue
+        if is_deep(name) and client.stack is not None and 'jev_pin' in client.stack.state:
+            _, listed = client.call('GET', '/v0/search/profiles')
+            served[name] = next(profile['version'] for profile in listed['items'] if profile['name'] == name)
+            continue
+        status, body = client.call('POST', '/v0/search', {'query': probe_query, 'corpus_ids': [corpus], 'mode': 'hybrid' if is_deep(name) else 'lexical', 'profile': name, 'limit': 1}, expected=(200, 422))
         if status == 200:
             served[name] = body['retrieval_profile']['version']
         else:
             refused[name] = f"422 {body.get('code', '')}".strip()
     return served, refused
+
+
+def is_deep(profile):
+    return profile == 'deep' or profile.startswith('deep-k')
+
+
+def measurements(sides):
+    profiles = list(dict.fromkeys(profile for side in sides for profile in side['served']))
+    profiles.sort(key=lambda profile: (profile != 'default', is_deep(profile)))
+    for profile in profiles:
+        if profile == 'deep' and any(side['client'].stack is not None and 'jev_pin' in side['client'].stack.state for side in sides):
+            for label, configuration in jev.matrix():
+                yield profile, label, configuration
+        else:
+            yield profile, profile, None
+
+
+def deep_warmups(queries, run_id):
+    result = []
+    for index in range(WARMUP_QUERIES):
+        query = f'evaluation warmup {run_id} {index}'
+        while query in queries:
+            query += ' warmup'
+        result.append(query)
+    return result
 
 
 def batches(commands):
@@ -169,7 +225,8 @@ def search(client, corpus, query, mode, profile, keys, limit=LIMIT):
     except Exception as error:  # a failed search scores 0 and is counted, never hidden
         return [], {'client_ms': (time.perf_counter() - start) * 1000}, str(error)[:200]
     usage = result.get('usage') or {}
-    timing = {'client_ms': (time.perf_counter() - start) * 1000, 'elapsed_ms': usage.get('elapsed_ms'), **(usage.get('phases') or {})}
+    timing = {'client_ms': (time.perf_counter() - start) * 1000, 'elapsed_ms': usage.get('elapsed_ms'),
+              'paid_calls': usage.get('paid_calls'), 'cost_cents': usage.get('cost_cents'), **(usage.get('phases') or {})}
     ranked = []
     for hit in result['items']:
         doc = keys.get(hit['record_id'])
@@ -192,14 +249,20 @@ def time_summary(timings, failures):
     return out
 
 
-def measure_set(clients, name, directory, run_id, options):
+def measure_set(clients, name, directory, run_id, options, allow_paid=True):
     """One result per client, in order. With two clients (--compare-to) each query is searched on
     both, alternating which goes first, so drift on the machine weighs on both sides alike."""
     import scoring
     data = trec.load(directory)
+    allow_paid = allow_paid and name == 'miracl-fr'
+    if allow_paid and any(client.deep_enabled for client in clients):
+        selected = sorted(data['queries'])[:150]
+        data['queries'] = {query: data['queries'][query] for query in selected}
+        data['qrels'] = {query: data['qrels'][query] for query in selected}
     manifest_path = pathlib.Path(directory) / 'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'name': name, 'fingerprint': trec.fingerprint(directory)}
     namespace = f'eval-{name}'
+    deep_queries = deep_warmups(set(data['queries'].values()), run_id)
     sides = []
     for client in clients:
         _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
@@ -207,41 +270,82 @@ def measure_set(clients, name, directory, run_id, options):
         print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
         records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
         advertised = advertised_profiles(client)
-        served, refused = serving_profiles(client, corpus, advertised)
+        served, refused = serving_profiles(client, corpus, advertised, deep_queries[0], allow_paid=allow_paid)
         sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
                       'out': {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
                               'dropped_queries': len(data['dropped_queries']), 'ingestion': ingestion,
                               'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}})
     queries = sorted(data['queries'])
-    for profile in dict.fromkeys(p for side in sides for p in side['served']):
-        for mode in MODES:
+    reranking = any('deep' in side['served'] for side in sides)
+    for profile, label, configuration in measurements(sides):
+        deep = is_deep(profile)
+        scored_limit = DEEP_LIMIT if deep or reranking else LIMIT
+        limits = [scored_limit] if deep else [scored_limit] + [limit for limit in TIMING_LIMITS if limit != scored_limit]
+        for mode in ['hybrid'] if deep else MODES:
             serving = [side for side in sides if profile in side['served']]
-            for q in queries[:WARMUP_QUERIES]:
+            if configuration is not None:
+                serving = [side for side in serving if side['client'].stack is not None and 'jev_pin' in side['client'].stack.state]
                 for side in serving:
-                    search(side['client'], side['corpus'], data['queries'][q], mode, profile, side['records'])
+                    started = time.monotonic()
+                    jev.select(side['client'].stack, configuration)
+                    side['configuration_seconds'] = round(time.monotonic() - started, 3)
+            warmups = [data['queries'][query] for query in queries[:WARMUP_QUERIES]]
+            if deep:
+                warmups = []
+            for query in warmups:
+                for side in serving:
+                    search(side['client'], side['corpus'], query, mode, profile, side['records'], scored_limit)
             for side in serving:
-                side.update(ranking={}, errors=[], timings={limit: [] for limit in TIMING_LIMITS}, failed={limit: 0 for limit in TIMING_LIMITS})
+                side.update(ranking={}, errors=[], timings={limit: [] for limit in limits}, failed={limit: 0 for limit in limits},
+                            attempts=[], log_begin=jev.offset(side['client'].jev_log))
             # The other limits are timed only, after the scored pass, so they never change what it measures.
-            for limit in TIMING_LIMITS:
+            for limit in limits:
                 for n, q in enumerate(queries):
                     for side in serving if n % 2 == 0 else serving[::-1]:
                         ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, profile, side['records'], limit)
-                        if limit == LIMIT:
+                        if limit == scored_limit:
                             side['ranking'][q] = ranked
+                            side['attempts'].append(timing)
                             if error:
                                 side['errors'].append(error)
                         if error:
                             side['failed'][limit] += 1
                         else:
                             side['timings'][limit].append(timing)
-            system = f'{mode}/{profile}'
+                if limit == scored_limit:
+                    for side in serving:
+                        side['log_end'] = jev.offset(side['client'].jev_log)
+            system = f'{mode}/{label}'
             print(f'[eval] {name}: {system} searched', flush=True)
             for side in serving:
-                latencies = [t['client_ms'] for t in side['timings'][LIMIT]]
+                events = jev.records(side['client'].jev_log, side['log_begin'], side['log_end'], profile)
+                accounting = jev.summary(side['attempts'], events, unpaid=options.paid_calls == 0 and not deep)
+                latencies = [t['client_ms'] for t in side['timings'][scored_limit]]
                 side['out']['systems'][system] = {**scoring.score(data['qrels'], side['ranking']), 'profile_version': side['served'][profile],
+                                                  'scored_limit': scored_limit, 'reranker': jev.variant(label) if configuration is not None else None,
+                                                  'accounting': {'scored': accounting},
                                                   'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
                                                   'time_by_limit': {str(limit): time_summary(t, side['failed'][limit]) for limit, t in side['timings'].items()},
-                                                  'failures': len(side['errors']), 'errors': sorted(set(side['errors']))[:3], 'paid_calls_per_query': options.paid_calls}
+                                                  'failures': len(side['errors']), 'errors': sorted(set(side['errors']))[:3],
+                                                  'paid_calls_per_query': accounting['paid_calls_per_search']}
+                if configuration is not None:
+                    side['out']['systems'][system]['configuration_seconds'] = side['configuration_seconds']
+            if deep and not getattr(options, 'live_paid', False):
+                for side in serving:
+                    side.update(warm_timings=[], warm_attempts=[], warm_failures=0, warm_begin=jev.offset(side['client'].jev_log))
+                for index, query in enumerate(queries):
+                    for side in serving if index % 2 == 0 else serving[::-1]:
+                        _, timing, error = search(side['client'], side['corpus'], data['queries'][query], 'hybrid', profile, side['records'], DEEP_LIMIT)
+                        side['warm_attempts'].append(timing)
+                        if error:
+                            side['warm_failures'] += 1
+                        else:
+                            side['warm_timings'].append(timing)
+                for side in serving:
+                    events = jev.records(side['client'].jev_log, side['warm_begin'], jev.offset(side['client'].jev_log), profile)
+                    result = side['out']['systems'][system]
+                    result['accounting']['warm_cache'] = jev.summary(side['warm_attempts'], events)
+                    result['warm_cache_timing'] = time_summary(side['warm_timings'], side['warm_failures'])
     for side in sides:
         compare_within(side['out'])
     return [side['out'] for side in sides]
@@ -276,7 +380,8 @@ def compare_runs(current, baseline):
             result['against_baseline_run'] = None
             continue
         result['against_baseline_run'] = {s: {m: scoring.paired(v['per_query'][m], before['systems'][s]['per_query'][m]) for m in scoring.METRICS}
-                                          for s, v in result['systems'].items() if s in before['systems']}
+                                          for s, v in result['systems'].items() if s in before['systems']
+                                          and v.get('scored_limit', LIMIT) == before['systems'][s].get('scored_limit', LIMIT)}
 
 
 def git(*args):
@@ -296,7 +401,7 @@ def checkout(ref):
     return commit, directory
 
 
-def start_stack(phases, stacks, source=ROOT, suffix=''):
+def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key=''):
     """A client of an isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it,
     built from source; appended to stacks as soon as it exists, so a failed start is still cleaned up."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
@@ -307,21 +412,37 @@ def start_stack(phases, stacks, source=ROOT, suffix=''):
     from local import GO, Stack, run
     from prepare_embeddings import prepare as prepare_embeddings
     from prepare_tokenizer import prepare as prepare_tokenizer
-    stack = Stack('quivr-eval-' + uuid.uuid4().hex[:10] + suffix, source)
+    class EvalStack(Stack):
+        def config(self):
+            super().config()
+            jev.configure(self)
+
+    stack = EvalStack('quivr-eval-' + uuid.uuid4().hex[:10] + suffix, source)
     stacks.append(stack)
     normalizer_plugin.select(stack, 'none')
     subscription_plugin.select(stack, False)
     connector_plugin.select(stack, False)
     connector_plugin.select_first_party(stack, connector_plugin.CORE)
     stack.check_disk()
-    for label, step in [('prepare_tokenizer', prepare_tokenizer), ('prepare_model', prepare_embeddings),
+    tokenizer = {}
+    enabled = source == ROOT and not suffix and bool(typesafe_key)
+    steps = [('prepare_tokenizer', lambda: tokenizer.update(prepare_tokenizer())), ('prepare_model', prepare_embeddings)]
+    if enabled:
+        steps.append(('prepare_jev', lambda: jev.start(stack, tokenizer, typesafe_key)))
+    for label, step in steps + [
                         ('go_build', lambda: run([GO, 'build', '-o', str(stack.directory / 'quivr'), './cmd/quivr'], cwd=source)),
                         ('start_dependencies', lambda: stack.compose('up', '-d', '--wait', '--wait-timeout', '300')),
-                        ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack), stack.start_processes()))]:
+                        ('migrate_and_start', lambda: (stack.migrate(), connector_plugin.start_first_party(stack, only=['core-ingest'] if enabled else None), stack.start_processes()))]:
         started = time.monotonic()
         step()
         phases[label] = round(time.monotonic() - started, 3)
-    return Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'])
+    client = Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'])
+    client.deep_enabled = enabled
+    client.stack = stack
+    client.jev_log = getattr(stack, 'jev_log', None)
+    if suffix:
+        client.deep_skip_reason = 'comparison stack retains the core retrieval plugin'
+    return client
 
 
 def resolve_sets(options):
@@ -352,6 +473,13 @@ def main():
     parser.add_argument('--ingest-timeout', type=int, default=5400, help='seconds for one set to become searchable with vectors')
     parser.add_argument('--stall', type=int, default=600, help='seconds without a Record gaining vectors before failing')
     options = parser.parse_args()
+    typesafe_key = os.environ.pop('TYPESAFE_API_KEY', '').strip()
+    if typesafe_key:
+        if options.api_url or [name.strip() for name in options.sets.split(',') if name.strip()] != ['miracl-fr']:
+            parser.error('paid evaluation requires a local miracl-fr-only run')
+        options.private = ''
+    budget = jev.Budget() if typesafe_key else None
+    options.live_paid = bool(typesafe_key)
     if options.compare_to and (options.api_url or options.baseline):
         parser.error('--compare-to measures two local stacks; it excludes --api-url and --baseline')
     try:
@@ -372,6 +500,11 @@ def main():
                                           'github': {k: os.environ[k] for k in ['GITHUB_RUN_ID', 'GITHUB_REF_NAME', 'GITHUB_EVENT_NAME'] if k in os.environ},
                                           'phases_seconds': {}},
               'convention': None, 'test': None, 'baseline_system': BASELINE_SYSTEM, 'limit': LIMIT, 'sets': {}}
+    if budget:
+        report['run']['paid_policy'] = {'set': 'miracl-fr', 'max_queries': 150, 'candidate_count': 30,
+                                       'trim_tokens': 256, 'ranking': 'noul', 'max_input_tokens': jev.MAX_RUN_INPUT_TOKENS,
+                                       'max_paid_searches': jev.MAX_RUN_PAID_SEARCHES,
+                                       'paid_probes_warmups_replay': False}
     stacks, worktree, watch = [], None, None
     print(f"[eval] host: {report['run']['host'].get('cpu_model', 'unknown CPU')}, {report['run']['host']['logical_cpus']} logical CPUs", flush=True)
     try:
@@ -383,6 +516,7 @@ def main():
             if not os.environ.get('QUIVR_EVAL_API_KEY'):
                 sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, content:read, content:write, changes:read, search:query)')
             clients.append(Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']))
+            clients[-1].deep_enabled = bool(typesafe_key)
             options.paid_calls = None
             report['run']['target'] = 'existing installation (--api-url)'
         else:
@@ -390,13 +524,15 @@ def main():
                 commit, worktree = checkout(options.compare_to)
                 report['compare'] = {'ref': options.compare_to, 'source_revision': commit, 'phases_seconds': {}, 'sets': {}}
                 clients.append(start_stack(report['compare']['phases_seconds'], stacks, worktree, '-base'))
-            clients.append(start_stack(report['run']['phases_seconds'], stacks))
-            options.paid_calls = 0  # the local stack embeds with its own TEI and calls no paid service
-            report['run']['target'] = 'isolated local stack, core plugins only'
+            clients.append(start_stack(report['run']['phases_seconds'], stacks, typesafe_key=typesafe_key))
+            clients[-1].budget = budget
+            options.paid_calls = 0
+            report['run']['target'] = 'isolated local stack, optional reranker' if typesafe_key else 'isolated local stack, core plugins only'
             watch = resources.Watch(stacks)
             watch.snapshot('stack started')
         for name, directory in sets:
-            *base, report['sets'][name] = measure_set(clients, name, directory, run_id, options)
+            *base, report['sets'][name] = measure_set(clients, name, directory, run_id, options,
+                                                     allow_paid=not options.private or name != options.private_name)
             if base:
                 report['compare']['sets'][name] = base[0]
             if watch:
@@ -414,6 +550,9 @@ def main():
         report['error'] = type(error).__name__ + ': ' + str(error)[:1000]
         raise
     finally:
+        if budget:
+            report['run']['jev_budget'] = budget.summary()
+            budget.print()
         report['run'].update(finished_at=now(), duration_seconds=round(time.monotonic() - started, 3))
         if watch:
             watch.snapshot('at the end')
@@ -425,8 +564,13 @@ def main():
         print('Evaluation report:', out / 'report.md', flush=True)
         for stack in stacks:
             try:
-                stack.capture()
-                stack.down(True)
+                try:
+                    stack.capture()
+                finally:
+                    try:
+                        jev.stop(stack)
+                    finally:
+                        stack.down(True)
             except Exception as error:  # the other stack and the worktree are still cleaned up
                 print(f'[eval] cleaning up {stack.name} failed: {error}', file=sys.stderr, flush=True)
         if worktree is not None:

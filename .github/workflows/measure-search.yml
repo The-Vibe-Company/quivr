@@ -12,7 +12,7 @@ on:
     inputs:
       sets:
         description: Public sets, comma-separated (scripts/eval/public_sets.py)
-        default: miracl-fr,mldr-fr,scifact
+        default: miracl-fr
       baseline_run_id:
         description: Search quality run ID to compare with; empty for the latest successful run on main
         default: ''
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-24.04
     # The baseline run took 91 minutes (THE-775); the margin absorbs slower runners. A compare_to
     # run ingests every set twice.
-    timeout-minutes: ${{ inputs.compare_to != '' && 330 || 150 }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 330 || 150 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -75,6 +75,7 @@ jobs:
           QUIVR_EVAL_SET_SHA256: ${{ secrets.EVAL_SET_SHA256 }}
           QUIVR_EVAL_SET_AUTHORIZATION: ${{ secrets.EVAL_SET_AUTHORIZATION }}
           COMPARE_TO: ${{ inputs.compare_to }}
+          TYPESAFE_API_KEY: ${{ github.event_name == 'workflow_dispatch' && secrets.TYPESAFE_API_KEY || '' }}
         run: make eval args="--sets $SETS --out .scratch/eval/out ${BASELINE:+--baseline $BASELINE} ${COMPARE_TO:+--compare-to $COMPARE_TO}"
       - uses: actions/upload-artifact@v4
         if: always()

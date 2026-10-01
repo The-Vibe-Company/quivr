@@ -152,3 +152,11 @@ TYPESAFE_API_KEY=test-key TYPESAFE_API_URL="http://127.0.0.1:$fake_port/v1/syste
 grep -q "PASS  batch            \[subscription\] tests/data/described.json" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.json"
+
+cd "$root/plugins/jev-rerank"
+"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+python3 -W error::ResourceWarning -m unittest discover -s tests
+"$quivr" plugin inspect . > "$work/jev-rerank-inspect.log"
+env -u TYPESAFE_API_KEY -u TYPESAFE_API_URL "$quivr" plugin test --report "$work/jev-rerank-contract-report.json" . > "$work/jev-rerank-contract.log" 2>&1 || { cat "$work/jev-rerank-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/jev-rerank-contract.log" || { cat "$work/jev-rerank-contract.log"; exit 1; }
+echo "quivr plugin test certified plugins/jev-rerank: $work/jev-rerank-contract-report.json"

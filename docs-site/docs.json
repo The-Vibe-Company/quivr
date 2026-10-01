@@ -57,7 +57,8 @@
               "plugins/switch-plugins-without-restarting",
               "plugins/backfill-a-vector-space",
               "plugins/reprocess-quarantined-versions",
-              "plugins/catalog"
+              "plugins/catalog",
+              "guides/rerank-with-jev"
             ]
           },
           {

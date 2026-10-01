@@ -70,7 +70,7 @@ class LoadedManifest:
     def contributions(self) -> list[str]:
         """Declared Contributions in protocol order, as discovery lists them."""
         declared = self.model.contributions
-        return [name for name in ("normalizer", "subscription", "connector") if getattr(declared, name) is not None]
+        return [name for name in ("normalizer", "subscription", "connector", "retrieval") if getattr(declared, name) is not None]
 
     @property
     def plugin_api(self) -> str:

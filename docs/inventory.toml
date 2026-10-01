@@ -86,12 +86,13 @@ excluded = [
 "plugins/alerts/calibration/README.md" = { audience = "plugin-author", kind = "concept", summary = "the local E5 alert threshold measurements and their limits" }
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
+"plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify a source collector or an ingestion plugin in Go" }
-"sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run a Python normalizer" }
+"sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run Python plugins" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
 "third_party/README.md" = { audience = "contributor", kind = "index", summary = "dependency notices and inventory" }
 
@@ -115,5 +116,5 @@ excluded = [
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 117
 "sdks/go/README.md" = 191
-"sdks/python/README.md" = 125
+"sdks/python/README.md" = 140
 "tests/acceptance/README.md" = 50

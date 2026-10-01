@@ -23,7 +23,7 @@ from .models import __all__ as _models
 from .server import Invocation, Plugin, Reply
 from .subscription import SubscriptionInvocation, match, no_match, not_ready, record_field
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Library logging stays silent unless the plugin configures handlers (Plugin.serve does).
 _logging.getLogger("quivr_plugin").addHandler(_logging.NullHandler())

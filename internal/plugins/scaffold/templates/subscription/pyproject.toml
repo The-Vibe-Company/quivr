@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A Quivr alert-rule plugin."
 requires-python = ">=3.12"
 # The Quivr Plugin SDK is installed from the Quivr repository (see README.md).
-dependencies = ["quivr-plugin-sdk>=0.2,<0.4"]
+dependencies = ["quivr-plugin-sdk>=0.2,<0.5"]
 
 [tool.setuptools]
 packages = ["__PLUGIN_MODULE__"]

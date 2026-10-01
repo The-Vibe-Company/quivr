@@ -2,7 +2,7 @@
 
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
 ([contract](../../contracts/plugins/v0/README.md), Plugin API through 0.10.0) for
-Python normalizers, alert rules and pull collectors. It has no Temporal, Weaviate or database clients, and its
+Python normalizers, alert rules, retrieval rounds and pull collectors. It has no Temporal, Weaviate or database clients, and its
 only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
 later.
 
@@ -83,7 +83,7 @@ See the runnable [static-source example](examples/static-source/static_source/co
 | Concern | Behavior |
 | --- | --- |
 | Models | Dataclasses generated from the contract schemas (`quivr_plugin.models`), with `from_dict` and `to_dict` |
-| Routes | `GET /v0/discovery` (identity, Contributions, highest admitted Plugin API through `0.10.0` including `0.3.1`, exact manifest `sha256:` digest), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription`, `POST /v0/contributions/connector/{fetch,check_credential}` |
+| Routes | `GET /v0/discovery` (identity, Contributions, highest admitted Plugin API through `0.10.0` including `0.3.1`, exact manifest `sha256:` digest), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription`, `POST /v0/contributions/connector/{fetch,check_credential}`, `POST /v0/contributions/retrieval/search` |
 | Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration`; a subscription expression or evaluation configuration against the declared schemas → 400 `invalid_expression` or `invalid_subscription_configuration` |
 | Errors | `RetryableError` → 503, `retryable: true`. `TerminalError` → 422, `retryable: false`. Unexpected exception → 500 `internal_error`, `retryable: false`. Always the protocol error envelope |
 | Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation. For a subscription, also one decision per evaluation, evidence for every match, Part keys that exist and details of at most 16 KiB (500 `invalid_response`) |
@@ -110,6 +110,15 @@ builds the same batches as `quivr plugin dev` and the Contract Runner from a
 runs them through `Plugin.evaluate(request)`, and fails when a decision
 differs from the fixture's `expect`. `build_subscription_requests` returns the
 requests themselves.
+
+## Retrieval rounds
+
+`@plugin.retrieval` registers a function receiving a generated `SearchRequest`.
+Return a `SearchResponse` or JSON: candidate `requests` or a final `ranking`,
+with optional paid-call `usage`. The adapter validates profiles, configuration
+and schemas; the engine validates candidates, authorization and budgets.
+See [Jev reranking](../../plugins/jev-rerank/README.md) for an example and fixtures.
+Retrieval supports Plugin API 0.7–0.10; ingestion handlers are not implemented.
 
 ## Maintaining the SDK
 
