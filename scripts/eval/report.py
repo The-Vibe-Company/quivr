@@ -15,6 +15,23 @@ def delta(c):
     return f"{c['delta']:+.4f} (p {p}){' *' if c['significant'] else ''}"
 
 
+def time_table(systems):
+    """Where each system's search time goes, per limit; empty for a run before THE-873 timed phases."""
+    rows = [(system, limit, t) for system, v in systems.items() for limit, t in v.get('time_by_limit', {}).items()]
+    if not rows:
+        return []
+    lines = ['Where search time goes, in ms, p50 / p95. Engine is the time the engine reports (`usage.elapsed_ms`); '
+             'the phases are its `usage.phases`. Encoding share is the part of the engine\'s time spent encoding queries, '
+             'what a query-vector cache would save if every query hit it; a lower bound, since each phase is whole milliseconds rounded down. '
+             'Limits other than the scored one are timed in a second pass.', '',
+             '| System | Limit | Client | Engine | Query encoding | Index | Hydration | Plugin rounds | Encoding share | Failures |', '| --- ' * 10 + '|']
+    for system, limit, t in rows:
+        both = [f"{number(t[k]['p50'], 0)} / {number(t[k]['p95'], 0)}" for k in ['client_ms', 'elapsed_ms', 'query_encoding_ms', 'index_query_ms', 'hydration_ms', 'plugin_rounds_ms']]
+        share = '—' if t['query_encoding_share'] is None else f"{t['query_encoding_share']:.0%}"
+        lines.append(f'| {system} | {limit} | ' + ' | '.join(both) + f" | {share} | {t['failures']}/{t['searches'] + t['failures']} |")
+    return lines + ['']
+
+
 def markdown(r):
     run = r['run']
     lines = ['# Search quality evaluation', '',
@@ -51,6 +68,7 @@ def markdown(r):
                          + f" | {deltas[0]} | {deltas[1]}"
                          + f" | {number(v['latency_ms']['p50'], 0)} | {number(v['latency_ms']['p95'], 0)} | {v['failures']}/{s['queries']} | {paid} |")
         lines.append('')
+        lines += time_table(s['systems'])
         if 'against_baseline_run' in s:
             if s['against_baseline_run'] is None:
                 lines += ['Not compared with the baseline run: that run did not measure this exact sample.', '']

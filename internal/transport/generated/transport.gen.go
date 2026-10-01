@@ -2374,6 +2374,16 @@ type SearchHit struct {
 	VersionId              string  `json:"version_id"`
 }
 
+// SearchPhases Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
+type SearchPhases struct {
+	CoverageMs      int `json:"coverage_ms"`
+	HydrationMs     int `json:"hydration_ms"`
+	IndexQueryMs    int `json:"index_query_ms"`
+	PluginRoundsMs  int `json:"plugin_rounds_ms"`
+	QueryEncodingMs int `json:"query_encoding_ms"`
+	RoutingMs       int `json:"routing_ms"`
+}
+
 // SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
 	Name    string `json:"name"`
@@ -2432,7 +2442,7 @@ type SearchResponse struct {
 	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
 
-	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
 	Usage *SearchUsage `json:"usage,omitempty"`
 }
 
@@ -2466,12 +2476,15 @@ type SearchStatsList struct {
 	Window            StatsWindowName `json:"window"`
 }
 
-// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
 type SearchUsage struct {
 	CostCents float32 `json:"cost_cents"`
 	ElapsedMs int     `json:"elapsed_ms"`
 	PaidCalls int     `json:"paid_calls"`
-	Rounds    int     `json:"rounds"`
+
+	// Phases Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
+	Phases *SearchPhases `json:"phases,omitempty"`
+	Rounds int           `json:"rounds"`
 }
 
 // SourceIdentity defines model for SourceIdentity.

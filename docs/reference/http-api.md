@@ -8705,7 +8705,7 @@ required:
 
 ### `SearchUsage`
 
-What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8713,6 +8713,7 @@ What a search answered by a retrieval plugin spent; rounds of the plugin, elapse
 | `elapsed_ms` | integer | yes | Minimum `0`. |
 | `paid_calls` | integer | yes | Minimum `0`. |
 | `cost_cents` | number | yes | Minimum `0`. |
+| `phases` | [`SearchPhases`](#searchphases) |  |  |
 
 <details>
 <summary>Full schema</summary>
@@ -8734,12 +8735,64 @@ properties:
   cost_cents:
     type: number
     minimum: 0
+  phases:
+    $ref: '#/components/schemas/SearchPhases'
 required:
   - rounds
   - elapsed_ms
   - paid_calls
   - cost_cents
-description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, and the paid calls and cost the plugin reported.
+description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
+```
+
+</details>
+
+### `SearchPhases`
+
+Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `routing_ms` | integer | yes | Minimum `0`. |
+| `coverage_ms` | integer | yes | Minimum `0`. |
+| `plugin_rounds_ms` | integer | yes | Minimum `0`. |
+| `query_encoding_ms` | integer | yes | Minimum `0`. |
+| `index_query_ms` | integer | yes | Minimum `0`. |
+| `hydration_ms` | integer | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  routing_ms:
+    type: integer
+    minimum: 0
+  coverage_ms:
+    type: integer
+    minimum: 0
+  plugin_rounds_ms:
+    type: integer
+    minimum: 0
+  query_encoding_ms:
+    type: integer
+    minimum: 0
+  index_query_ms:
+    type: integer
+    minimum: 0
+  hydration_ms:
+    type: integer
+    minimum: 0
+required:
+  - routing_ms
+  - coverage_ms
+  - plugin_rounds_ms
+  - query_encoding_ms
+  - index_query_ms
+  - hydration_ms
+description: Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
 ```
 
 </details>
@@ -8987,7 +9040,15 @@ Example `plugin_ranked_search_results`:
     "rounds": 2,
     "elapsed_ms": 84,
     "paid_calls": 0,
-    "cost_cents": 0
+    "cost_cents": 0,
+    "phases": {
+      "routing_ms": 2,
+      "coverage_ms": 3,
+      "plugin_rounds_ms": 9,
+      "query_encoding_ms": 21,
+      "index_query_ms": 18,
+      "hydration_ms": 27
+    }
   }
 }
 ```

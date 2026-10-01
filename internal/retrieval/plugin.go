@@ -51,6 +51,8 @@ type Usage struct {
 	// OverObjective reports a search that took longer than its profile's
 	// latency objective, max_latency_ms.
 	OverObjective bool
+	// Phases is the time the search spent in each of its phases.
+	Phases Phases
 }
 
 // Profile is one search profile a deployment answers.
@@ -111,7 +113,7 @@ func invocationID() string {
 func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
 	m := s.Ranker.Manifest()
 	profile := m.Contributions.Retrieval.Profiles[q.Profile]
-	timing := &phases{routing: time.Since(started)}
+	timing := &Phases{Routing: time.Since(started)}
 	out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
 	query, err := normalizeQuery(q.Query)
 	if err != nil {
@@ -119,7 +121,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 	}
 	phase := time.Now()
 	spaces, err := s.searchSpaces(ctx, scope.Organization, routes)
-	timing.coverage += time.Since(phase)
+	timing.Coverage += time.Since(phase)
 	if err != nil {
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
@@ -134,7 +136,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 	for {
 		phase := time.Now()
 		body, err := s.Ranker.Round(ctx, session.Request())
-		timing.rounds += time.Since(phase)
+		timing.PluginRounds += time.Since(phase)
 		switch {
 		case err == nil:
 		case errors.Is(err, content.ErrInvalid):
@@ -155,7 +157,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation})
 			}
 			usage := session.Usage()
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: usage.PaidCalls, CostCents: usage.CostCents}
+			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: usage.PaidCalls, CostCents: usage.CostCents, Phases: *timing}
 			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
 				slog.Warn("search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
@@ -177,7 +179,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 
 // deadline turns a failure of the plugin's round caused by the profile's
 // hard bound into ErrDeadline: the plugin outran it.
-func (s Service) deadline(ctx context.Context, plugin string, err error, timing *phases) error {
+func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		slog.Warn("retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return ErrDeadline
@@ -190,24 +192,27 @@ func (s Service) deadline(ctx context.Context, plugin string, err error, timing 
 // the engine (the space owner encoding the query, the index, canonical
 // storage) did not answer in time, as when the embedding service is down, so
 // the search is unavailable (retryable), not a plugin that outran its bound.
-func (s Service) unserved(ctx context.Context, plugin string, err error, timing *phases) error {
+func (s Service) unserved(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		slog.Warn("search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
 	return err
 }
 
-// phases is the time one search spent in each of its phases.
-type phases struct {
-	routing, coverage, rounds, encoding, index, hydration time.Duration
+// Phases is the time one search spent in each of its phases: authorizing and
+// routing, reading space coverage, the retrieval plugin's rounds, encoding the
+// query with each space's owner, querying the index, and hydrating candidates
+// from canonical storage.
+type Phases struct {
+	Routing, Coverage, PluginRounds, QueryEncoding, IndexQuery, Hydration time.Duration
 }
 
 // attrs are the phases as log attributes, preceded by the slowest one.
-func (p *phases) attrs() []any {
+func (p *Phases) attrs() []any {
 	named := []struct {
 		name string
 		d    time.Duration
-	}{{"routing", p.routing}, {"coverage", p.coverage}, {"plugin_rounds", p.rounds}, {"query_encoding", p.encoding}, {"index_query", p.index}, {"hydration", p.hydration}}
+	}{{"routing", p.Routing}, {"coverage", p.Coverage}, {"plugin_rounds", p.PluginRounds}, {"query_encoding", p.QueryEncoding}, {"index_query", p.IndexQuery}, {"hydration", p.Hydration}}
 	slowest := named[0]
 	out := []any{}
 	for _, n := range named {
@@ -289,7 +294,7 @@ type server struct {
 	hydrated map[string]content.Hydrated
 	// vectors caches query encodings by space and text.
 	vectors map[string][]float32
-	timing  *phases
+	timing  *Phases
 }
 
 // serve runs one candidate request through the projection and hydrates what
@@ -335,7 +340,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 	}
 	phase := time.Now()
 	found, err := sv.s.Projection.Search(ctx, sv.routes, sv.scope, pq)
-	sv.timing.index += time.Since(phase)
+	sv.timing.IndexQuery += time.Since(phase)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -373,7 +378,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		next += len(wave)
 		phase := time.Now()
 		hydrated, err := sv.hydrate(ctx, wave)
-		sv.timing.hydration += time.Since(phase)
+		sv.timing.Hydration += time.Since(phase)
 		if err != nil {
 			return nil, err
 		}
@@ -453,7 +458,7 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 	var vector []float32
 	var err error
 	started := time.Now()
-	defer func() { sv.timing.encoding += time.Since(started) }()
+	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
 	switch {
 	case sv.s.Embedder != nil && space == sv.s.Embedder.Space().ID:
 		vector, err = sv.s.Embedder.Embed(ctx, "query: "+text)

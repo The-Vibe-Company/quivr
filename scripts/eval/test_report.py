@@ -9,6 +9,14 @@ def system(ndcg, paid=0):
             'failures': 1, 'paid_calls_per_query': paid, 'per_query': {}}
 
 
+def timed(encoding):
+    """A time_by_limit entry: 9 searches and 1 failure; encoding None when the engine did not report its phases."""
+    p = lambda p50, p95: {'p50': p50, 'p95': p95}  # noqa: E731
+    return {'searches': 9, 'failures': 1, 'client_ms': p(40.0, 90.0), 'elapsed_ms': p(30.0, 70.0), 'query_encoding_ms': p(encoding, encoding),
+            'index_query_ms': p(4.0, 9.0), 'hydration_ms': p(6.0, 12.0), 'plugin_rounds_ms': p(2.0, 3.0),
+            'query_encoding_share': None if encoding is None else 0.4}
+
+
 RUN = {'id': 'r1', 'source_revision': 'abc', 'finished_at': '2026-09-30T00:00:00+00:00', 'duration_seconds': 61, 'target': 'isolated local stack', 'host': {}}
 
 
@@ -20,12 +28,16 @@ class Markdown(unittest.TestCase):
              'sets': {'tiny': {'manifest': {'licence': 'MIT', 'sample': {'seed': 775, 'eligible_queries': 9}}, 'queries': 2, 'documents': 5,
                                'ingestion': {'searchable_with_vectors_seconds': 3.2},
                                'profiles': {'refused': {'deep': '422 unsupported_profile'}},
-                               'systems': {'hybrid/default': system(0.5), 'lexical/default': system(0.375, None)},
+                               'systems': {'hybrid/default': {**system(0.5), 'time_by_limit': {'50': timed(12.0), '10': timed(None)}},
+                                           'lexical/default': system(0.375, None)},
                                'against_baseline_system': {'lexical/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}},
                                'against_baseline_run': {'hybrid/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}}}}}
         text = report.markdown(r)
         self.assertIn('| hybrid/default | 0.5000 | 0.5000 | 0.2500 | baseline | baseline | 40 | 90 | 1/2 | 0 |', text)
         self.assertIn('| lexical/default | 0.3750 | 0.5000 | 0.2500 | -0.1250 (p 0.010) * | -0.1250 (p 0.010) * | 40 | 90 | 1/2 | — |', text)
+        self.assertIn('| hybrid/default | 50 | 40 / 90 | 30 / 70 | 12 / 12 | 4 / 9 | 6 / 12 | 2 / 3 | 40% | 1/10 |', text)
+        self.assertIn('| hybrid/default | 10 | 40 / 90 | 30 / 70 | — / — | 4 / 9 | 6 / 12 | 2 / 3 | — | 1/10 |', text)
+        self.assertNotIn('| lexical/default | 50 |', text)  # a system from a run before phases were timed
         self.assertIn('`deep` (422 unsupported_profile)', text)
         self.assertIn('Against the same system in run 123 (source `old`)', text)
         self.assertIn('| tiny | 2 | 5 | seed 775, 9 eligible queries | MIT | 3 |', text)

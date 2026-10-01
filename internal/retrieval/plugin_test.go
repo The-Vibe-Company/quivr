@@ -127,6 +127,29 @@ func TestPluginRanksServedCandidates(t *testing.T) {
 	}
 }
 
+// A search reports the time it spent in each phase (THE-873): only a search
+// with a vector encodes its query, and the phases never add up to more than
+// the search took.
+func TestUsageReportsTheTimeOfEachPhase(t *testing.T) {
+	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
+	s := rankedService(p, &scriptedRanker{answer: passthrough})
+	for mode, encodes := range map[string]bool{"lexical": false, "semantic": true} {
+		result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: mode, CorpusIDs: []string{"corpus"}, Profile: "default"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := result.Usage
+		if u == nil {
+			t.Fatalf("%s: no usage", mode)
+		}
+		ph := u.Phases
+		sum := ph.Routing + ph.Coverage + ph.PluginRounds + ph.QueryEncoding + ph.IndexQuery + ph.Hydration
+		if (ph.QueryEncoding > 0) != encodes || ph.IndexQuery <= 0 || ph.Hydration <= 0 || ph.PluginRounds <= 0 || sum > u.Elapsed {
+			t.Fatalf("%s: phases %+v in %s; want query encoding only when the search has a vector, index, hydration and rounds timed, and no more than the search took", mode, ph, u.Elapsed)
+		}
+	}
+}
+
 // The engine enforces the contract on every plugin answer, and a deadline on
 // the whole search.
 func TestPluginAnswersTheEngineRefuses(t *testing.T) {

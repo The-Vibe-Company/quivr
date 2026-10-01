@@ -82,6 +82,9 @@ licence on its ticket.
   **Paid calls** is 0 on the local stack, which calls no paid service, and unknown (`—`)
   with `--api-url`. **Ingestion to vectors** is the time from the first submission until
   every Record has its vectors.
+- **Where search time goes** splits it by the engine's `usage.phases`, at limit 50 and, in a
+  second pass timed only, limit 10. Encoding share is the part of the engine's time spent
+  encoding queries: the most a query-vector cache could save.
 
 ## The lane
 

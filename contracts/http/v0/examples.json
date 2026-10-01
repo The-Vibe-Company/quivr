@@ -897,7 +897,15 @@
         "rounds": 2,
         "elapsed_ms": 84,
         "paid_calls": 0,
-        "cost_cents": 0
+        "cost_cents": 0,
+        "phases": {
+          "routing_ms": 2,
+          "coverage_ms": 3,
+          "plugin_rounds_ms": 9,
+          "query_encoding_ms": 21,
+          "index_query_ms": 18,
+          "hydration_ms": 27
+        }
       }
     }
   },

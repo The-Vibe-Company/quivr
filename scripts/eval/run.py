@@ -38,6 +38,8 @@ from measure_metrics import percentile  # noqa: E402
 MODES = ['lexical', 'semantic', 'hybrid']
 BASELINE_SYSTEM = 'hybrid/default'  # the API's default mode and profile
 LIMIT = 50  # the API maximum; hits are deduplicated by Record before scoring
+TIMING_LIMITS = [LIMIT, 10]  # limit 10, the API default, is timed only, in a second pass
+PHASES = ['query_encoding_ms', 'index_query_ms', 'hydration_ms', 'plugin_rounds_ms']  # of usage.phases
 BATCH_ITEMS, BATCH_BYTES = 100, 8 << 20  # under the batch bounds of 100 entries and 10 MiB
 WARMUP_QUERIES = 3
 
@@ -154,20 +156,37 @@ def stuck(client, receipts, show=3):
     return out or 'every receipt is retrieval_ready and idle'
 
 
-def search(client, corpus, query, mode, profile, keys):
-    """(ranked doc ids, milliseconds, error): hits deduplicated by Record, best first."""
+def search(client, corpus, query, mode, profile, keys, limit=LIMIT):
+    """(ranked doc ids, timing, error): hits deduplicated by Record, best first.
+
+    timing is the client's milliseconds, with the engine's usage (elapsed_ms and its phases) when it reports them."""
     start = time.perf_counter()
     try:
-        _, result = client.call('POST', '/v0/search', {'query': query, 'corpus_ids': [corpus], 'mode': mode, 'profile': profile, 'limit': LIMIT}, attempts=1)
+        _, result = client.call('POST', '/v0/search', {'query': query, 'corpus_ids': [corpus], 'mode': mode, 'profile': profile, 'limit': limit}, attempts=1)
     except Exception as error:  # a failed search scores 0 and is counted, never hidden
-        return [], (time.perf_counter() - start) * 1000, str(error)[:200]
-    ms = (time.perf_counter() - start) * 1000
+        return [], {'client_ms': (time.perf_counter() - start) * 1000}, str(error)[:200]
+    usage = result.get('usage') or {}
+    timing = {'client_ms': (time.perf_counter() - start) * 1000, 'elapsed_ms': usage.get('elapsed_ms'), **(usage.get('phases') or {})}
     ranked = []
     for hit in result['items']:
         doc = keys.get(hit['record_id'])
         if doc is not None and doc not in ranked:
             ranked.append(doc)
-    return ranked, ms, None
+    return ranked, timing, None
+
+
+def time_summary(timings, failures):
+    """p50/p95 of the client time, the engine's time and each phase over successful searches, and the share of the
+    engine's time spent encoding queries: what a query-vector cache would save if every query hit it. A field the
+    engine did not report (an installation before THE-873) is None."""
+    def p(key):
+        values = [t[key] for t in timings if t.get(key) is not None]
+        return {'p50': rounded(percentile(values, 50)), 'p95': rounded(percentile(values, 95))}
+    out = {'searches': len(timings), 'failures': failures, **{key: p(key) for key in ['client_ms', 'elapsed_ms', *PHASES]}}
+    reported = [t for t in timings if t.get('query_encoding_ms') is not None and t.get('elapsed_ms') is not None]
+    total = sum(t['elapsed_ms'] for t in reported)
+    out['query_encoding_share'] = round(sum(t['query_encoding_ms'] for t in reported) / total, 3) if total else None
+    return out
 
 
 def measure_set(client, name, directory, run_id, options):
@@ -190,17 +209,29 @@ def measure_set(client, name, directory, run_id, options):
         for mode in MODES:
             for q in queries[:WARMUP_QUERIES]:
                 search(client, corpus, data['queries'][q], mode, profile, records)
-            ranking, latencies, errors = {}, [], []
+            ranking, timings, errors = {}, {limit: [] for limit in TIMING_LIMITS}, []
+            failed = {limit: 0 for limit in TIMING_LIMITS}
             for q in queries:
-                ranking[q], ms, error = search(client, corpus, data['queries'][q], mode, profile, records)
+                ranking[q], timing, error = search(client, corpus, data['queries'][q], mode, profile, records)
                 if error:
                     errors.append(error)
+                    failed[LIMIT] += 1
                 else:
-                    latencies.append(ms)
+                    timings[LIMIT].append(timing)
+            # The other limits are timed only, after the scored pass, so they never change what it measures.
+            for limit in TIMING_LIMITS[1:]:
+                for q in queries:
+                    _, timing, error = search(client, corpus, data['queries'][q], mode, profile, records, limit)
+                    if error:
+                        failed[limit] += 1
+                    else:
+                        timings[limit].append(timing)
+            latencies = [t['client_ms'] for t in timings[LIMIT]]
             system = f'{mode}/{profile}'
             print(f'[eval] {name}: {system} searched', flush=True)
             out['systems'][system] = {**scoring.score(data['qrels'], ranking), 'profile_version': served[profile],
                                       'latency_ms': {'p50': rounded(percentile(latencies, 50)), 'p95': rounded(percentile(latencies, 95)), 'max': rounded(max(latencies, default=None))},
+                                      'time_by_limit': {str(limit): time_summary(t, failed[limit]) for limit, t in timings.items()},
                                       'failures': len(errors), 'errors': sorted(set(errors))[:3], 'paid_calls_per_query': options.paid_calls}
     compare_within(out)
     return out
