@@ -1,0 +1,37 @@
+scripts/measure_upgrade.py
+  s_54b80c92daa9cb::t_13f7c5f8941dde 253-254
+  s_54b80c92daa9cb::t_e77d4999a4f174 396
+  s_54b80c92daa9cb::t_04d66f50150aef 25-26
+  s_54b80c92daa9cb::t_68f099f53911ce 57-62
+docs-site/plugins/upgrade-a-plugin.mdx
+  s_54b80c92daa9cb::t_6435cc87c42fa1 108
+scripts/test_measure_upgrade.py
+  s_54b80c92daa9cb::t_7a4f35b7713567 14-15,59-64
+  s_54b80c92daa9cb::t_16388b1c9edcc6 65
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_d4173f0fe0e672 46-52
+  s_54b80c92daa9cb::t_ef3093ac7c4651 65,97
+  s_54b80c92daa9cb::t_340d360552bdc9 212-241,243-270,274
+  s_54b80c92daa9cb::t_806aee4c363524 242
+  s_54b80c92daa9cb::t_7184f1f1d12465 66-68
+  s_54b80c92daa9cb::t_9ee77513960738 69
+  s_54b80c92daa9cb::t_744d2743a1f384 165
+internal/orchestration/temporal/ingestion_test.go
+  s_54b80c92daa9cb::t_5bcd75a3e473fc 5,7-9,12,17-57,61-89,91,96,100-102,107-109,114-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c9c7f330dc6993ef92ebd299f0c147e47ba26a1a",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
