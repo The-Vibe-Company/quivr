@@ -104,15 +104,21 @@ type pluginRegistrationRequest struct {
 	Routes         []plugins.RouteConfig `json:"routes"`
 	Kinds          []string              `json:"kinds"`
 	Spaces         map[string]string     `json:"spaces"`
+	// Fixtures are base64 in JSON.
+	Fixtures map[string][]byte `json:"fixtures"`
 }
+
+// maxPluginRegistrationBytes bounds a registration request: its fixtures,
+// base64-encoded, and its manifest.
+const maxPluginRegistrationBytes = 8 << 20
 
 func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in pluginRegistrationRequest
-	if !decodeInto(w, r, a.pluginSchema, &in) {
+	if !decodeIntoAtMost(w, r, maxPluginRegistrationBytes, a.pluginSchema, &in) {
 		return
 	}
 	reg, err := a.Plugins.Register(r.Context(), scope, registry.Request{Key: in.IdempotencyKey, Manifest: []byte(in.Manifest), Endpoint: in.Endpoint,
-		Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces})
+		Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces, Fixtures: in.Fixtures})
 	if err != nil {
 		pluginFailure(w, err)
 		return
@@ -175,7 +181,7 @@ func registrationToTransport(reg registry.Registration) transport.PluginRegistra
 	if c := reg.Check; c != nil {
 		report := transport.PluginCheckReport{Certified: c.Certified, CheckedAt: c.CheckedAt, Passed: c.Passed, Failed: c.Failed, Skipped: c.Skipped, Checks: make([]transport.PluginCheck, 0, len(c.Checks))}
 		for _, check := range c.Checks {
-			out := transport.PluginCheck{Id: check.ID, Title: check.Title, Status: transport.PluginCheckStatus(check.Status), Issues: make([]transport.PluginIssue, 0, len(check.Issues))}
+			out := transport.PluginCheck{Id: check.ID, Title: check.Title, Status: transport.PluginCheckStatus(check.Status), Fixture: optionalString(check.Fixture), Issues: make([]transport.PluginIssue, 0, len(check.Issues))}
 			if check.Contribution != "" {
 				contribution := check.Contribution
 				out.Contribution = &contribution

@@ -197,6 +197,8 @@ curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API
 
 `folder_notes` is listed next to the other kinds. Create an instance as for any kind, with `"kind": "folder_notes"` and `"config": {"path": "/srv/notes"}`: see [Collect from a source](/guides/connectors).
 
+To add the plugin to a deployment that is already running, register it with its `fixtures/` folder instead of pinning it: Quivr runs the same checks, and you activate it without a restart. See [Switch plugins without restarting](/plugins/switch-plugins-without-restarting).
+
 ## Go further
 
 A kind can also store binary attachments next to an item: declare `contributions.connector.attachments` and implement `OpenAttachment`, and Quivr asks for each file's size and checksum, then gives the plugin a one-time upload URL. A kind with `modes: [pull, push]` also receives the webhooks a source sends to Quivr, through `receive`; the X list connector works this way. The [plugin protocol](/reference/plugin-protocol#connector) lists every field of `fetch` and its answer, and the first-party `plugins/rss` is a complete connector built on this SDK.

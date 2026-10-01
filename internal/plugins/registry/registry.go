@@ -161,6 +161,9 @@ type Registration struct {
 	UpdatedAt  time.Time
 	// Check is the Contract Runner's report, once the check ran.
 	Check *CheckReport
+	// Fixtures are the plugin's own test files the check runs, by path in
+	// its fixtures folder. Only RegisterPlugin and ClaimCheck carry them.
+	Fixtures map[string][]byte
 }
 
 // CheckReport is what the Contract Runner reported on a registration.
@@ -175,11 +178,13 @@ type CheckReport struct {
 
 // CheckResult is one check of the report.
 type CheckResult struct {
-	ID           string          `json:"id"`
-	Title        string          `json:"title"`
-	Contribution string          `json:"contribution,omitempty"`
-	Status       string          `json:"status"`
-	Issues       []plugins.Issue `json:"issues"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Contribution string `json:"contribution,omitempty"`
+	Status       string `json:"status"`
+	// Fixture names the fixture the check ran, if any.
+	Fixture string          `json:"fixture,omitempty"`
+	Issues  []plugins.Issue `json:"issues"`
 }
 
 // Registration origins.
@@ -276,11 +281,13 @@ type Store interface {
 	// ErrNotFound.
 	PlanMembers(ctx context.Context, id string) (Plan, map[string]Registration, error)
 	// RegisterPlugin records a registration under an idempotency key: it
-	// replays the key's registration, refuses a key used for another one
-	// (ErrIdempotencyConflict), queues a new registration for its check and
-	// re-queues a rejected one under a new key. queued reports a check to run.
+	// replays the key's registration, refuses a key used for another one or
+	// with other fixtures (ErrIdempotencyConflict), queues a new registration
+	// for its check with r's fixtures, and re-queues a rejected one under a
+	// new key with that request's fixtures. queued reports a check to run.
 	RegisterPlugin(ctx context.Context, r Registration, key string) (stored Registration, queued bool, err error)
-	// ClaimCheck leases the oldest registration waiting for its check.
+	// ClaimCheck leases the oldest registration waiting for its check, with
+	// the fixtures it is checked with.
 	ClaimCheck(ctx context.Context, lease time.Duration) (Registration, bool, error)
 	// RecordCheck stores the report and moves a registered registration to
 	// validated or rejected.

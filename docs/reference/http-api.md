@@ -1197,7 +1197,7 @@ Every plugin version this deployment has registered, oldest first, with its endp
 
 Operation `registerPlugin`. Requires `plugins:admin`.
 
-Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest or settings. Requires plugins:admin.
+Register a plugin version the operator runs at an address. The request carries the exact quivr-plugin.yaml the plugin was built from, its endpoint and the settings it is installed with, with the shape and rules of a pin in the startup configuration (configuration, routes, kinds, spaces); plugin id and version come from the manifest. Quivr then checks it in the background with the Contract Runner against the endpoint, whose discovery must report the manifest's digest, using the normative fixtures and the fixtures the request carries. The registration is registered while its check runs, then validated or rejected with the report. The same idempotency key returns the same registration; a key already used for another registration or other fixtures is 409 idempotency_conflict; a new key for a rejected registration checks it again. 422 invalid_plugin lists what the engine refuses in the manifest, settings or fixture paths. The body is at most 8 MiB (413 request_too_large). Requires plugins:admin.
 
 **Request body** (required): `application/json` [`PluginRegistrationRequest`](#pluginregistrationrequest)
 
@@ -1206,7 +1206,7 @@ Register a plugin version the operator runs at an address. The request carries t
 | Status | Body | Description |
 | --- | --- | --- |
 | `202` | `application/json` [`PluginRegistration`](#pluginregistration)<br><br>Header `Location`: string (uri-reference). The registration's read URL, which reports the check once it ran. | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 409 idempotency_conflict, 422 invalid_schema or invalid_plugin, 503 storage unavailable. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 409 idempotency_conflict, 413 request_too_large, 422 invalid_schema or invalid_plugin, 503 storage unavailable. |
 
 #### `GET /v0/admin/plugins/{registration_id}`
 
@@ -4119,6 +4119,7 @@ required:
 | `routes[].mode` | string |  | One of `required`, `optional`. |
 | `kinds` | array of string |  | Alert kinds offered, a subset of those the manifest declares; absent offers them all. At most `100` items. Each item: Minimum length `1`. |
 | `spaces` | map of string |  | Vector spaces of an ingestion plugin by space id, served or evaluation; absent serves the only declared space. |
+| `fixtures` | map of string |  | The plugin's own test files, by path inside its fixtures folder (such as events.json or inputs/events.csv), each base64-encoded; at most 4 MiB decoded in total. The check runs them as quivr plugin test runs that folder, so a connector, or a normalizer for a media type without a normative fixture, can be certified. They are stored with the registration; a new idempotency key for a rejected registration checks it again with that request's fixtures. At most `100` properties. |
 
 Example `plugin_registration_request`:
 
@@ -4190,6 +4191,17 @@ properties:
       enum:
         - served
         - evaluation
+  fixtures:
+    type: object
+    maxProperties: 100
+    description: The plugin's own test files, by path inside its fixtures folder (such as events.json or inputs/events.csv), each base64-encoded; at most 4 MiB decoded in total. The check runs them as quivr plugin test runs that folder, so a connector, or a normalizer for a media type without a normative fixture, can be certified. They are stored with the registration; a new idempotency key for a rejected registration checks it again with that request's fixtures.
+    propertyNames:
+      minLength: 1
+      maxLength: 255
+    additionalProperties:
+      type: string
+      contentEncoding: base64
+      maxLength: 5592408
 required:
   - idempotency_key
   - endpoint
@@ -4256,6 +4268,7 @@ required:
 | `title` | string | yes | Minimum length `1`. |
 | `contribution` | string |  | Minimum length `1`. |
 | `status` | string | yes | One of `pass`, `fail`, `skip`. |
+| `fixture` | string |  | The fixture the check ran, such as fixtures/events.json, or a normative fixture prefixed with contracts:. Minimum length `1`. |
 | `issues` | array of [`PluginIssue`](#pluginissue) | yes |  |
 
 <details>
@@ -4280,6 +4293,10 @@ properties:
       - pass
       - fail
       - skip
+  fixture:
+    type: string
+    minLength: 1
+    description: The fixture the check ran, such as fixtures/events.json, or a normative fixture prefixed with contracts:.
   issues:
     type: array
     items:

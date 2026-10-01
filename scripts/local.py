@@ -594,6 +594,8 @@ def parts():
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
             # X webhook deliveries while the x-list plugin is down: 503 to X, then polling catches up.
             step('x_push_outage',lambda stack:verify_connector_x_push(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),
+            # Last, since it activates them: pdf-text and the RSS connector registered with their own fixtures (THE-807).
+            acceptance('plugin_own_fixtures','^TestPluginRegistrationWithItsFixtures$'),
             step('validate_captures',validate_captures)],
     }
 

@@ -25,12 +25,16 @@ quivr plugin dev --port 9960 my-embedder
 </Step>
 <Step title="Register it">
 
-Send the exact text of the `quivr-plugin.yaml` the plugin was built from, its address, and the settings you would give it in a [pin](/plugins/pin): `configuration`, `routes`, `kinds` or `spaces`.
+Send the exact text of the `quivr-plugin.yaml` the plugin was built from, its address, the settings you would give it in a [pin](/plugins/pin) (`configuration`, `routes`, `kinds` or `spaces`), and the files of its `fixtures/` folder. Quivr checks the plugin with them, as `quivr plugin test` does. A connector, or a normalizer for a media type other than `text/markdown`, needs its own fixtures to pass. Each file goes in `fixtures`, base64-encoded, under its path inside the folder:
 
 ```bash
-jq -n --rawfile manifest my-embedder/quivr-plugin.yaml '{
+FIXTURES=$(cd my-embedder/fixtures && find . -type f | sed 's|^\./||' | sort | while IFS= read -r f; do
+  jq -n --arg path "$f" --arg content "$(base64 < "$f" | tr -d '\n')" '{($path): $content}'
+done | jq -s 'add // {}')
+
+jq -n --rawfile manifest my-embedder/quivr-plugin.yaml --argjson fixtures "$FIXTURES" '{
   idempotency_key: "acme-embedder-0.1.0", endpoint: "http://127.0.0.1:9960",
-  manifest: $manifest, spaces: {"acme.embedder.base": "served"}
+  manifest: $manifest, spaces: {"acme.embedder.base": "served"}, fixtures: $fixtures
 }' | curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
   -H "Content-Type: application/json" -d @- | jq '{registration_id, plugin_id, version, state}'
 ```
@@ -43,7 +47,7 @@ jq -n --rawfile manifest my-embedder/quivr-plugin.yaml '{
 export REGISTRATION_ID=<the registration_id above>
 ```
 
-Quivr refuses at once, with `422 invalid_plugin`, anything it would refuse at startup, such as a configuration that fails the plugin's schema. The same `idempotency_key` returns the same registration.
+Quivr refuses at once, with `422 invalid_plugin`, anything it would refuse at startup, such as a configuration that fails the plugin's schema, and a fixture path that leaves the folder. The fixtures are at most 100 files and 4 MiB in total. The same `idempotency_key` returns the same registration.
 
 </Step>
 <Step title="Wait for the check">
@@ -59,7 +63,7 @@ curl -s "$QUIVR_API_URL/v0/admin/plugins/$REGISTRATION_ID" -H "Authorization: Be
 {"state": "validated", "certified": true}
 ```
 
-A `rejected` registration lists every check and its issues in `check.checks`. The plugin must report the digest of the manifest you sent, so one built from another manifest is rejected. To check a fixed build, register it again with a new `idempotency_key`.
+A `rejected` registration lists every check and its issues in `check.checks`; a check that ran one of your fixtures names it in `fixture`. The plugin must report the digest of the manifest you sent, so one built from another manifest is rejected. To check a fixed build or fixed fixtures, register it again with a new `idempotency_key`.
 
 </Step>
 <Step title="Activate it">
@@ -134,7 +138,7 @@ The plugins pinned in `QUIVR_CONFIG` are registered at every start. The configur
 
 ## Limits
 
-- The check runs the normative fixtures only, since Quivr has just the manifest. A plugin that needs its own fixtures to be certified, such as a connector or a normalizer for a media type other than `text/markdown`, is rejected; pin it in the configuration instead.
+- A normalizer's check gives each fixture's input file by its path on the api's machine, a `file://` URL, as `quivr plugin test` does. The normalizer must run where it can read the api's temporary folder, for example on the same machine; elsewhere it is rejected, so pin it in the configuration instead.
 - Alert rules switch through the configuration only: each Subscription names its rule's version, so its evaluations never change version.
 - An activation cannot add or remove the retrieval role; pin or unpin a retrieval plugin in the configuration.
 - An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespaces, and vector spaces whose model changes without a new space version.

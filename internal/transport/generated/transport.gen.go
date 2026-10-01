@@ -1957,11 +1957,14 @@ type PluginCallStatsList struct {
 
 // PluginCheck defines model for PluginCheck.
 type PluginCheck struct {
-	Contribution *string           `json:"contribution,omitempty"`
-	Id           string            `json:"id"`
-	Issues       []PluginIssue     `json:"issues"`
-	Status       PluginCheckStatus `json:"status"`
-	Title        string            `json:"title"`
+	Contribution *string `json:"contribution,omitempty"`
+
+	// Fixture The fixture the check ran, such as fixtures/events.json, or a normative fixture prefixed with contracts:.
+	Fixture *string           `json:"fixture,omitempty"`
+	Id      string            `json:"id"`
+	Issues  []PluginIssue     `json:"issues"`
+	Status  PluginCheckStatus `json:"status"`
+	Title   string            `json:"title"`
 }
 
 // PluginCheckStatus defines model for PluginCheck.Status.
@@ -2026,8 +2029,11 @@ type PluginRegistrationRequest struct {
 	Configuration *map[string]interface{} `json:"configuration,omitempty"`
 
 	// Endpoint Base URL where the operator runs the plugin, such as http://127.0.0.1:9900. A connector plugin needs https unless it is on loopback.
-	Endpoint       string `json:"endpoint"`
-	IdempotencyKey string `json:"idempotency_key"`
+	Endpoint string `json:"endpoint"`
+
+	// Fixtures The plugin's own test files, by path inside its fixtures folder (such as events.json or inputs/events.csv), each base64-encoded; at most 4 MiB decoded in total. The check runs them as quivr plugin test runs that folder, so a connector, or a normalizer for a media type without a normative fixture, can be certified. They are stored with the registration; a new idempotency key for a rejected registration checks it again with that request's fixtures.
+	Fixtures       *map[string][]byte `json:"fixtures,omitempty"`
+	IdempotencyKey string             `json:"idempotency_key"`
 
 	// Kinds Alert kinds offered, a subset of those the manifest declares; absent offers them all.
 	Kinds *[]string `json:"kinds,omitempty"`

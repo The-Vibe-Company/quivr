@@ -50,10 +50,11 @@ const registrationColumns = `id,plugin_id,version,endpoint,manifest_digest,coale
  CASE WHEN state IN ('draining','inactive') THEN CASE WHEN ` + pinnedWorkSQL + `>0 THEN 'draining' ELSE 'inactive' END ELSE state END,
  created_at,updated_at,manifest,settings,check_report,origin,` + pinnedWorkSQL
 
-func scanRegistration(row pgx.Row) (registry.Registration, error) {
+// scanRegistration scans registrationColumns, then extra columns into extra.
+func scanRegistration(row pgx.Row, extra ...any) (registry.Registration, error) {
 	var r registry.Registration
 	var settings, report []byte
-	err := row.Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report, &r.Origin, &r.PinnedWork)
+	err := row.Scan(append([]any{&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report, &r.Origin, &r.PinnedWork}, extra...)...)
 	if err != nil {
 		return r, err
 	}
@@ -86,9 +87,22 @@ func insertRegistration(ctx context.Context, q querier, r registry.Registration)
 	if origin == "" {
 		origin = registry.OriginConfiguration
 	}
-	_, err = q.Exec(ctx, `INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,artifact_digest,contributions,roles,state,manifest,settings,origin) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
-		r.ID, r.PluginID, r.Version, r.Endpoint, r.ManifestDigest, r.ArtifactDigest, r.Contributions, r.Roles, r.State, r.Manifest, settings, origin)
+	fixtures, err := fixturesColumn(r.Fixtures)
+	if err != nil {
+		return err
+	}
+	_, err = q.Exec(ctx, `INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,artifact_digest,contributions,roles,state,manifest,settings,origin,check_fixtures) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
+		r.ID, r.PluginID, r.Version, r.Endpoint, r.ManifestDigest, r.ArtifactDigest, r.Contributions, r.Roles, r.State, r.Manifest, settings, origin, fixtures)
 	return err
+}
+
+// fixturesColumn is a fixture set as stored: a JSON object of base64
+// contents by path, NULL for none.
+func fixturesColumn(files map[string][]byte) ([]byte, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(files)
 }
 
 // ApplyConfiguration records the configured registrations and applies the
@@ -344,9 +358,10 @@ func (s PluginStore) RegisterPlugin(ctx context.Context, r registry.Registration
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", pluginPlanLock); err != nil {
 		return registry.Registration{}, false, err
 	}
-	var keyed string
-	switch err = tx.QueryRow(ctx, `SELECT registration_id FROM plugin_registration_requests WHERE request_key=$1`, key).Scan(&keyed); {
-	case err == nil && keyed != r.ID:
+	var keyed, keyedFixtures string
+	digest := registry.FixturesDigest(r.Fixtures)
+	switch err = tx.QueryRow(ctx, `SELECT registration_id,fixtures_digest FROM plugin_registration_requests WHERE request_key=$1`, key).Scan(&keyed, &keyedFixtures); {
+	case err == nil && (keyed != r.ID || keyedFixtures != digest):
 		return registry.Registration{}, false, registry.ErrIdempotencyConflict
 	case err == nil:
 		stored, err := scanRegistration(tx.QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE id=$1`, r.ID))
@@ -357,12 +372,17 @@ func (s PluginStore) RegisterPlugin(ctx context.Context, r registry.Registration
 	if err = insertRegistration(ctx, tx, r); err != nil {
 		return registry.Registration{}, false, err
 	}
-	// A new request for a rejected registration checks it again.
-	tag, err := tx.Exec(ctx, `UPDATE plugin_registrations SET state='registered',check_report=NULL,check_lease_until='-infinity',updated_at=now() WHERE id=$1 AND state='rejected'`, r.ID)
+	// A new request for a rejected registration checks it again, with the
+	// request's fixtures.
+	fixtures, err := fixturesColumn(r.Fixtures)
 	if err != nil {
 		return registry.Registration{}, false, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO plugin_registration_requests(request_key,registration_id) VALUES($1,$2)`, key, r.ID); err != nil {
+	tag, err := tx.Exec(ctx, `UPDATE plugin_registrations SET state='registered',check_report=NULL,check_fixtures=$2,check_lease_until='-infinity',updated_at=now() WHERE id=$1 AND state='rejected'`, r.ID, fixtures)
+	if err != nil {
+		return registry.Registration{}, false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO plugin_registration_requests(request_key,registration_id,fixtures_digest) VALUES($1,$2,$3)`, key, r.ID, digest); err != nil {
 		return registry.Registration{}, false, err
 	}
 	stored, err := scanRegistration(tx.QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE id=$1`, r.ID))
@@ -372,13 +392,18 @@ func (s PluginStore) RegisterPlugin(ctx context.Context, r registry.Registration
 	return stored, stored.State == registry.StateRegistered || tag.RowsAffected() > 0, tx.Commit(ctx)
 }
 
-// ClaimCheck leases the oldest registration waiting for its check.
+// ClaimCheck leases the oldest registration waiting for its check, with its
+// fixtures.
 func (s PluginStore) ClaimCheck(ctx context.Context, lease time.Duration) (registry.Registration, bool, error) {
+	var fixtures []byte
 	r, err := scanRegistration(s.Pool.QueryRow(ctx, `UPDATE plugin_registrations SET check_lease_until=now()+$1::interval WHERE id=(
  SELECT id FROM plugin_registrations WHERE state='registered' AND check_lease_until<now() ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED)
- RETURNING `+registrationColumns, fmt.Sprintf("%d milliseconds", lease.Milliseconds())))
+ RETURNING `+registrationColumns+`,check_fixtures`, fmt.Sprintf("%d milliseconds", lease.Milliseconds())), &fixtures)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, false, nil
+	}
+	if err == nil && len(fixtures) > 0 {
+		err = json.Unmarshal(fixtures, &r.Fixtures)
 	}
 	return r, err == nil, err
 }

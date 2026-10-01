@@ -75,7 +75,7 @@ func TestPluginConfigurationReconcilesAnEarlierPlan(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work|plan_rollback)\.sql$`))); err != nil {
+	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work|plan_rollback|plugin_check_fixtures)\.sql$`))); err != nil {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
@@ -161,12 +161,18 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	}
 
 	next := embedderVersion(t, "0.2.0")
+	next.Fixtures = map[string][]byte{"article.json": []byte(`{"segment":{}}`), "inputs/article.txt": {0xff, 0x00}}
 	stored, queued, err := store.RegisterPlugin(ctx, next, "register-0.2.0")
 	if err != nil || !queued || stored.State != registry.StateRegistered || string(stored.Manifest) != string(next.Manifest) {
 		t.Fatalf("registration: %+v queued %v (%v)", stored, queued, err)
 	}
 	if replay, queued, err := store.RegisterPlugin(ctx, next, "register-0.2.0"); err != nil || queued || replay.ID != next.ID {
 		t.Fatalf("replay: %+v queued %v (%v), want the same registration and no second check", replay, queued, err)
+	}
+	otherFixtures := next
+	otherFixtures.Fixtures = map[string][]byte{"article.json": []byte(`{}`)}
+	if _, _, err := store.RegisterPlugin(ctx, otherFixtures, "register-0.2.0"); !errors.Is(err, registry.ErrIdempotencyConflict) {
+		t.Fatalf("a key reused with other fixtures: %v, want ErrIdempotencyConflict", err)
 	}
 	changed := embedderVersion(t, "0.3.0", "dimensions: 16", "dimensions: 24")
 	if _, _, err := store.RegisterPlugin(ctx, changed, "register-0.2.0"); !errors.Is(err, registry.ErrIdempotencyConflict) {
@@ -175,18 +181,32 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	if _, _, err := store.RegisterPlugin(ctx, changed, "register-0.3.0"); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		claimed, ok, err := store.ClaimCheck(ctx, time.Minute)
-		if err != nil || !ok {
-			t.Fatalf("claim: %v %v", ok, err)
+	// Each check runs with the fixtures of the request that queued it: 0.3.0
+	// is rejected without any, then checked again with those of a new key.
+	settle := func(want map[string]map[string][]byte) {
+		t.Helper()
+		for range want {
+			claimed, ok, err := store.ClaimCheck(ctx, time.Minute)
+			if err != nil || !ok {
+				t.Fatalf("claim: %v %v", ok, err)
+			}
+			if !reflect.DeepEqual(claimed.Fixtures, want[claimed.ID]) {
+				t.Fatalf("%s@%s claimed with fixtures %q, want %q", claimed.PluginID, claimed.Version, claimed.Fixtures, want[claimed.ID])
+			}
+			if err = store.RecordCheck(ctx, claimed.ID, registry.CheckReport{Certified: claimed.Fixtures != nil, Passed: 1, Checks: []registry.CheckResult{}}); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err = store.RecordCheck(ctx, claimed.ID, registry.CheckReport{Certified: true, Passed: 1, Checks: []registry.CheckResult{}}); err != nil {
-			t.Fatal(err)
+		if _, ok, err := store.ClaimCheck(ctx, time.Minute); err != nil || ok {
+			t.Fatalf("a claim with nothing waiting: %v %v", ok, err)
 		}
 	}
-	if _, ok, err := store.ClaimCheck(ctx, time.Minute); err != nil || ok {
-		t.Fatalf("a third claim with nothing waiting: %v %v", ok, err)
+	settle(map[string]map[string][]byte{next.ID: next.Fixtures, changed.ID: nil})
+	changed.Fixtures = otherFixtures.Fixtures
+	if again, queued, err := store.RegisterPlugin(ctx, changed, "register-0.3.0-fixed"); err != nil || !queued || again.State != registry.StateRegistered {
+		t.Fatalf("a rejected registration under a new key: %+v queued %v (%v), want checked again", again, queued, err)
 	}
+	settle(map[string]map[string][]byte{changed.ID: changed.Fixtures})
 
 	// 0.3.0 changes the served space's dimensions under the same version.
 	if _, err := service.Activate(ctx, operatorScope, changed.ID); !errors.Is(err, content.ErrSpaceChanged) {

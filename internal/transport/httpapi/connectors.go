@@ -104,7 +104,12 @@ func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
 
 // decodeInto validates raw JSON against a contract schema and decodes it.
 func decodeInto(w http.ResponseWriter, r *http.Request, schema interface{ Validate(any) error }, v any) bool {
-	raw, payload, ok := readJSON(w, r, maxRequestBytes)
+	return decodeIntoAtMost(w, r, maxRequestBytes, schema, v)
+}
+
+// decodeIntoAtMost is decodeInto for a body of at most limit bytes.
+func decodeIntoAtMost(w http.ResponseWriter, r *http.Request, limit int64, schema interface{ Validate(any) error }, v any) bool {
+	raw, payload, ok := readJSON(w, r, limit)
 	if !ok {
 		return false
 	}
