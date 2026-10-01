@@ -147,55 +147,12 @@ func TestBatchAcceptsValidPeersIndependently(t *testing.T) {
 	}
 }
 
-func TestBatchEnvelopeRejectionAcceptsNothing(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	c := ingestionCorpus(t)
-	// Different content under the same key is accepted only if no Receipt exists.
-	neverAccepted := func(key string) {
-		t.Helper()
-		request(t, "POST", "/v0/records", admin, inlineCommand(c, key, key, "Contenu ultérieur"), 202)
-	}
-	tooMany := []any{inlineCommand(c, "envelope-count", "envelope-count", "Première entrée")}
-	for i := 1; i <= 100; i++ {
-		key := fmt.Sprintf("envelope-count-%d", i)
-		tooMany = append(tooMany, inlineCommand(c, key, key, "Entrée"))
-	}
-	if e := request(t, "POST", "/v0/records/batch", admin, map[string]any{"items": tooMany}, 413); e["code"] != "batch_too_large" {
-		t.Fatal(e)
-	}
-	neverAccepted("envelope-count")
-	envelope := map[string]any{"items": []any{inlineCommand(c, "envelope-field", "envelope-field", "Enveloppe invalide")}, "atomic": true}
-	if e := request(t, "POST", "/v0/records/batch", admin, envelope, 422); e["code"] != "invalid_schema" {
-		t.Fatal(e)
-	}
-	neverAccepted("envelope-field")
-	request(t, "POST", "/v0/records/batch", admin, map[string]any{"items": []any{}}, 422)
-	if e := rawRequest(t, "POST", "/v0/records/batch", admin, []byte(`{"items":[`), 400); e["code"] != "malformed_json" {
-		t.Fatal(e)
-	}
-	// An entry above the single-request bound is rejected alone; its peer is accepted.
-	outcomes := batchOutcomes(t, admin, []any{
-		inlineCommand(c, "entry-bound-peer", "entry-bound-peer", "Pair accepté"),
-		inlineCommand(c, "entry-bound", "entry-bound", strings.Repeat("y", 1<<20)),
-	})
-	awaitReceipt(t, receiptOf(t, outcomes[0])["receipt_id"].(string))
-	if code := errorCode(t, outcomes[1]); code != "entry_too_large" {
-		t.Fatal(code)
-	}
-	neverAccepted("entry-bound")
-}
-
 func TestBatchAuthorization(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
 	c := ingestionCorpus(t)
 	entry := []any{inlineCommand(c, "batch-auth", "batch-auth", "Autorisation")}
-	request(t, "POST", "/v0/records/batch", "not-a-key", map[string]any{"items": entry}, 401)
-	request(t, "POST", "/v0/records/batch", os.Getenv("QUIVR_TEST_READER"), map[string]any{"items": entry}, 403)
 	for _, key := range []string{"OTHER", "SCOPED"} {
 		if code := errorCode(t, batchOutcomes(t, os.Getenv("QUIVR_TEST_"+key), entry)[0]); code != "not_found" {
 			t.Fatalf("%s: %s", key, code)

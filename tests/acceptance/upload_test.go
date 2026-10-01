@@ -125,15 +125,15 @@ func TestUploadedBlobIngestion(t *testing.T) {
 	pending := request(t, "POST", "/v0/uploads", admin, pendingBody, 201)
 	pendingID := pending["upload_id"].(string)
 	retryable := request(t, "POST", "/v0/uploads/"+pendingID+"/confirm", admin, nil, 202)
-	if retryable["state"] == "verified" || retryable["error"] == nil {
+	failure, _ := retryable["error"].(map[string]any)
+	if retryable["state"] != "awaiting_upload" || failure["code"] != "verification_unavailable" || failure["retryable"] != true {
 		t.Fatal(retryable)
 	}
-	pendingHeaders := uploadHeaders(pending)
 	refreshed := request(t, "GET", "/v0/uploads/"+pendingID, admin, nil, 200)
 	if refreshed["state"] != "awaiting_upload" || refreshed["upload_url"] == nil {
 		t.Fatal("retryable session stopped offering a transfer capability", refreshed)
 	}
-	if status := rawTransfer(t, refreshed["upload_url"].(string), pendingHeaders, []byte(pendingText)); status/100 != 2 {
+	if status := rawTransfer(t, refreshed["upload_url"].(string), uploadHeaders(refreshed), []byte(pendingText)); status/100 != 2 {
 		t.Fatalf("retry transfer refused: %d", status)
 	}
 	recovered := request(t, "POST", "/v0/uploads/"+pendingID+"/confirm", admin, nil, 202)

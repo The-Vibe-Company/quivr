@@ -239,6 +239,7 @@ func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 		{name: "unknown envelope field", key: adminKey, body: map[string]any{"items": []any{valid}, "atomic": true}, status: 422, code: "invalid_schema"},
 		{name: "bare array", key: adminKey, body: []any{valid}, status: 422, code: "invalid_schema"},
 		{name: "no content:write", key: readerKey, body: map[string]any{"items": []any{valid}}, status: 403, code: "forbidden"},
+		{name: "unknown API key", key: "not-a-key", body: map[string]any{"items": []any{valid}}, status: 401, code: "invalid_api_key"},
 		{name: "not JSON", key: adminKey, media: "text/plain", body: map[string]any{"items": []any{valid}}, status: 415, code: "unsupported_media_type"},
 	}
 	for _, tc := range cases {
@@ -377,6 +378,9 @@ func TestBatchEntryRejectionsMatchSingleSubmission(t *testing.T) {
 		}), status: 422, code: "invalid_input"},
 		{name: "missing content", key: adminKey, entry: with("missing", func(e map[string]any) { delete(e, "content") }), status: 422, code: "invalid_schema"},
 		{name: "unknown core field", key: adminKey, entry: with("unknown", func(e map[string]any) { e["atomic"] = true }), status: 422, code: "invalid_schema"},
+		{name: "undeclared extension namespace", key: adminKey, entry: with("extension", func(e map[string]any) {
+			e["extensions"] = map[string]any{"uninstalled": map[string]any{"schema_version": "1", "data": map[string]any{}}}
+		}), status: 422, code: "unsupported_content"},
 		{name: "storage outage", key: adminKey, entry: inline("outage", "outage", "Texte"), failure: errors.New("connection refused"), status: 503, code: "content_unavailable", retryable: true},
 	}
 	for _, tc := range cases {

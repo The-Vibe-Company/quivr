@@ -157,20 +157,3 @@ func TestInlineProducerDoesNotChangeManifestIdentity(t *testing.T) {
 		}
 	}
 }
-
-func TestInlineRejections(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	c := ingestionCorpus(t)
-	unverified := inlineCommand(c, "unsupported-blob", "x", "x")
-	unverified["content"] = map[string]any{"kind": "blob", "blob_id": "not-verified", "media_type": "text/plain"}
-	request(t, "POST", "/v0/records", admin, unverified, 422)
-	cmd := inlineCommand(c, "unknown", "x", "x")
-	cmd["unknown"] = true
-	request(t, "POST", "/v0/records", admin, cmd, 422)
-	delete(cmd, "unknown")
-	cmd["extensions"] = map[string]any{"uninstalled": map[string]any{"schema_version": "1", "data": map[string]any{}}}
-	request(t, "POST", "/v0/records", admin, cmd, 422)
-}
