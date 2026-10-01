@@ -1,0 +1,47 @@
+internal/adapters/postgres/spaces_test.go
+  s_54b80c92daa9cb::t_1931ecf07006c1 172
+internal/adapters/postgres/rebuild_test.go
+  s_54b80c92daa9cb::t_1931ecf07006c1 166,169,173
+plugins/core-retrieve/README.md
+  s_54b80c92daa9cb::t_929604b9378156 40-42
+internal/adapters/postgres/searchable.go
+  s_54b80c92daa9cb::t_caecd40d55f2ed 305
+  s_54b80c92daa9cb::t_327d33e55a078d 306-336,338-346,348-353,355
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_086af10b66a046 405-407,410-411,413,417-424,426-430
+  s_54b80c92daa9cb::t_4367b7eb32809a 276,278-282
+  s_54b80c92daa9cb::t_8932a4104133e7 352-357,359-360
+internal/adapters/postgres/embeddings_test.go
+  s_54b80c92daa9cb::t_1931ecf07006c1 121,137
+internal/adapters/postgres/purge_test.go
+  s_54b80c92daa9cb::t_1931ecf07006c1 244,252
+internal/adapters/postgres/searchable_test.go
+  s_54b80c92daa9cb::t_1931ecf07006c1 109,119,125,134,140
+  s_54b80c92daa9cb::t_38dff0d807194d 198-210
+  s_54b80c92daa9cb::t_23d231c19dded9 112-116
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_df146526e7170f 165
+  s_54b80c92daa9cb::t_6b0ef1851814dc 178-179,182-185,189-190
+  s_54b80c92daa9cb::t_d62eaa409117ca 64-69,71-73,75-85,87,191
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_caecd40d55f2ed 203
+  s_54b80c92daa9cb::t_62fa102f912847 127-137
+  s_54b80c92daa9cb::t_155188b18f7829 8
+  s_54b80c92daa9cb::t_fa4e6bc16cec22 204-213,215-219,221,223,225,227-246,248-249,251-253,255-291,293-294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3a6fae99bb6d44fe356721cfc998ad6383f2e2b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
