@@ -105,7 +105,7 @@ When the new version brings an embedding model, a Corpus created after the switc
 Every step survives a restart of the api or the worker:
 
 - an activation or a rollback is kept in the database, and the configuration applies at startup only what changed in it;
-- pinned work keeps its plan across worker restarts;
+- pinned work keeps its plan across worker restarts. A step that a killed worker was running is retried within about 10 seconds, and the old version stays `draining` until that retry finishes;
 - a backfill resumes after its checkpoint.
 
 A single api process does not answer while it restarts. Run two or more behind a load balancer if you restart the api during an upgrade.

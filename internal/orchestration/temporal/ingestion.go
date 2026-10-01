@@ -43,12 +43,13 @@ type ProcessResult struct {
 // engine invocation cap plus discovery and durable recording.
 const normalizationActivityTimeout = normalization.TimeoutCap + time.Minute
 
-// normalizationHeartbeatTimeout bounds how long an attempt of normalize-external
-// can go unheard. A running attempt heartbeats well within it. An attempt that
-// no worker is running, because a stopping worker took the task or never
-// reported it, is retried after this bound, not after the three-minute
-// start-to-close bound (THE-745).
-const normalizationHeartbeatTimeout = 10 * time.Second
+// stepHeartbeatTimeout bounds how long an attempt of any step of a receipt's
+// processing can go unheard. A running attempt heartbeats well within it. An
+// attempt that no worker runs, because its worker was killed or a stopping
+// worker took the task or never reported it, is retried after this bound
+// rather than its start-to-close bound (THE-745, THE-835), so a dead worker
+// does not hold work pinned to a draining plugin version.
+const stepHeartbeatTimeout = 10 * time.Second
 
 // maxNormalizationRounds bounds normalize-then-process rounds of one receipt.
 // normalize-external records an outcome (or leaves one to publication), so a
@@ -61,8 +62,11 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 	// receipt; version 2 runs it only when publication reports a routed Blob
 	// without a normalization outcome, so other content runs no extra Activity.
 	version := workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 2)
-	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, HeartbeatTimeout: normalizationHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
+	// The heartbeat timeout only detects an attempt nobody runs: a live
+	// attempt still ends at its 30 s start-to-close bound, and a plugin call
+	// inside it at its own deadline.
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
 	switch version {
 	case 1:
 		if err := workflow.ExecuteActivity(normalize, "normalize-external", input).Get(ctx, nil); err != nil {
@@ -90,7 +94,7 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 			}
 		}
 	}
-	enrich := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: enrichmentActivityTimeout, HeartbeatTimeout: normalizationHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	enrich := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: enrichmentActivityTimeout, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
 	return workflow.ExecuteActivity(enrich, "enrich-e5", input).Get(ctx, nil)
 }
 
@@ -158,46 +162,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
 	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
-	// Every activity of a receipt's processing resolves plugins in the plan
-	// its first activity pinned; enrichment, the last one, releases it.
-	pinned := func(ctx context.Context, in Input) (context.Context, error) {
-		return pins.Pin(ctx, workIngestion, in.Organization, in.ReceiptID)
-	}
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		ctx, err := pinned(ctx, in)
-		if err != nil {
-			return err
-		}
-		return service.Run(ctx, in.Organization, in.ReceiptID)
-	}, activity.RegisterOptions{Name: "process-token-windows"})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) (ProcessResult, error) {
-		ctx, err := pinned(ctx, in)
-		if err != nil {
-			return ProcessResult{}, err
-		}
-		err = service.Run(ctx, in.Organization, in.ReceiptID)
-		if errors.Is(err, content.ErrNormalizationPending) {
-			return ProcessResult{NormalizationRequired: true}, nil
-		}
-		return ProcessResult{}, err
-	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		ctx, err := pinned(ctx, in)
-		if err != nil {
-			return err
-		}
-		return heartbeating(ctx, normalizationHeartbeatTimeout/3, func() error { return service.Normalize(ctx, in.Organization, in.ReceiptID) })
-	}, activity.RegisterOptions{Name: "normalize-external"})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
-		pinnedCtx, err := pinned(ctx, in)
-		if err != nil {
-			return err
-		}
-		if err = heartbeating(ctx, normalizationHeartbeatTimeout/3, func() error { return service.Enrich(pinnedCtx, in.Organization, in.ReceiptID) }); err != nil {
-			return err
-		}
-		return pins.Release(ctx, workIngestion, in.Organization, in.ReceiptID)
-	}, activity.RegisterOptions{Name: "enrich-e5"})
+	registerIngestion(w, service, pins)
 	registerRebuild(w, rebuilder, pins)
 	var cw worker.Worker
 	if conns != nil {
@@ -244,11 +209,69 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	return runtime, nil
 }
 
-// heartbeating runs run while it records an activity heartbeat every interval,
-// so the server can tell a live attempt from one no worker is running.
+// Steps runs the steps of a receipt's processing (processing.Service).
+type Steps interface {
+	Run(ctx context.Context, org, receiptID string) error
+	Normalize(ctx context.Context, org, receiptID string) error
+	Enrich(ctx context.Context, org, receiptID string) error
+}
+
+// registerIngestion registers the activities of a receipt's processing. Each
+// resolves plugins in the plan its first activity pinned; enrichment, the last
+// one, releases it. Each heartbeats, so an attempt no worker runs is retried
+// after stepHeartbeatTimeout.
+func registerIngestion(w worker.ActivityRegistry, steps Steps, pins Pinner) {
+	pinned := func(ctx context.Context, in Input) (context.Context, error) {
+		return pins.Pin(ctx, workIngestion, in.Organization, in.ReceiptID)
+	}
+	step := func(ctx context.Context, run func() error) error {
+		return heartbeating(ctx, stepHeartbeatTimeout/3, run)
+	}
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
+		return step(ctx, func() error { return steps.Run(ctx, in.Organization, in.ReceiptID) })
+	}, activity.RegisterOptions{Name: "process-token-windows"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) (ProcessResult, error) {
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return ProcessResult{}, err
+		}
+		err = step(ctx, func() error { return steps.Run(ctx, in.Organization, in.ReceiptID) })
+		if errors.Is(err, content.ErrNormalizationPending) {
+			return ProcessResult{NormalizationRequired: true}, nil
+		}
+		return ProcessResult{}, err
+	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		ctx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
+		return step(ctx, func() error { return steps.Normalize(ctx, in.Organization, in.ReceiptID) })
+	}, activity.RegisterOptions{Name: "normalize-external"})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in Input) error {
+		pinnedCtx, err := pinned(ctx, in)
+		if err != nil {
+			return err
+		}
+		if err = step(ctx, func() error { return steps.Enrich(pinnedCtx, in.Organization, in.ReceiptID) }); err != nil {
+			return err
+		}
+		return pins.Release(ctx, workIngestion, in.Organization, in.ReceiptID)
+	}, activity.RegisterOptions{Name: "enrich-e5"})
+}
+
+// heartbeating runs run while it records an activity heartbeat at once and
+// then every interval, so the server can tell a live attempt from one no
+// worker is running. A heartbeat never moves the attempt's deadline, and the
+// heartbeats stop when its context ends.
 func heartbeating(ctx context.Context, interval time.Duration, run func() error) error {
 	done := make(chan struct{})
 	defer close(done)
+	activity.RecordHeartbeat(ctx)
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()

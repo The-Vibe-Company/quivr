@@ -2,51 +2,135 @@ package temporal
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
 
-// ingestionRun executes the ingestion workflow with fake activities: process
-// answers the successive process-token-windows-v2 results.
-func ingestionRun(t *testing.T, process ...ProcessResult) (normalized, processed, enriched int, err error) {
+// fakeSteps answers the successive Runs from process (true: normalization
+// pending) and counts the steps. Each step first waits, within a deadline, for
+// its attempt's first heartbeat and records the steps that never sent one.
+type fakeSteps struct {
+	process                    []bool
+	runs, normalized, enriched int
+	heard                      func(ctx context.Context) bool
+	unheard                    []string
+}
+
+func (f *fakeSteps) step(ctx context.Context) {
+	if !f.heard(ctx) {
+		f.unheard = append(f.unheard, activity.GetInfo(ctx).ActivityType.Name)
+	}
+}
+
+func (f *fakeSteps) Run(ctx context.Context, _, _ string) error {
+	f.step(ctx)
+	pending := f.process[min(f.runs, len(f.process)-1)]
+	f.runs++
+	if pending {
+		return content.ErrNormalizationPending
+	}
+	return nil
+}
+
+func (f *fakeSteps) Normalize(ctx context.Context, _, _ string) error {
+	f.step(ctx)
+	f.normalized++
+	return nil
+}
+
+func (f *fakeSteps) Enrich(ctx context.Context, _, _ string) error {
+	f.step(ctx)
+	f.enriched++
+	return nil
+}
+
+// ingestionRun executes the ingestion workflow with the real activities over
+// fake steps, and returns the heartbeat timeout each step was scheduled with.
+func ingestionRun(t *testing.T, process ...bool) (*fakeSteps, map[string]time.Duration, error) {
 	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
+	var mu sync.Mutex
+	beats := map[string]chan struct{}{}
+	beat := func(id string) chan struct{} {
+		mu.Lock()
+		defer mu.Unlock()
+		if beats[id] == nil {
+			beats[id] = make(chan struct{})
+		}
+		return beats[id]
+	}
+	env.SetOnActivityHeartbeatListener(func(info *activity.Info, _ converter.EncodedValues) {
+		select {
+		case <-beat(info.ActivityID):
+		default:
+			close(beat(info.ActivityID))
+		}
+	})
+	timeouts := map[string]time.Duration{}
+	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+		timeouts[info.ActivityType.Name] = info.HeartbeatTimeout
+	})
+	steps := &fakeSteps{process: process, heard: func(ctx context.Context) bool {
+		select {
+		case <-beat(activity.GetInfo(ctx).ActivityID):
+			return true
+		case <-time.After(time.Second):
+			return false
+		}
+	}}
 	env.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
-	env.RegisterActivityWithOptions(func(context.Context, Input) (ProcessResult, error) {
-		r := process[min(processed, len(process)-1)]
-		processed++
-		return r, nil
-	}, activity.RegisterOptions{Name: "process-token-windows-v2"})
-	env.RegisterActivityWithOptions(func(context.Context, Input) error { normalized++; return nil }, activity.RegisterOptions{Name: "normalize-external"})
-	env.RegisterActivityWithOptions(func(context.Context, Input) error { enriched++; return nil }, activity.RegisterOptions{Name: "enrich-e5"})
+	registerIngestion(env, steps, unpinned{})
 	env.ExecuteWorkflow("process-e5-v3", Input{Organization: "org_a", ReceiptID: "receipt_1"})
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("workflow did not complete")
 	}
-	return normalized, processed, enriched, env.GetWorkflowError()
+	return steps, timeouts, env.GetWorkflowError()
 }
 
 func TestContentWithoutNormalizationRunsNoNormalizationActivity(t *testing.T) {
-	normalized, processed, enriched, err := ingestionRun(t, ProcessResult{})
-	if err != nil || normalized != 0 || processed != 1 || enriched != 1 {
-		t.Fatalf("normalized %d processed %d enriched %d err %v", normalized, processed, enriched, err)
+	s, _, err := ingestionRun(t, false)
+	if err != nil || s.normalized != 0 || s.runs != 1 || s.enriched != 1 {
+		t.Fatalf("normalized %d processed %d enriched %d err %v", s.normalized, s.runs, s.enriched, err)
 	}
 }
 
 func TestRoutedBlobsNormalizeOnceBeforePublication(t *testing.T) {
-	normalized, processed, enriched, err := ingestionRun(t, ProcessResult{NormalizationRequired: true}, ProcessResult{})
-	if err != nil || normalized != 1 || processed != 2 || enriched != 1 {
-		t.Fatalf("normalized %d processed %d enriched %d err %v", normalized, processed, enriched, err)
+	s, _, err := ingestionRun(t, true, false)
+	if err != nil || s.normalized != 1 || s.runs != 2 || s.enriched != 1 {
+		t.Fatalf("normalized %d processed %d enriched %d err %v", s.normalized, s.runs, s.enriched, err)
 	}
 }
 
 func TestNormalizationWithoutAnOutcomeStopsAfterBoundedRounds(t *testing.T) {
-	normalized, _, enriched, err := ingestionRun(t, ProcessResult{NormalizationRequired: true})
-	if err == nil || normalized != maxNormalizationRounds || enriched != 0 {
-		t.Fatalf("normalized %d enriched %d err %v", normalized, enriched, err)
+	s, _, err := ingestionRun(t, true)
+	if err == nil || s.normalized != maxNormalizationRounds || s.enriched != 0 {
+		t.Fatalf("normalized %d enriched %d err %v", s.normalized, s.enriched, err)
+	}
+}
+
+// A step whose worker died is retried once its heartbeat timeout passes, so
+// work pinned to a draining plugin version is freed within seconds (THE-835):
+// every step must heartbeat while it runs, under a timeout of about 10 s.
+func TestEveryStepIsRetriedWithinSecondsWhenItsWorkerDies(t *testing.T) {
+	s, timeouts, err := ingestionRun(t, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.unheard) > 0 {
+		t.Errorf("steps that never heartbeat while running: %v", s.unheard)
+	}
+	for _, name := range []string{"process-token-windows-v2", "normalize-external", "enrich-e5"} {
+		if d, ok := timeouts[name]; !ok || d <= 0 || d > 10*time.Second {
+			t.Errorf("%s scheduled with heartbeat timeout %v (ran %t), want at most 10s", name, d, ok)
+		}
 	}
 }

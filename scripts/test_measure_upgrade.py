@@ -11,7 +11,8 @@ def passing():
               'versions': 1, 'hits': ['rec1'], 'segmented_by': '0.2.0', 'expected_version': '0.2.0'}
     return {'records': [record], 'quarantined': 0, 'samples': [{'ok': True, 'restart': False}], 'client_failures': [],
             'expectations': {'upgrade': {'since': 1.0, 'version': '0.2.0'}},
-            'drains': [{'name': 'a_after_upgrade', 'inactive': True, 'at_switch': {'state': 'draining', 'pinned_work': 2}, 'restart_while_draining': True}],
+            'drains': [{'name': 'a_after_upgrade', 'inactive': True, 'seconds': 12.0, 'worker_killed': True,
+                        'at_switch': {'state': 'draining', 'pinned_work': 2}, 'restart_while_draining': True}],
             'backfill': {'state': 'succeeded', 'counters': {'versions_in_scope': 3, 'versions_done': 3}, 'estimated_versions': 3, 'window_records': 3,
                          'state_at_restart': 'running'},
             'plans_after_restart': [{'want': 'plan_1', 'got': 'plan_1'}]}
@@ -54,6 +55,13 @@ class Verdict(unittest.TestCase):
         r = passing()
         r['drains'][0]['at_switch'] = {'state': 'inactive', 'pinned_work': 0}
         self.assertEqual(failing(r), ['transitions_under_load'])
+
+    def test_a_dead_worker_holding_a_drain_past_its_heartbeat_timeout_fails(self):
+        r = passing()
+        r['drains'][0]['seconds'] = 31.7
+        self.assertEqual(failing(r), ['drain_after_worker_kill_bounded'])
+        r['drains'][0]['worker_killed'] = False
+        self.assertEqual(failing(r), [])
 
 
 if __name__ == '__main__':

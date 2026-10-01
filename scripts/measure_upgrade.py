@@ -22,7 +22,8 @@ a sampler reads the API every 100 ms, an operator follows the upgrade guide
 Then the load stops and the gate checks that every Record the client
 submitted is searchable exactly once, nothing is quarantined, the API never
 failed outside its own restarts, each switch happened with work in flight and
-each drain ended, new work ran on the active version, and the backfill filled
+each drain ended (within KILLED_DRAIN_BOUND when the worker was killed during
+it), new work ran on the active version, and the backfill filled
 its window. The report, upgrade-measurement.json and .md, gives every check
 with the per-phase API latency, drain times and which version segmented the
 Records. A failed check exits nonzero.
@@ -53,6 +54,12 @@ SAMPLE_INTERVAL = .1
 # Every process follows a plan change within plugin_plan_poll (200 ms on the
 # local stack); work dispatched this long after a switch uses the new plan.
 FOLLOW = 1.0
+# A drain during which the worker is killed ends within this many seconds of the
+# switch: every processing step heartbeats under a 10 s timeout, so a step the
+# dead worker held is retried after it, then the 1 s retry interval and the
+# worker restart (THE-835). Before, the dead step held the drain for its 30 s
+# start-to-close timeout.
+KILLED_DRAIN_BOUND = 20.0
 A_SPACES = {'example.hash_embedder.small': 'served'}
 B_SPACES = sample.SPACES
 SEGMENT_ROUTE = '/v0/contributions/ingestion/segment_and_embed'
@@ -243,6 +250,8 @@ def verdict(r):
     check('transitions_under_load', idle, f'no work in flight at the switch or restart: {idle}')
     stuck = [d['name'] for d in r['drains'] if not d.get('inactive')]
     check('drains_finish', stuck, f'still draining: {stuck}')
+    slow = [f"{d['name']} {d.get('seconds')} s" for d in r['drains'] if d.get('worker_killed') and d.get('inactive') and d['seconds'] > KILLED_DRAIN_BOUND]
+    check('drain_after_worker_kill_bounded', slow, f'a drain the worker was killed during took over {KILLED_DRAIN_BOUND} s: {slow}')
     wrong = [x['key'] for x in records if x.get('expected_version') and x.get('segmented_by') != x['expected_version']]
     unproven = [p for p in r['expectations'] if not any(x.get('expected_version') and x.get('phase') == p for x in records)]
     check('new_work_on_active_version', wrong or unproven, f'{len(wrong)} segmented by another version than the active one: {wrong[:5]}; phases without such work: {unproven}')
@@ -384,6 +393,7 @@ def scenario(stack, report, clock):
         switched = clock.now()
         activate(base, operator, b_reg, '0.2.0')
         d = drain(base, operator, 'a_after_upgrade', '0.1.0', a_endpoint, clock, switched, during=lambda: (stack.stop_worker(), stack.start_worker()))
+        d['worker_killed'] = True
         report['drains'].append(d)
         expectations['upgrade'] = {'since': max(d['done'], switched + FOLLOW), 'version': '0.2.0'}
         load('upgrade', expectations['upgrade']['since'])
