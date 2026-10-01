@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,19 +21,29 @@ import (
 // received, so the test sees exactly what the route relays.
 type echoPush struct {
 	connectors.Fixture
-	seen *[]connectors.ReceiveRequest
+	seen   *[]connectors.ReceiveRequest
+	answer *connectors.Delivery
 }
 
 func (echoPush) Kind() string { return "echo" }
 func (echoPush) Pushes() bool { return true }
 func (e echoPush) Receive(_ context.Context, r connectors.ReceiveRequest) (connectors.Delivery, error) {
 	*e.seen = append(*e.seen, r)
+	if e.answer != nil {
+		return *e.answer, nil
+	}
 	return connectors.Delivery{Accepted: true, Status: 202, ContentType: "application/json", Body: `{"ok":true}`}, nil
 }
 
-type onePushInstance struct{ target connectors.Target }
+type onePushInstance struct {
+	target connectors.Target
+	fail   error
+}
 
 func (s onePushInstance) LoadDelivery(_ context.Context, id string) (connectors.Target, error) {
+	if s.fail != nil {
+		return connectors.Target{}, s.fail
+	}
 	if id != s.target.ID {
 		return connectors.Target{}, corpus.ErrNotFound
 	}
@@ -44,11 +55,12 @@ func (onePushInstance) RecordDelivery(context.Context, string, string, connector
 
 func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 	var seen []connectors.ReceiveRequest
-	registry, err := connectors.NewRegistry(echoPush{seen: &seen})
+	answer := &connectors.Delivery{Accepted: true, Status: 202, ContentType: "application/json", Body: `{"ok":true}`}
+	registry, err := connectors.NewRegistry(echoPush{seen: &seen, answer: answer})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := onePushInstance{connectors.Target{Instance: connectors.Instance{Organization: "org_a", ID: "connector_push", CorpusID: "corpus_news", Namespace: "echo", Kind: "echo", Config: json.RawMessage(`{}`), Enabled: true}}}
+	store := &onePushInstance{target: connectors.Target{Instance: connectors.Instance{Organization: "org_a", ID: "connector_push", CorpusID: "corpus_news", Namespace: "echo", Kind: "echo", Config: json.RawMessage(`{}`), Enabled: true}}}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{}, []byte("cursor-key-0123456789abcdef0123456789"),
 		httpapi.WithRelay(connectors.Relay{Store: store, Registry: registry}))
 	if err != nil {
@@ -78,18 +90,28 @@ func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 		method, path string
 		body         []byte
 		status       int
+		allow        string
 	}{
-		"unknown instance":     {"POST", "/v0/connector-webhooks/connector_other", nil, 404},
-		"nested path":          {"POST", "/v0/connector-webhooks/connector_push/x", nil, 404},
-		"other method":         {"PUT", "/v0/connector-webhooks/connector_push", nil, 405},
-		"body over 1 MiB":      {"POST", "/v0/connector-webhooks/connector_push", bytes.Repeat([]byte("a"), 1<<20+1), 413},
-		"api routes keep auth": {"GET", "/v0/connectors/connector_push", nil, 401},
+		"unknown instance":      {"POST", "/v0/connector-webhooks/connector_other", nil, 404, ""},
+		"nested path":           {"POST", "/v0/connector-webhooks/connector_push/x", nil, 404, ""},
+		"other method":          {"PUT", "/v0/connector-webhooks/connector_push", nil, 405, "GET, POST"},
+		"body over 1 MiB":       {"POST", "/v0/connector-webhooks/connector_push", bytes.Repeat([]byte("a"), 1<<20+1), 413, ""},
+		"query over 8192 bytes": {"POST", "/v0/connector-webhooks/connector_push?" + strings.Repeat("q", 8193), nil, 413, ""},
+		"api routes keep auth":  {"GET", "/v0/connectors/connector_push", nil, 401, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(seen)
-			if rec := send(c.method, c.path, c.body, nil); rec.Code != c.status || len(seen) != before {
+			if rec := send(c.method, c.path, c.body, nil); rec.Code != c.status || len(seen) != before || rec.Header().Get("Allow") != c.allow {
 				t.Fatalf("status %d %s, plugin called %d times", rec.Code, strings.TrimSpace(rec.Body.String()), len(seen)-before)
 			}
 		})
+	}
+	*answer = connectors.Delivery{Status: 200, Body: "challenge"}
+	if rec := send("GET", "/v0/connector-webhooks/connector_push", nil, nil); rec.Code != 200 || rec.Body.String() != "challenge" || rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("default content type: %d %q %v", rec.Code, rec.Body.String(), rec.Header())
+	}
+	store.fail = errors.New("storage offline")
+	if rec := send("POST", "/v0/connector-webhooks/connector_push", nil, nil); rec.Code != 503 || rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("retry hint: %d %v", rec.Code, rec.Header())
 	}
 }

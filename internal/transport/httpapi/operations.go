@@ -92,8 +92,6 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 	key, _ := raw.(map[string]any)["idempotency_key"].(string)
 	op, err := a.Operations.RequestRebuild(r.Context(), scope, corpusID, key)
 	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
 	case errors.Is(err, corpus.ErrNotFound):
 		failure(w, 404, "not_found")
 	case errors.Is(err, operations.ErrConflict):

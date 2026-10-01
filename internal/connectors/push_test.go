@@ -139,25 +139,44 @@ func TestARefusedDeliveryChangesNothing(t *testing.T) {
 
 func TestAFailedDeliveryIsRetryableOrTerminalAndRecordedAsPushHealth(t *testing.T) {
 	for name, c := range map[string]struct {
-		err    error
-		ingest error
-		status int
-		class  ErrorClass
-		code   string
+		err      error
+		ingest   error
+		status   int
+		class    ErrorClass
+		code     string
+		edit     func(*fakePush)
+		accepted bool
+		calls    int
 	}{
-		"plugin unavailable":    {err: TransientError("plugin_unavailable"), status: 503, class: ClassTransient, code: "plugin_unavailable"},
-		"credential refused":    {err: AccessError("consumer_secret_missing"), status: 500, class: ClassAccess, code: "consumer_secret_missing"},
-		"untyped failure":       {err: errors.New("boom"), status: 503, class: ClassTransient, code: "source_unavailable"},
-		"ingestion unavailable": {ingest: errors.New("database down"), status: 503, class: ClassTransient, code: "ingestion_unavailable"},
+		"plugin unavailable":    {err: TransientError("plugin_unavailable"), status: 503, class: ClassTransient, code: "plugin_unavailable", calls: 1},
+		"credential refused":    {err: AccessError("consumer_secret_missing"), status: 500, class: ClassAccess, code: "consumer_secret_missing", calls: 1},
+		"untyped failure":       {err: errors.New("boom"), status: 503, class: ClassTransient, code: "source_unavailable", calls: 1},
+		"ingestion unavailable": {ingest: errors.New("database down"), status: 503, class: ClassTransient, code: "ingestion_unavailable", calls: 1},
+		"credential expired": {status: 500, class: ClassAccess, code: "credential_expired", edit: func(store *fakePush) {
+			expired := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+			store.target.Sealed.ExpiresAt = &expired
+		}},
+		"credential unreadable": {status: 500, class: ClassAccess, code: "credential_unreadable", edit: func(store *fakePush) {
+			store.target.Sealed.Ciphertext[0] ^= 1
+		}},
+		"corpus missing":   {ingest: corpus.ErrNotFound, status: 500, class: ClassAccess, code: "corpus_unavailable", calls: 1},
+		"corpus forbidden": {ingest: corpus.ErrForbidden, status: 500, class: ClassAccess, code: "corpus_unavailable", calls: 1},
+		"item rejected":    {ingest: content.ErrInvalid, status: 200, class: ClassSource, code: "item_rejected", accepted: true, calls: 1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			relay, store, ingest, _ := newRelay(t, pushKind{pushes: true, err: c.err, delivery: Delivery{Accepted: true, Status: 200, Items: []Item{pushed}}})
+			relay, store, ingest, received := newRelay(t, pushKind{pushes: true, err: c.err, delivery: Delivery{Accepted: true, Status: 200, Items: []Item{pushed}}})
+			if c.edit != nil {
+				c.edit(store)
+			}
 			ingest.fail = c.ingest
 			answer, err := relay.Deliver(context.Background(), "connector_1", delivery)
 			if err != nil || answer.Status != c.status || (c.status == 503) != (answer.RetryAfter > 0) {
 				t.Fatalf("answer %+v err %v", answer, err)
 			}
-			if len(store.outcomes) != 1 || store.outcomes[0].Accepted || store.outcomes[0].Failure.Class != c.class || store.outcomes[0].Failure.Code != c.code {
+			if len(*received) != c.calls || len(ingest.accepted) != 0 {
+				t.Fatalf("plugin calls %d, want %d; accepted items %d, want 0", len(*received), c.calls, len(ingest.accepted))
+			}
+			if len(store.outcomes) != 1 || store.outcomes[0].Accepted != c.accepted || store.outcomes[0].Failure == nil || store.outcomes[0].Failure.Class != c.class || store.outcomes[0].Failure.Code != c.code {
 				t.Fatalf("outcomes %+v", store.outcomes)
 			}
 		})

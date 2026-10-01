@@ -133,7 +133,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		var sized struct {
 			Items []json.RawMessage `json:"items"`
 		}
-		if json.Unmarshal(payload, &sized) != nil || len(sized.Items) != len(entries) {
+		if json.Unmarshal(payload, &sized) != nil {
 			failure(w, 400, "malformed_json")
 			return true
 		}

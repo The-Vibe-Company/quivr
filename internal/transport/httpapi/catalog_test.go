@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
@@ -26,11 +27,15 @@ import (
 // TestRecordCatalogKeysetTraversal.
 type memoryCatalog struct {
 	records []content.Record
+	fail    error
 }
 
 func (c *memoryCatalog) put(r content.Record) { c.records = append(c.records, r) }
 
 func (c *memoryCatalog) Records(_ context.Context, _, _, after string, limit int) ([]content.Record, error) {
+	if c.fail != nil {
+		return nil, c.fail
+	}
 	var page []content.Record
 	for _, r := range c.records {
 		if r.ID > after && len(page) < limit {
@@ -46,7 +51,7 @@ const (
 	catalogDenied = "catalog-denied-token-0123456789abcdef012345"
 )
 
-func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, string) {
+func catalogServer(t *testing.T, catalog *memoryCatalog, stores ...corpus.Store) (*httptest.Server, string) {
 	t.Helper()
 	keys := map[string]corpus.Scope{
 		catalogReader: {Organization: "org_a", Actions: []string{"content:read", "changes:read", "corpora:read", "connectors:read"}, Corpora: []string{"*"}},
@@ -56,7 +61,11 @@ func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, stri
 	key := catalogCursorKey
 	journal := &memoryJournal{}
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 0), httpapi.WithConnectors(catalogConnectors(t)))
+	var store corpus.Store = knownCorpora{}
+	if len(stores) > 0 {
+		store = stores[0]
+	}
+	handler, err := httpapi.New(store, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 0), httpapi.WithConnectors(catalogConnectors(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +73,26 @@ func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, stri
 	t.Cleanup(server.Close)
 	changeCursor := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", catalogReader, 200)["next_cursor"].(string)
 	return server, changeCursor
+}
+
+func TestCatalogReadOutages(t *testing.T) {
+	for _, stage := range []string{"corpus read", "record listing"} {
+		t.Run(stage, func(t *testing.T) {
+			store := &readCorpora{}
+			catalog := &memoryCatalog{}
+			server, _ := catalogServer(t, catalog, store)
+			outage := errors.New("storage offline")
+			if stage == "corpus read" {
+				store.fail = outage
+			} else {
+				catalog.fail = outage
+			}
+			body := getJSON(t, server, recordsPath("corpus_a", "", 0), catalogReader, 503)
+			if body["code"] != "content_unavailable" || body["retryable"] != true {
+				t.Fatalf("%s: want retryable content_unavailable, got %v", stage, body)
+			}
+		})
+	}
 }
 
 // catalogConnectors holds two Connector instances so /v0/connectors issues a page cursor.

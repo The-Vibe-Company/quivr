@@ -211,6 +211,10 @@ func TestBatchReturnsIndependentOutcomePerEntry(t *testing.T) {
 
 func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 	valid := inline("envelope-a", "a", "Texte valide")
+	validJSON, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tooMany := make([]any, 101)
 	for i := range tooMany {
 		tooMany[i] = inline(fmt.Sprintf("many-%d", i), fmt.Sprintf("r%d", i), "x")
@@ -232,6 +236,7 @@ func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {
 		{name: "more than 100 entries", key: adminKey, body: map[string]any{"items": tooMany}, status: 413, code: "batch_too_large"},
 		{name: "more than 10 MiB", key: adminKey, body: map[string]any{"items": oversized}, status: 413, code: "request_too_large"},
 		{name: "malformed JSON", key: adminKey, raw: `{"items":[`, status: 400, code: "malformed_json"},
+		{name: "duplicate items with conflicting types", key: adminKey, raw: `{"items":false,"items":[` + string(validJSON) + `]}`, status: 400, code: "malformed_json"},
 		{name: "trailing document", key: adminKey, raw: `{"items":[1]} {}`, status: 400, code: "malformed_json"},
 		{name: "empty items", key: adminKey, body: map[string]any{"items": []any{}}, status: 422, code: "invalid_schema"},
 		{name: "items not an array", key: adminKey, body: map[string]any{"items": valid}, status: 422, code: "invalid_schema"},
@@ -276,15 +281,34 @@ func TestBatchAcceptsEnvelopesAtTheirBounds(t *testing.T) {
 	for i := range wide {
 		wide[i] = inline(fmt.Sprintf("wide-%d", i), fmt.Sprintf("wide%d", i), strings.Repeat("a", 900<<10))
 	}
-	for name, items := range map[string][]any{"exactly 100 entries": hundred, "just under 10 MiB": wide} {
+	exact := inline("exact", "exact", "")
+	empty, err := json.Marshal(exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact["content"].(map[string]any)["text"] = strings.Repeat("a", (1<<20)-len(empty))
+	for name, items := range map[string][]any{"exactly 100 entries": hundred, "just under 10 MiB": wide, "exactly 1 MiB entry": {exact}} {
 		port := &acceptancePort{}
 		payload, _ := json.Marshal(map[string]any{"items": items})
+		if name == "exactly 1 MiB entry" {
+			var raw struct {
+				Items []json.RawMessage `json:"items"`
+			}
+			if err := json.Unmarshal(payload, &raw); err != nil || len(raw.Items) != 1 || len(raw.Items[0]) != 1<<20 {
+				t.Fatalf("entry fixture must be exactly 1 MiB: %v", err)
+			}
+		}
 		if name == "just under 10 MiB" && (len(payload) <= 9<<20 || len(payload) > 10<<20) {
 			t.Fatalf("fixture is %d bytes", len(payload))
 		}
 		status, body := postRaw(t, newAPI(t, port), "/v0/records/batch", adminKey, payload)
 		if status != 200 || len(port.accepted) != len(items) {
 			t.Fatalf("%s: got %d code=%v, accepted %d", name, status, body["code"], len(port.accepted))
+		}
+		for index, item := range entries(t, body) {
+			if item["receipt"] == nil || item["error"] != nil {
+				t.Fatalf("%s entry %d: want receipt, got %v", name, index, item)
+			}
 		}
 	}
 }

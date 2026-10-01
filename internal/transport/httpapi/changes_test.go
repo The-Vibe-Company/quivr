@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +27,7 @@ type memoryJournal struct {
 	mu      sync.Mutex
 	events  []changes.Event
 	expired bool
+	fail    error
 }
 
 func (j *memoryJournal) append(corpusID, kind, id string) {
@@ -38,6 +40,9 @@ func (j *memoryJournal) append(corpusID, kind, id string) {
 func (j *memoryJournal) ReadChanges(_ context.Context, _, corpusID string, after int64, limit int, _ time.Duration) (changes.Window, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.fail != nil {
+		return changes.Window{}, j.fail
+	}
 	head := int64(len(j.events))
 	w := changes.Window{Head: head, Through: after, Expired: j.expired}
 	if limit <= 0 {
@@ -58,6 +63,18 @@ func (j *memoryJournal) ReadChanges(_ context.Context, _, corpusID string, after
 }
 
 type knownCorpora struct{}
+
+type readCorpora struct {
+	knownCorpora
+	fail error
+}
+
+func (s *readCorpora) Read(ctx context.Context, org, id string) (corpus.Corpus, error) {
+	if s.fail != nil {
+		return corpus.Corpus{}, s.fail
+	}
+	return s.knownCorpora.Read(ctx, org, id)
+}
 
 func (knownCorpora) Create(context.Context, string, corpus.CreateInput) (corpus.Corpus, bool, error) {
 	return corpus.Corpus{}, false, corpus.ErrForbidden
@@ -84,7 +101,7 @@ const (
 	noFeed     = "feed-denied-token-0123456789abcdef0123456789"
 )
 
-func changeServer(t *testing.T, journal *memoryJournal) *httptest.Server {
+func changeServer(t *testing.T, journal *memoryJournal, stores ...corpus.Store) *httptest.Server {
 	t.Helper()
 	keys := map[string]corpus.Scope{
 		feedReader: {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}},
@@ -94,7 +111,11 @@ func changeServer(t *testing.T, journal *memoryJournal) *httptest.Server {
 	key := []byte("cursor-key-0123456789abcdef0123456789")
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
 	// Streams read the journal every 5 ms, like a deployment's change_stream_poll.
-	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 5*time.Millisecond))
+	var store corpus.Store = knownCorpora{}
+	if len(stores) > 0 {
+		store = stores[0]
+	}
+	handler, err := httpapi.New(store, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 5*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,5 +352,66 @@ func TestStreamErrorOnInStreamExpiryDoesNotAdvanceID(t *testing.T) {
 	}
 	if f, ok := stream.next(t); ok {
 		t.Fatal("stream stayed open after stream_error", f)
+	}
+}
+
+func TestChangeReadOutages(t *testing.T) {
+	for _, stage := range []string{"corpus read", "journal poll"} {
+		t.Run(stage, func(t *testing.T) {
+			store := &readCorpora{}
+			journal := &memoryJournal{}
+			server := changeServer(t, journal, store)
+			outage := errors.New("storage offline")
+			if stage == "corpus read" {
+				store.fail = outage
+			} else {
+				journal.fail = outage
+			}
+			body := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", feedReader, 503)
+			if body["code"] != "changes_unavailable" || body["retryable"] != true {
+				t.Fatalf("%s: want retryable changes_unavailable, got %v", stage, body)
+			}
+		})
+	}
+}
+
+func TestStreamStorageErrorDoesNotAdvanceID(t *testing.T) {
+	journal := &memoryJournal{}
+	server := changeServer(t, journal)
+	stream, _ := openStream(t, server, "/v0/changes/stream?corpus_id=corpus_a", feedReader, "")
+	if checkpoint, ok := stream.next(t); !ok || checkpoint.event != "checkpoint" {
+		t.Fatalf("want initial checkpoint, got %+v", checkpoint)
+	}
+	journal.mu.Lock()
+	journal.fail = errors.New("storage offline")
+	journal.mu.Unlock()
+	got, ok := stream.next(t)
+	var body map[string]any
+	if !ok || got.event != "stream_error" || got.id != "" || json.Unmarshal([]byte(got.data), &body) != nil || body["code"] != "changes_unavailable" || body["retryable"] != true {
+		t.Fatalf("want retryable stream_error without id, got %+v", got)
+	}
+	if got, ok := stream.next(t); ok {
+		t.Fatalf("stream stays open after storage failure: %+v", got)
+	}
+}
+
+func TestStreamCheckpointsInvisiblePositions(t *testing.T) {
+	journal := &memoryJournal{}
+	server := changeServer(t, journal)
+	stream, _ := openStream(t, server, "/v0/changes/stream?corpus_id=corpus_a", feedReader, "")
+	initial, ok := stream.next(t)
+	if !ok || initial.event != "checkpoint" {
+		t.Fatalf("want initial checkpoint, got %+v", initial)
+	}
+	journal.append("corpus_b", "record.accepted", "invisible")
+	got, ok := stream.next(t)
+	var body map[string]any
+	if !ok || got.event != "checkpoint" || got.id == "" || got.id == initial.id || json.Unmarshal([]byte(got.data), &body) != nil || body["cursor"] != got.id {
+		t.Fatalf("want advanced checkpoint without an invisible event, got %+v", got)
+	}
+	resumed, _ := openStream(t, server, "/v0/changes/stream?corpus_id=corpus_a", feedReader, got.id)
+	journal.append("corpus_a", "record.accepted", "visible")
+	if got, ok := resumed.next(t); !ok || got.event != "change" || !strings.Contains(got.data, `"id":"visible"`) {
+		t.Fatalf("want next visible change after checkpoint, got %+v", got)
 	}
 }

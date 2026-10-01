@@ -38,6 +38,9 @@ func (m *memoryOperations) AcceptRebuild(_ context.Context, org, corpusID, key s
 	return op, nil
 }
 func (m *memoryOperations) Operation(_ context.Context, _, id string) (operations.Operation, error) {
+	if m.fail != nil {
+		return operations.Operation{}, m.fail
+	}
 	if op, ok := m.byID[id]; ok {
 		return op, nil
 	}
@@ -172,6 +175,7 @@ func TestRebuildInitiationAndOperationReads(t *testing.T) {
 		{"read permission", "GET", location, noRebuild, "", "", nil, 403, "forbidden"},
 		{"read out of scope", "GET", location, rebuildScoped, "", "", nil, 404, "not_found"},
 		{"unknown Operation", "GET", "/v0/operations/operation_missing", rebuilder, "", "", nil, 404, "not_found"},
+		{"read storage outage", "GET", location, rebuilder, "", "", errors.New("database unavailable"), 503, "storage_unavailable"},
 	} {
 		store.fail = tc.store
 		res, body := operationCall(t, server, tc.method, tc.path, tc.token, tc.contentType, tc.body)

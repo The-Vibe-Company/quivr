@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -158,7 +160,7 @@ const (
 	noMonitoring  = "monitor-denied-0123456789abcdef0123456789abcdef"
 )
 
-func monitoringServer(t *testing.T) *httptest.Server {
+func monitoringServer(t *testing.T, configure ...func(*monitoring.Service)) *httptest.Server {
 	t.Helper()
 	keys := map[string]corpus.Scope{
 		monitor:       {Organization: "org_a", Actions: []string{"monitoring:read", "monitoring:write"}, Corpora: []string{"*"}},
@@ -172,6 +174,9 @@ func monitoringServer(t *testing.T) *httptest.Server {
 		Destinations: map[string]monitoring.Destination{"receiver_a": {Organization: "org_a", URL: "http://receiver.invalid/hook", Secret: "whsec_dGVzdC1zZWNyZXQtbmV2ZXItcmV0dXJuZWQ="}},
 		MatchStore:   history{},
 		Evaluators:   monitoring.FixtureEvaluators(),
+	}
+	for _, edit := range configure {
+		edit(&service)
 	}
 	key := []byte("cursor-key-0123456789abcdef0123456789")
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithMonitoring(service))
@@ -207,6 +212,68 @@ func call(t *testing.T, server *httptest.Server, method, path, token, body strin
 }
 
 const savedQueryBody = `{"idempotency_key":"q1","name":"Wire","definition":{"corpus_ids":["corpus_a"],"expression":{"fixture":{"decision":"match","threshold":0.50}},"retrieval_profile":"default","temporal_policy":"from_activation"}}`
+
+type previewRecords []monitoring.RecentVersion
+
+func (records previewRecords) Recent(context.Context, string, []string, time.Time, int) ([]monitoring.RecentVersion, error) {
+	return records, nil
+}
+
+func (previewRecords) Article(_ context.Context, _, _, recordID, _ string) (monitoring.Article, error) {
+	return monitoring.Article{Parts: []monitoring.Part{{Key: "body", Role: "body", Text: recordID}}}, nil
+}
+
+func TestSubscriptionPreviewRoute(t *testing.T) {
+	body := `{"definition":{"corpus_ids":["corpus_a"],"expression":{},"retrieval_profile":"default","temporal_policy":"from_activation"},"evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{"decisions":{"hit":"match","wait":"not_ready"}}},"limit":3,"accepted_after":"2026-09-30T08:00:00Z"}`
+	for name, row := range map[string]struct {
+		method, token, body string
+		status              int
+		code                string
+		disabled            bool
+	}{
+		"disabled":                    {"POST", monitor, `{}`, 404, "not_found", true},
+		"method":                      {"GET", monitor, "", 405, "method_not_allowed", false},
+		"permission":                  {"POST", monitorReader, `{}`, 403, "forbidden", false},
+		"schema":                      {"POST", monitor, `{"idempotency_key":"unexpected"}`, 422, "invalid_schema", false},
+		"preview readers unavailable": {"POST", monitor, body, 404, "not_found", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := monitoringServer(t, func(service *monitoring.Service) {
+				if row.disabled {
+					service.Store = nil
+				}
+			})
+			got, _ := call(t, server, row.method, "/v0/subscription-previews", row.token, row.body, row.status)
+			if got["code"] != row.code || got["retryable"] != false {
+				t.Fatalf("want non-retryable %s, got %v", row.code, got)
+			}
+		})
+	}
+	records := previewRecords{
+		{CorpusID: "corpus_a", RecordID: "hit", VersionID: "version_hit", AcceptedAt: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)},
+		{CorpusID: "corpus_a", RecordID: "wait", VersionID: "version_wait", AcceptedAt: time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)},
+		{CorpusID: "corpus_a", RecordID: "miss", VersionID: "version_miss", AcceptedAt: time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)},
+	}
+	server := monitoringServer(t, func(service *monitoring.Service) {
+		service.Recent, service.Versions = records, records
+	})
+	got, _ := call(t, server, "POST", "/v0/subscription-previews", monitor, body, 200)
+	want := map[string]any{
+		"evaluated": float64(3), "matched": float64(1), "not_ready": float64(1), "complete": true,
+		"oldest_accepted_at": "2026-09-30T10:00:00Z",
+		"matches": []any{map[string]any{
+			"corpus_id": "corpus_a", "record_id": "hit", "record_version_id": "version_hit", "accepted_at": "2026-09-30T12:00:00Z",
+			"evidence": map[string]any{
+				"evaluator":   map[string]any{"plugin_id": "quivr.fixture", "version": "1", "configuration": map[string]any{"decisions": map[string]any{"hit": "match", "wait": "not_ready"}}},
+				"explanation": `Fixture evaluator decided match from marker "hit".`, "part_keys": []any{"body"}, "details": map[string]any{"marker": "hit", "decision": "match"},
+			},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("preview rendering: got %v, want %v", got, want)
+	}
+	conforms(t, "SubscriptionPreview", got)
+}
 
 func subscriptionBody(key, evaluator, destination string) string {
 	return `{"idempotency_key":"` + key + `","name":"Alerts","saved_query_id":"saved_query_q1","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"` + evaluator + `","version":"1","configuration":{"decisions":{"default":"match"}}},"destination_id":"` + destination + `"}`

@@ -40,6 +40,11 @@ func (history) Matches(_ context.Context, org, sub string, after int64, limit in
 	return out, nil
 }
 func (history) Delivery(_ context.Context, org, id string) (monitoring.Delivery, error) {
+	if id == "delivery_corrupt" {
+		delivery, _ := history{}.Delivery(context.Background(), org, "delivery_1")
+		delivery.ID, delivery.Event = id, []byte(`{"event_id":`)
+		return delivery, nil
+	}
 	if id == "delivery_2" {
 		d, _ := history{}.Delivery(context.Background(), org, "delivery_1")
 		d.ID, d.AttemptCount, d.Admission = id, 3, monitoring.Admission{Allowed: true}
@@ -125,6 +130,7 @@ func TestDeliveryAttemptsPageBoundedHistory(t *testing.T) {
 		{"GET", "/v0/deliveries/delivery_1/attempts?limit=101", noMonitoring, 403, "forbidden"},
 		{"POST", "/v0/deliveries/delivery_1/attempts", monitor, 405, "method_not_allowed"},
 		{"GET", "/v0/deliveries/delivery_1/other", monitorReader, 404, "not_found"},
+		{"GET", "/v0/deliveries/delivery_corrupt", monitorReader, 503, "storage_unavailable"},
 	} {
 		body := ""
 		if r.method == "POST" {
