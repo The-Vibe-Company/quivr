@@ -1,0 +1,23 @@
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_5f8d2583a9ee33 301-302
+third_party/e5/NOTICE.md
+  s_54b80c92daa9cb::t_5f8d2583a9ee33 20-21
+scripts/prepare_embeddings.py
+  s_54b80c92daa9cb::t_5f8d2583a9ee33 3,9-11,13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a26d6597898967cf20a95ca9f508148beb1e5c6f",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
