@@ -169,7 +169,7 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	if s := spaces[1]; s.ID != evaluation.ID || s.GenerationRole != content.SpaceEvaluation || s.Segments != 1 || s.VectorSpace.Dimensions != 6 {
 		t.Fatalf("evaluation space %+v", s)
 	}
-	h, _, err := store.Hydrate(ctx, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
+	h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
 	if err != nil || h.SpaceID != served.ID {
 		t.Fatalf("hydration serves the served space: %+v %v", h, err)
 	}

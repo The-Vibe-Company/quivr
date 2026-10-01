@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -277,16 +276,16 @@ func nonNil(v []string) []string {
 	return v
 }
 
-// hydrateParallelism bounds concurrent canonical hydrations of one request.
-const hydrateParallelism = 8
+// maxHydrationBatches bounds the hydration batches of one candidate request.
+const maxHydrationBatches = 3
 
-// server serves the candidate requests of one search.
+// server serves the candidate requests of one search, one at a time.
 type server struct {
-	s        Service
-	scope    corpus.Scope
-	routes   []Route
-	spaces   []plugins.SearchSpace
-	mu       sync.Mutex
+	s      Service
+	scope  corpus.Scope
+	routes []Route
+	spaces []plugins.SearchSpace
+	// hydrated caches the segments hydrated earlier in the search.
 	hydrated map[string]content.Hydrated
 	// vectors caches query encodings by space and text.
 	vectors map[string][]float32
@@ -356,10 +355,21 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 	}
 	out := []plugins.Candidate{}
 	records := map[string]bool{}
-	// Hydrate in index order, a wave at a time, until k candidates are kept:
-	// a candidate further down is never read from storage.
-	for next := 0; next < len(unique) && len(out) < c.K; {
-		wave := unique[next:min(len(unique), next+min(hydrateParallelism, c.K-len(out)))]
+	// Hydrate in index order, a batch at a time, until k candidates are kept.
+	// The first batch is the k best: when hydration keeps them all, as it
+	// usually does, a candidate further down is never read. A further batch
+	// is sized from the share of candidates kept so far, and the last allowed
+	// takes every candidate left, so a page costs at most maxHydrationBatches.
+	for batch, next := 1, 0; next < len(unique) && len(out) < c.K; batch++ {
+		size := c.K - len(out)
+		if next > 0 {
+			if len(out) == 0 || batch == maxHydrationBatches {
+				size = len(unique)
+			} else {
+				size = max(size, (size*next+len(out)-1)/len(out))
+			}
+		}
+		wave := unique[next:min(len(unique), next+size)]
 		next += len(wave)
 		phase := time.Now()
 		hydrated, err := sv.hydrate(ctx, wave)
@@ -404,44 +414,32 @@ func fetch(k int) int {
 	return max(3*k, CandidateLimit)
 }
 
-// hydrate rechecks and reads each candidate from canonical storage, a few at
-// a time, reusing segments hydrated earlier in the search. A candidate the
-// caller may not read, or that is no longer current, is absent.
+// hydrate rechecks and reads candidates from canonical storage in one batch,
+// reusing segments hydrated earlier in the search. A candidate the caller may
+// not read, or that is no longer current, is absent.
 func (sv *server) hydrate(ctx context.Context, found []content.Candidate) (map[int]content.Hydrated, error) {
 	out := map[int]content.Hydrated{}
-	var mu sync.Mutex
-	var failure error
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, hydrateParallelism)
+	var batch []content.Candidate
+	var at []int
 	for i, f := range found {
-		sv.mu.Lock()
-		h, cached := sv.hydrated[f.SegmentID]
-		sv.mu.Unlock()
-		if cached {
+		if h, cached := sv.hydrated[f.SegmentID]; cached {
 			out[i] = h
 			continue
 		}
-		wg.Add(1)
-		slots <- struct{}{}
-		go func(i int, f content.Candidate) {
-			defer func() { <-slots; wg.Done() }()
-			h, err := sv.s.Content.Hydrate(ctx, sv.scope, f)
-			mu.Lock()
-			defer mu.Unlock()
-			switch {
-			case errors.Is(err, corpus.ErrNotFound):
-			case err != nil:
-				failure = ErrUnavailable
-			default:
-				out[i] = h
-				sv.mu.Lock()
-				sv.hydrated[f.SegmentID] = h
-				sv.mu.Unlock()
-			}
-		}(i, f)
+		batch, at = append(batch, f), append(at, i)
 	}
-	wg.Wait()
-	return out, failure
+	if len(batch) == 0 {
+		return out, nil
+	}
+	hydrated, err := sv.s.Content.Hydrate(ctx, sv.scope, batch)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	for j, h := range hydrated {
+		out[at[j]] = h
+		sv.hydrated[h.Segment.ID] = h
+	}
+	return out, nil
 }
 
 // encode encodes a query with the owner of a space: the engine's E5 encoder

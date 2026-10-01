@@ -118,7 +118,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if err = store.CommitEnrichment(ctx, scope.Organization, seg, g, []content.Embedding{artifact}); err == nil {
 		t.Fatal("injection absent")
 	}
-	h, _, err := store.Hydrate(ctx, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
+	h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
 	if err != nil || h.EmbeddingID != "" {
 		t.Fatal("partial enrichment", h, err)
 	}
@@ -134,7 +134,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM change_events WHERE organization=$1 AND event_type='record.enrichment_available'`, scope.Organization).Scan(&count); err != nil || count != 1 {
 		t.Fatal("duplicate enrichment event", count, err)
 	}
-	h, _, err = store.Hydrate(ctx, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
+	h, err = hydrateOne(ctx, store, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
 	if err != nil || h.EmbeddingID != artifact.ID || h.SpaceID != g.SpaceID {
 		t.Fatal("unpaired provenance", h, err)
 	}

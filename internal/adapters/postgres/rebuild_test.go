@@ -163,14 +163,14 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 		t.Fatalf("neighbour Corpus B rerouted to %s", g.ID)
 	}
 	// Hydration follows canonical routing, not whichever generation a candidate names.
-	if _, _, err = store.Hydrate(ctx, scope, content.Candidate{SegmentID: x1.Segments[0].ID, GenerationID: prior.ID}); !errors.Is(err, corpus.ErrNotFound) {
+	if _, err = hydrateOne(ctx, store, scope, content.Candidate{SegmentID: x1.Segments[0].ID, GenerationID: prior.ID}); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatalf("stale-generation candidate hydrated: %v", err)
 	}
-	h, _, err := store.Hydrate(ctx, scope, content.Candidate{SegmentID: x1.Segments[0].ID, GenerationID: op.TargetGenerationID})
+	h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: x1.Segments[0].ID, GenerationID: op.TargetGenerationID})
 	if err != nil || h.GenerationID != op.TargetGenerationID || h.EmbeddingID != artifact.ID {
 		t.Fatalf("target hydration %+v %v", h, err)
 	}
-	if _, _, err = store.Hydrate(ctx, scope, content.Candidate{SegmentID: y1.Segments[0].ID, GenerationID: prior.ID}); err != nil {
+	if _, err = hydrateOne(ctx, store, scope, content.Candidate{SegmentID: y1.Segments[0].ID, GenerationID: prior.ID}); err != nil {
 		t.Fatalf("neighbour Corpus hydration: %v", err)
 	}
 	// Work still carrying the old generation after cutover must retry on the new route.

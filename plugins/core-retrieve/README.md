@@ -37,8 +37,9 @@ engine's former E5 space. It needs no configuration.
 
 The engine asks the index for at least 150 objects per candidate request
 whatever `k`, as its own search did for every limit, so the index query and
-its order are unchanged; it keeps each segment's first object, drops what the
-caller may no longer read and hydrates only the candidates it keeps. The
+its order are unchanged; it keeps each segment's first object, then hydrates
+the best ones in a few batches until it holds `k`, dropping what the caller
+may no longer read. The
 retrieval baseline (`make measure`) records every hit of the 24 CC0 queries
 and the query edge cases in the three modes: before and after the move they
 are identical, but for the order of keyword hits of exactly equal score, which

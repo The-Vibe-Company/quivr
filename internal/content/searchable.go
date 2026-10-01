@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"sync"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
@@ -123,7 +124,17 @@ type BaselineRepository interface {
 	// with its structured reason, like BaselineProgress with quarantined.
 	QuarantineVersion(ctx context.Context, org, versionID string, reason Diagnostic) error
 	Promote(context.Context, string, Segmentation, Generation) error
-	Hydrate(context.Context, corpus.Scope, Candidate) (Hydrated, Blob, error)
+	// Hydrate looks candidates up in one batch: at each candidate's index,
+	// its segment and the blob holding its Part text, or nothing when the
+	// caller may not read it or it is no longer current and routed.
+	Hydrate(context.Context, corpus.Scope, []Candidate) (map[int]Located, error)
+}
+
+// Located is a candidate's segment as canonical storage records it, with the
+// immutable blob holding its Part text.
+type Located struct {
+	Hydrated
+	Blob Blob
 }
 
 func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (Version, error) {
@@ -189,33 +200,117 @@ func (s Service) QuarantineVersion(ctx context.Context, org, versionID string, r
 func (s Service) Promote(ctx context.Context, org string, seg Segmentation, g Generation) error {
 	return s.Baseline.Promote(ctx, org, seg, g)
 }
-func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, c Candidate) (Hydrated, error) {
+
+// blobReadParallelism bounds the concurrent canonical blob reads of one
+// hydration batch.
+const blobReadParallelism = 16
+
+// Hydrate rechecks candidates and reads their excerpts from canonical storage
+// as one batch: one lookup, one read per distinct blob, then one recheck,
+// since access and currentness may change while the immutable bytes are read.
+// The result holds, at each candidate's index, its hydration, or nothing when
+// the caller may not read it or it is no longer current.
+func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate) (map[int]Hydrated, error) {
 	if !scope.Allows("content:read") || !scope.Allows("search:query") {
-		return Hydrated{}, corpus.ErrForbidden
+		return nil, corpus.ErrForbidden
 	}
-	h, blob, err := s.Baseline.Hydrate(ctx, scope, c)
+	out := map[int]Hydrated{}
+	if len(cs) == 0 {
+		return out, nil
+	}
+	located, err := s.Baseline.Hydrate(ctx, scope, cs)
 	if err != nil {
-		return h, err
+		return nil, err
 	}
-	text, err := s.Blobs.Read(ctx, blob)
+	excerpts, err := s.excerpts(ctx, located)
 	if err != nil {
-		return h, err
+		return nil, err
 	}
-	runes := []rune(string(text))
-	if h.Segment.Start < 0 || h.Segment.End > len(runes) || h.Segment.End < h.Segment.Start {
-		return h, errors.New("invalid canonical excerpt")
+	var found []int
+	for i := range cs {
+		l, ok := located[i]
+		if !ok {
+			continue
+		}
+		l.Hydrated.Segment.Text = excerpts[i]
+		out[i] = l.Hydrated
+		found = append(found, i)
 	}
-	excerpt := string(runes[h.Segment.Start:h.Segment.End])
-	// Repository supplies the checksum of the segment, not a projection excerpt.
-	if Hash([]byte(excerpt)) != h.TextSHA256 {
-		return h, errors.New("canonical excerpt mismatch")
+	if len(found) == 0 {
+		return out, nil
 	}
-	// Access and currentness may have changed while fetching immutable bytes.
-	if _, _, err = s.Baseline.Hydrate(ctx, scope, c); err != nil {
-		return Hydrated{}, err
+	recheck := make([]Candidate, len(found))
+	for j, i := range found {
+		recheck[j] = cs[i]
 	}
-	h.Segment.Text = excerpt
-	return h, nil
+	still, err := s.Baseline.Hydrate(ctx, scope, recheck)
+	if err != nil {
+		return nil, err
+	}
+	for j, i := range found {
+		if _, ok := still[j]; !ok {
+			delete(out, i)
+		}
+	}
+	return out, nil
+}
+
+// excerpts reads each distinct blob of a batch once, a few at a time, and
+// cuts from it the excerpts of its candidates, each checked against the
+// segment's checksum. Only the excerpts outlive a read.
+func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int]string, error) {
+	byBlob := map[string][]int{}
+	for i, l := range located {
+		byBlob[l.Blob.Key] = append(byBlob[l.Blob.Key], i)
+	}
+	out := make(map[int]string, len(located))
+	var mu sync.Mutex
+	var failure error
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, blobReadParallelism)
+	for _, at := range byBlob {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(at []int) {
+			defer func() { <-slots; wg.Done() }()
+			cut, err := s.cut(ctx, located, at)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failure = err
+				return
+			}
+			for i, excerpt := range cut {
+				out[i] = excerpt
+			}
+		}(at)
+	}
+	wg.Wait()
+	return out, failure
+}
+
+// cut reads the blob the candidates at the given indexes share and returns
+// their excerpts.
+func (s Service) cut(ctx context.Context, located map[int]Located, at []int) (map[int]string, error) {
+	data, err := s.Blobs.Read(ctx, located[at[0]].Blob)
+	if err != nil {
+		return nil, err
+	}
+	runes := []rune(string(data))
+	out := make(map[int]string, len(at))
+	for _, i := range at {
+		seg := located[i].Segment
+		if seg.Start < 0 || seg.End > len(runes) || seg.End < seg.Start {
+			return nil, errors.New("invalid canonical excerpt")
+		}
+		excerpt := string(runes[seg.Start:seg.End])
+		// Repository supplies the checksum of the segment, not a projection excerpt.
+		if Hash([]byte(excerpt)) != located[i].TextSHA256 {
+			return nil, errors.New("canonical excerpt mismatch")
+		}
+		out[i] = excerpt
+	}
+	return out, nil
 }
 
 func SegmentID(org, segmentation string, p Segment) string {

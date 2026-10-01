@@ -61,18 +61,30 @@ func (fakeRecords) Record(_ context.Context, _ string, id string) (content.Recor
 	return content.Record{ID: id, Source: content.Source{CorpusID: "corpus"}}, nil
 }
 
-type fakeBaseline struct{ content.BaselineRepository }
+// fakeBaseline finds every candidate but stale- ones, each in its own blob,
+// and counts the batch lookups it answers.
+type fakeBaseline struct {
+	content.BaselineRepository
+	lookups *atomic.Int64
+}
 
-func (fakeBaseline) Hydrate(_ context.Context, _ corpus.Scope, c content.Candidate) (content.Hydrated, content.Blob, error) {
-	if strings.HasPrefix(c.SegmentID, "stale-") {
-		return content.Hydrated{}, content.Blob{}, corpus.ErrNotFound
+func (f fakeBaseline) Hydrate(_ context.Context, _ corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
+	if f.lookups != nil {
+		f.lookups.Add(1)
 	}
-	h := content.Hydrated{GenerationID: c.GenerationID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, End: len([]rune(segmentText))}}
-	// A vec- segment holds a vector in the served space.
-	if strings.HasPrefix(c.SegmentID, "vec-") {
-		h.EmbeddingID, h.SpaceID = "embedding-"+c.SegmentID, "space"
+	out := map[int]content.Located{}
+	for i, c := range cs {
+		if strings.HasPrefix(c.SegmentID, "stale-") {
+			continue
+		}
+		h := content.Hydrated{GenerationID: c.GenerationID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, End: len([]rune(segmentText))}}
+		// A vec- segment holds a vector in the served space.
+		if strings.HasPrefix(c.SegmentID, "vec-") {
+			h.EmbeddingID, h.SpaceID = "embedding-"+c.SegmentID, "space"
+		}
+		out[i] = content.Located{Hydrated: h, Blob: content.Blob{Key: "blob-" + c.SegmentID}}
 	}
-	return h, content.Blob{}, nil
+	return out, nil
 }
 
 type fakeBlobs struct{ content.Blobs }
@@ -150,6 +162,7 @@ func TestSearchFillsPageWhileSegmentsHaveDuplicateObjects(t *testing.T) {
 // Objects of superseded or withdrawn Versions are not filtered by the projection
 // query; hydration drops them. They consume the fetched objects, so a page is
 // full only while live segments fit in them (docs/quivr-v2-remaining-limits.md).
+// However many it drops, a page costs a few batch lookups, not one per candidate.
 func TestSearchStaleCandidatesConsumeTheCandidateBudget(t *testing.T) {
 	const stale = retrieval.CandidateLimit - retrieval.MaxLimit
 	build := func(stale int) *fakeProjection {
@@ -162,11 +175,20 @@ func TestSearchStaleCandidatesConsumeTheCandidateBudget(t *testing.T) {
 		}
 		return p
 	}
+	// A lookup and a recheck per batch: the k best, then, with all of them
+	// dropped, every candidate left.
+	const maxLookups = 4
 	search := func(p *fakeProjection) int {
 		t.Helper()
-		out, err := service(p, &fakeEmbeddings{}).Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: "lexical", Limit: retrieval.MaxLimit, CorpusIDs: []string{"corpus"}})
+		lookups := &atomic.Int64{}
+		s := service(p, &fakeEmbeddings{})
+		s.Content.Baseline = fakeBaseline{lookups: lookups}
+		out, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", Mode: "lexical", Limit: retrieval.MaxLimit, CorpusIDs: []string{"corpus"}})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if lookups.Load() > maxLookups {
+			t.Fatalf("a page of %d hits took %d storage lookups, want at most %d", len(out.Hits), lookups.Load(), maxLookups)
 		}
 		return len(out.Hits)
 	}

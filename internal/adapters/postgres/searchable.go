@@ -302,26 +302,57 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	}
 	return tx.Commit(ctx)
 }
-func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, c content.Candidate) (content.Hydrated, content.Blob, error) {
-	var h content.Hydrated
-	var blob content.Blob
-	var corpusID string
-	err := s.Pool.QueryRow(ctx, `SELECT r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length FROM segments sg JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id) JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN version_parts p ON (p.organization,p.version_id,p.part_key)=(sg.organization,sg.version_id,sg.part_key) JOIN content_blobs b ON (b.organization,b.blob_id)=(p.organization,p.blob_id) JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id)=(sg.organization,sg.version_id,sg.segmentation_id) WHERE sg.organization=$1 AND sg.id=$2 AND pc.generation_id=$3 AND $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+` AND r.current_version_id=v.id AND `+eligibleVersionSQL, scope.Organization, c.SegmentID, c.GenerationID).Scan(&h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256, &blob.Key, &blob.SHA256, &blob.Size)
-	if err == nil && !scope.Contains(corpusID) {
-		err = corpus.ErrNotFound
+
+// hydrateSQL looks up a batch of candidates, given as parallel arrays of
+// segment and generation ids, in one query: a candidate is returned, with its
+// position in the batch, only while its segment belongs to the current
+// eligible Version of its Record and to the generation the Corpus routes to.
+// Its embedding in the generation's served space, if any, comes with it.
+var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,'')
+FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS c(segment_id,generation_id,n)
+JOIN segments sg ON sg.organization=$1 AND sg.id=c.segment_id
+JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id)
+JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+JOIN version_parts p ON (p.organization,p.version_id,p.part_key)=(sg.organization,sg.version_id,sg.part_key)
+JOIN content_blobs b ON (b.organization,b.blob_id)=(p.organization,p.blob_id)
+JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id)=(sg.organization,sg.version_id,sg.segmentation_id) AND pc.generation_id=c.generation_id
+LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND g.space_id=a.space_id
+  WHERE ec.organization=$1 AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
+WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL
+
+// Hydrate looks a batch of candidates up in one query (hydrateSQL). A
+// candidate outside the caller's Corpora is absent, as if it did not exist.
+func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
+	out := map[int]content.Located{}
+	if len(cs) == 0 {
+		return out, nil
 	}
-	if err == nil {
-		var embeddingID, spaceID string
-		e := s.Pool.QueryRow(ctx, `SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND g.space_id=a.space_id WHERE ec.organization=$1 AND ec.segment_id=$2 AND ec.generation_id=$3`, scope.Organization, c.SegmentID, c.GenerationID).Scan(&embeddingID, &spaceID)
-		if e == nil {
-			h.EmbeddingID, h.SpaceID = embeddingID, spaceID
-		} else if !errors.Is(e, pgx.ErrNoRows) {
-			err = e
+	segments, generations := make([]string, len(cs)), make([]string, len(cs))
+	for i, c := range cs {
+		segments[i], generations[i] = c.SegmentID, c.GenerationID
+	}
+	rows, err := s.Pool.Query(ctx, hydrateSQL, scope.Organization, segments, generations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n int
+		var l content.Located
+		var corpusID string
+		h := &l.Hydrated
+		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID); err != nil {
+			return nil, err
 		}
+		if !scope.Contains(corpusID) {
+			continue
+		}
+		h.GenerationID = cs[n-1].GenerationID
+		h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
+		out[n-1] = l
 	}
-	h.GenerationID = c.GenerationID
-	h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
-	return h, blob, notFound(err)
+	return out, rows.Err()
 }
 func (s ContentStore) VersionStatus(ctx context.Context, org, id string) (content.Availability, content.Processing, string, error) {
 	var a content.Availability

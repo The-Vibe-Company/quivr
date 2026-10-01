@@ -241,7 +241,7 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	if err = f.pool.QueryRow(ctx, `SELECT sg.id,pc.generation_id FROM segments sg JOIN projection_coverage pc ON (pc.organization,pc.version_id)=(sg.organization,sg.version_id) WHERE sg.organization=$1 AND sg.version_id=$2`, f.org, reverted).Scan(&segment, &generation); err != nil {
 		t.Fatal(err)
 	}
-	if h, _, err := f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: segment, GenerationID: generation}); err != nil || h.VersionID != reverted || h.TextSHA256 != content.Hash([]byte("Dépêche A")) {
+	if h, err := hydrateOne(ctx, f.store, f.scope, content.Candidate{SegmentID: segment, GenerationID: generation}); err != nil || h.VersionID != reverted || h.TextSHA256 != content.Hash([]byte("Dépêche A")) {
 		t.Fatalf("Record does not serve A after the revert: %+v %v", h, err)
 	}
 	for _, old := range []string{v1, v2} {
@@ -249,7 +249,7 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 		if err = f.pool.QueryRow(ctx, `SELECT id FROM segments WHERE organization=$1 AND version_id=$2`, f.org, old).Scan(&oldSegment); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err = f.store.Hydrate(ctx, f.scope, content.Candidate{SegmentID: oldSegment, GenerationID: generation}); !errors.Is(err, corpus.ErrNotFound) {
+		if _, err = hydrateOne(ctx, f.store, f.scope, content.Candidate{SegmentID: oldSegment, GenerationID: generation}); !errors.Is(err, corpus.ErrNotFound) {
 			t.Fatalf("a superseded Version %s hydrated: %v", old, err)
 		}
 	}

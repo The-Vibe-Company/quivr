@@ -106,18 +106,23 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 		t.Fatal("retry duplicated readiness fact", events, err)
 	}
 	candidate := content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID}
-	if _, _, err = store.Hydrate(ctx, scope, candidate); err != nil {
+	if _, err = hydrateOne(ctx, store, scope, candidate); err != nil {
 		t.Fatal(err)
+	}
+	// One batch lookup fences each candidate on its own and keeps its position.
+	batch, err := store.Hydrate(ctx, scope, []content.Candidate{{SegmentID: "absent", GenerationID: g.ID}, candidate, {SegmentID: candidate.SegmentID, GenerationID: "unrouted"}})
+	if err != nil || len(batch) != 1 || batch[1].Segment.ID != candidate.SegmentID || batch[1].Blob.Key != "fixture/text" {
+		t.Fatalf("batch hydration = %+v, %v; want only the routed candidate, at position 1, with its blob", batch, err)
 	}
 	inaccessible := scope
 	inaccessible.Corpora = []string{"ungranted"}
-	if _, _, err = store.Hydrate(ctx, inaccessible, candidate); !errors.Is(err, corpus.ErrNotFound) {
+	if _, err = hydrateOne(ctx, store, inaccessible, candidate); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatal("unauthorized hydration", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE record_versions SET quarantined=true WHERE organization=$1 AND id=$2`, scope.Organization, work.VersionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.Hydrate(ctx, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
+	if _, err = hydrateOne(ctx, store, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatal("quarantined candidate leaked", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE record_versions SET quarantined=false WHERE organization=$1 AND id=$2`, scope.Organization, work.VersionID); err != nil {
@@ -126,13 +131,13 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO tombstones VALUES($1,$2)`, scope.Organization, work.RecordID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.Hydrate(ctx, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
+	if _, err = hydrateOne(ctx, store, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatal("tombstoned candidate leaked", err)
 	}
 	if err = service.Promote(ctx, scope.Organization, seg, g); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.Hydrate(ctx, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
+	if _, err = hydrateOne(ctx, store, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatal("late promotion resurrected withdrawn content", err)
 	}
 	// A terminal unsupported result must invalidate synchronized Record views atomically.
@@ -189,4 +194,17 @@ func wholeParts(org string, v content.Version) (content.Segmentation, error) {
 		}
 	}
 	return content.PluginSegmentation(org, v, "plugin:adapter.fixture@1", json.RawMessage(`{"plugin_id":"adapter.fixture"}`), in)
+}
+
+// hydrateOne looks one candidate up; it is corpus.ErrNotFound when fenced.
+func hydrateOne(ctx context.Context, store postgres.ContentStore, scope corpus.Scope, c content.Candidate) (content.Hydrated, error) {
+	found, err := store.Hydrate(ctx, scope, []content.Candidate{c})
+	if err != nil {
+		return content.Hydrated{}, err
+	}
+	l, ok := found[0]
+	if !ok {
+		return content.Hydrated{}, corpus.ErrNotFound
+	}
+	return l.Hydrated, nil
 }
