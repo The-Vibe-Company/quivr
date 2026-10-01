@@ -1,0 +1,19 @@
+docs-site/plugins/upgrade-a-plugin.mdx
+  s_54b80c92daa9cb::t_44288bfa322acf 108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5792c396948bbef707b3fc8e70052bb43480b222",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "unknown"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
