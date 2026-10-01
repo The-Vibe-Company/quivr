@@ -529,20 +529,54 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	return nil
 }
 
+// staleListLimit bounds one listing of a segment's objects; a segment holds
+// its anchor and, between two attachments, a few enriched objects.
+const staleListLimit = 100
+
 // removeStaleEnriched deletes the segment's other enriched objects in the
-// generation, by filter. The lexical anchor is never deleted, so keyword search
-// keeps the segment visible even while an enriched object is replaced. Segments
-// belong to one Version, so no other Version's objects match.
+// generation. It lists the segment's objects and deletes the others by
+// identity, never by a filter excluding the kept one: Weaviate indexes an
+// object's id after its other properties and evaluates NotEqual as the
+// complement of Equal, so while a concurrent attachment creates the kept
+// object such a filter matches it. The lexical anchor is never deleted, so
+// keyword search keeps the segment visible even while an enriched object is
+// replaced. Segments belong to one Version, so no other Version's objects match.
 func (s *Store) removeStaleEnriched(ctx context.Context, g content.Generation, org, segment, keep string) error {
-	where := map[string]any{"operator": "And", "operands": []any{
-		map[string]any{"path": []string{"organization"}, "operator": "Equal", "valueText": org},
-		map[string]any{"path": []string{"generationId"}, "operator": "Equal", "valueText": g.ID},
-		map[string]any{"path": []string{"segmentId"}, "operator": "Equal", "valueText": segment},
-		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": keep},
-		map[string]any{"path": []string{"id"}, "operator": "NotEqual", "valueText": objectID(org, g.ID, segment)},
-	}}
-	_, err := s.deleteWhere(ctx, s.Client, g.Collection, where)
-	return err
+	anchor := objectID(org, g.ID, segment)
+	where := "{operator:And,operands:[" + equal("organization", org) + "," + equal("generationId", g.ID) + "," + equal("segmentId", segment) + "]}"
+	query := fmt.Sprintf("{Get{%s(where:%s,limit:%d){_additional{id}}}}", g.Collection, where, staleListLimit)
+	for {
+		var response struct {
+			Data struct {
+				Get map[string][]struct {
+					Additional struct {
+						ID string `json:"id"`
+					} `json:"_additional"`
+				} `json:"Get"`
+			} `json:"data"`
+			Errors []any `json:"errors"`
+		}
+		if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &response); err != nil {
+			return err
+		}
+		rows, ok := response.Data.Get[g.Collection]
+		if len(response.Errors) > 0 || !ok {
+			return errors.New("projection query failed")
+		}
+		for _, r := range rows {
+			if r.Additional.ID == keep || r.Additional.ID == anchor {
+				continue
+			}
+			// A concurrent attachment may have deleted it first.
+			if status, err := s.call(ctx, "DELETE", "/v1/objects/"+g.Collection+"/"+r.Additional.ID, nil, nil); err != nil && status != http.StatusNotFound {
+				return err
+			}
+		}
+		// A full listing may hide more stale objects behind the ones just deleted.
+		if len(rows) < staleListLimit {
+			return nil
+		}
+	}
 }
 
 // purgeTimeout bounds one purge delete; a large match can exceed the default

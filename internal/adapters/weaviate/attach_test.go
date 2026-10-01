@@ -244,7 +244,7 @@ func TestEmbeddingAttachmentKeepsSegmentsLexicallyVisible(t *testing.T) {
 }
 
 // failingDeletes drops the cleanup request, as a crash between inserting the
-// enriched object and removing the lexical one would.
+// enriched object and removing the stale one would.
 type failingDeletes struct{ next http.RoundTripper }
 
 func (f failingDeletes) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -258,6 +258,9 @@ func TestEmbeddingAttachmentConvergesAfterInterruptedSwap(t *testing.T) {
 	f := newAttachFixture(t)
 	id := "segment-interrupted"
 	f.publish(f.gen, f.segmentation(id, "une lanterne interrompue"))
+	if err := f.store.PublishEmbeddings(f.ctx, f.gen, f.org, []content.EmbeddingData{f.embedding(f.gen, id, unitVector(41))}); err != nil {
+		t.Fatal(err)
+	}
 	data := []content.EmbeddingData{f.embedding(f.gen, id, unitVector(42))}
 	crashing := weaviate.New(f.url)
 	crashing.Client = &http.Client{Timeout: 4 * time.Second, Transport: failingDeletes{next: http.DefaultTransport}}
@@ -337,30 +340,92 @@ func TestEmbeddingAttachmentIsScopedToGenerationAndSegment(t *testing.T) {
 	}
 }
 
-// Overlapping attachments of the same embedding never overwrite each other's
-// enriched object, and both converge on it.
+// Overlapping attachments of the same embedding never delete each other's
+// enriched object, and both converge on it. Weaviate indexes an object's id
+// after its other properties, so while the first attachment creates the
+// enriched object, a filter on the segment matches it but cannot exclude it
+// by id yet. The second attachment runs inside that window; a long body keeps
+// the window open, and a segment whose properties were indexed in another
+// order is retried with the next one.
 func TestConcurrentIdenticalAttachmentsConverge(t *testing.T) {
 	f := newAttachFixture(t)
-	id := "segment-concurrent"
-	f.publish(f.gen, f.segmentation(id, "une lanterne partagee"))
-	data := []content.EmbeddingData{f.embedding(f.gen, id, unitVector(11))}
-	var wg sync.WaitGroup
-	errs := make(chan error, 4)
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- f.store.PublishEmbeddings(f.ctx, f.gen, f.org, data)
-		}()
+	words := make([]string, 20000)
+	for i := range words {
+		words[i] = "lanterne" + strconv.Itoa(i)
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
+	text := strings.Join(words, " ")
+	for n := 0; n < 40; n++ {
+		id := "segment-concurrent-" + strconv.Itoa(n)
+		f.publish(f.gen, f.segmentation(id, text))
+		data := []content.EmbeddingData{f.embedding(f.gen, id, unitVector(11+n))}
+		first := make(chan error, 1)
+		go func() { first <- f.store.PublishEmbeddings(f.ctx, f.gen, f.org, data) }()
+		overlapped, err := f.awaitUnindexedIdentity(id, first)
+		if overlapped {
+			second := f.store.PublishEmbeddings(f.ctx, f.gen, f.org, data)
+			if err = <-first; err == nil {
+				err = second
+			}
+		}
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("attachment %s: %v", id, err)
+		}
+		if objects := f.objects(f.gen, id); fmt.Sprint(shape(objects)) != "1 1" {
+			t.Fatalf("attachment %s left %+v, want the lexical object plus one enriched object", id, objects)
+		}
+		if overlapped {
+			return
 		}
 	}
-	if objects := f.objects(f.gen, id); fmt.Sprint(shape(objects)) != "1 1" {
-		t.Fatalf("concurrent attachments left %+v, want the lexical object plus one enriched object", objects)
+	t.Fatal("no attachment overlapped the indexing of its enriched object")
+}
+
+// awaitUnindexedIdentity polls until the segment's enriched object matches a
+// filter that excludes its own id, or the attachment creating it returns.
+func (f *attachFixture) awaitUnindexedIdentity(segmentID string, done chan error) (bool, error) {
+	f.t.Helper()
+	for {
+		select {
+		case err := <-done:
+			return false, err
+		default:
+		}
+		for _, o := range f.objects(f.gen, segmentID) {
+			if o.Vector && f.matchesExcluding(segmentID, o.ID) {
+				return true, nil
+			}
+		}
 	}
+}
+
+// matchesExcluding reports whether a filter on the segment that excludes id
+// still returns id.
+func (f *attachFixture) matchesExcluding(segmentID, id string) bool {
+	f.t.Helper()
+	query := fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["segmentId"],operator:Equal,valueText:%q},{path:["id"],operator:NotEqual,valueText:%q}]},limit:20){_additional{id}}}}`, f.gen.Collection, segmentID, id)
+	body, _ := json.Marshal(map[string]any{"query": query})
+	res, err := http.Post(f.url+"/v1/graphql", "application/json", bytes.NewReader(body))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		Data struct {
+			Get map[string][]struct {
+				Additional struct {
+					ID string `json:"id"`
+				} `json:"_additional"`
+			} `json:"Get"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	if err = json.NewDecoder(res.Body).Decode(&out); err != nil || len(out.Errors) > 0 {
+		f.t.Fatalf("filter objects: %v %v", err, out.Errors)
+	}
+	for _, o := range out.Data.Get[f.gen.Collection] {
+		if o.Additional.ID == id {
+			return true
+		}
+	}
+	return false
 }
