@@ -85,6 +85,9 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/quarantine`](#get-v0adminquarantine) | `listQuarantinedVersions` | `plugins:admin` |
 | [`POST /v0/admin/quarantine/reprocess`](#post-v0adminquarantinereprocess) | `reprocessQuarantine` | `plugins:admin` |
 | [`POST /v0/admin/subscriptions/evaluator-migrations`](#post-v0adminsubscriptionsevaluator-migrations) | `migrateSubscriptionEvaluators` | `plugins:admin` |
+| [`GET /v0/admin/subscriptions/evaluation-backlog`](#get-v0adminsubscriptionsevaluation-backlog) | `listEvaluationBacklog` | `plugins:admin` |
+| [`POST /v0/admin/subscriptions/evaluation-retirements`](#post-v0adminsubscriptionsevaluation-retirements) | `retireEvaluations` | `plugins:admin` |
+| [`GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id}`](#get-v0adminsubscriptionsevaluation-retirementsretirement_id) | `getEvaluationRetirement` | `plugins:admin` |
 | [`POST /v0/admin/plugins/plan/rollback`](#post-v0adminpluginsplanrollback) | `rollbackPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/active-plugins`](#get-v0adminactive-plugins) | `listActivePlugins` | `observability:read` |
@@ -1377,6 +1380,60 @@ Move the key's Organization's Subscriptions from one version of an alert-rule pl
 | --- | --- | --- |
 | `200` | `application/json` [`SubscriptionEvaluatorMigration`](#subscriptionevaluatormigration) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 422 invalid_schema, unsupported_evaluator or invalid_migration, 503 storage unavailable. |
+
+#### `GET /v0/admin/subscriptions/evaluation-backlog`
+
+Operation `listEvaluationBacklog`. Requires `plugins:admin`.
+
+Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `limit` | query | integer |  | Maximum evaluator versions returned; a present invalid value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `500`. |
+| `after` | query | string |  | The previous page's next_after. Counts are live, not a snapshot across pages. Minimum length `1`. Maximum length `256`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`EvaluationBacklogPage`](#evaluationbacklogpage) | Scoped per-version counts |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 not configured, 422 invalid_query or invalid_limit, 503 storage unavailable. |
+
+#### `POST /v0/admin/subscriptions/evaluation-retirements`
+
+Operation `retireEvaluations`. Requires `plugins:admin`.
+
+Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+
+**Request body** (required): `application/json` [`EvaluationRetirementRequest`](#evaluationretirementrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`EvaluationRetirement`](#evaluationretirement)<br><br>Header `Location`: string. The receipt read URL, present only for a real batch. | The dry-run preview or committed audit receipt |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 not configured, 409 idempotency_conflict, 422 invalid_schema, invalid_input or invalid_limit, 503 storage unavailable. |
+
+#### `GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id}`
+
+Operation `getEvaluationRetirement`. Requires `plugins:admin`.
+
+Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location. Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `retirement_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`EvaluationRetirement`](#evaluationretirement) | The committed receipt |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 not_found, 503 storage unavailable. |
 
 #### `POST /v0/admin/plugins/plan/rollback`
 
@@ -7100,6 +7157,256 @@ required:
   - idempotency_key
   - name
 description: New display name of a Saved Query or Subscription.
+```
+
+</details>
+
+### `EvaluationBacklogPage`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`EvaluationCounts`](#evaluationcounts) | yes | At most `500` items. |
+| `next_after` | string |  | Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required:
+  - items
+properties:
+  items:
+    type: array
+    maxItems: 500
+    items:
+      $ref: '#/components/schemas/EvaluationCounts'
+  next_after:
+    type: string
+    minLength: 1
+```
+
+</details>
+
+### `EvaluationCounts`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_id` | string | yes |  |
+| `version` | string | yes |  |
+| `pending` | integer | yes | Minimum `0`. |
+| `erroring` | integer | yes | Minimum `0`. |
+| `unavailable` | integer | yes | Minimum `0`. |
+| `retired` | integer | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required:
+  - plugin_id
+  - version
+  - pending
+  - erroring
+  - unavailable
+  - retired
+properties:
+  plugin_id:
+    type: string
+  version:
+    type: string
+  pending:
+    type: integer
+    minimum: 0
+  erroring:
+    type: integer
+    minimum: 0
+  unavailable:
+    type: integer
+    minimum: 0
+  retired:
+    type: integer
+    minimum: 0
+```
+
+</details>
+
+### `EvaluationRetirementRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `key` | string | yes | Minimum length `1`. Maximum length `128`. |
+| `plugin_id` | string | yes | Minimum length `1`. Maximum length `128`. |
+| `version` | string | yes | Minimum length `1`. Maximum length `128`. |
+| `reason` | string | yes | The operator's explanation for deliberately abandoning these evaluations. Minimum length `1`. Maximum length `1024`. |
+| `dry_run` | boolean | yes |  |
+| `limit` | integer |  | Default `100`. Minimum `1`. Maximum `500`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required:
+  - key
+  - plugin_id
+  - version
+  - reason
+  - dry_run
+properties:
+  key:
+    type: string
+    minLength: 1
+    maxLength: 128
+  plugin_id:
+    type: string
+    minLength: 1
+    maxLength: 128
+  version:
+    type: string
+    minLength: 1
+    maxLength: 128
+  reason:
+    type: string
+    minLength: 1
+    maxLength: 1024
+    description: The operator's explanation for deliberately abandoning these evaluations.
+  dry_run:
+    type: boolean
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 500
+    default: 100
+```
+
+</details>
+
+### `EvaluationRetirement`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `key` | string | yes |  |
+| `plugin_id` | string | yes |  |
+| `version` | string | yes |  |
+| `reason` | string | yes |  |
+| `dry_run` | boolean | yes |  |
+| `limit` | integer | yes | Minimum `1`. Maximum `500`. |
+| `retirement_id` | string | yes | Minimum length `1`. |
+| `created_at` | string (date-time) |  |  |
+| `outcome` | string | yes | One of `evaluator_retired`. |
+| `items` | array of [`RetiredEvaluation`](#retiredevaluation) | yes | At most `500` items. |
+| `remaining` | integer | yes | Unavailable pending evaluations remaining in this request's scope, including leased ones. Minimum `0`. |
+| `leased` | integer | yes | Unavailable pending evaluations skipped because their leases have not expired. Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required:
+  - key
+  - plugin_id
+  - version
+  - reason
+  - dry_run
+  - limit
+  - retirement_id
+  - outcome
+  - items
+  - remaining
+  - leased
+properties:
+  key:
+    type: string
+  plugin_id:
+    type: string
+  version:
+    type: string
+  reason:
+    type: string
+  dry_run:
+    type: boolean
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 500
+  retirement_id:
+    type: string
+    minLength: 1
+  created_at:
+    type: string
+    format: date-time
+  outcome:
+    type: string
+    enum:
+      - evaluator_retired
+  items:
+    type: array
+    maxItems: 500
+    items:
+      $ref: '#/components/schemas/RetiredEvaluation'
+  remaining:
+    type: integer
+    minimum: 0
+    description: Unavailable pending evaluations remaining in this request's scope, including leased ones.
+  leased:
+    type: integer
+    minimum: 0
+    description: Unavailable pending evaluations skipped because their leases have not expired.
+```
+
+</details>
+
+### `RetiredEvaluation`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `subscription_id` | string | yes |  |
+| `subscription_version_id` | string | yes |  |
+| `sequence` | integer (int64) | yes | The original trigger's Organization journal position. |
+| `corpus_id` | string | yes |  |
+| `record_id` | string | yes |  |
+| `record_version_id` | string | yes |  |
+| `event_id` | string |  | The evaluation.retired event; absent for a dry run. Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required:
+  - subscription_id
+  - subscription_version_id
+  - sequence
+  - corpus_id
+  - record_id
+  - record_version_id
+properties:
+  subscription_id:
+    type: string
+  subscription_version_id:
+    type: string
+  sequence:
+    type: integer
+    format: int64
+    description: The original trigger's Organization journal position.
+  corpus_id:
+    type: string
+  record_id:
+    type: string
+  record_version_id:
+    type: string
+  event_id:
+    type: string
+    minLength: 1
+    description: The evaluation.retired event; absent for a dry run.
 ```
 
 </details>

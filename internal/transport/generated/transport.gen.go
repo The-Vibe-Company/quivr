@@ -300,6 +300,21 @@ func (e DeliveryAttemptOutcome) Valid() bool {
 	}
 }
 
+// Defines values for EvaluationRetirementOutcome.
+const (
+	EvaluatorRetired EvaluationRetirementOutcome = "evaluator_retired"
+)
+
+// Valid indicates whether the value is a known member of the EvaluationRetirementOutcome enum.
+func (e EvaluationRetirementOutcome) Valid() bool {
+	switch e {
+	case EvaluatorRetired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FieldMappingRoles.
 const (
 	Filter FieldMappingRoles = "filter"
@@ -1665,6 +1680,57 @@ type Error struct {
 	Retryable bool    `json:"retryable"`
 }
 
+// EvaluationBacklogPage defines model for EvaluationBacklogPage.
+type EvaluationBacklogPage struct {
+	Items     []EvaluationCounts `json:"items"`
+	NextAfter *string            `json:"next_after,omitempty"`
+}
+
+// EvaluationCounts defines model for EvaluationCounts.
+type EvaluationCounts struct {
+	Erroring    int    `json:"erroring"`
+	Pending     int    `json:"pending"`
+	PluginId    string `json:"plugin_id"`
+	Retired     int    `json:"retired"`
+	Unavailable int    `json:"unavailable"`
+	Version     string `json:"version"`
+}
+
+// EvaluationRetirement defines model for EvaluationRetirement.
+type EvaluationRetirement struct {
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	DryRun    bool                `json:"dry_run"`
+	Items     []RetiredEvaluation `json:"items"`
+	Key       string              `json:"key"`
+
+	// Leased Unavailable pending evaluations skipped because their leases have not expired.
+	Leased   int                         `json:"leased"`
+	Limit    int                         `json:"limit"`
+	Outcome  EvaluationRetirementOutcome `json:"outcome"`
+	PluginId string                      `json:"plugin_id"`
+	Reason   string                      `json:"reason"`
+
+	// Remaining Unavailable pending evaluations remaining in this request's scope, including leased ones.
+	Remaining    int    `json:"remaining"`
+	RetirementId string `json:"retirement_id"`
+	Version      string `json:"version"`
+}
+
+// EvaluationRetirementOutcome defines model for EvaluationRetirement.Outcome.
+type EvaluationRetirementOutcome string
+
+// EvaluationRetirementRequest defines model for EvaluationRetirementRequest.
+type EvaluationRetirementRequest struct {
+	DryRun   bool   `json:"dry_run"`
+	Key      string `json:"key"`
+	Limit    *int   `json:"limit,omitempty"`
+	PluginId string `json:"plugin_id"`
+
+	// Reason The operator's explanation for deliberately abandoning these evaluations.
+	Reason  string `json:"reason"`
+	Version string `json:"version"`
+}
+
 // EvaluatorConfig Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 type EvaluatorConfig struct {
 	Configuration map[string]interface{} `json:"configuration"`
@@ -2280,6 +2346,21 @@ type ResourceReference struct {
 	CorpusId *string `json:"corpus_id,omitempty"`
 	Id       string  `json:"id"`
 	Kind     string  `json:"kind"`
+}
+
+// RetiredEvaluation defines model for RetiredEvaluation.
+type RetiredEvaluation struct {
+	CorpusId string `json:"corpus_id"`
+
+	// EventId The evaluation.retired event; absent for a dry run.
+	EventId         *string `json:"event_id,omitempty"`
+	RecordId        string  `json:"record_id"`
+	RecordVersionId string  `json:"record_version_id"`
+
+	// Sequence The original trigger's Organization journal position.
+	Sequence              int64  `json:"sequence"`
+	SubscriptionId        string `json:"subscription_id"`
+	SubscriptionVersionId string `json:"subscription_version_id"`
 }
 
 // RetrievalConfig Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
@@ -3002,6 +3083,15 @@ type GetTopQueriesParams struct {
 // GetTopQueriesParamsWindow defines parameters for GetTopQueries.
 type GetTopQueriesParamsWindow string
 
+// ListEvaluationBacklogParams defines parameters for ListEvaluationBacklog.
+type ListEvaluationBacklogParams struct {
+	// Limit Maximum evaluator versions returned; a present invalid value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After The previous page's next_after. Counts are live, not a snapshot across pages.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // PollChangesParams defines parameters for PollChanges.
 type PollChangesParams struct {
 	Cursor   *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -3085,6 +3175,9 @@ type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
 
 // PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
 type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
+
+// RetireEvaluationsJSONRequestBody defines body for RetireEvaluations for application/json ContentType.
+type RetireEvaluationsJSONRequestBody = EvaluationRetirementRequest
 
 // MigrateSubscriptionEvaluatorsJSONRequestBody defines body for MigrateSubscriptionEvaluators for application/json ContentType.
 type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrationRequest
@@ -3437,6 +3530,15 @@ type ServerInterface interface {
 
 	// (GET /v0/admin/stats/top-queries)
 	GetTopQueries(w http.ResponseWriter, r *http.Request, params GetTopQueriesParams)
+
+	// (GET /v0/admin/subscriptions/evaluation-backlog)
+	ListEvaluationBacklog(w http.ResponseWriter, r *http.Request, params ListEvaluationBacklogParams)
+
+	// (POST /v0/admin/subscriptions/evaluation-retirements)
+	RetireEvaluations(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id})
+	GetEvaluationRetirement(w http.ResponseWriter, r *http.Request, retirementId string)
 
 	// (POST /v0/admin/subscriptions/evaluator-migrations)
 	MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request)
@@ -4252,6 +4354,92 @@ func (siw *ServerInterfaceWrapper) GetTopQueries(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetTopQueries(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListEvaluationBacklog operation middleware
+func (siw *ServerInterfaceWrapper) ListEvaluationBacklog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListEvaluationBacklogParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListEvaluationBacklog(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetireEvaluations operation middleware
+func (siw *ServerInterfaceWrapper) RetireEvaluations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetireEvaluations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetEvaluationRetirement operation middleware
+func (siw *ServerInterfaceWrapper) GetEvaluationRetirement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "retirement_id" -------------
+	var retirementId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "retirement_id", r.PathValue("retirement_id"), &retirementId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "retirement_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEvaluationRetirement(w, r, retirementId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6052,6 +6240,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/quarantine", wrapper.ListQuarantinedVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/quarantine/reprocess", wrapper.ReprocessQuarantine)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/subscriptions/evaluator-migrations", wrapper.MigrateSubscriptionEvaluators)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/subscriptions/evaluation-backlog", wrapper.ListEvaluationBacklog)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/subscriptions/evaluation-retirements", wrapper.RetireEvaluations)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/subscriptions/evaluation-retirements/{retirement_id}", wrapper.GetEvaluationRetirement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/plan/rollback", wrapper.RollbackPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/active-plugins", wrapper.ListActivePlugins)
@@ -6931,6 +7122,133 @@ type GetTopQueriesdefaultJSONResponse struct {
 }
 
 func (response GetTopQueriesdefaultJSONResponse) VisitGetTopQueriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvaluationBacklogRequestObject struct {
+	Params ListEvaluationBacklogParams
+}
+
+type ListEvaluationBacklogResponseObject interface {
+	VisitListEvaluationBacklogResponse(w http.ResponseWriter) error
+}
+
+type ListEvaluationBacklog200JSONResponse EvaluationBacklogPage
+
+func (response ListEvaluationBacklog200JSONResponse) VisitListEvaluationBacklogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvaluationBacklogdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListEvaluationBacklogdefaultJSONResponse) VisitListEvaluationBacklogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireEvaluationsRequestObject struct {
+	Body *RetireEvaluationsJSONRequestBody
+}
+
+type RetireEvaluationsResponseObject interface {
+	VisitRetireEvaluationsResponse(w http.ResponseWriter) error
+}
+
+type RetireEvaluations200ResponseHeaders struct {
+	Location *string
+}
+
+type RetireEvaluations200JSONResponse struct {
+	Body    EvaluationRetirement
+	Headers RetireEvaluations200ResponseHeaders
+}
+
+func (response RetireEvaluations200JSONResponse) VisitRetireEvaluationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireEvaluationsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RetireEvaluationsdefaultJSONResponse) VisitRetireEvaluationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEvaluationRetirementRequestObject struct {
+	RetirementId string `json:"retirement_id"`
+}
+
+type GetEvaluationRetirementResponseObject interface {
+	VisitGetEvaluationRetirementResponse(w http.ResponseWriter) error
+}
+
+type GetEvaluationRetirement200JSONResponse EvaluationRetirement
+
+func (response GetEvaluationRetirement200JSONResponse) VisitGetEvaluationRetirementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEvaluationRetirementdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetEvaluationRetirementdefaultJSONResponse) VisitGetEvaluationRetirementResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -9296,6 +9614,15 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/stats/top-queries)
 	GetTopQueries(ctx context.Context, request GetTopQueriesRequestObject) (GetTopQueriesResponseObject, error)
 
+	// (GET /v0/admin/subscriptions/evaluation-backlog)
+	ListEvaluationBacklog(ctx context.Context, request ListEvaluationBacklogRequestObject) (ListEvaluationBacklogResponseObject, error)
+
+	// (POST /v0/admin/subscriptions/evaluation-retirements)
+	RetireEvaluations(ctx context.Context, request RetireEvaluationsRequestObject) (RetireEvaluationsResponseObject, error)
+
+	// (GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id})
+	GetEvaluationRetirement(ctx context.Context, request GetEvaluationRetirementRequestObject) (GetEvaluationRetirementResponseObject, error)
+
 	// (POST /v0/admin/subscriptions/evaluator-migrations)
 	MigrateSubscriptionEvaluators(ctx context.Context, request MigrateSubscriptionEvaluatorsRequestObject) (MigrateSubscriptionEvaluatorsResponseObject, error)
 
@@ -10067,6 +10394,89 @@ func (sh *strictHandler) GetTopQueries(w http.ResponseWriter, r *http.Request, p
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetTopQueriesResponseObject); ok {
 		if err := validResponse.VisitGetTopQueriesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListEvaluationBacklog operation middleware
+func (sh *strictHandler) ListEvaluationBacklog(w http.ResponseWriter, r *http.Request, params ListEvaluationBacklogParams) {
+	var request ListEvaluationBacklogRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListEvaluationBacklog(ctx, request.(ListEvaluationBacklogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListEvaluationBacklog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListEvaluationBacklogResponseObject); ok {
+		if err := validResponse.VisitListEvaluationBacklogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetireEvaluations operation middleware
+func (sh *strictHandler) RetireEvaluations(w http.ResponseWriter, r *http.Request) {
+	var request RetireEvaluationsRequestObject
+
+	var body RetireEvaluationsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetireEvaluations(ctx, request.(RetireEvaluationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetireEvaluations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetireEvaluationsResponseObject); ok {
+		if err := validResponse.VisitRetireEvaluationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetEvaluationRetirement operation middleware
+func (sh *strictHandler) GetEvaluationRetirement(w http.ResponseWriter, r *http.Request, retirementId string) {
+	var request GetEvaluationRetirementRequestObject
+
+	request.RetirementId = retirementId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEvaluationRetirement(ctx, request.(GetEvaluationRetirementRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEvaluationRetirement")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetEvaluationRetirementResponseObject); ok {
+		if err := validResponse.VisitGetEvaluationRetirementResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

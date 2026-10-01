@@ -2340,6 +2340,123 @@ paths:
       tags:
       - Admin
       summary: Migrate subscription evaluators
+  /v0/admin/subscriptions/evaluation-backlog:
+    get:
+      operationId: listEvaluationBacklog
+      description: Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization
+        and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint
+        health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations
+        are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        description: Maximum evaluator versions returned; a present invalid value is 422 invalid_limit.
+      - in: query
+        name: after
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description: The previous page's next_after. Counts are live, not a snapshot across pages.
+      responses:
+        '200':
+          description: Scoped per-version counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationBacklogPage'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 not configured, 422 invalid_query
+            or invalid_limit, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: List evaluation backlog
+  /v0/admin/subscriptions/evaluation-retirements:
+    post:
+      operationId: retireEvaluations
+      description: Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error
+        is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals
+        are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The
+        terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with
+        resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original
+        identities and event ids, and is readable at the Location. A real key replay returns the original batch, including
+        its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch
+        also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable
+        intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after
+        dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential
+        alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+      x-required-permissions:
+      - plugins:admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluationRetirementRequest'
+      responses:
+        '200':
+          description: The dry-run preview or committed audit receipt
+          headers:
+            Location:
+              description: The receipt read URL, present only for a real batch.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationRetirement'
+        default:
+          description: Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 not configured,
+            409 idempotency_conflict, 422 invalid_schema, invalid_input or invalid_limit, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Retire evaluations
+  /v0/admin/subscriptions/evaluation-retirements/{retirement_id}:
+    get:
+      operationId: getEvaluationRetirement
+      description: Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location.
+        Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires
+        a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+      x-required-permissions:
+      - plugins:admin
+      parameters:
+      - in: path
+        name: retirement_id
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: The committed receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationRetirement'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 not_found, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: Get evaluation retirement
   /v0/admin/plugins/plan/rollback:
     post:
       operationId: rollbackPipelinePlan
@@ -5562,6 +5679,163 @@ components:
       - idempotency_key
       - name
       description: New display name of a Saved Query or Subscription.
+    EvaluationBacklogPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/EvaluationCounts'
+        next_after:
+          type: string
+          minLength: 1
+    EvaluationCounts:
+      type: object
+      additionalProperties: false
+      required:
+      - plugin_id
+      - version
+      - pending
+      - erroring
+      - unavailable
+      - retired
+      properties:
+        plugin_id:
+          type: string
+        version:
+          type: string
+        pending:
+          type: integer
+          minimum: 0
+        erroring:
+          type: integer
+          minimum: 0
+        unavailable:
+          type: integer
+          minimum: 0
+        retired:
+          type: integer
+          minimum: 0
+    EvaluationRetirementRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - key
+      - plugin_id
+      - version
+      - reason
+      - dry_run
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        plugin_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: string
+          minLength: 1
+          maxLength: 128
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: The operator's explanation for deliberately abandoning these evaluations.
+        dry_run:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+    EvaluationRetirement:
+      type: object
+      additionalProperties: false
+      required:
+      - key
+      - plugin_id
+      - version
+      - reason
+      - dry_run
+      - limit
+      - retirement_id
+      - outcome
+      - items
+      - remaining
+      - leased
+      properties:
+        key:
+          type: string
+        plugin_id:
+          type: string
+        version:
+          type: string
+        reason:
+          type: string
+        dry_run:
+          type: boolean
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        retirement_id:
+          type: string
+          minLength: 1
+        created_at:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum:
+          - evaluator_retired
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/RetiredEvaluation'
+        remaining:
+          type: integer
+          minimum: 0
+          description: Unavailable pending evaluations remaining in this request's scope, including leased ones.
+        leased:
+          type: integer
+          minimum: 0
+          description: Unavailable pending evaluations skipped because their leases have not expired.
+    RetiredEvaluation:
+      type: object
+      additionalProperties: false
+      required:
+      - subscription_id
+      - subscription_version_id
+      - sequence
+      - corpus_id
+      - record_id
+      - record_version_id
+      properties:
+        subscription_id:
+          type: string
+        subscription_version_id:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+          description: The original trigger's Organization journal position.
+        corpus_id:
+          type: string
+        record_id:
+          type: string
+        record_version_id:
+          type: string
+        event_id:
+          type: string
+          minLength: 1
+          description: The evaluation.retired event; absent for a dry run.
     ResourceReference:
       type: object
       additionalProperties: false

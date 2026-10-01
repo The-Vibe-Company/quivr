@@ -39,6 +39,8 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 		failure(w, 409, publicCode(err, "conflict"))
 	case errors.Is(err, monitoring.ErrInvalidOwner):
 		failure(w, 422, "invalid_owner")
+	case errors.Is(err, monitoring.ErrInvalidRetirement):
+		failure(w, 422, "invalid_input")
 	case errors.Is(err, monitoring.ErrUnsupportedProfile), errors.Is(err, monitoring.ErrUnsupportedEvaluator),
 		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
 		errors.Is(err, monitoring.ErrTooLarge):

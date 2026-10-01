@@ -242,7 +242,8 @@ type Service struct {
 	Evaluators EvaluatorSet
 	// Moves lists and moves the Subscriptions pinning an evaluator, for an
 	// operator migration; without it migrations are not served.
-	Moves EvaluatorMoves
+	Moves       EvaluatorMoves
+	Evaluations EvaluationAdministration
 	// Recent and Versions read what a preview judges; without them previews
 	// are not served.
 	Recent   RecentReader

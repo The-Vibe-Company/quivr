@@ -394,6 +394,13 @@ func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decid
 	if err = lockJournal(ctx, tx, in.Organization); err != nil {
 		return "", err
 	}
+	var state, previous string
+	if err = tx.QueryRow(ctx, `SELECT state,outcome FROM evaluation_intents WHERE organization=$1 AND subscription_version_id=$2 AND sequence=$3 FOR UPDATE`, in.Organization, in.SubscriptionVersionID, in.Sequence).Scan(&state, &previous); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	if state == "done" && previous == monitoring.OutcomeEvaluatorRetired {
+		return previous, nil
+	}
 	outcome, err := decide(tx)
 	if err != nil {
 		return "", err

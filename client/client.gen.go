@@ -300,6 +300,21 @@ func (e DeliveryAttemptOutcome) Valid() bool {
 	}
 }
 
+// Defines values for EvaluationRetirementOutcome.
+const (
+	EvaluatorRetired EvaluationRetirementOutcome = "evaluator_retired"
+)
+
+// Valid indicates whether the value is a known member of the EvaluationRetirementOutcome enum.
+func (e EvaluationRetirementOutcome) Valid() bool {
+	switch e {
+	case EvaluatorRetired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FieldMappingRoles.
 const (
 	Filter FieldMappingRoles = "filter"
@@ -1665,6 +1680,57 @@ type Error struct {
 	Retryable bool    `json:"retryable"`
 }
 
+// EvaluationBacklogPage defines model for EvaluationBacklogPage.
+type EvaluationBacklogPage struct {
+	Items     []EvaluationCounts `json:"items"`
+	NextAfter *string            `json:"next_after,omitempty"`
+}
+
+// EvaluationCounts defines model for EvaluationCounts.
+type EvaluationCounts struct {
+	Erroring    int    `json:"erroring"`
+	Pending     int    `json:"pending"`
+	PluginId    string `json:"plugin_id"`
+	Retired     int    `json:"retired"`
+	Unavailable int    `json:"unavailable"`
+	Version     string `json:"version"`
+}
+
+// EvaluationRetirement defines model for EvaluationRetirement.
+type EvaluationRetirement struct {
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	DryRun    bool                `json:"dry_run"`
+	Items     []RetiredEvaluation `json:"items"`
+	Key       string              `json:"key"`
+
+	// Leased Unavailable pending evaluations skipped because their leases have not expired.
+	Leased   int                         `json:"leased"`
+	Limit    int                         `json:"limit"`
+	Outcome  EvaluationRetirementOutcome `json:"outcome"`
+	PluginId string                      `json:"plugin_id"`
+	Reason   string                      `json:"reason"`
+
+	// Remaining Unavailable pending evaluations remaining in this request's scope, including leased ones.
+	Remaining    int    `json:"remaining"`
+	RetirementId string `json:"retirement_id"`
+	Version      string `json:"version"`
+}
+
+// EvaluationRetirementOutcome defines model for EvaluationRetirement.Outcome.
+type EvaluationRetirementOutcome string
+
+// EvaluationRetirementRequest defines model for EvaluationRetirementRequest.
+type EvaluationRetirementRequest struct {
+	DryRun   bool   `json:"dry_run"`
+	Key      string `json:"key"`
+	Limit    *int   `json:"limit,omitempty"`
+	PluginId string `json:"plugin_id"`
+
+	// Reason The operator's explanation for deliberately abandoning these evaluations.
+	Reason  string `json:"reason"`
+	Version string `json:"version"`
+}
+
 // EvaluatorConfig Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 type EvaluatorConfig struct {
 	Configuration map[string]interface{} `json:"configuration"`
@@ -2280,6 +2346,21 @@ type ResourceReference struct {
 	CorpusId *string `json:"corpus_id,omitempty"`
 	Id       string  `json:"id"`
 	Kind     string  `json:"kind"`
+}
+
+// RetiredEvaluation defines model for RetiredEvaluation.
+type RetiredEvaluation struct {
+	CorpusId string `json:"corpus_id"`
+
+	// EventId The evaluation.retired event; absent for a dry run.
+	EventId         *string `json:"event_id,omitempty"`
+	RecordId        string  `json:"record_id"`
+	RecordVersionId string  `json:"record_version_id"`
+
+	// Sequence The original trigger's Organization journal position.
+	Sequence              int64  `json:"sequence"`
+	SubscriptionId        string `json:"subscription_id"`
+	SubscriptionVersionId string `json:"subscription_version_id"`
 }
 
 // RetrievalConfig Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
@@ -3002,6 +3083,15 @@ type GetTopQueriesParams struct {
 // GetTopQueriesParamsWindow defines parameters for GetTopQueries.
 type GetTopQueriesParamsWindow string
 
+// ListEvaluationBacklogParams defines parameters for ListEvaluationBacklog.
+type ListEvaluationBacklogParams struct {
+	// Limit Maximum evaluator versions returned; a present invalid value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After The previous page's next_after. Counts are live, not a snapshot across pages.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // PollChangesParams defines parameters for PollChanges.
 type PollChangesParams struct {
 	Cursor   *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -3085,6 +3175,9 @@ type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
 
 // PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
 type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
+
+// RetireEvaluationsJSONRequestBody defines body for RetireEvaluations for application/json ContentType.
+type RetireEvaluationsJSONRequestBody = EvaluationRetirementRequest
 
 // MigrateSubscriptionEvaluatorsJSONRequestBody defines body for MigrateSubscriptionEvaluators for application/json ContentType.
 type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrationRequest
@@ -3585,6 +3678,28 @@ type ClientInterface interface {
 	//
 	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 	GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListEvaluationBacklog performs a GET /v0/admin/subscriptions/evaluation-backlog (the `ListEvaluationBacklog` operationId) request.
+	//
+	// Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+	ListEvaluationBacklog(ctx context.Context, params *ListEvaluationBacklogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RetireEvaluationsWithBody performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+	RetireEvaluationsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RetireEvaluations performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+	RetireEvaluations(ctx context.Context, body RetireEvaluationsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetEvaluationRetirement performs a GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id} (the `GetEvaluationRetirement` operationId) request.
+	//
+	// Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location. Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+	GetEvaluationRetirement(ctx context.Context, retirementId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// MigrateSubscriptionEvaluatorsWithBody performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
 	// with any type of body and a specified content type.
@@ -4465,6 +4580,68 @@ func (c *Client) GetStepStats(ctx context.Context, params *GetStepStatsParams, r
 // The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTopQueriesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListEvaluationBacklog performs a GET /v0/admin/subscriptions/evaluation-backlog (the `ListEvaluationBacklog` operationId) request.
+//
+// Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+func (c *Client) ListEvaluationBacklog(ctx context.Context, params *ListEvaluationBacklogParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEvaluationBacklogRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RetireEvaluationsWithBody performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request,
+// with any type of body and a specified content type.
+//
+// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+func (c *Client) RetireEvaluationsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRetireEvaluationsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RetireEvaluations performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+func (c *Client) RetireEvaluations(ctx context.Context, body RetireEvaluationsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRetireEvaluationsRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetEvaluationRetirement performs a GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id} (the `GetEvaluationRetirement` operationId) request.
+//
+// Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location. Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+func (c *Client) GetEvaluationRetirement(ctx context.Context, retirementId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEvaluationRetirementRequest(c.Server, retirementId)
 	if err != nil {
 		return nil, err
 	}
@@ -6831,6 +7008,146 @@ func NewGetTopQueriesRequest(server string, params *GetTopQueriesParams) (*http.
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
 		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListEvaluationBacklogRequest constructs an http.Request for the ListEvaluationBacklog method
+func NewListEvaluationBacklogRequest(server string, params *ListEvaluationBacklogParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/subscriptions/evaluation-backlog")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "after", *params.After, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRetireEvaluationsRequest calls the generic RetireEvaluations builder with application/json body
+func NewRetireEvaluationsRequest(server string, body RetireEvaluationsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRetireEvaluationsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRetireEvaluationsRequestWithBody constructs an http.Request for the RetireEvaluations method, with any body, and a specified content type
+func NewRetireEvaluationsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/subscriptions/evaluation-retirements")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetEvaluationRetirementRequest constructs an http.Request for the GetEvaluationRetirement method
+func NewGetEvaluationRetirementRequest(server string, retirementId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "retirement_id", retirementId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/subscriptions/evaluation-retirements/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -9630,6 +9947,34 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error)
 
+	// ListEvaluationBacklogWithResponse performs a GET /v0/admin/subscriptions/evaluation-backlog (the `ListEvaluationBacklog` operationId) request.
+	//
+	// Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListEvaluationBacklogWithResponse(ctx context.Context, params *ListEvaluationBacklogParams, reqEditors ...RequestEditorFn) (*ListEvaluationBacklogResponse, error)
+
+	// RetireEvaluationsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RetireEvaluationsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RetireEvaluationsResponse, error)
+
+	// RetireEvaluationsWithResponse performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+	RetireEvaluationsWithResponse(ctx context.Context, body RetireEvaluationsJSONRequestBody, reqEditors ...RequestEditorFn) (*RetireEvaluationsResponse, error)
+
+	// GetEvaluationRetirementWithResponse performs a GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id} (the `GetEvaluationRetirement` operationId) request.
+	//
+	// Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location. Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetEvaluationRetirementWithResponse(ctx context.Context, retirementId string, reqEditors ...RequestEditorFn) (*GetEvaluationRetirementResponse, error)
+
 	// MigrateSubscriptionEvaluatorsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -11270,6 +11615,157 @@ func (r GetTopQueriesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetTopQueriesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListEvaluationBacklogResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *EvaluationBacklogPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListEvaluationBacklogResponse) GetJSON200() *EvaluationBacklogPage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListEvaluationBacklogResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListEvaluationBacklogResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListEvaluationBacklogResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListEvaluationBacklogResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListEvaluationBacklogResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// RetireEvaluationsResponse200Headers the declared response headers of an HTTP 200 response for RetireEvaluations
+type RetireEvaluationsResponse200Headers struct {
+	Location *string
+}
+
+type RetireEvaluationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *EvaluationRetirement
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *RetireEvaluationsResponse200Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RetireEvaluationsResponse) GetJSON200() *EvaluationRetirement {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RetireEvaluationsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RetireEvaluationsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RetireEvaluationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RetireEvaluationsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RetireEvaluationsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetEvaluationRetirementResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *EvaluationRetirement
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetEvaluationRetirementResponse) GetJSON200() *EvaluationRetirement {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetEvaluationRetirementResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetEvaluationRetirementResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEvaluationRetirementResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEvaluationRetirementResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetEvaluationRetirementResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -14322,6 +14818,58 @@ func (c *ClientWithResponses) GetTopQueriesWithResponse(ctx context.Context, par
 	return ParseGetTopQueriesResponse(rsp)
 }
 
+// ListEvaluationBacklogWithResponse performs a GET /v0/admin/subscriptions/evaluation-backlog (the `ListEvaluationBacklog` operationId) request.
+//
+// Read evaluation counts grouped by the pinned evaluator plugin id and version, only in the key's Organization and granted Corpora. unavailable counts pending intents whose latest error is evaluator_unavailable, not a live endpoint health check. retired counts terminal evaluator_retired intents. Rows with neither pending nor retired evaluations are omitted. Requires plugins:admin. Pages are ordered by plugin_id@version; next_after is the next after.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListEvaluationBacklogWithResponse(ctx context.Context, params *ListEvaluationBacklogParams, reqEditors ...RequestEditorFn) (*ListEvaluationBacklogResponse, error) {
+	rsp, err := c.ListEvaluationBacklog(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEvaluationBacklogResponse(rsp)
+}
+
+// RetireEvaluationsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request,
+// with any type of body and a specified content type.
+//
+// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RetireEvaluationsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RetireEvaluationsResponse, error) {
+	rsp, err := c.RetireEvaluationsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRetireEvaluationsResponse(rsp)
+}
+
+// RetireEvaluationsWithResponse performs a POST /v0/admin/subscriptions/evaluation-retirements (the `RetireEvaluations` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Explicitly abandon a bounded batch of pending evaluations pinned to the named evaluator whose latest error is evaluator_unavailable. Only the key's Organization and granted Corpora are considered. Live leases and withdrawals are left alone. Never migrate an intent, run another evaluator, create a Match or Delivery, or declare no_match. The terminal outcome is evaluator_retired. Each real retirement emits evaluation.retired in the intent's Corpus, with resource.kind=evaluation_retirement and resource.id=retirement_id. The immutable receipt records the reason, original identities and event ids, and is readable at the Location. A real key replay returns the original batch, including its original counts; another request or Corpus scope using that key is 409 idempotency_conflict. An empty real batch also reserves its key. dry_run selects without writes or reserving the key, and remaining reports how many unavailable intents would remain after that selection. Use new real keys for further batches and recheck live backlog counts after dispatch and leases settle. This action does not establish a policy for future intents. It deliberately discards potential alerts; restore the exact old implementation to drain without losing judgments. Requires plugins:admin.
+func (c *ClientWithResponses) RetireEvaluationsWithResponse(ctx context.Context, body RetireEvaluationsJSONRequestBody, reqEditors ...RequestEditorFn) (*RetireEvaluationsResponse, error) {
+	rsp, err := c.RetireEvaluations(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRetireEvaluationsResponse(rsp)
+}
+
+// GetEvaluationRetirementWithResponse performs a GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id} (the `GetEvaluationRetirement` operationId) request.
+//
+// Read the immutable audit receipt referenced by an evaluation.retired event or the retirement action's Location. Requires plugins:admin and grants covering the original request's entire Corpus scope; a deployment-wide request requires a key granting all Corpora. Unknown, another Organization's and ungranted receipts all answer 404 not_found.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetEvaluationRetirementWithResponse(ctx context.Context, retirementId string, reqEditors ...RequestEditorFn) (*GetEvaluationRetirementResponse, error) {
+	rsp, err := c.GetEvaluationRetirement(ctx, retirementId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEvaluationRetirementResponse(rsp)
+}
+
 // MigrateSubscriptionEvaluatorsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -16169,6 +16717,118 @@ func ParseGetTopQueriesResponse(rsp *http.Response) (*GetTopQueriesResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest TopQueryList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListEvaluationBacklogResponse parses an HTTP response from a ListEvaluationBacklogWithResponse call
+func ParseListEvaluationBacklogResponse(rsp *http.Response) (*ListEvaluationBacklogResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListEvaluationBacklogResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EvaluationBacklogPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRetireEvaluationsResponse parses an HTTP response from a RetireEvaluationsWithResponse call
+func ParseRetireEvaluationsResponse(rsp *http.Response) (*RetireEvaluationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RetireEvaluationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EvaluationRetirement
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers RetireEvaluationsResponse200Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers200 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetEvaluationRetirementResponse parses an HTTP response from a GetEvaluationRetirementWithResponse call
+func ParseGetEvaluationRetirementResponse(rsp *http.Response) (*GetEvaluationRetirementResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEvaluationRetirementResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EvaluationRetirement
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

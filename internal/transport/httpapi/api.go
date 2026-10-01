@@ -76,7 +76,8 @@ type API struct {
 	// pluginRollbackSchema validates the plan rollback command.
 	pluginRollbackSchema *jsonschema.Schema
 	// evaluatorMigrationSchema validates the alert-rule migration command.
-	evaluatorMigrationSchema *jsonschema.Schema
+	evaluatorMigrationSchema   *jsonschema.Schema
+	evaluationRetirementSchema *jsonschema.Schema
 	// Activity serves the operator reads of document activity.
 	Activity content.Activities
 	// Recorder counts searches; nil counts nothing.
@@ -162,6 +163,10 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
+	evaluationRetirementSchema, err := compiler.Compile(contracts.HTTPSchema("EvaluationRetirementRequest"))
+	if err != nil {
+		return nil, err
+	}
 	backfillSchema, err := compiler.Compile(contracts.HTTPSchema("BackfillRequest"))
 	if err != nil {
 		return nil, err
@@ -175,6 +180,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 		return nil, err
 	}
 	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, reprocessSchema: reprocessSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, evaluatorMigrationSchema: evaluatorMigrationSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
+	a.evaluationRetirementSchema = evaluationRetirementSchema
 	for _, option := range options {
 		option(a)
 	}
@@ -293,6 +299,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.evaluatorMigrationRoutes(w, r, scope) {
+		return
+	}
+	if a.evaluationAdministrationRoutes(w, r, scope) {
 		return
 	}
 	if a.backfillRoutes(w, r, scope) {

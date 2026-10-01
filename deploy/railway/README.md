@@ -101,28 +101,26 @@ deliveries; without the variable, X lists only poll.
 
 ## Keyword alerts and PDF text (optional)
 
-The core image bakes in the first-party plugins [`alerts`](../../plugins/alerts/README.md),
-which the **Alertes** tab needs, and [`pdf-text`](../../plugins/pdf-text/README.md).
-Set `QUIVR_DEMO_PLUGINS=1` on api and worker and `QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink`
-on web, then redeploy api, worker and web. `core-entrypoint.py` then:
+The core image bakes in [`alerts`](../../plugins/alerts/README.md), which the **Alertes** tab needs, and [`pdf-text`](../../plugins/pdf-text/README.md).
+Set `QUIVR_DEMO_PLUGINS=1` on api and worker and `QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink` on web, then redeploy all three. `core-entrypoint.py`:
 
-- pins both through the `plugins` list: pdf-text on `127.0.0.1:9900` (`application/pdf`),
-  alerts on `127.0.0.1:9910`. The worker runs both as sidecar processes. The API also
-  runs alerts, which it calls for alert previews. If any sidecar exits, its container
-  stops and Railway restarts it;
-- offers [described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts) (the pin's `kinds`) only when
-  `TYPESAFE_API_KEY` is set, with the same value on api and worker; only the alerts
-  sidecars receive it. Without it, only keyword alerts can be created. With it, also set
-  `DEMO_DESCRIBED_ALERTS=true` on web so the **Alertes** tab offers them;
-- gives the demo key `monitoring:read` and `monitoring:write`;
-- declares the webhook destination `demo-alerts-sink`, which every Subscription needs.
-  The web app reads Matches through the API, so it points at `http://alerts-sink.invalid/`,
-  a reserved name that never resolves: deliveries fail inside the container, and the
-  private-address refusal stays on. Its signing secret derives from `QUIVR_CURSOR_KEY`.
+- pins pdf-text on `127.0.0.1:9900` (`application/pdf`) and alerts on `127.0.0.1:9910`; worker runs both, api also runs alerts for previews. A sidecar exit stops its container for Railway to restart;
+- enables external [described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts) when `TYPESAFE_API_KEY` is the same on api and worker; only alerts receives it. Set `DEMO_DESCRIBED_ALERTS=true` on web to offer them;
+- grants the demo key `monitoring:read` and `monitoring:write`;
+- declares destination `demo-alerts-sink` at `http://alerts-sink.invalid/`: web reads Matches through the API, deliveries fail on the reserved name, and private-address refusal stays on. Its signing secret derives from `QUIVR_CURSOR_KEY`.
 
-The worker logs `plugins pinned` with `pdf-text@0.1.0 [normalizer] alerts@0.2.0
-[subscription]` and `evaluators=1`. Without a web `DEMO_STATE_FILE` volume, paused
-alerts leave the list after a web restart; active ones are found again through the API.
+The worker logs its actual versions in `plugins pinned`. Without a web `DEMO_STATE_FILE` volume, paused alerts leave the list after a web restart; active ones are found through the API.
+
+## Upgrade a bundled alert rule without losing alerts
+
+Use an operator key with `plugins:admin` and the relevant Corpus grants. Call the admin API from inside the deployment; `web` never gets this permission.
+
+1. Keep the exact old implementation A running at a reachable endpoint while starting B at another endpoint. A new image that only contains B cannot serve A: retain and run A's old code separately. Never relabel B as A.
+2. [Register, certify and activate B](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting#upgrade-an-alert-rule). Dry-run `POST /v0/admin/subscriptions/evaluator-migrations`, inspect refusals, then migrate in pages. New Subscription Versions apply only to future changes; queued pins stay on A.
+3. Keep A reachable until its registry `subscriptions` and `pinned_work` are both zero, including undispatched old triggers. Only then remove A's endpoint or image.
+
+If A has already disappeared, its missing-evaluator retries continue unchanged. Restore A for zero-loss recovery, or intentionally abandon potential Matches with `POST /v0/admin/subscriptions/evaluation-retirements`.
+Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/guides/keyword-alerts#retire-evaluations-you-cannot-finish): inspect `GET /v0/admin/subscriptions/evaluation-backlog`, dry-run first, wait for leases and dispatch, then repeat real batches with new keys. Retirement records `evaluator_retired`, never `no_match`, and creates no Match or Delivery.
 
 ## Provision and deploy
 
