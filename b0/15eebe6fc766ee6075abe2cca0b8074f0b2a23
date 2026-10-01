@@ -1,0 +1,32 @@
+tests/acceptance/search_mcp_test.go
+  s_54b80c92daa9cb::t_d50a05e8f32b15 16-19,22-27,30
+  s_54b80c92daa9cb::t_67bbc3894cea59 333-383
+internal/online/mcp_stdio.go
+  s_54b80c92daa9cb::t_3ffb52ddd006c6 1-73,79-168
+  s_54b80c92daa9cb::t_478b7d806ded10 74-78
+internal/online/mcp.go
+  s_54b80c92daa9cb::t_9efa184fc936ec 98-99
+  s_54b80c92daa9cb::t_1780541e8a83ba 32-33,36-37
+docs-site/guides/ai-agents.mdx
+  s_54b80c92daa9cb::t_689085fb83502a 40-41
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_e2bea0ae7b4cf5 193-194,197-198
+docs-site/reference/cli.mdx
+  s_54b80c92daa9cb::t_e2bea0ae7b4cf5 194-195,198-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b015eebe6fc766ee6075abe2cca0b8074f0b2a23",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
