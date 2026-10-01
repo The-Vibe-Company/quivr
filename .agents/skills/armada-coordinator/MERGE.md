@@ -26,3 +26,23 @@ gh pr merge <n> --squash --match-head-commit <full-sha>
 2. Tell every in-flight worker what the merge changes for them: a shared file, a migration, a new check, code they must now reuse or delete.
 3. Archive the merged worker's workspace with the "Stop and archive" section of its runtime guide.
 4. Launch the tickets this merge unblocked.
+
+## The release pull request
+
+Some repositories publish through release-please: every merge to the default branch opens or updates one release pull request, and merging it tags the version and publishes it. When the repository's rules (`AGENTS.md`) say to merge it after each merge, do it right after the ticket's merge, without a hand-back: no worker owns it, so `armada merge` does not apply.
+
+- **What it looks like.** Title `chore(main): release <version>`, opened by `github-actions`, label `autorelease: pending`, and a diff that only touches the changelog, the manifest and version fields. It is opened with the workflow's own token, so **no CI check runs on it** (only checks from apps such as Vercel, if any) and `mergeStateStatus` is `UNSTABLE`. Both are expected: the publish job runs the repository's checks again before publishing. Anything else in the diff, or a `DIRTY` state, is not expected: stop and tell the owner.
+- **Find it and its head:**
+
+```sh
+gh pr list --state open --label "autorelease: pending" --json number,title,headRefOid,mergeStateStatus
+```
+
+- **Merge it** pinned to that head, like any merge, and without `--delete-branch`:
+
+```sh
+gh pr merge <n> --squash --match-head-commit <full-sha>
+```
+
+- **Check the publish.** After a minute or two the new version is on the registry, for example `npm view <package> version` for an npm package (the package is named in `AGENTS.md` or the release workflow). If it is not, open the Release run (`gh run list --workflow release.yml --limit 3`), fix the cause and re-run its failed jobs: a later push does not publish a version already tagged.
+- Release-please updates the same pull request on each merge to the default branch; one release pull request can carry several merges.
