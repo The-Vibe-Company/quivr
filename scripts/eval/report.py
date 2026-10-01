@@ -59,13 +59,40 @@ def time_table(systems):
     return lines + ['']
 
 
+def resources(r):
+    """Disk and memory at each step of a local-stack run, and Weaviate's own disk and memory lines (THE-878)."""
+    res = r.get('resources')
+    if not res:
+        return []
+    lines = ['## Machine resources', '', 'Weaviate refuses every write once the disk under its data passes 90%. '
+             'Memory is each container\'s usage, and the resident memory of the engine\'s api and worker processes.', '',
+             '| Step | Docker disk used | Free | Images | Volumes | Build cache | Memory available | Memory |', '| --- ' * 8 + '|']
+    for s in res['snapshots']:
+        d, st = s.get('docker_disk', {}), s.get('docker_storage', {})
+        used = '—' if 'used_percent' not in d else f"{d['used_percent']}%"
+        free = '—' if 'free_gb' not in d else f"{d['free_gb']} GB"
+        memory = ', '.join(f'{k} {v}' for k, v in s.get('memory', {}).items()) or s.get('error', '—')
+        available = '—' if s.get('memory_available_mb') is None else f"{s['memory_available_mb']} MB"
+        lines.append(f"| {s['label']} | {used} | {free} | {st.get('Images', '—')} | {st.get('Local Volumes', '—')} "
+                     f"| {st.get('Build Cache', '—')} | {available} | {memory} |")
+    lines.append('')
+    for stack, entries in res.get('weaviate', {}).items():
+        shown = [e for e in entries if e['action'] == 'set_shard_read_only']
+        shown += [e for e in entries if e['action'] in ('read_disk_use', 'read_memory_use')][-1:]
+        lines += [f"Weaviate of `{stack}`: {e.get('time')} {e.get('msg')}" for e in shown] + ([''] if shown else [])
+    return lines
+
+
 def markdown(r):
     run = r['run']
     lines = ['# Search quality evaluation', '',
              f"Status: **{r['status']}** · source `{run.get('source_revision', '')}`{' (dirty)' if run.get('source_dirty') else ''} · "
              f"{run.get('finished_at', '')} · {run.get('duration_seconds', 0):.0f} s · {run.get('target', '')}", '']
     if r['status'] != 'completed':
-        lines += ['Error: `' + r.get('error', '') + '`', '', 'Partial results: ' + (', '.join(r['sets']) or 'none'), '']
+        lines += ['Error: `' + r.get('error', '') + '`', '']
+        if (r.get('resources') or {}).get('cause'):
+            lines += ['Cause: ' + r['resources']['cause'] + '.', '']
+        lines += [ 'Partial results: ' + (', '.join(r['sets']) or 'none'), '']
     h = run.get('host', {})
     lines += [f"Host: {h.get('cpu_model', h.get('machine', ''))}, {h.get('logical_cpus')} logical CPUs. "
               f"Every query runs in each mode and each served profile, limit {r['limit']}, hits deduplicated by Record.", '']
@@ -108,6 +135,7 @@ def markdown(r):
                 for system, c in s['against_baseline_run'].items():
                     lines.append(f'| {system} | ' + ' | '.join(delta(c[k]) for k, _ in METRIC_NAMES) + ' |')
                 lines.append('')
+    lines += resources(r)
     phases = run.get('phases_seconds')
     if phases:
         lines += ['## Stack phases (seconds)', '', ' · '.join(f'{k} {v:.0f}' for k, v in phases.items()), '']

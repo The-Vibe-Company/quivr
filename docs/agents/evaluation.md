@@ -86,6 +86,8 @@ licence on its ticket.
 - **Where search time goes** splits it by the engine's `usage.phases`, at limit 50 and, in a
   second pass timed only, limit 10. Encoding share is the part of the engine's time spent
   encoding queries: the most a query-vector cache could save.
+- **Machine resources** (local stack): disk and memory after each step. A run stalled by Weaviate's
+  90% disk guard quotes its switch to read-only, kept whole in `weaviate-full.log`.
 
 ## Compare speed before and after a change
 

@@ -46,11 +46,11 @@ jobs:
         with:
           path: .scratch/eval/cache
           key: eval-sets-${{ hashFiles('scripts/eval/public_sets.py', 'plugins/core-ingest/profile.json') }}
-      # A compare_to run keeps two stacks' data on the runner's disk, which brought the second one to
-      # Weaviate's 90% read-only threshold (THE-874, as THE-758). Remove preinstalled toolchains this
-      # job never uses (about 17 GB, a few seconds), as verify.yml does.
-      - if: inputs.compare_to != ''
-        run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
+      # The runner's disk starts about 85% full and Weaviate turns read-only at 90%: once the stack's
+      # images are pulled, Weaviate reads 88.6%, and each set adds up to 0.6%, so the third set stalled
+      # every write (THE-878; a compare_to run keeps two stacks, THE-874; as THE-758). Remove
+      # preinstalled toolchains this job never uses (about 17 GB, a few seconds), as verify.yml does.
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
       - run: python3 -m pip install -q -r scripts/eval/requirements.txt
       - run: python3 -m unittest discover -s scripts/eval -p 'test_*.py'
       - name: Find the baseline run

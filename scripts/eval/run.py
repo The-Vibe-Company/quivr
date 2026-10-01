@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 
 import public_sets  # noqa: E402
 import report as render  # noqa: E402
+import resources  # noqa: E402
 import trec  # noqa: E402
 from measure_metrics import percentile  # noqa: E402
 
@@ -371,7 +372,7 @@ def main():
                                           'github': {k: os.environ[k] for k in ['GITHUB_RUN_ID', 'GITHUB_REF_NAME', 'GITHUB_EVENT_NAME'] if k in os.environ},
                                           'phases_seconds': {}},
               'convention': None, 'test': None, 'baseline_system': BASELINE_SYSTEM, 'limit': LIMIT, 'sets': {}}
-    stacks, worktree = [], None
+    stacks, worktree, watch = [], None, None
     print(f"[eval] host: {report['run']['host'].get('cpu_model', 'unknown CPU')}, {report['run']['host']['logical_cpus']} logical CPUs", flush=True)
     try:
         import scoring
@@ -392,10 +393,14 @@ def main():
             clients.append(start_stack(report['run']['phases_seconds'], stacks))
             options.paid_calls = 0  # the local stack embeds with its own TEI and calls no paid service
             report['run']['target'] = 'isolated local stack, core plugins only'
+            watch = resources.Watch(stacks)
+            watch.snapshot('stack started')
         for name, directory in sets:
             *base, report['sets'][name] = measure_set(clients, name, directory, run_id, options)
             if base:
                 report['compare']['sets'][name] = base[0]
+            if watch:
+                watch.snapshot('after ' + name)
         if 'compare' in report:
             report['baseline_run'] = {'ref': options.compare_to, 'source_revision': report['compare']['source_revision']}
             compare_runs(report, report['compare'])
@@ -410,6 +415,11 @@ def main():
         raise
     finally:
         report['run'].update(finished_at=now(), duration_seconds=round(time.monotonic() - started, 3))
+        if watch:
+            watch.snapshot('at the end')
+            report['resources'] = watch.summary()
+            if report['resources']['cause']:
+                print('[eval] ' + report['resources']['cause'], flush=True)
         (out / 'report.json').write_text(json.dumps(report, indent=1, ensure_ascii=False))
         (out / 'report.md').write_text(render.markdown(report))
         print('Evaluation report:', out / 'report.md', flush=True)

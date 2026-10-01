@@ -66,6 +66,19 @@ class Markdown(unittest.TestCase):
         self.assertIn('Status: **failed**', text)
         self.assertIn('Error: `RuntimeError: TEI never ready`', text)
 
+    def test_failed_run_names_the_resource_that_ran_short(self):
+        switch = 'Set READONLY, disk usage currently at 90.02%, threshold set to 90.00%'
+        snapshot = {'label': 'after mldr-fr', 'docker_disk': {'used_percent': 89.6, 'free_gb': 7.5},
+                    'docker_storage': {'Images': '6.1GB', 'Local Volumes': '2.3GB', 'Build Cache': '0B'},
+                    'memory_available_mb': 2048, 'memory': {'weaviate-1': '1.2GiB', 'worker': '300MiB'}}
+        r = {'status': 'failed', 'error': 'RuntimeError: eval-scifact: 935/2000 Records have vectors after 1018 s', 'run': RUN,
+             'convention': None, 'test': None, 'baseline_system': 'hybrid/default', 'limit': 50, 'sets': {},
+             'resources': {'snapshots': [snapshot], 'cause': f'Weaviate turned its shards read-only at 2026-10-01T11:20:11Z: {switch}',
+                           'weaviate': {'quivr-eval-1': [{'action': 'set_shard_read_only', 'time': '2026-10-01T11:20:11Z', 'msg': switch}]}}}
+        text = report.markdown(r)
+        self.assertIn(f'Cause: Weaviate turned its shards read-only at 2026-10-01T11:20:11Z: {switch}.', text)
+        self.assertIn('| after mldr-fr | 89.6% | 7.5 GB | 6.1GB | 2.3GB | 0B | 2048 MB | weaviate-1 1.2GiB, worker 300MiB |', text)
+
 
 if __name__ == '__main__':
     unittest.main()
