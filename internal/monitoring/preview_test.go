@@ -64,7 +64,7 @@ func previewService(ids ...string) (monitoring.Service, *memoryStore, *recentRec
 	s, store := service()
 	recent := &recentRecords{ids: ids}
 	s.Recent, s.Versions = recent, articleText{}
-	s.Evaluators["test.blocking@1"] = blocking{}
+	s.Evaluators.(monitoring.Evaluators)["test.blocking@1"] = blocking{}
 	return s, store, recent
 }
 
@@ -122,7 +122,7 @@ func TestPreviewJudgesRecentRecordsAndWritesNothing(t *testing.T) {
 func TestPreviewSendsASyntheticSubscription(t *testing.T) {
 	s, _, _ := previewService("only")
 	batches := make(chan monitoring.Batch, 1)
-	s.Evaluators["test.sent@1"] = sent{batches: batches}
+	s.Evaluators.(monitoring.Evaluators)["test.sent@1"] = sent{batches: batches}
 	evaluator := monitoring.Evaluator{PluginID: "test.sent", Version: "1", Configuration: map[string]any{}}
 	if _, err := s.Preview(context.Background(), writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: evaluator}); err != nil {
 		t.Fatal(err)

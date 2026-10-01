@@ -433,7 +433,23 @@ func Run(command string) error {
 		// loading (THE-813); the worker never encodes a query.
 		warming = warmQueries(ctx, pluginhttp.Ingestor{Pin: resolved.Ingestion()}.Warm, warmBound, warmRetry)
 	}
-	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) }}
+	// Subscription evaluators follow the plan too: its alert-rule versions
+	// serve new Subscription Versions, earlier ones keep judging the
+	// Subscription Versions that pin them (THE-805).
+	evaluators := &monitoring.LiveEvaluators{}
+	installed, err := cfg.planEvaluators(ctx, pluginRegistry.Store, resolved, monitoring.PlanEvaluators{})
+	if err != nil {
+		return fmt.Errorf("alert-rule versions of earlier plans: %w", err)
+	}
+	evaluators.Store(installed)
+	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) },
+		followed: func(ctx context.Context, set *plugins.PinSet) {
+			installed, err := cfg.planEvaluators(ctx, pluginRegistry.Store, set, evaluators.Load())
+			if err != nil {
+				slog.Error("alert-rule versions of earlier plans stay as this process last read them", "error", err)
+			}
+			evaluators.Store(installed)
+		}}
 	// Work pinned to an earlier plan resolves its plugins in that plan.
 	planStore := postgres.PluginStore{Pool: pool}
 	live.Resolve = func(ctx context.Context, plan string) (*plugins.PinSet, error) {
@@ -470,9 +486,6 @@ func Run(command string) error {
 		case <-time.After(5 * time.Second):
 		}
 	}()
-	// Subscription evaluators are resolved at startup: an activation never
-	// switches one (registry.PlanActivation).
-	evaluators := cfg.evaluators(resolved)
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	// Coverage counts read every current segment of a Corpus; a search sees
 	// them at most 10 s old.
@@ -549,7 +562,7 @@ func Run(command string) error {
 			recorder.WriteMetrics(w)
 		}
 		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
-		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators))
+		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
@@ -562,7 +575,7 @@ func Run(command string) error {
 		go pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute)
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{ContentStore: store}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Moves: store, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),

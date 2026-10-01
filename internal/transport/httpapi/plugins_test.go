@@ -58,6 +58,9 @@ func (m memoryRegistry) ActiveMembers(context.Context) (registry.Plan, map[strin
 func (m memoryRegistry) PlanMembers(context.Context, string) (registry.Plan, map[string]registry.Registration, error) {
 	return registry.Plan{}, nil, registry.ErrNotFound
 }
+func (m memoryRegistry) EvaluatorRegistrations(context.Context) ([]registry.Registration, error) {
+	return nil, nil
+}
 func (m memoryRegistry) RegisterPlugin(_ context.Context, r registry.Registration, _ string) (registry.Registration, bool, error) {
 	return r, true, nil
 }

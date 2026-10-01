@@ -38,23 +38,51 @@ type querier interface {
 const pinnedWorkSQL = `(SELECT count(*) FROM pipeline_plan_work w WHERE (w.kind<>'connector_run' OR w.pinned_at>now()-interval '` + connectorRunPinExpiry + `')
  AND EXISTS (SELECT 1 FROM pipeline_plan_roles pr WHERE pr.plan_id=w.plan_id AND pr.registration_id=plugin_registrations.id))`
 
+// evaluatorSQL keeps the Subscription Versions v pinning the evaluator of an
+// alert-rule registration: its plugin id and version (THE-805).
+const evaluatorSQL = `'subscription'=ANY(plugin_registrations.contributions)
+ AND v.evaluator->>'plugin_id'=plugin_registrations.plugin_id AND v.evaluator->>'version'=plugin_registrations.version`
+
+// pendingEvaluationsSQL counts the pending evaluations of Subscription
+// Versions pinning an alert-rule registration's version: work it must still
+// judge, whichever plan is active.
+const pendingEvaluationsSQL = `(SELECT count(*) FROM evaluation_intents i JOIN subscription_versions v ON v.organization=i.organization AND v.id=i.subscription_version_id
+ WHERE i.state='pending' AND i.kind='evaluation' AND ` + evaluatorSQL + `)`
+
+// undispatchedSQL counts the earlier Subscription Versions pinning an
+// alert-rule registration's version that changes not yet dispatched may still
+// reach: a Version judges the changes committed before its successor's
+// activation, and evaluation work for them exists only once the
+// Organization's dispatch checkpoint passed that activation. A deleted
+// Subscription judges nothing.
+const undispatchedSQL = `(SELECT count(*) FROM subscription_versions v JOIN subscriptions s ON s.organization=v.organization AND s.id=v.subscription_id
+ LEFT JOIN monitoring_checkpoints c ON c.organization=v.organization
+ WHERE NOT s.deleted AND s.current_version_id<>v.id AND ` + evaluatorSQL + `
+ AND (SELECT min(n.activation_position) FROM subscription_versions n WHERE n.organization=v.organization AND n.subscription_id=v.subscription_id AND n.activation_position>v.activation_position)>coalesce(c.position,0))`
+
+// subscriptionsSQL counts the Subscriptions that are not deleted whose current
+// Version pins an alert-rule registration's version.
+const subscriptionsSQL = `(SELECT count(*) FROM subscription_versions v JOIN subscriptions s ON s.organization=v.organization AND s.id=v.subscription_id AND s.current_version_id=v.id
+ WHERE NOT s.deleted AND ` + evaluatorSQL + `)`
+
 // connectorRunPinExpiry is well past a connector run's longest life: three
 // attempts of at most five minutes and their backoff.
 const connectorRunPinExpiry = "30 minutes"
 
 // registrationColumns read a registration. A registration a plan change left
-// out is draining while work pinned to a plan naming it remains, and inactive
-// once none does: derived when read, so no process has to notice the last
-// piece of work finishing.
+// out is draining while work pinned to a plan naming it remains or, for an
+// alert-rule plugin, while Subscriptions pin its version, and inactive once
+// none does: derived when read, so no process has to notice the last piece of
+// work finishing.
 const registrationColumns = `id,plugin_id,version,endpoint,manifest_digest,coalesce(artifact_digest,''),contributions,roles,
- CASE WHEN state IN ('draining','inactive') THEN CASE WHEN ` + pinnedWorkSQL + `>0 THEN 'draining' ELSE 'inactive' END ELSE state END,
- created_at,updated_at,manifest,settings,check_report,origin,` + pinnedWorkSQL
+ CASE WHEN state IN ('draining','inactive') THEN CASE WHEN ` + pinnedWorkSQL + `+` + pendingEvaluationsSQL + `+` + undispatchedSQL + `+` + subscriptionsSQL + `>0 THEN 'draining' ELSE 'inactive' END ELSE state END,
+ created_at,updated_at,manifest,settings,check_report,origin,` + pinnedWorkSQL + `+` + pendingEvaluationsSQL + `+` + undispatchedSQL + `,` + subscriptionsSQL
 
 // scanRegistration scans registrationColumns, then extra columns into extra.
 func scanRegistration(row pgx.Row, extra ...any) (registry.Registration, error) {
 	var r registry.Registration
 	var settings, report []byte
-	err := row.Scan(append([]any{&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report, &r.Origin, &r.PinnedWork}, extra...)...)
+	err := row.Scan(append([]any{&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.ArtifactDigest, &r.Contributions, &r.Roles, &r.State, &r.CreatedAt, &r.UpdatedAt, &r.Manifest, &settings, &report, &r.Origin, &r.PinnedWork, &r.Subscriptions}, extra...)...)
 	if err != nil {
 		return r, err
 	}
@@ -288,6 +316,19 @@ func (s PluginStore) PlanMembers(ctx context.Context, id string) (registry.Plan,
 		members[r.ID] = r
 	}
 	return plan, members, err
+}
+
+// EvaluatorRegistrations returns every registration a plan named for an
+// alert-rule role, ordered by the latest plan naming each, oldest first.
+func (s PluginStore) EvaluatorRegistrations(ctx context.Context) ([]registry.Registration, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations
+ JOIN (SELECT pr.registration_id,max(p.created_at) AS named_at FROM pipeline_plan_roles pr JOIN pipeline_plans p ON p.id=pr.plan_id
+  WHERE pr.role LIKE 'subscription:%' GROUP BY pr.registration_id) named ON named.registration_id=plugin_registrations.id
+ ORDER BY named.named_at,plugin_registrations.id`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (registry.Registration, error) { return scanRegistration(row) })
 }
 
 // PinWork pins a piece of work to plan unless it is pinned already, and

@@ -102,7 +102,9 @@ type Activation struct {
 // PlanActivation computes the plan that activates target on top of the active
 // plan: every other version of the same plugin leaves it, and so does every
 // registration whose roles target takes over entirely; target joins with
-// every role it declares. The result must satisfy the startup rules (one
+// every role it declares. For an alert-rule plugin, new Subscription Versions
+// pin target from then on, while those pinning the version that left keep it
+// until an operator migrates them (THE-805). The result must satisfy the startup rules (one
 // normalizer per media type, one provider per connector kind, one ingestion
 // and one retrieval plugin, extension namespace ownership); a registration
 // target overlaps only in part is a conflict. validate adds the checks of
@@ -116,9 +118,6 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	pin, err := target.Pin()
 	if err != nil {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "/registrations/"+target.ID)}
-	}
-	if pin.Manifest.Contributions.Subscription != nil {
-		return Activation{}, fmt.Errorf("%w: %s declares an alert rule (subscription); each Subscription pins its rule's version, so another version cannot be activated while Subscriptions use this one; pin it in the configuration instead", ErrUnsupportedRole, target.PluginID)
 	}
 	alone, err := plugins.NewPinSet([]*plugins.Pin{pin})
 	if err != nil {

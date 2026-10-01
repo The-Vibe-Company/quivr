@@ -84,6 +84,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/admin/spaces/{vector_space_id}/promote`](#post-v0adminspacesvector_space_idpromote) | `promoteVectorSpace` | `plugins:admin` |
 | [`GET /v0/admin/quarantine`](#get-v0adminquarantine) | `listQuarantinedVersions` | `plugins:admin` |
 | [`POST /v0/admin/quarantine/reprocess`](#post-v0adminquarantinereprocess) | `reprocessQuarantine` | `plugins:admin` |
+| [`POST /v0/admin/subscriptions/evaluator-migrations`](#post-v0adminsubscriptionsevaluator-migrations) | `migrateSubscriptionEvaluators` | `plugins:admin` |
 | [`POST /v0/admin/plugins/plan/rollback`](#post-v0adminpluginsplanrollback) | `rollbackPipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/plugins/plan`](#get-v0adminpluginsplan) | `getActivePipelinePlan` | `plugins:admin` |
 | [`GET /v0/admin/active-plugins`](#get-v0adminactive-plugins) | `listActivePlugins` | `observability:read` |
@@ -1231,7 +1232,7 @@ One registration with the Contract Runner's report once its check ran. Requires 
 
 Operation `activatePlugin`. Requires `plugins:admin`.
 
-Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 
 **Parameters**
 
@@ -1244,7 +1245,7 @@ Make a validated registration serve every role it declares, as a new immutable P
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 409 registration_not_validated or plugin_conflict, 422 unsupported_role, 503 storage unavailable. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown registration, 409 registration_not_validated or plugin_conflict, 503 storage unavailable. |
 
 #### `GET /v0/admin/plugins/plans/{plan_id}`
 
@@ -1362,11 +1363,26 @@ Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions fai
 | `202` | `application/json` [`Operation`](#operation)<br><br>Header `Location`: string. | The accepted reprocess Operation; read it at the Location. |
 | `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown Corpus, 409 dry_run_required, idempotency_conflict or reprocess_in_progress, 422 invalid_schema or invalid_reprocess (an empty window), 503 storage unavailable. |
 
+#### `POST /v0/admin/subscriptions/evaluator-migrations`
+
+Operation `migrateSubscriptionEvaluators`. Requires `plugins:admin`.
+
+Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+
+**Request body** (required): `application/json` [`SubscriptionEvaluatorMigrationRequest`](#subscriptionevaluatormigrationrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`SubscriptionEvaluatorMigration`](#subscriptionevaluatormigration) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 422 invalid_schema, unsupported_evaluator or invalid_migration, 503 storage unavailable. |
+
 #### `POST /v0/admin/plugins/plan/rollback`
 
 Operation `rollbackPipelinePlan`. Requires `plugins:admin`.
 
-Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 
 **Request body** (required): `application/json` [`PipelinePlanRollbackRequest`](#pipelineplanrollbackrequest)
 
@@ -1375,7 +1391,7 @@ Make an earlier plan's roles active again, as a new immutable Pipeline Plan with
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`PipelinePlan`](#pipelineplan) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 409 idempotency_conflict, no_previous_plan, plugin_conflict, plugin_unreachable or registration_not_validated, 422 invalid_schema or unsupported_role, 503 storage unavailable. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown plan, 409 idempotency_conflict, no_previous_plan, plugin_conflict, plugin_unreachable or registration_not_validated, 422 invalid_schema, 503 storage unavailable. |
 
 #### `GET /v0/admin/plugins/plan`
 
@@ -3971,8 +3987,9 @@ required:
 | `artifact_digest` | string |  | Artifact digest the plugin reports, recorded as information. Absent when it reports none. Minimum length `1`. |
 | `contributions` | array of string | yes |  |
 | `roles` | array of string | yes | Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves. |
-| `state` | string | yes | registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive. One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
-| `pinned_work` | integer | yes | Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. Minimum `0`. |
+| `state` | string | yes | registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive. One of `registered`, `validated`, `active`, `draining`, `inactive`, `rejected`. |
+| `pinned_work` | integer | yes | Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. For an alert-rule plugin it also counts the pending evaluations of Subscription Versions that pin its version. Minimum `0`. |
+| `subscriptions` | integer | yes | For an alert-rule plugin, the Subscriptions of every Organization that are not deleted, enabled or disabled, whose current Version pins this plugin version. They keep it until migrateSubscriptionEvaluators moves them; 0 for other plugins. Minimum `0`. |
 | `check` | [`PluginCheckReport`](#plugincheckreport) |  |  |
 | `created_at` | string (date-time) | yes |  |
 | `updated_at` | string (date-time) | yes |  |
@@ -3994,6 +4011,7 @@ Example `plugin_registration_checked`:
   ],
   "state": "rejected",
   "pinned_work": 0,
+  "subscriptions": 0,
   "check": {
     "certified": false,
     "checked_at": "2026-09-30T13:00:00Z",
@@ -4077,11 +4095,15 @@ properties:
       - draining
       - inactive
       - rejected
-    description: registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
+    description: registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive.
   pinned_work:
     type: integer
     minimum: 0
-    description: Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero.
+    description: Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. For an alert-rule plugin it also counts the pending evaluations of Subscription Versions that pin its version.
+  subscriptions:
+    type: integer
+    minimum: 0
+    description: For an alert-rule plugin, the Subscriptions of every Organization that are not deleted, enabled or disabled, whose current Version pins this plugin version. They keep it until migrateSubscriptionEvaluators moves them; 0 for other plugins.
   check:
     $ref: '#/components/schemas/PluginCheckReport'
   created_at:
@@ -4100,6 +4122,7 @@ required:
   - roles
   - state
   - pinned_work
+  - subscriptions
   - created_at
   - updated_at
 ```
@@ -4365,6 +4388,7 @@ Example `plugin_registrations`:
       ],
       "state": "active",
       "pinned_work": 4,
+      "subscriptions": 0,
       "created_at": "2026-09-30T10:00:00Z",
       "updated_at": "2026-09-30T10:00:00Z"
     },
@@ -4383,6 +4407,7 @@ Example `plugin_registrations`:
       ],
       "state": "draining",
       "pinned_work": 1,
+      "subscriptions": 0,
       "created_at": "2026-09-30T10:00:00Z",
       "updated_at": "2026-09-30T10:00:00Z"
     }
@@ -4953,6 +4978,172 @@ required:
   - generations_switched
   - corpora_incomplete
   - segments_missing
+```
+
+</details>
+
+### `SubscriptionEvaluatorMigrationRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_id` | string | yes | The alert-rule plugin, such as alerts. Minimum length `1`. Maximum length `256`. |
+| `from_version` | string | yes | The version the Subscriptions to move pin now. Minimum length `1`. Maximum length `256`. |
+| `dry_run` | boolean | yes | true validates and lists what would move, without moving anything. |
+| `limit` | integer |  | The most Subscriptions this call looks at. Default `100`. Minimum `1`. Maximum `500`. |
+| `after` | string |  | Continue after this Subscription id, the next_after of the previous call. Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plugin_id:
+    type: string
+    minLength: 1
+    maxLength: 256
+    description: The alert-rule plugin, such as alerts.
+  from_version:
+    type: string
+    minLength: 1
+    maxLength: 256
+    description: The version the Subscriptions to move pin now.
+  dry_run:
+    type: boolean
+    description: true validates and lists what would move, without moving anything.
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 500
+    default: 100
+    description: The most Subscriptions this call looks at.
+  after:
+    type: string
+    minLength: 1
+    description: Continue after this Subscription id, the next_after of the previous call.
+required:
+  - plugin_id
+  - from_version
+  - dry_run
+```
+
+</details>
+
+### `SubscriptionEvaluatorMigration`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_id` | string | yes |  |
+| `from_version` | string | yes |  |
+| `to_version` | string | yes | The version the active plan serves, which moved Subscriptions pin. |
+| `dry_run` | boolean | yes |  |
+| `moved` | array of [`SubscriptionEvaluatorMove`](#subscriptionevaluatormove) | yes | The Subscriptions moved, or that would move in a dry run. |
+| `refused` | array of [`SubscriptionEvaluatorRefusal`](#subscriptionevaluatorrefusal) | yes | The Subscriptions left on from_version. code is invalid_expression or invalid_subscription_configuration when the served version's schemas refuse them (field and message name the first issue), or subscription_changed when the Subscription got another Version during the call. |
+| `next_after` | string |  | Present when more Subscriptions may pin from_version; pass it as after. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  plugin_id:
+    type: string
+  from_version:
+    type: string
+  to_version:
+    type: string
+    description: The version the active plan serves, which moved Subscriptions pin.
+  dry_run:
+    type: boolean
+  moved:
+    type: array
+    description: The Subscriptions moved, or that would move in a dry run.
+    items:
+      $ref: '#/components/schemas/SubscriptionEvaluatorMove'
+  refused:
+    type: array
+    description: The Subscriptions left on from_version. code is invalid_expression or invalid_subscription_configuration when the served version's schemas refuse them (field and message name the first issue), or subscription_changed when the Subscription got another Version during the call.
+    items:
+      $ref: '#/components/schemas/SubscriptionEvaluatorRefusal'
+  next_after:
+    type: string
+    description: Present when more Subscriptions may pin from_version; pass it as after.
+required:
+  - plugin_id
+  - from_version
+  - to_version
+  - dry_run
+  - moved
+  - refused
+```
+
+</details>
+
+### `SubscriptionEvaluatorMove`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `subscription_id` | string | yes |  |
+| `from_version_id` | string | yes | The Subscription Version that pinned from_version. |
+| `version_id` | string |  | The new current Subscription Version; absent in a dry run. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  subscription_id:
+    type: string
+  from_version_id:
+    type: string
+    description: The Subscription Version that pinned from_version.
+  version_id:
+    type: string
+    description: The new current Subscription Version; absent in a dry run.
+required:
+  - subscription_id
+  - from_version_id
+```
+
+</details>
+
+### `SubscriptionEvaluatorRefusal`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `subscription_id` | string | yes |  |
+| `version_id` | string | yes | Its current Subscription Version, which keeps from_version. |
+| `code` | string | yes |  |
+| `field` | string |  |  |
+| `message` | string |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  subscription_id:
+    type: string
+  version_id:
+    type: string
+    description: Its current Subscription Version, which keeps from_version.
+  code:
+    type: string
+  field:
+    type: string
+  message:
+    type: string
+required:
+  - subscription_id
+  - version_id
+  - code
 ```
 
 </details>

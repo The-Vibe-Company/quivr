@@ -107,7 +107,7 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	if _, ok := s.Evaluators[EvaluatorKey(in.Evaluator)]; !ok {
+	if !s.Evaluators.Serves(EvaluatorKey(in.Evaluator)) {
 		return PreviewResult{}, ErrUnsupportedEvaluator
 	}
 	if tooLarge(in.Evaluator.Configuration) {
@@ -143,7 +143,7 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	if item.Configuration == nil {
 		item.Configuration = map[string]any{}
 	}
-	evaluator := s.Evaluators[EvaluatorKey(in.Evaluator)]
+	evaluator, _ := s.Evaluators.Evaluator(EvaluatorKey(in.Evaluator))
 	decided := make([]*Evaluation, len(recent))
 	errs := make([]error, len(recent))
 	var wg sync.WaitGroup

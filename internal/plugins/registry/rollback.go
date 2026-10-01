@@ -3,7 +3,6 @@ package registry
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -39,8 +38,10 @@ func (r RollbackRequest) Stop() bool { return r.PinnedWork == PinnedWorkStop }
 // PlanRollback computes the plan that restores target's roles on top of the
 // active plan: the registrations of target serve again, every other member
 // of the active plan leaves it. The result must satisfy the rules of an
-// activation: the startup rules, the running engine's checks (validate), the
-// same retrieval role presence, and unchanged alert-rule roles.
+// activation: the startup rules, the running engine's checks (validate) and
+// the same retrieval role presence. An alert-rule version that leaves the
+// plan keeps judging the Subscription Versions that pin it, like after an
+// activation.
 func PlanRollback(active, target Plan, members map[string]Registration, validate func(*plugins.PinSet) error) (Activation, error) {
 	if sameRoles(active.Roles, target.Roles) {
 		return Activation{Roles: active.Roles, Unchanged: true}, nil
@@ -65,9 +66,6 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeRetrievalConflict, Path: "/contributions/retrieval",
 			Message: "this rollback would add or remove the retrieval role; a running search switches its retrieval plugin but only starts or stops using one after a restart, so pin it in the configuration"}}}
 	}
-	if !sameRoles(subscriptionRoles(active.Roles), subscriptionRoles(roles)) {
-		return Activation{}, fmt.Errorf("%w: this rollback would change an alert rule (subscription) plugin; each Subscription pins its rule's version, so switch alert rules in the configuration", ErrUnsupportedRole)
-	}
 	if validate != nil {
 		if err := validate(set); err != nil {
 			return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
@@ -91,16 +89,6 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 		}
 	}
 	return a, nil
-}
-
-func subscriptionRoles(roles []Assignment) []Assignment {
-	var out []Assignment
-	for _, a := range roles {
-		if strings.HasPrefix(a.Role, "subscription:") {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // Rollback makes an earlier plan's roles active again as a new immutable

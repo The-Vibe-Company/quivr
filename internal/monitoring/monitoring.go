@@ -231,8 +231,12 @@ type Service struct {
 	Profiles SearchProfiles
 	// MatchStore reads Match history and Deliveries.
 	MatchStore MatchStore
-	// Evaluators are the installed evaluators a Subscription Version may pin.
-	Evaluators Evaluators
+	// Evaluators are the installed evaluators: a new Subscription Version
+	// pins one they serve, or keeps the one its Subscription already pins.
+	Evaluators EvaluatorSet
+	// Moves lists and moves the Subscriptions pinning an evaluator, for an
+	// operator migration; without it migrations are not served.
+	Moves EvaluatorMoves
 	// Recent and Versions read what a preview judges; without them previews
 	// are not served.
 	Recent   RecentReader
@@ -362,10 +366,17 @@ func (s Service) RenameSavedQuery(ctx context.Context, scope corpus.Scope, key, 
 	return s.Store.RenameSavedQuery(ctx, scope.Organization, key, id, name)
 }
 
-// validSubscription checks the evaluator and destination of a Subscription Version.
-func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, destination string) error {
-	if _, ok := s.Evaluators[EvaluatorKey(evaluator)]; !ok {
-		return ErrUnsupportedEvaluator
+// validSubscription checks the evaluator and destination of a Subscription
+// Version. The evaluator must be served, or be kept, the one the
+// Subscription's current Version pins ("" for a new Subscription), while it
+// is still installed: an edit never has to move a Subscription to another
+// version of its rule.
+func (s Service) validSubscription(scope corpus.Scope, evaluator Evaluator, destination, kept string) error {
+	key := EvaluatorKey(evaluator)
+	if !s.Evaluators.Serves(key) {
+		if _, installed := s.Evaluators.Evaluator(key); !installed || key != kept {
+			return ErrUnsupportedEvaluator
+		}
 	}
 	if tooLarge(evaluator.Configuration) {
 		return ErrTooLarge
@@ -386,7 +397,8 @@ func (s Service) validPair(evaluator Evaluator, q SavedQueryVersion) error {
 	if configuration == nil {
 		configuration = map[string]any{}
 	}
-	return s.Evaluators[EvaluatorKey(evaluator)].Validate(expression, configuration)
+	port, _ := s.Evaluators.Evaluator(EvaluatorKey(evaluator))
+	return port.Validate(expression, configuration)
 }
 
 // pinnable reads the Saved Query Version a Subscription Version would pin and
@@ -412,7 +424,7 @@ func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in 
 	if in.Owner != "" && !validOwner(in.Owner) {
 		return Subscription{}, ErrInvalidOwner
 	}
-	if err := s.validSubscription(scope, in.Evaluator, in.DestinationID); err != nil {
+	if err := s.validSubscription(scope, in.Evaluator, in.DestinationID, ""); err != nil {
 		return Subscription{}, err
 	}
 	// Replaying a creation stays valid after its Saved Query moved on; the
@@ -509,7 +521,7 @@ func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Sco
 	if err != nil {
 		return SubscriptionVersion{}, err
 	}
-	if err = s.validSubscription(scope, in.Evaluator, in.DestinationID); err != nil {
+	if err = s.validSubscription(scope, in.Evaluator, in.DestinationID, EvaluatorKey(sub.Current.Evaluator)); err != nil {
 		return SubscriptionVersion{}, err
 	}
 	q, err := s.pinnable(ctx, scope, sub.Current.SavedQueryID, in.SavedQueryVersionID)

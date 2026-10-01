@@ -164,6 +164,14 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 		t.Fatalf("another ingestion plugin takes the role over: %+v (%v)", takeover, err)
 	}
 
+	// A new alert-rule version takes the plugin's role; the old one leaves the
+	// plan and drains while Subscription Versions pin it (THE-805).
+	ruleV1, ruleV2 := registered(t, manifest("example.rule", "1.0.0", rule)), registered(t, manifest("example.rule", "2.0.0", rule))
+	withRule, ruleMembers := plan(t, embedderV1, ruleV1)
+	if next, err := registry.PlanActivation(withRule, ruleMembers, ruleV2, nil); err != nil || roleMap(next.Roles)["subscription:example.rule"] != "example.rule@2.0.0" || !reflect.DeepEqual(next.Retired, []string{ruleV1.ID}) {
+		t.Fatalf("an alert-rule upgrade: %+v (%v); want 2.0.0 serving the rule's role, 1.0.0 retired", next, err)
+	}
+
 	// A registration still draining can serve again (a rollback).
 	draining := embedderV2
 	draining.State = registry.StateDraining
@@ -179,7 +187,6 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 		// example.markdown would keep text/x-rst and still claim text/markdown.
 		"partial overlap": {markdownOnly, registry.ErrConflict, plugins.CodeRouteConflict},
 		"not validated":   {func() registry.Registration { r := embedderV2; r.State = registry.StateRejected; return r }(), registry.ErrNotValidated, "rejected"},
-		"alert rule":      {registered(t, manifest("example.rule", "1.0.0", "  subscription:\n    expression_schema: {type: object}\n    timeout_ms: 1000\n")), registry.ErrUnsupportedRole, "each Subscription pins its rule's version"},
 		"adds retrieval":  {registered(t, string(must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml")))), registry.ErrConflict, plugins.CodeRetrievalConflict},
 	} {
 		_, err := registry.PlanActivation(active, members, c.target, nil)
@@ -271,6 +278,9 @@ func TestConfigurationAppliesOnlyTheRolesItChanged(t *testing.T) {
 		t.Fatalf("a configuration change over an activation: %+v", r)
 	}
 }
+
+// rule is the subscription Contribution of a test alert-rule manifest.
+const rule = "  subscription:\n    expression_schema: {type: object}\n    timeout_ms: 1000\n"
 
 func must(b []byte, err error) []byte {
 	if err != nil {

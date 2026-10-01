@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 )
 
 // versionParts reads the evaluated Record Version: its canonical text Parts,
@@ -68,17 +70,42 @@ func (cfg Config) migrationPins() *plugins.PinSet {
 	return pins
 }
 
-// evaluators installs the subscription evaluator of every pinned plugin, and
-// the fixture evaluator only where the deployment enables it for tests.
-func (cfg Config) evaluators(pins *plugins.PinSet) monitoring.Evaluators {
-	installed := monitoring.Evaluators{}
+// planEvaluators installs the subscription evaluators of a plan's plugins,
+// which new Subscription Versions pin, and the fixture evaluator only where
+// the deployment enables it for tests. Every other alert-rule version a plan
+// named, or the process installed before (previous), stays installed for the
+// Subscription Versions that pin it, until an operator migrates them
+// (THE-805); the latest plan naming a version gives its registration. A
+// registry that cannot be read keeps the previous ones and returns the error.
+func (cfg Config) planEvaluators(ctx context.Context, store registry.Store, set *plugins.PinSet, previous monitoring.PlanEvaluators) (monitoring.PlanEvaluators, error) {
+	served := monitoring.Evaluators{}
 	if cfg.MonitoringFixtureEvaluator {
-		installed = monitoring.FixtureEvaluators()
+		served = monitoring.FixtureEvaluators()
 	}
-	for _, pin := range pins.Evaluators() {
-		installed[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
+	for _, pin := range set.Evaluators() {
+		served[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
 	}
-	return installed
+	retained := monitoring.Evaluators{}
+	for _, earlier := range []monitoring.Evaluators{previous.Retained, previous.Served} {
+		for key, port := range earlier {
+			retained[key] = port
+		}
+	}
+	read, cancel := context.WithTimeout(ctx, 5*time.Second)
+	named, err := store.EvaluatorRegistrations(read)
+	cancel()
+	for _, r := range named {
+		pin, err := r.Pin()
+		if err != nil || pin.Manifest.Contributions.Subscription == nil {
+			slog.Error("an earlier alert-rule version cannot be loaded; the Subscription Versions pinning it wait", "plugin", r.PluginID, "version", r.Version, "registration", r.ID, "error", err)
+			continue
+		}
+		retained[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
+	}
+	for key := range served {
+		delete(retained, key)
+	}
+	return monitoring.PlanEvaluators{Served: served, Retained: retained}, err
 }
 
 // DeliveryConfig overrides the webhook delivery policy with Go durations.

@@ -2001,7 +2001,7 @@ type PluginRegistration struct {
 	Endpoint       string `json:"endpoint"`
 	ManifestDigest string `json:"manifest_digest"`
 
-	// PinnedWork Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero.
+	// PinnedWork Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. For an alert-rule plugin it also counts the pending evaluations of Subscription Versions that pin its version.
 	PinnedWork     int    `json:"pinned_work"`
 	PluginId       string `json:"plugin_id"`
 	RegistrationId string `json:"registration_id"`
@@ -2009,13 +2009,16 @@ type PluginRegistration struct {
 	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
 	Roles []string `json:"roles"`
 
-	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
-	State     PluginRegistrationState `json:"state"`
-	UpdatedAt time.Time               `json:"updated_at"`
-	Version   string                  `json:"version"`
+	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive.
+	State PluginRegistrationState `json:"state"`
+
+	// Subscriptions For an alert-rule plugin, the Subscriptions of every Organization that are not deleted, enabled or disabled, whose current Version pins this plugin version. They keep it until migrateSubscriptionEvaluators moves them; 0 for other plugins.
+	Subscriptions int       `json:"subscriptions"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Version       string    `json:"version"`
 }
 
-// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
+// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive.
 type PluginRegistrationState string
 
 // PluginRegistrationList defines model for PluginRegistrationList.
@@ -2566,6 +2569,64 @@ type SubscriptionCreate struct {
 	SavedQueryVersionId string             `json:"saved_query_version_id"`
 }
 
+// SubscriptionEvaluatorMigration defines model for SubscriptionEvaluatorMigration.
+type SubscriptionEvaluatorMigration struct {
+	DryRun      bool   `json:"dry_run"`
+	FromVersion string `json:"from_version"`
+
+	// Moved The Subscriptions moved, or that would move in a dry run.
+	Moved []SubscriptionEvaluatorMove `json:"moved"`
+
+	// NextAfter Present when more Subscriptions may pin from_version; pass it as after.
+	NextAfter *string `json:"next_after,omitempty"`
+	PluginId  string  `json:"plugin_id"`
+
+	// Refused The Subscriptions left on from_version. code is invalid_expression or invalid_subscription_configuration when the served version's schemas refuse them (field and message name the first issue), or subscription_changed when the Subscription got another Version during the call.
+	Refused []SubscriptionEvaluatorRefusal `json:"refused"`
+
+	// ToVersion The version the active plan serves, which moved Subscriptions pin.
+	ToVersion string `json:"to_version"`
+}
+
+// SubscriptionEvaluatorMigrationRequest defines model for SubscriptionEvaluatorMigrationRequest.
+type SubscriptionEvaluatorMigrationRequest struct {
+	// After Continue after this Subscription id, the next_after of the previous call.
+	After *string `json:"after,omitempty"`
+
+	// DryRun true validates and lists what would move, without moving anything.
+	DryRun bool `json:"dry_run"`
+
+	// FromVersion The version the Subscriptions to move pin now.
+	FromVersion string `json:"from_version"`
+
+	// Limit The most Subscriptions this call looks at.
+	Limit *int `json:"limit,omitempty"`
+
+	// PluginId The alert-rule plugin, such as alerts.
+	PluginId string `json:"plugin_id"`
+}
+
+// SubscriptionEvaluatorMove defines model for SubscriptionEvaluatorMove.
+type SubscriptionEvaluatorMove struct {
+	// FromVersionId The Subscription Version that pinned from_version.
+	FromVersionId  string `json:"from_version_id"`
+	SubscriptionId string `json:"subscription_id"`
+
+	// VersionId The new current Subscription Version; absent in a dry run.
+	VersionId *string `json:"version_id,omitempty"`
+}
+
+// SubscriptionEvaluatorRefusal defines model for SubscriptionEvaluatorRefusal.
+type SubscriptionEvaluatorRefusal struct {
+	Code           string  `json:"code"`
+	Field          *string `json:"field,omitempty"`
+	Message        *string `json:"message,omitempty"`
+	SubscriptionId string  `json:"subscription_id"`
+
+	// VersionId Its current Subscription Version, which keeps from_version.
+	VersionId string `json:"version_id"`
+}
+
 // SubscriptionOwner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
 type SubscriptionOwner = string
 
@@ -3002,6 +3063,9 @@ type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
 // PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
 type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
 
+// MigrateSubscriptionEvaluatorsJSONRequestBody defines body for MigrateSubscriptionEvaluators for application/json ContentType.
+type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrationRequest
+
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
 
@@ -3350,6 +3414,9 @@ type ServerInterface interface {
 
 	// (GET /v0/admin/stats/top-queries)
 	GetTopQueries(w http.ResponseWriter, r *http.Request, params GetTopQueriesParams)
+
+	// (POST /v0/admin/subscriptions/evaluator-migrations)
+	MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request)
 
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(w http.ResponseWriter, r *http.Request, blobId string)
@@ -4162,6 +4229,20 @@ func (siw *ServerInterfaceWrapper) GetTopQueries(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetTopQueries(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MigrateSubscriptionEvaluators operation middleware
+func (siw *ServerInterfaceWrapper) MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MigrateSubscriptionEvaluators(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5947,6 +6028,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/spaces/{vector_space_id}/promote", wrapper.PromoteVectorSpace)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/quarantine", wrapper.ListQuarantinedVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/quarantine/reprocess", wrapper.ReprocessQuarantine)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/subscriptions/evaluator-migrations", wrapper.MigrateSubscriptionEvaluators)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins/plan/rollback", wrapper.RollbackPipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plan", wrapper.GetActivePipelinePlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/active-plugins", wrapper.ListActivePlugins)
@@ -6826,6 +6908,45 @@ type GetTopQueriesdefaultJSONResponse struct {
 }
 
 func (response GetTopQueriesdefaultJSONResponse) VisitGetTopQueriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MigrateSubscriptionEvaluatorsRequestObject struct {
+	Body *MigrateSubscriptionEvaluatorsJSONRequestBody
+}
+
+type MigrateSubscriptionEvaluatorsResponseObject interface {
+	VisitMigrateSubscriptionEvaluatorsResponse(w http.ResponseWriter) error
+}
+
+type MigrateSubscriptionEvaluators200JSONResponse SubscriptionEvaluatorMigration
+
+func (response MigrateSubscriptionEvaluators200JSONResponse) VisitMigrateSubscriptionEvaluatorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MigrateSubscriptionEvaluatorsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response MigrateSubscriptionEvaluatorsdefaultJSONResponse) VisitMigrateSubscriptionEvaluatorsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -9152,6 +9273,9 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/stats/top-queries)
 	GetTopQueries(ctx context.Context, request GetTopQueriesRequestObject) (GetTopQueriesResponseObject, error)
 
+	// (POST /v0/admin/subscriptions/evaluator-migrations)
+	MigrateSubscriptionEvaluators(ctx context.Context, request MigrateSubscriptionEvaluatorsRequestObject) (MigrateSubscriptionEvaluatorsResponseObject, error)
+
 	// (GET /v0/blobs/{blob_id})
 	GetBlob(ctx context.Context, request GetBlobRequestObject) (GetBlobResponseObject, error)
 
@@ -9920,6 +10044,37 @@ func (sh *strictHandler) GetTopQueries(w http.ResponseWriter, r *http.Request, p
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetTopQueriesResponseObject); ok {
 		if err := validResponse.VisitGetTopQueriesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MigrateSubscriptionEvaluators operation middleware
+func (sh *strictHandler) MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request) {
+	var request MigrateSubscriptionEvaluatorsRequestObject
+
+	var body MigrateSubscriptionEvaluatorsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MigrateSubscriptionEvaluators(ctx, request.(MigrateSubscriptionEvaluatorsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MigrateSubscriptionEvaluators")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MigrateSubscriptionEvaluatorsResponseObject); ok {
+		if err := validResponse.VisitMigrateSubscriptionEvaluatorsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

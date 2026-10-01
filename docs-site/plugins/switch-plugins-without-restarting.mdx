@@ -132,6 +132,22 @@ The processing of a receipt, a connector run and a rebuild each record the plan 
 
 If the old version cannot be reached while it drains, its pinned work retries with backoff, up to `pinned_plugin_attempts` attempts (10 by default). The work then stops with the diagnostic `pinned_plugin_unavailable`, which names the plan and the plugin: a Version still waiting for its text is quarantined, a searchable Version keeps its text and its enrichment stops, and a rebuild fails. The work is never moved to the new version. A plugin of the active plan, in contrast, may be unreachable for any time: its work keeps retrying. Do not terminate pinned work by hand in Temporal, since its count would never be released. To run quarantined Versions through the new version, [reprocess them](/plugins/reprocess-quarantined-versions).
 
+## Upgrade an alert rule
+
+Activating a new version of an alert-rule plugin follows the same steps. From then on, new Subscriptions and edits pin the new version; a Subscription that already pins the old one keeps it, and an edit may keep it too. Each Subscription is judged by the version it pinned, so its alerts never change rule silently. The old version stays `draining` while `subscriptions` counts the Subscriptions that still pin it, and `pinned_work` the evaluations still waiting for it. Keep it running until it is `inactive`.
+
+Move an Organization's Subscriptions to the version the plan serves when you are ready, with a key that has `plugins:admin` on that Organization. A dry run first lists what would move and what would not:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/admin/subscriptions/evaluator-migrations" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  -H "Content-Type: application/json" -d '{"plugin_id": "alerts", "from_version": "0.2.0", "dry_run": true}' \
+  | jq '{to_version, moved: (.moved | length), refused, next_after}'
+```
+
+`refused` lists the Subscriptions whose saved search the new version's schema refuses, with the first issue; they stay on the old version until someone edits them. Send the same request with `"dry_run": false` to move the others. A moved Subscription gets a new Version, as an edit would: it judges what changes from then on, nothing is evaluated again, and its Matches keep the version that decided them. A call looks at 100 Subscriptions by default; pass `next_after` as `after` to continue.
+
+After a rollback, the version it brings back serves new Subscriptions again and the ones on the version you left stay there; the same call moves them back.
+
 ## The configuration and the plan
 
 The plugins pinned in `QUIVR_CONFIG` are registered at every start. The configuration then applies, role by role, only what changed in it since it last applied. A role whose pinned plugin you changed follows the configuration; a role you did not touch keeps what the plan says, so an activation survives restarts.
@@ -139,6 +155,5 @@ The plugins pinned in `QUIVR_CONFIG` are registered at every start. The configur
 ## Limits
 
 - A normalizer's check gives each fixture's input file by its path on the api's machine, a `file://` URL, as `quivr plugin test` does. The normalizer must run where it can read the api's temporary folder, for example on the same machine; elsewhere it is rejected, so pin it in the configuration instead.
-- Alert rules switch through the configuration only: each Subscription names its rule's version, so its evaluations never change version.
 - An activation cannot add or remove the retrieval role; pin or unpin a retrieval plugin in the configuration.
 - An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespaces, and vector spaces whose model changes without a new space version.

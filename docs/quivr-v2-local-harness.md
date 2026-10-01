@@ -554,6 +554,10 @@ Verification starts on the template and runs these steps in order:
 12. With the alert-rule plugins stopped, a matching article becomes searchable
     and no Match appears; after the restart the delayed evaluation completes
     with one Match and one acknowledged webhook.
+13. The template's 0.2.0 build is registered and activated: a Subscription on
+    0.1.0 keeps matching through 0.1.0 while a new one matches through 0.2.0.
+    The operator migrates the Subscriptions to 0.2.0, rolls back, and migrates
+    them back until 0.2.0 is inactive.
 
 Later steps keep the pdf-text pin.
 

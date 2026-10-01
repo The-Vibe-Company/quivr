@@ -23,7 +23,7 @@ type VersionReader interface {
 type Engine struct {
 	Store      EvaluationStore
 	Versions   VersionReader
-	Evaluators Evaluators
+	Evaluators EvaluatorSet
 	Workers    int
 	Lease      time.Duration
 	Poll       time.Duration
@@ -149,7 +149,7 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	key := EvaluatorKey(first.target.Subscription.Evaluator)
-	evaluator, installed := e.Evaluators[key]
+	evaluator, installed := e.Evaluators.Evaluator(key)
 	if !installed {
 		return true, e.retry(ctx, in, "evaluator_unavailable")
 	}

@@ -2001,7 +2001,7 @@ type PluginRegistration struct {
 	Endpoint       string `json:"endpoint"`
 	ManifestDigest string `json:"manifest_digest"`
 
-	// PinnedWork Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero.
+	// PinnedWork Unfinished work pinned to a Pipeline Plan that names this registration, such as the processing of a receipt, a connector run or a rebuild. Work finishes on the plan it started on, so a registration a plan change left out keeps being called until this reaches zero. For an alert-rule plugin it also counts the pending evaluations of Subscription Versions that pin its version.
 	PinnedWork     int    `json:"pinned_work"`
 	PluginId       string `json:"plugin_id"`
 	RegistrationId string `json:"registration_id"`
@@ -2009,13 +2009,16 @@ type PluginRegistration struct {
 	// Roles Roles the manifest declares it can serve, such as normalizer:application/pdf, subscription:<plugin id> or connector:<kind>. The active plan says which it serves.
 	Roles []string `json:"roles"`
 
-	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
-	State     PluginRegistrationState `json:"state"`
-	UpdatedAt time.Time               `json:"updated_at"`
-	Version   string                  `json:"version"`
+	// State registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive.
+	State PluginRegistrationState `json:"state"`
+
+	// Subscriptions For an alert-rule plugin, the Subscriptions of every Organization that are not deleted, enabled or disabled, whose current Version pins this plugin version. They keep it until migrateSubscriptionEvaluators moves them; 0 for other plugins.
+	Subscriptions int       `json:"subscriptions"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Version       string    `json:"version"`
 }
 
-// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work is above zero, then inactive.
+// PluginRegistrationState registered while the Contract Runner checks it, then validated or rejected; active while the active plan names it. Once a later plan leaves it out it is draining while pinned_work or subscriptions is above zero, then inactive.
 type PluginRegistrationState string
 
 // PluginRegistrationList defines model for PluginRegistrationList.
@@ -2566,6 +2569,64 @@ type SubscriptionCreate struct {
 	SavedQueryVersionId string             `json:"saved_query_version_id"`
 }
 
+// SubscriptionEvaluatorMigration defines model for SubscriptionEvaluatorMigration.
+type SubscriptionEvaluatorMigration struct {
+	DryRun      bool   `json:"dry_run"`
+	FromVersion string `json:"from_version"`
+
+	// Moved The Subscriptions moved, or that would move in a dry run.
+	Moved []SubscriptionEvaluatorMove `json:"moved"`
+
+	// NextAfter Present when more Subscriptions may pin from_version; pass it as after.
+	NextAfter *string `json:"next_after,omitempty"`
+	PluginId  string  `json:"plugin_id"`
+
+	// Refused The Subscriptions left on from_version. code is invalid_expression or invalid_subscription_configuration when the served version's schemas refuse them (field and message name the first issue), or subscription_changed when the Subscription got another Version during the call.
+	Refused []SubscriptionEvaluatorRefusal `json:"refused"`
+
+	// ToVersion The version the active plan serves, which moved Subscriptions pin.
+	ToVersion string `json:"to_version"`
+}
+
+// SubscriptionEvaluatorMigrationRequest defines model for SubscriptionEvaluatorMigrationRequest.
+type SubscriptionEvaluatorMigrationRequest struct {
+	// After Continue after this Subscription id, the next_after of the previous call.
+	After *string `json:"after,omitempty"`
+
+	// DryRun true validates and lists what would move, without moving anything.
+	DryRun bool `json:"dry_run"`
+
+	// FromVersion The version the Subscriptions to move pin now.
+	FromVersion string `json:"from_version"`
+
+	// Limit The most Subscriptions this call looks at.
+	Limit *int `json:"limit,omitempty"`
+
+	// PluginId The alert-rule plugin, such as alerts.
+	PluginId string `json:"plugin_id"`
+}
+
+// SubscriptionEvaluatorMove defines model for SubscriptionEvaluatorMove.
+type SubscriptionEvaluatorMove struct {
+	// FromVersionId The Subscription Version that pinned from_version.
+	FromVersionId  string `json:"from_version_id"`
+	SubscriptionId string `json:"subscription_id"`
+
+	// VersionId The new current Subscription Version; absent in a dry run.
+	VersionId *string `json:"version_id,omitempty"`
+}
+
+// SubscriptionEvaluatorRefusal defines model for SubscriptionEvaluatorRefusal.
+type SubscriptionEvaluatorRefusal struct {
+	Code           string  `json:"code"`
+	Field          *string `json:"field,omitempty"`
+	Message        *string `json:"message,omitempty"`
+	SubscriptionId string  `json:"subscription_id"`
+
+	// VersionId Its current Subscription Version, which keeps from_version.
+	VersionId string `json:"version_id"`
+}
+
 // SubscriptionOwner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
 type SubscriptionOwner = string
 
@@ -3002,6 +3063,9 @@ type ReprocessQuarantineJSONRequestBody = QuarantineReprocessRequest
 // PromoteVectorSpaceJSONRequestBody defines body for PromoteVectorSpace for application/json ContentType.
 type PromoteVectorSpaceJSONRequestBody = VectorSpacePromotionRequest
 
+// MigrateSubscriptionEvaluatorsJSONRequestBody defines body for MigrateSubscriptionEvaluators for application/json ContentType.
+type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrationRequest
+
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
 
@@ -3411,13 +3475,13 @@ type ClientInterface interface {
 	// RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 	RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 	RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPipelinePlans performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
@@ -3437,7 +3501,7 @@ type ClientInterface interface {
 
 	// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListQuarantinedVersions performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
@@ -3498,6 +3562,18 @@ type ClientInterface interface {
 	//
 	// The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 	GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MigrateSubscriptionEvaluatorsWithBody performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+	MigrateSubscriptionEvaluatorsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MigrateSubscriptionEvaluators performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+	MigrateSubscriptionEvaluators(ctx context.Context, body MigrateSubscriptionEvaluatorsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBlob performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
@@ -4118,7 +4194,7 @@ func (c *Client) GetActivePipelinePlan(ctx context.Context, reqEditors ...Reques
 // RollbackPipelinePlanWithBody performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 func (c *Client) RollbackPipelinePlanWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRollbackPipelinePlanRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -4134,7 +4210,7 @@ func (c *Client) RollbackPipelinePlanWithBody(ctx context.Context, contentType s
 // RollbackPipelinePlan performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 func (c *Client) RollbackPipelinePlan(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRollbackPipelinePlanRequest(c.Server, body)
 	if err != nil {
@@ -4194,7 +4270,7 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 
 // ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActivatePluginRequest(c.Server, registrationId)
 	if err != nil {
@@ -4366,6 +4442,38 @@ func (c *Client) GetStepStats(ctx context.Context, params *GetStepStatsParams, r
 // The most frequent search queries of the key's Organization over the window, normalized (lowercased, white space collapsed, at most 200 characters) and counted per hour, each with its hourly counts. Query text is recorded only when the deployment sets observability.record_query_text; otherwise recording is false and the list is empty. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetTopQueries(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTopQueriesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// MigrateSubscriptionEvaluatorsWithBody performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
+// with any type of body and a specified content type.
+//
+// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+func (c *Client) MigrateSubscriptionEvaluatorsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMigrateSubscriptionEvaluatorsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// MigrateSubscriptionEvaluators performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+func (c *Client) MigrateSubscriptionEvaluators(ctx context.Context, body MigrateSubscriptionEvaluatorsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMigrateSubscriptionEvaluatorsRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6706,6 +6814,46 @@ func NewGetTopQueriesRequest(server string, params *GetTopQueriesParams) (*http.
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewMigrateSubscriptionEvaluatorsRequest calls the generic MigrateSubscriptionEvaluators builder with application/json body
+func NewMigrateSubscriptionEvaluatorsRequest(server string, body MigrateSubscriptionEvaluatorsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewMigrateSubscriptionEvaluatorsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewMigrateSubscriptionEvaluatorsRequestWithBody constructs an http.Request for the MigrateSubscriptionEvaluators method, with any body, and a specified content type
+func NewMigrateSubscriptionEvaluatorsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/subscriptions/evaluator-migrations")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -9343,7 +9491,7 @@ type ClientWithResponsesInterface interface {
 	// RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
@@ -9351,7 +9499,7 @@ type ClientWithResponsesInterface interface {
 	// RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+	// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 	RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error)
 
 	// ListPipelinePlansWithResponse performs a GET /v0/admin/plugins/plans (the `ListPipelinePlans` operationId) request.
@@ -9377,7 +9525,7 @@ type ClientWithResponsesInterface interface {
 
 	// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
@@ -9458,6 +9606,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetTopQueriesWithResponse(ctx context.Context, params *GetTopQueriesParams, reqEditors ...RequestEditorFn) (*GetTopQueriesResponse, error)
+
+	// MigrateSubscriptionEvaluatorsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	MigrateSubscriptionEvaluatorsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MigrateSubscriptionEvaluatorsResponse, error)
+
+	// MigrateSubscriptionEvaluatorsWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+	MigrateSubscriptionEvaluatorsWithResponse(ctx context.Context, body MigrateSubscriptionEvaluatorsJSONRequestBody, reqEditors ...RequestEditorFn) (*MigrateSubscriptionEvaluatorsResponse, error)
 
 	// GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
 	//
@@ -11085,6 +11247,54 @@ func (r GetTopQueriesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetTopQueriesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type MigrateSubscriptionEvaluatorsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SubscriptionEvaluatorMigration
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r MigrateSubscriptionEvaluatorsResponse) GetJSON200() *SubscriptionEvaluatorMigration {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r MigrateSubscriptionEvaluatorsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r MigrateSubscriptionEvaluatorsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r MigrateSubscriptionEvaluatorsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MigrateSubscriptionEvaluatorsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r MigrateSubscriptionEvaluatorsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -13871,7 +14081,7 @@ func (c *ClientWithResponses) GetActivePipelinePlanWithResponse(ctx context.Cont
 // RollbackPipelinePlanWithBodyWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request,
 // with any type of body and a specified content type.
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) RollbackPipelinePlanWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
@@ -13885,7 +14095,7 @@ func (c *ClientWithResponses) RollbackPipelinePlanWithBodyWithResponse(ctx conte
 // RollbackPipelinePlanWithResponse performs a POST /v0/admin/plugins/plan/rollback (the `RollbackPipelinePlan` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict, or 422 unsupported_role when the rollback would change an alert-rule plugin. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
+// Make an earlier plan's roles active again, as a new immutable Pipeline Plan with source rollback that api and worker follow without restarting. The default target is the plan the active one replaced; plan_id names another one. Registrations the rollback brings back serve again, even when they were draining or inactive. Registrations it takes out drain, or stop with pinned_work=stop. The target must keep the rules of an activation. Otherwise the answer is 409 plugin_conflict. An alert-rule version it takes out keeps judging the Subscription Versions that pin it, whatever pinned_work says, as after an activation. Every plugin it brings back must answer discovery at its endpoint with its manifest's digest. Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active plan's roles returns the active plan. The same idempotency key with the same request returns the plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already produced is rewritten. Requires plugins:admin.
 func (c *ClientWithResponses) RollbackPipelinePlanWithResponse(ctx context.Context, body RollbackPipelinePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*RollbackPipelinePlanResponse, error) {
 	rsp, err := c.RollbackPipelinePlan(ctx, body, reqEditors...)
 	if err != nil {
@@ -13935,7 +14145,7 @@ func (c *ClientWithResponses) GetPluginRegistrationWithResponse(ctx context.Cont
 
 // ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive; 422 unsupported_role for an alert-rule plugin, which the configuration pins. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). Requires plugins:admin.
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
@@ -14087,6 +14297,32 @@ func (c *ClientWithResponses) GetTopQueriesWithResponse(ctx context.Context, par
 		return nil, err
 	}
 	return ParseGetTopQueriesResponse(rsp)
+}
+
+// MigrateSubscriptionEvaluatorsWithBodyWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request,
+// with any type of body and a specified content type.
+//
+// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) MigrateSubscriptionEvaluatorsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*MigrateSubscriptionEvaluatorsResponse, error) {
+	rsp, err := c.MigrateSubscriptionEvaluatorsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMigrateSubscriptionEvaluatorsResponse(rsp)
+}
+
+// MigrateSubscriptionEvaluatorsWithResponse performs a POST /v0/admin/subscriptions/evaluator-migrations (the `MigrateSubscriptionEvaluators` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Move the key's Organization's Subscriptions from one version of an alert-rule plugin to the version the active Pipeline Plan serves, after that plugin's upgrade or rollback. It looks at the Subscriptions that are not deleted, enabled or disabled, whose current Version pins plugin_id at from_version, in Subscription id order, at most limit of them, after after. Each one's Saved Query expression and evaluator configuration must validate against the served version's schemas first; one that does not is listed in refused with the first issue and keeps its version. A moved Subscription gets a new current Version that keeps its Saved Query Version, configuration and destination and pins the served version. Like an edit, it judges only changes committed after it, nothing is re-evaluated, Matches keep the Version that produced them, and subscription.updated is announced in each of its Corpora. dry_run true validates and lists what would move without moving anything. A call moves each Subscription at most once; calling again with next_after continues, and repeating a call converges. Subscriptions whose Corpora the key does not all grant are left out. 422 unsupported_evaluator when no version of plugin_id serves new Subscriptions, invalid_migration when from_version is that version. Requires plugins:admin.
+func (c *ClientWithResponses) MigrateSubscriptionEvaluatorsWithResponse(ctx context.Context, body MigrateSubscriptionEvaluatorsJSONRequestBody, reqEditors ...RequestEditorFn) (*MigrateSubscriptionEvaluatorsResponse, error) {
+	rsp, err := c.MigrateSubscriptionEvaluators(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMigrateSubscriptionEvaluatorsResponse(rsp)
 }
 
 // GetBlobWithResponse performs a GET /v0/blobs/{blob_id} (the `GetBlob` operationId) request.
@@ -15910,6 +16146,39 @@ func ParseGetTopQueriesResponse(rsp *http.Response) (*GetTopQueriesResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest TopQueryList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseMigrateSubscriptionEvaluatorsResponse parses an HTTP response from a MigrateSubscriptionEvaluatorsWithResponse call
+func ParseMigrateSubscriptionEvaluatorsResponse(rsp *http.Response) (*MigrateSubscriptionEvaluatorsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MigrateSubscriptionEvaluatorsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SubscriptionEvaluatorMigration
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

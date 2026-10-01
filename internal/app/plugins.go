@@ -168,7 +168,9 @@ type planFollower struct {
 	// apply prepares what else follows the plan (connector kinds) before
 	// the swap; an error keeps the current plan.
 	apply func(*plugins.PinSet) error
-	mu    sync.Mutex
+	// followed runs once the process follows a new plan.
+	followed func(context.Context, *plugins.PinSet)
+	mu       sync.Mutex
 	// failed is the last plan id that could not be resolved, logged once.
 	failed string
 }
@@ -195,6 +197,9 @@ func (f *planFollower) Refresh(ctx context.Context) {
 	}
 	if plan == id {
 		slog.Info("following pipeline plan", "plan", plan, "plugins", set.Describe())
+		if f.followed != nil {
+			f.followed(ctx, set)
+		}
 	}
 }
 

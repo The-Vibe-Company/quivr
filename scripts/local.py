@@ -595,6 +595,9 @@ def parts():
             # Described alerts judged through the fake System One server, never TypeSafe: one call per article for every described alert.
             step('described_alerts',subscription_plugin.described),
             step('alert_plugin_outage',subscription_plugin.outage),
+            # The template's 0.2.0 is activated without restart: existing alerts stay on 0.1.0 until migrated,
+            # then a rollback serves 0.1.0 again and the alerts are migrated back (THE-805).
+            step('alert_plugin_upgrade',subscription_plugin.upgrade),
             # Runnable guide blocks, each page in its own Organization (scripts/guides.py).
             step('runnable_guides',guides.verify),
             # The keyless worker would fail credentialed instances of earlier scenarios.

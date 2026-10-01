@@ -19,7 +19,7 @@ stays in the single ``plugin`` pin:
 Each runs as its own process with the repository's Python Plugin SDK. Every
 oracle is a public HTTP read or a webhook.
 """
-import os, pathlib, signal, subprocess, time, urllib.request
+import os, pathlib, shutil, signal, subprocess, time, urllib.request
 
 import normalizer_plugin
 
@@ -229,6 +229,36 @@ def described(stack):
     translated articles alert, an unrelated one does not, and one call serves every described alert.
     A Subscription preview judges recent articles through the same plugin and saves nothing."""
     stack.tests('^(TestDescribedAlerts|TestSubscriptionPreview)', environment(stack))
+
+
+def upgrade(stack):
+    """The template's next build, 0.2.0, runs beside the pinned 0.1.0: TestAlertPluginUpgrade registers and
+    activates it, migrates Subscriptions to it, rolls back and migrates them back (THE-805). It stops after."""
+    copy = stack.directory / 'subscription-plugin-next'
+    shutil.rmtree(copy, ignore_errors=True)
+    shutil.copytree(directory(stack), copy, ignore=shutil.ignore_patterns('__pycache__'))
+    manifest_next = copy / 'quivr-plugin.yaml'
+    manifest_next.write_text(manifest_next.read_text().replace(f'version: {VERSION}', 'version: 0.2.0', 1))
+    stack.state.setdefault('subscription_plugin_next_port', normalizer_plugin.stack_port())
+    stack.save()
+    port = stack.state['subscription_plugin_next_port']
+    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_next)}
+    with (stack.directory / 'subscription-plugin-next.log').open('a') as log:
+        p = subprocess.Popen([str(normalizer_plugin.python()), '-m', MODULE], cwd=copy, env=env, stdout=log, stderr=log, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 30
+        while not healthy(stack, 'subscription_plugin_next_port'):
+            if p.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f'{NAME} 0.2.0 not healthy; inspect {stack.directory / "subscription-plugin-next.log"}')
+            time.sleep(.1)
+        stack.tests('^TestAlertPluginUpgrade$', {**environment(), 'QUIVR_TEST_ALERT_UPGRADE_ENDPOINT': f'http://127.0.0.1:{port}', 'QUIVR_TEST_ALERT_UPGRADE_MANIFEST': str(manifest_next),
+                                                  'QUIVR_TEST_ALERT_PINNED_ENDPOINT': f"http://127.0.0.1:{stack.state['subscription_plugin_port']}"})
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        p.wait(timeout=10)
 
 
 def outage(stack):

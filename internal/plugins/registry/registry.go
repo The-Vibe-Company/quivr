@@ -31,7 +31,8 @@ const Action = "plugins:admin"
 // Registration states. A registration is registered while its check runs,
 // then validated or rejected; the plan makes it active. A later plan that
 // leaves it out makes it draining while work pinned to a plan that names it
-// is unfinished, and inactive once none is.
+// is unfinished, or Subscriptions still pin its alert rule, and inactive once
+// none is.
 const (
 	StateRegistered = "registered"
 	StateValidated  = "validated"
@@ -67,9 +68,6 @@ var (
 	// ErrConflict refuses an activation that breaks a startup rule; the error
 	// lists the issues.
 	ErrConflict = errors.New("plugin_conflict")
-	// ErrUnsupportedRole refuses to activate a plugin for a role that cannot
-	// switch without a restart yet.
-	ErrUnsupportedRole = errors.New("unsupported_role")
 	// ErrUnreachable refuses a rollback to a plugin that does not answer
 	// discovery with its manifest; the error lists the issues.
 	ErrUnreachable = errors.New("plugin_unreachable")
@@ -154,11 +152,17 @@ type Registration struct {
 	Roles []string
 	State string
 	// PinnedWork counts the unfinished work pinned to a plan that names the
-	// registration: a registration that left the active plan is draining
-	// until it reaches zero.
+	// registration, and for an alert-rule plugin the pending evaluations of
+	// Subscription Versions that pin its version and the earlier such
+	// Versions that changes not dispatched yet may reach: a registration that left
+	// the active plan is draining until it and Subscriptions reach zero.
 	PinnedWork int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Subscriptions counts, for an alert-rule plugin, the Subscriptions that
+	// are not deleted whose current Version pins its version: they keep it
+	// until an operator migrates them (THE-805).
+	Subscriptions int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 	// Check is the Contract Runner's report, once the check ran.
 	Check *CheckReport
 	// Fixtures are the plugin's own test files the check runs, by path in
@@ -280,6 +284,10 @@ type Store interface {
 	// PlanMembers returns any plan and its registrations by id, or
 	// ErrNotFound.
 	PlanMembers(ctx context.Context, id string) (Plan, map[string]Registration, error)
+	// EvaluatorRegistrations returns every registration a plan named for an
+	// alert-rule role, ordered by the latest plan naming each, oldest first:
+	// the evaluators Subscription Versions may still pin.
+	EvaluatorRegistrations(ctx context.Context) ([]Registration, error)
 	// RegisterPlugin records a registration under an idempotency key: it
 	// replays the key's registration, refuses a key used for another one or
 	// with other fixtures (ErrIdempotencyConflict), queues a new registration

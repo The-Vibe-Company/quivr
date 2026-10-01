@@ -173,7 +173,7 @@ func (a *API) listPlans(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 }
 
 func registrationToTransport(reg registry.Registration) transport.PluginRegistration {
-	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), PinnedWork: reg.PinnedWork, CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
+	item := transport.PluginRegistration{RegistrationId: reg.ID, PluginId: reg.PluginID, Version: reg.Version, Endpoint: reg.Endpoint, ManifestDigest: reg.ManifestDigest, Contributions: nonNil(reg.Contributions), Roles: nonNil(reg.Roles), State: transport.PluginRegistrationState(reg.State), PinnedWork: reg.PinnedWork, Subscriptions: reg.Subscriptions, CreatedAt: reg.CreatedAt, UpdatedAt: reg.UpdatedAt}
 	if reg.ArtifactDigest != "" {
 		digest := reg.ArtifactDigest
 		item.ArtifactDigest = &digest
@@ -232,8 +232,6 @@ func pluginFailure(w http.ResponseWriter, err error) {
 		failure(w, 409, "idempotency_conflict")
 	case errors.Is(err, registry.ErrInvalid):
 		detailed(422, "invalid_plugin")
-	case errors.Is(err, registry.ErrUnsupportedRole):
-		detailed(422, "unsupported_role")
 	case errors.Is(err, registry.ErrNotValidated):
 		detailed(409, "registration_not_validated")
 	case errors.Is(err, registry.ErrConflict):

@@ -1233,6 +1233,7 @@
           ],
           "state": "active",
           "pinned_work": 4,
+          "subscriptions": 0,
           "created_at": "2026-09-30T10:00:00Z",
           "updated_at": "2026-09-30T10:00:00Z"
         },
@@ -1251,6 +1252,7 @@
           ],
           "state": "draining",
           "pinned_work": 1,
+          "subscriptions": 0,
           "created_at": "2026-09-30T10:00:00Z",
           "updated_at": "2026-09-30T10:00:00Z"
         }
@@ -1310,6 +1312,7 @@
       ],
       "state": "rejected",
       "pinned_work": 0,
+      "subscriptions": 0,
       "check": {
         "certified": false,
         "checked_at": "2026-09-30T13:00:00Z",

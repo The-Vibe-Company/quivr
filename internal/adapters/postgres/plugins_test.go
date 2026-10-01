@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -75,7 +74,9 @@ func TestPluginConfigurationReconcilesAnEarlierPlan(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := postgres.MigrateFS(ctx, pool, embedded(t, regexp.MustCompile(`_(plugin_registry|plugin_activation|pinned_plan_work|plan_rollback|plugin_check_fixtures)\.sql$`))); err != nil {
+	// The registry reads the monitoring tables too: an alert-rule version
+	// drains while Subscriptions pin it (THE-805).
+	if err := postgres.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}

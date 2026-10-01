@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -291,3 +292,86 @@ func truncate(s string, n int) string {
 	}
 	return string(r[:n])
 }
+
+// EvaluatorSet resolves the installed evaluators by EvaluatorKey.
+type EvaluatorSet interface {
+	// Evaluator returns an installed evaluator, to judge the Subscription
+	// Versions that pin it.
+	Evaluator(key string) (EvaluationPort, bool)
+	// Serves reports whether a new Subscription Version may pin key: an
+	// evaluator kept only for the Subscription Versions that already pin it
+	// is installed but not served.
+	Serves(key string) bool
+	// Serving returns the version of an alert-rule plugin that new
+	// Subscription Versions pin.
+	Serving(pluginID string) (version string, ok bool)
+}
+
+// Evaluator returns the evaluator installed under key.
+func (e Evaluators) Evaluator(key string) (EvaluationPort, bool) {
+	port, ok := e[key]
+	return port, ok
+}
+
+// Serves reports whether key is installed: a plain set serves all it has.
+func (e Evaluators) Serves(key string) bool {
+	_, ok := e[key]
+	return ok
+}
+
+// Serving returns the version installed for pluginID; when several are,
+// the greatest key, so the answer does not depend on map order.
+func (e Evaluators) Serving(pluginID string) (string, bool) {
+	best := ""
+	for key := range e {
+		if version, ok := strings.CutPrefix(key, pluginID+"@"); ok && !strings.Contains(version, "@") && version > best {
+			best = version
+		}
+	}
+	return best, best != ""
+}
+
+// PlanEvaluators are the evaluators of a Pipeline Plan (Spec 5): Served are
+// those its alert-rule roles name, which new Subscription Versions pin;
+// Retained are other versions of those plugins that earlier plans named,
+// kept installed so that the Subscription Versions pinning them are still
+// judged by the version they recorded until an operator migrates them.
+type PlanEvaluators struct {
+	Served   Evaluators
+	Retained Evaluators
+}
+
+func (p PlanEvaluators) Evaluator(key string) (EvaluationPort, bool) {
+	if port, ok := p.Served[key]; ok {
+		return port, true
+	}
+	port, ok := p.Retained[key]
+	return port, ok
+}
+
+func (p PlanEvaluators) Serves(key string) bool { return p.Served.Serves(key) }
+
+func (p PlanEvaluators) Serving(pluginID string) (string, bool) { return p.Served.Serving(pluginID) }
+
+// LiveEvaluators are the evaluators of the plan a running api or worker
+// follows, swapped whole when the plan changes.
+type LiveEvaluators struct {
+	current atomic.Pointer[PlanEvaluators]
+}
+
+// Store swaps in the evaluators of a new plan.
+func (l *LiveEvaluators) Store(p PlanEvaluators) { l.current.Store(&p) }
+
+// Load returns the current evaluators; none before the first Store.
+func (l *LiveEvaluators) Load() PlanEvaluators {
+	if p := l.current.Load(); p != nil {
+		return *p
+	}
+	return PlanEvaluators{}
+}
+
+func (l *LiveEvaluators) Evaluator(key string) (EvaluationPort, bool) { return l.Load().Evaluator(key) }
+
+func (l *LiveEvaluators) Serves(key string) bool { return l.Load().Serves(key) }
+
+func (l *LiveEvaluators) Serving(pluginID string) (string, bool) { return l.Load().Serving(pluginID) }

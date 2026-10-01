@@ -32,6 +32,16 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 	if err != nil || back.Unchanged || !reflect.DeepEqual(roleMap(back.Roles), roleMap(target.Roles)) || !reflect.DeepEqual(back.Retired, []string{embedderV2.ID}) || len(back.Returning) != 1 || back.Returning[0].ID != embedderV1.ID {
 		t.Fatalf("rollback: %+v (%v); want the target's roles, 2.0.0 retired and the draining 1.0.0 back", back, err)
 	}
+	// An earlier alert-rule version comes back like any plugin (THE-805).
+	ruleV1, ruleV2 := registered(t, manifest("example.rule", "1.0.0", rule)), registered(t, manifest("example.rule", "2.0.0", rule))
+	upgraded, ruleMembers := plan(t, embedderV2, ruleV2)
+	earlier, earlierMembers := plan(t, embedderV2, ruleV1)
+	for id, r := range earlierMembers {
+		ruleMembers[id] = r
+	}
+	if back, err := registry.PlanRollback(upgraded, earlier, ruleMembers, nil); err != nil || roleMap(back.Roles)["subscription:example.rule"] != "example.rule@1.0.0" || !reflect.DeepEqual(back.Retired, []string{ruleV2.ID}) {
+		t.Fatalf("an alert-rule rollback: %+v (%v); want 1.0.0 back, 2.0.0 retired", back, err)
+	}
 	if same, err := registry.PlanRollback(active, active, members, nil); err != nil || !same.Unchanged {
 		t.Fatalf("a rollback to the active roles: %+v (%v), want unchanged", same, err)
 	}
@@ -44,7 +54,6 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 		}
 		return p, byID
 	}
-	rule := registered(t, manifest("example.rule", "1.0.0", "  subscription:\n    expression_schema: {type: object}\n    timeout_ms: 1000\n"))
 	retriever := registered(t, string(must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml"))))
 	rejected := embedderV1
 	rejected.State = registry.StateRejected
@@ -57,7 +66,6 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 		want   error
 		says   string
 	}{
-		"alert rule":        {target: []registry.Registration{embedderV1, rule}, want: registry.ErrUnsupportedRole, says: "alert rule"},
 		"adds retrieval":    {target: []registry.Registration{embedderV1, retriever}, want: registry.ErrConflict, says: plugins.CodeRetrievalConflict},
 		"rejected member":   {target: []registry.Registration{embedderV1}, member: &rejected, want: registry.ErrNotValidated, says: "rejected"},
 		"manifest not kept": {target: []registry.Registration{embedderV1}, member: &unkept, want: registry.ErrConflict, says: registry.CodePlanUnresolvable},

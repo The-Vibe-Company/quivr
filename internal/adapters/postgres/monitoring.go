@@ -576,6 +576,76 @@ ORDER BY s.id LIMIT $6`, org, after, owner.Global, owner.Owner, corpora, limit)
 	return out, rows.Err()
 }
 
+var _ monitoring.EvaluatorMoves = ContentStore{}
+
+// PinningSubscriptions lists the Subscriptions of org that are not deleted,
+// enabled or not, whose current Version pins pluginID@version (THE-805).
+func (s ContentStore) PinningSubscriptions(ctx context.Context, org, pluginID, version string, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND NOT s.deleted AND s.id>$2
+  AND v.evaluator->>'plugin_id'=$3 AND v.evaluator->>'version'=$4
+  AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
+ORDER BY s.id LIMIT $6`, org, after, pluginID, version, corpora, limit)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (monitoring.Subscription, error) { return scanSubscription(row) })
+}
+
+// MoveEvaluator commits a new immutable Version of from's Subscription that
+// keeps its Saved Query Version, configuration and destination and pins
+// evaluator, and makes it current, with subscription.updated in every Corpus
+// of its scope. Like an edit, the Version activates at that commit: later
+// changes are judged by it, earlier ones by from, and Matches keep the
+// Version that produced them. Its id derives from from and evaluator, so a
+// replay converges; from must still be current.
+func (s ContentStore) MoveEvaluator(ctx context.Context, org string, from monitoring.SubscriptionVersion, evaluator monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
+	pinned, err := json.Marshal(evaluator)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	id := from.SubscriptionID
+	versionID := content.StableID("subscription_version", org, id, "evaluator_move", from.VersionID, monitoring.EvaluatorKey(evaluator))
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	deleted, corpora, err := subscriptionScope(ctx, tx, org, id)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	var current string
+	if err = tx.QueryRow(ctx, "SELECT current_version_id FROM subscriptions WHERE organization=$1 AND id=$2", org, id).Scan(&current); err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	switch {
+	case current == versionID:
+		return s.SubscriptionVersion(ctx, org, id, versionID)
+	case deleted:
+		return monitoring.SubscriptionVersion{}, monitoring.ErrSubscriptionDeleted
+	case current != from.VersionID:
+		return monitoring.SubscriptionVersion{}, monitoring.ErrConflict
+	}
+	boundary, err := appendScopedEvents(ctx, tx, org, "subscription.updated", "subscription", id, versionID, corpora)
+	if err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO subscription_versions(organization,subscription_id,id,saved_query_id,saved_query_version_id,evaluator,destination_id,activation_position)
+SELECT organization,subscription_id,$3,saved_query_id,saved_query_version_id,$4,destination_id,$5 FROM subscription_versions WHERE organization=$1 AND id=$2`, org, from.VersionID, versionID, pinned, boundary); err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE subscriptions SET current_version_id=$3 WHERE organization=$1 AND id=$2", org, id, versionID); err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return monitoring.SubscriptionVersion{}, err
+	}
+	return s.SubscriptionVersion(ctx, org, id, versionID)
+}
+
 // toggleScope reads the Corpora of a Subscription's current Version whose
 // enabled state changes and the event identity of that change: the
 // Subscription ID, suffixed with the position of the previous opposite change
