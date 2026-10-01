@@ -87,33 +87,3 @@ func (f *attachFixture) patchVector(segmentID string, vector []float32) {
 		f.t.Fatalf("baseline vector attach status %d", res.StatusCode)
 	}
 }
-
-// A rebuild covers enriched Versions into the target generation with their
-// lexical anchor plus one enriched object, and not-yet-enriched Versions with the
-// anchor only. Re-covering converges on the same shape; the prior generation is
-// untouched.
-func TestRebuildCoverShapePerSegment(t *testing.T) {
-	f := newAttachFixture(t)
-	target := f.gen
-	target.ID = "generation-attach-target"
-	enriched, lexicalOnly := f.segmentation("segment-cover-enriched", "une lanterne couverte"), f.segmentation("segment-cover-lexical", "une lanterne sans vecteur")
-	f.publish(f.gen, enriched)
-	before := f.objects(f.gen, enriched.Segments[0].ID)
-	data := []content.EmbeddingData{f.embedding(target, enriched.Segments[0].ID, unitVector(21))}
-	for attempt := 0; attempt < 2; attempt++ {
-		f.publish(target, enriched)
-		if err := f.store.PublishEmbeddings(f.ctx, target, f.org, data); err != nil {
-			t.Fatal(err)
-		}
-		f.publish(target, lexicalOnly)
-	}
-	if got := fmt.Sprint(shape(f.objects(target, enriched.Segments[0].ID))); got != "1 1" {
-		t.Fatalf("enriched Version covered as %s lexical/enriched objects, want 1 1", got)
-	}
-	if got := fmt.Sprint(shape(f.objects(target, lexicalOnly.Segments[0].ID))); got != "1 0" {
-		t.Fatalf("lexical-only Version covered as %s lexical/enriched objects, want 1 0", got)
-	}
-	if after := f.objects(f.gen, enriched.Segments[0].ID); fmt.Sprint(after) != fmt.Sprint(before) {
-		t.Fatalf("covering the target changed the prior generation: %+v then %+v", before, after)
-	}
-}

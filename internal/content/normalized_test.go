@@ -91,19 +91,21 @@ func TestUnroutedBlobsKeepTheExistingPath(t *testing.T) {
 func TestRoutedBlobRejections(t *testing.T) {
 	mismatch := markdownBlob()
 	mismatch.MediaType = "text/plain"
+	outage := errors.New("database unavailable")
 	for name, tc := range map[string]struct {
 		source stubSource
 		want   error
 	}{
 		"unverified":          {stubSource{err: content.ErrUnverifiedBlob}, content.ErrUnverifiedBlob},
 		"media type mismatch": {stubSource{verified: mismatch}, content.ErrUnverifiedBlob},
-		"outage":              {stubSource{err: errors.New("database unavailable")}, nil},
+		// An outage leaves the Blob unjudged: it stays retryable, never unverified_blob.
+		"outage": {stubSource{err: outage}, outage},
 	} {
 		t.Run(name, func(t *testing.T) {
 			service := content.Service{Repository: &stubRepository{}, Blobs: failingBlobs{}, BlobSource: tc.source, Routes: routes{"text/markdown": true}}
 			_, err := service.Accept(context.Background(), scope(), routedCommand("text/markdown"))
-			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
-				t.Fatalf("got %v", err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
 			}
 		})
 	}

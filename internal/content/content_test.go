@@ -114,16 +114,28 @@ func TestBlobContentResolvesToImmutableText(t *testing.T) {
 }
 
 func TestBlobContentRejections(t *testing.T) {
-	cases := map[string]content.Service{
-		"unknown blob":      {Repository: &stubRepository{}, Blobs: stubBlobs{data: []byte("x")}, BlobSource: stubSource{err: content.ErrUnverifiedBlob}},
-		"non-text media":    {Repository: &stubRepository{}, Blobs: stubBlobs{data: []byte("x")}, BlobSource: stubSource{verified: content.VerifiedBlob{MediaType: "image/png"}}},
-		"media mismatch":    {Repository: &stubRepository{}, Blobs: stubBlobs{data: []byte("x")}, BlobSource: stubSource{verified: content.VerifiedBlob{MediaType: "text/csv"}}},
-		"invalid utf8 text": {Repository: &stubRepository{}, Blobs: stubBlobs{data: []byte{0xff, 0xfe}}, BlobSource: stubSource{verified: content.VerifiedBlob{MediaType: "text/plain"}}},
+	text := []byte("Bonjour")
+	verified := func(media string, data []byte) content.VerifiedBlob {
+		return content.VerifiedBlob{ID: "blob_1", MediaType: media, Blob: content.Blob{Key: "obj", SHA256: content.Hash(data), Size: int64(len(data))}}
 	}
-	for name, service := range cases {
-		_, err := service.Accept(context.Background(), scope(), blobCommand())
-		if !errors.Is(err, content.ErrUnverifiedBlob) && !errors.Is(err, content.ErrInvalid) && err == nil {
-			t.Fatalf("%s: accepted", name)
+	for name, tc := range map[string]struct {
+		media  string
+		source stubSource
+		stored []byte
+		want   error
+	}{
+		"unknown blob":      {"text/plain", stubSource{err: content.ErrUnverifiedBlob}, text, content.ErrUnverifiedBlob},
+		"non-text media":    {"image/png", stubSource{verified: verified("image/png", text)}, text, content.ErrUnverifiedBlob},
+		"media mismatch":    {"text/plain", stubSource{verified: verified("text/csv", text)}, text, content.ErrUnverifiedBlob},
+		"empty blob":        {"text/plain", stubSource{verified: verified("text/plain", nil)}, nil, content.ErrUnsupported},
+		"altered bytes":     {"text/plain", stubSource{verified: verified("text/plain", text)}, []byte("Bonsoir"), content.ErrUnverifiedBlob},
+		"invalid utf8 text": {"text/plain", stubSource{verified: verified("text/plain", []byte{0xff, 0xfe})}, []byte{0xff, 0xfe}, content.ErrInvalid},
+	} {
+		command := blobCommand()
+		command.Content.MediaType = tc.media
+		service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{data: tc.stored}, BlobSource: tc.source}
+		if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, tc.want) {
+			t.Errorf("%s: got %v, want %v", name, err, tc.want)
 		}
 	}
 }
@@ -177,32 +189,41 @@ func TestManifestAcceptedWithVerifiedBlobPartsAndExtensions(t *testing.T) {
 	}
 }
 
+// Each structural rejection is a ManifestViolation: its error is the bare
+// public code, so logs never echo submitted keys, and its Detail names what is
+// wrong for the Plugin Contract Runner.
 func TestManifestStructureRejections(t *testing.T) {
-	cases := map[string]func(*content.Command){
-		"duplicate key":     func(c *content.Command) { c.Manifest.Parts[1].Key = "title" },
-		"unknown parent":    func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "missing" },
-		"self parent":       func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "body" },
-		"empty text":        func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "" },
-		"nul text":          func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "bad\x00text" },
-		"empty parts":       func(c *content.Command) { c.Manifest.Parts = nil },
-		"missing relation":  func(c *content.Command) { c.Manifest.Relations[0].Target.RecordKey = "" },
-		"unknown part kind": func(c *content.Command) { c.Manifest.Parts[1].Content.Kind = "manifest" },
-	}
-	for name, mutate := range cases {
+	for name, tc := range map[string]struct {
+		mutate func(*content.Command)
+		want   error
+		detail string
+	}{
+		"duplicate key":     {func(c *content.Command) { c.Manifest.Parts[1].Key = "title" }, content.ErrInvalid, `duplicate Part key "title"`},
+		"unknown parent":    {func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "missing" }, content.ErrInvalid, `unknown parent "missing"`},
+		"self parent":       {func(c *content.Command) { c.Manifest.Parts[1].ParentKey = "body" }, content.ErrInvalid, `"body" is its own parent`},
+		"empty text":        {func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "" }, content.ErrInvalid, `"body" text`},
+		"nul text":          {func(c *content.Command) { c.Manifest.Parts[1].Content.Text = "bad\x00text" }, content.ErrInvalid, `"body" text`},
+		"empty parts":       {func(c *content.Command) { c.Manifest.Parts = nil }, content.ErrInvalid, "at least one Part"},
+		"missing relation":  {func(c *content.Command) { c.Manifest.Relations[0].Target.RecordKey = "" }, content.ErrInvalid, "Relation 0"},
+		"unknown part kind": {func(c *content.Command) { c.Manifest.Parts[1].Content.Kind = "manifest" }, content.ErrUnsupported, `content kind "manifest"`},
+		// A parent cycle is rejected even when every key exists.
+		"parent cycle": {func(c *content.Command) {
+			c.Manifest.Parts[1].ParentKey = "source"
+			c.Manifest.Parts[2].ParentKey = "body"
+		}, content.ErrInvalid, "parent cycle"},
+	} {
 		command := manifestCommand()
-		mutate(&command)
+		tc.mutate(&command)
 		_, service := manifestService()
-		if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, content.ErrInvalid) && !errors.Is(err, content.ErrUnsupported) {
-			t.Fatalf("%s: accepted (%v)", name, err)
+		_, err := service.Accept(context.Background(), scope(), command)
+		var violation *content.ManifestViolation
+		if !errors.Is(err, tc.want) || !errors.As(err, &violation) {
+			t.Errorf("%s: got %v, want a ManifestViolation of %v", name, err, tc.want)
+			continue
 		}
-	}
-	// A parent cycle is rejected even when every key exists.
-	cycle := manifestCommand()
-	cycle.Manifest.Parts[1].ParentKey = "source"
-	cycle.Manifest.Parts[2].ParentKey = "body"
-	_, service := manifestService()
-	if _, err := service.Accept(context.Background(), scope(), cycle); !errors.Is(err, content.ErrInvalid) {
-		t.Fatalf("cycle accepted: %v", err)
+		if err.Error() != tc.want.Error() || !strings.Contains(violation.Detail, tc.detail) {
+			t.Errorf("%s: error %q with detail %q; want %q naming %s", name, err, violation.Detail, tc.want, tc.detail)
+		}
 	}
 }
 
@@ -216,6 +237,13 @@ func TestManifestRejectsUnverifiedBlobParts(t *testing.T) {
 		if _, err := service.Accept(context.Background(), scope(), manifestCommand()); !errors.Is(err, content.ErrUnverifiedBlob) {
 			t.Fatalf("%s: accepted (%v)", name, err)
 		}
+	}
+	// A Blob Part is verified right after its own structural checks, so it is
+	// reported before a structural failure of a later Part.
+	later := manifestCommand()
+	later.Manifest.Parts = append(later.Manifest.Parts, content.Part{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: "again"}})
+	if _, err := cases["unknown blob"].Accept(context.Background(), scope(), later); !errors.Is(err, content.ErrUnverifiedBlob) {
+		t.Fatalf("unverified Blob Part before a later duplicate key: %v", err)
 	}
 }
 
@@ -257,15 +285,17 @@ func TestExtensionSchemaValidation(t *testing.T) {
 	if err := (content.BuiltinExtensions{}).Validate(context.Background(), valid); err != nil {
 		t.Fatalf("declared schema rejected: %v", err)
 	}
-	invalid := map[string]content.Extensions{
-		"unknown namespace": {"uninstalled": {SchemaVersion: "1", Data: map[string]any{}}},
-		"unknown version":   {"example.editorial": {SchemaVersion: "2", Data: map[string]any{}}},
-		"wrong data type":   {"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}},
-		"bad subject":       {"example.editorial": {SchemaVersion: "1", Data: map[string]any{"subjects": []any{map[string]any{"score": 0.5}}}}},
-	}
-	for name, exts := range invalid {
-		if err := (content.BuiltinExtensions{}).Validate(context.Background(), exts); !errors.Is(err, content.ErrInvalid) && !errors.Is(err, content.ErrUnsupported) {
-			t.Fatalf("%s: accepted (%v)", name, err)
+	for name, tc := range map[string]struct {
+		exts content.Extensions
+		want error
+	}{
+		"unknown namespace": {content.Extensions{"uninstalled": {SchemaVersion: "1", Data: map[string]any{}}}, content.ErrUnsupported},
+		"unknown version":   {content.Extensions{"example.editorial": {SchemaVersion: "2", Data: map[string]any{}}}, content.ErrUnsupported},
+		"wrong data type":   {content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}}, content.ErrInvalid},
+		"bad subject":       {content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"subjects": []any{map[string]any{"score": 0.5}}}}}, content.ErrInvalid},
+	} {
+		if err := (content.BuiltinExtensions{}).Validate(context.Background(), tc.exts); !errors.Is(err, tc.want) {
+			t.Errorf("%s: got %v, want %v", name, err, tc.want)
 		}
 	}
 }
@@ -308,48 +338,5 @@ func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
 				t.Fatalf("%s (%v): outage reported as %v", name, outage, err)
 			}
 		}
-	}
-}
-
-// TestCheckManifestIsTheEngineStructuralRule proves the exported check applies
-// the same structural rules as acceptance, with actionable messages, and runs
-// the per-Part hook in Part order before later structural failures.
-func TestCheckManifestIsTheEngineStructuralRule(t *testing.T) {
-	base := func() *content.Manifest {
-		return &content.Manifest{Kind: "manifest", Parts: []content.Part{
-			{Key: "doc", Role: "document", Content: content.Text{Kind: "text", Text: "a"}},
-			{Key: "page", ParentKey: "doc", Role: "page", Content: content.Text{Kind: "text", Text: "b"}},
-		}}
-	}
-	if err := content.CheckManifest(base(), nil); err != nil {
-		t.Fatalf("valid Manifest rejected: %v", err)
-	}
-	dup := base()
-	dup.Parts[1].Key = "doc"
-	dup.Parts[1].ParentKey = ""
-	detail := func(err error) string {
-		var v *content.ManifestViolation
-		if !errors.As(err, &v) {
-			t.Fatalf("not a ManifestViolation: %v", err)
-		}
-		return v.Detail
-	}
-	err := content.CheckManifest(dup, nil)
-	if !errors.Is(err, content.ErrInvalid) || err.Error() != "invalid_input" || !strings.Contains(detail(err), `"doc"`) {
-		t.Fatalf("duplicate key: %v", err)
-	}
-	cycle := base()
-	cycle.Parts[0].ParentKey = "page"
-	if err := content.CheckManifest(cycle, nil); !errors.Is(err, content.ErrInvalid) || !strings.Contains(detail(err), "cycle") {
-		t.Fatalf("cycle: %v", err)
-	}
-	hookErr := errors.New("hook")
-	var seen []int
-	err = content.CheckManifest(dup, func(i int) error {
-		seen = append(seen, i)
-		return hookErr
-	})
-	if !errors.Is(err, hookErr) || len(seen) != 1 || seen[0] != 0 {
-		t.Fatalf("hook precedence changed: err=%v seen=%v", err, seen)
 	}
 }
