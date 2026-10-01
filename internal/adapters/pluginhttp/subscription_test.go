@@ -126,6 +126,44 @@ func article() monitoring.Batch {
 		}}
 }
 
+func TestSubscriptionVectorsAreOptInAndIdentifyTheirSpace(t *testing.T) {
+	evaluator, _ := alertsEvaluator(t)
+	batch := article()
+	batch.Article.Vectors = &monitoring.ArticleVectors{SpaceID: "text-space", Ready: true, Parts: map[string][]monitoring.SegmentVector{"title": {{SegmentID: "segment-1", Vector: []float32{1, 0}}}}}
+	batch.Items[0].QueryVectors = []monitoring.QueryVector{{SpaceID: "text-space", Vector: []float32{1, 0}}}
+	for _, requested := range []bool{false, true} {
+		if requested {
+			evaluator.Pin.Manifest.Contributions.Subscription.Vectors = &plugins.SubscriptionVectors{Parts: true, Query: true, QueryTextPointer: "/text"}
+		}
+		raw, err := evaluator.SubscriptionRequest(batch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if issues := plugins.ValidateDocument("subscription-request.schema.json", raw); len(issues) != 0 {
+			t.Fatalf("invalid vector request: %v", issues)
+		}
+		var request map[string]any
+		if err := json.Unmarshal(raw, &request); err != nil {
+			t.Fatal(err)
+		}
+		record := request["record"].(map[string]any)
+		part := record["parts"].([]any)[0].(map[string]any)
+		item := request["evaluations"].([]any)[0].(map[string]any)
+		if _, present := record["vector_space_id"]; present != requested {
+			t.Fatalf("space disclosure opt-in=%v: %s", requested, raw)
+		}
+		if _, present := part["vectors"]; present != requested {
+			t.Fatalf("Part vector disclosure opt-in=%v: %s", requested, raw)
+		}
+		if _, present := item["query_vector"]; present != requested {
+			t.Fatalf("query vector disclosure opt-in=%v: %s", requested, raw)
+		}
+		if requested && (record["vector_space_id"] != "text-space" || record["vectors_ready"] != true) {
+			t.Fatalf("vector identity/readiness lost: %s", raw)
+		}
+	}
+}
+
 // The request carries the Record Version's text and metadata and every
 // distinct evaluation; the answer becomes one Outcome per item.
 func TestEvaluatorSendsOneValidRequestPerBatch(t *testing.T) {

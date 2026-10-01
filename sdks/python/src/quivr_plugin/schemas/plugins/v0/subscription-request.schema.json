@@ -85,7 +85,33 @@
               "text": {
                 "type": "string"
               },
-              "vector": false
+              "vector": false,
+              "vectors": {
+                "type": "array",
+                "maxItems": 1024,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segment_id",
+                    "vector"
+                  ],
+                  "properties": {
+                    "segment_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "vector": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 4096,
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
@@ -194,6 +220,14 @@
         "extensions": {
           "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
           "description": "The Version's structured metadata by namespace (for example author, section or categories when the source provides them). Absent when the Version has none."
+        },
+        "vector_space_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vectors_ready": {
+          "type": "boolean",
+          "description": "Since Plugin API 0.10. False when canonical segment vectors are missing from the served text space. Absent when vectors were not requested."
         }
       }
     },
@@ -265,7 +299,29 @@
               }
             }
           },
-          "query_vector": false
+          "query_vector": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "vector_space_id",
+              "vector"
+            ],
+            "properties": {
+              "vector_space_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "vector": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4096,
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "Since Plugin API 0.10. Immutable vector from the semantic-search query encoder. Missing if this Saved Query Version has no vector in the article space."
+          }
         }
       }
     },

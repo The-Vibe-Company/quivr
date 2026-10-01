@@ -455,15 +455,24 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 	if v, ok := sv.vectors[key]; ok {
 		return v, nil
 	}
-	var vector []float32
-	var err error
 	started := time.Now()
 	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
+	vector, err := sv.s.EncodeQuery(ctx, sv.scope.Organization, space, text)
+	if err != nil {
+		return nil, err
+	}
+	sv.vectors[key] = vector
+	return vector, nil
+}
+
+func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]float32, error) {
+	var vector []float32
+	var err error
 	switch {
-	case sv.s.Embedder != nil && space == sv.s.Embedder.Space().ID:
-		vector, err = sv.s.Embedder.Embed(ctx, "query: "+text)
-	case sv.s.Spaces != nil && sv.s.Spaces.Owns(space):
-		vector, err = sv.s.Spaces.EncodeQuery(ctx, sv.scope.Organization, space, text)
+	case s.Embedder != nil && space == s.Embedder.Space().ID:
+		vector, err = s.Embedder.Embed(ctx, "query: "+text)
+	case s.Spaces != nil && s.Spaces.Owns(space):
+		vector, err = s.Spaces.EncodeQuery(ctx, org, space, text)
 		if errors.Is(err, ErrQueryTooLong) {
 			return nil, err
 		}
@@ -477,6 +486,5 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	sv.vectors[key] = vector
 	return vector, nil
 }

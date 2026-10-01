@@ -44,7 +44,11 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.subscription.retry.max_attempts` | integer | yes | 1 to 10. Default `3`. |
 | `contributions.subscription.limits` | object | no | — |
 | `contributions.subscription.limits.max_response_bytes` | integer | no | 1024 to 16777216. Default `4194304`. |
-| `contributions.subscription.vectors` | reserved | no | Reserved: a document that sets it is rejected. |
+| `contributions.subscription.vectors` | object | no | Since Plugin API 0.10. Opt in to canonical Part vectors and saved query vectors. query_text_pointer selects a string in the expression by RFC 6901 JSON Pointer; the core embeds it when the Saved Query Version is created. |
+| `contributions.subscription.vectors.parts` | boolean | no | — |
+| `contributions.subscription.vectors.query` | boolean | no | — |
+| `contributions.subscription.vectors.query_text_pointer` | string | no | At most 256 characters. |
+| `contributions.subscription.vectors.query_expression_schema` | object or boolean | no | Optional JSON Schema 2020-12 selecting expressions that need query vectors. Nonmatching expressions do not invoke the query encoder; absent means every valid expression. |
 
 ## Connector
 

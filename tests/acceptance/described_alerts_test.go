@@ -193,10 +193,11 @@ func TestKeylessRefusesDescribedAlerts(t *testing.T) {
 	c := request(t, "POST", "/v0/corpora", token, map[string]any{"name": "Keyless alerts " + run, "idempotency_key": "keyless-alerts-" + run}, 201)["corpus_id"].(string)
 	refused := ownedSubscription(t, token, "keyless-described-"+run, c, described(strikeDescription), nil, "", "local-receiver-org-k", 422)
 	if refused["code"] != "invalid_expression" || refused["field"] != "/saved_query_version_id" ||
-		!strings.Contains(refused["message"].(string), `does not offer the kind "described" (offered: keywords)`) {
+		!strings.Contains(refused["message"].(string), `does not offer the kind "described"`) {
 		t.Fatal("a described alert must be refused without a classifier", refused)
 	}
 	ownedSubscription(t, token, "keyless-keywords-"+run, c, map[string]any{"kind": "keywords", "match": term("strike")}, nil, "", "local-receiver-org-k", 201)
+	ownedSubscription(t, token, "keyless-vectors-"+run, c, map[string]any{"kind": "meaning", "meaning_check": "vectors", "description": strikeDescription}, nil, "", "local-receiver-org-k", 201)
 }
 
 func sortedCopy(values []string) []string {

@@ -24,7 +24,7 @@ class Selection(unittest.TestCase):
             os.environ.pop('QUIVR_ALERTS', None)
             sp.select(self.stack, sp.from_environment())
         self.assertEqual(self.manifests(), [ALERTS_MANIFEST])
-        self.assertIn('alerts (alerts@0.2.0)', sp.describe(self.stack))
+        self.assertIn('alerts (alerts@0.3.0)', sp.describe(self.stack))
 
     def test_quivr_alerts_off_leaves_them_unpinned(self):
         with mock.patch.dict(os.environ, {'QUIVR_ALERTS': 'off'}):
@@ -65,7 +65,7 @@ class Described(unittest.TestCase):
         with mock.patch.dict(os.environ, {'TYPESAFE_API_KEY': 'personal-key'}):
             sp.select(self.stack, True, sp.described_mode(True))
         self.stack.state['fake_system_one_port'] = 18765
-        self.assertEqual(self.alerts_pin()['kinds'], ['keywords', 'described'])
+        self.assertEqual(self.alerts_pin()['kinds'], ['keywords', 'meaning', 'keywords_or_meaning', 'keywords_and_meaning', 'described'])
         self.assertEqual(sp.classifier_environment(self.stack), {'TYPESAFE_API_KEY': 'test-key', 'TYPESAFE_API_URL': 'http://127.0.0.1:18765/v1/systemone'})
 
     def test_make_dev_offers_described_alerts_only_with_a_typesafe_key(self):
@@ -73,14 +73,14 @@ class Described(unittest.TestCase):
             self.assertEqual(sp.described_mode(False), 'typesafe')
         with mock.patch.dict(os.environ, {'TYPESAFE_API_KEY': ''}):
             sp.select(self.stack, True, sp.described_mode(False))
-        self.assertEqual(self.alerts_pin()['kinds'], ['keywords'])
+        self.assertEqual(self.alerts_pin()['kinds'], ['keywords', 'meaning', 'keywords_or_meaning', 'keywords_and_meaning'])
         # The plugin process must not inherit a key the pin does not offer.
         self.assertEqual(sp.classifier_environment(self.stack), {'TYPESAFE_API_KEY': ''})
         self.assertIn('described alerts off', sp.describe(self.stack))
 
-    def test_an_installation_without_a_key_pins_keywords_only(self):
+    def test_an_installation_without_a_key_pins_local_kinds_only(self):
         sp.select(self.stack, True, 'fake')
-        self.assertEqual(self.alerts_pin(described='off')['kinds'], ['keywords'])
+        self.assertEqual(self.alerts_pin(described='off')['kinds'], ['keywords', 'meaning', 'keywords_or_meaning', 'keywords_and_meaning'])
 
 
 if __name__ == '__main__':

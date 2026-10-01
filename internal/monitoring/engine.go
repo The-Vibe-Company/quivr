@@ -57,6 +57,7 @@ type Intent struct {
 // Target is the pinned configuration an intent evaluates, read before the
 // evaluator runs. Commit rechecks everything that matters under the lock.
 type Target struct {
+	QueryVectors []QueryVector
 	Subscription SubscriptionVersion
 	Definition   Definition
 	Enabled      bool

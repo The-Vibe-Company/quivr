@@ -125,12 +125,14 @@ def build_subscription_requests(fixture_path: str | Path, *, max_batch_size: int
                              source=fixture.record.source or RecordSource(namespace="dev-namespace", record_key=f"dev-record-{short}"),
                              accepted_at=fixture.record.accepted_at or DEV_ACCEPTED_AT,
                              provenance=fixture.record.provenance or RecordProvenance(origin="client"),
-                             extensions=fixture.record.extensions)
+                             extensions=fixture.record.extensions, vector_space_id=fixture.record.vector_space_id,
+                             vectors_ready=fixture.record.vectors_ready)
     evaluations = [
         Evaluation(
             id=f"e{n}",
             expression=item.expression,
             configuration=item.configuration if item.configuration is not None else {},
+            query_vector=item.query_vector,
             subscriptions=[SubscriptionRef(subscription_id=f"dev-subscription-{n}", subscription_version_id=f"dev-subscription-version-{n}",
                                            saved_query_id=f"dev-saved-query-{n}", saved_query_version_id=f"dev-saved-query-version-{n}")],
         )

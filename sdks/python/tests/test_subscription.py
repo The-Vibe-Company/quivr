@@ -15,6 +15,7 @@ from quivr_plugin import (
     record_field,
 )
 from quivr_plugin.testing import build_subscription_requests, expected_decisions, invoke_subscription_fixture
+from quivr_plugin.manifest import negotiate_plugin_api
 
 DATA = Path(__file__).resolve().parent / "data"
 CONTRACT = Path(__file__).resolve().parents[3] / "contracts" / "plugins" / "v0" / "fixtures"
@@ -85,6 +86,11 @@ class SubscriptionTest(unittest.TestCase):
         body = self.plugin.handle("GET", "/v0/discovery").body
         self.assertEqual(body["contributions"], ["subscription"])
         self.assertEqual(body["plugin_api"], "0.2.0")
+
+        for minor in range(1, 11):
+            with self.subTest(minor=minor):
+                expected = "0.3.1" if minor == 3 else f"0.{minor}.0"
+                self.assertEqual(negotiate_plugin_api(f">=0.{minor}.0 <0.{minor + 1}.0"), expected)
 
     def test_decides_each_evaluation(self) -> None:
         reply = self.plugin.evaluate(request())

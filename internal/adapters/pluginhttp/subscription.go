@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,40 @@ var _ monitoring.EvaluationPort = Evaluator{}
 
 func (e Evaluator) contribution() *plugins.Subscription {
 	return e.Pin.Manifest.Contributions.Subscription
+}
+
+func (e Evaluator) WantsVectors() bool {
+	vectors := e.contribution().Vectors
+	return vectors != nil && (vectors.Parts || vectors.Query)
+}
+
+func (e Evaluator) QueryText(expression map[string]any) string {
+	vectors := e.contribution().Vectors
+	if vectors == nil || !vectors.Query || !e.Pin.Offers(expression) {
+		return ""
+	}
+	raw, err := json.Marshal(expression)
+	if err != nil || !plugins.SubscriptionQueryVectorApplies(&e.Pin.Manifest, raw) {
+		return ""
+	}
+	var value any = expression
+	for _, token := range strings.Split(strings.TrimPrefix(vectors.QueryTextPointer, "/"), "/") {
+		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+		switch object := value.(type) {
+		case map[string]any:
+			value = object[token]
+		case []any:
+			index, err := strconv.Atoi(token)
+			if err != nil || index < 0 || index >= len(object) || strconv.Itoa(index) != token {
+				return ""
+			}
+			value = object[index]
+		default:
+			return ""
+		}
+	}
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
 // MaxBatch is the declared max_batch_size.
@@ -79,12 +114,15 @@ func (e Evaluator) Validate(expression, configuration map[string]any) error {
 }
 
 type subscriptionPart struct {
-	Key  string `json:"key"`
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Key     string                     `json:"key"`
+	Role    string                     `json:"role"`
+	Text    string                     `json:"text"`
+	Vectors []monitoring.SegmentVector `json:"vectors,omitempty"`
 }
 
 type subscriptionRecord struct {
+	VectorSpaceID   string                      `json:"vector_space_id,omitempty"`
+	VectorsReady    *bool                       `json:"vectors_ready,omitempty"`
 	CorpusID        string                      `json:"corpus_id"`
 	RecordID        string                      `json:"record_id"`
 	RecordVersionID string                      `json:"record_version_id"`
@@ -97,6 +135,7 @@ type subscriptionRecord struct {
 }
 
 type subscriptionEvaluation struct {
+	QueryVector   *monitoring.QueryVector      `json:"query_vector,omitempty"`
 	ID            string                       `json:"id"`
 	Expression    map[string]any               `json:"expression"`
 	Configuration map[string]any               `json:"configuration"`
@@ -132,6 +171,20 @@ func (e Evaluator) SubscriptionRequest(b monitoring.Batch) ([]byte, error) {
 	if len(meta.Extensions) > 0 {
 		record.Extensions = meta.Extensions
 	}
+	wants := e.contribution().Vectors
+	if wants != nil && (wants.Parts || wants.Query) {
+		ready := false
+		record.VectorsReady = &ready
+		if vectors := b.Article.Vectors; vectors != nil {
+			record.VectorSpaceID = vectors.SpaceID
+			ready = vectors.Ready
+			if wants.Parts {
+				for index := range record.Parts {
+					record.Parts[index].Vectors = vectors.Parts[record.Parts[index].Key]
+				}
+			}
+		}
+	}
 	evaluations := make([]subscriptionEvaluation, 0, len(b.Items))
 	identity := []any{e.Pin.Generation(), "subscription", b.Organization, b.VersionID, b.Enriched}
 	for _, item := range b.Items {
@@ -142,8 +195,21 @@ func (e Evaluator) SubscriptionRequest(b monitoring.Batch) ([]byte, error) {
 		if configuration == nil {
 			configuration = map[string]any{}
 		}
-		evaluations = append(evaluations, subscriptionEvaluation{ID: item.ID, Expression: expression, Configuration: configuration, Subscriptions: item.Subscriptions})
+		evaluation := subscriptionEvaluation{ID: item.ID, Expression: expression, Configuration: configuration, Subscriptions: item.Subscriptions}
+		if wants != nil && wants.Query {
+			for _, vector := range item.QueryVectors {
+				if vector.SpaceID == record.VectorSpaceID {
+					copy := vector
+					evaluation.QueryVector = &copy
+					break
+				}
+			}
+		}
+		evaluations = append(evaluations, evaluation)
 		identity = append(identity, item.ID, expression, configuration)
+	}
+	if wants != nil {
+		identity = append(identity, record.VectorSpaceID, record.VectorsReady, evaluations)
 	}
 	key, err := json.Marshal(identity)
 	if err != nil {

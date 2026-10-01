@@ -37,7 +37,7 @@ The expression holds the description. `sources` is optional: it limits the alert
 Create a Saved Query with this expression and a Subscription with the `alerts` evaluator, as for a [keyword alert](/guides/keyword-alerts#save-the-alert). The Subscription's `configuration` can set a `threshold`:
 
 ```json
-"evaluator": {"plugin_id": "alerts", "version": "0.2.0", "configuration": {"threshold": 0.6}}
+"evaluator": {"plugin_id": "alerts", "version": "0.3.0", "configuration": {"threshold": 0.6}}
 ```
 
 The classifier returns a score from 0 to 1, the probability that the article fits. The article matches when its score reaches the threshold: 0.5 by default, between 0.2 and 0.95. Raise it for fewer, surer alerts.
@@ -79,3 +79,27 @@ These steps are for the operator who runs Quivr.
 3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
 
 Without a key, pin `"kinds": ["keywords"]`: a described alert is then refused at creation with `422 invalid_expression`. With the local stack, `make dev` offers described alerts only when `TYPESAFE_API_KEY` is set in its environment.
+
+## Keep the meaning check inside the installation
+
+Use `alerts` version `0.3.0` with Plugin API `0.10.0` for a local meaning check. It compares the article's stored E5 vectors with a query vector computed when the Saved Query Version is created. A vector is a numeric summary of meaning. This backend never calls Jev or sends article text to TypeSafe; it uses the installation's served text space and the same query encoder as semantic search.
+
+The following expressions are illustrative. Save one with the [Saved Query API](/guides/keyword-alerts#save-the-alert), then create a Subscription pinned to `alerts@0.3.0`:
+
+```json
+{"kind": "meaning", "meaning_check": "vectors", "description": "Labour strikes at ports and harbours"}
+```
+
+To combine it with a keyword tree, choose `keywords_or_meaning` or `keywords_and_meaning`. State `meaning_check` explicitly; `jev` selects the external service, while `vectors` stays local:
+
+```json
+{"kind": "keywords_and_meaning", "meaning_check": "vectors", "description": "Labour strikes at ports and harbours", "match": {"term": "port"}}
+```
+
+The plugin takes the highest cosine similarity across all text Parts and segments. This score is closeness, not a probability. The Match names the winning Part, segment, vector space, similarity and threshold. Configure `threshold` on the evaluator to change the default **0.80**.
+
+That default comes from 156 neutral French/English article-query pairs, including translations: 16 relevant pairs and 140 unrelated pairs. It matches all 16 relevant pairs and rejects 129 unrelated pairs; 11 unrelated pairs still match. An English paraphrase scores 0.886641, a French translation 0.815391, and the football control 0.765448. Scores overlap, so tune the threshold on your own examples rather than treating it as a confidence score. The [plugin calibration notes](https://github.com/The-Vibe-Company/quivr-v2/tree/main/plugins/alerts/calibration) include every pair, the pinned model revision and a reproducible measurement command.
+
+If article vectors are missing, the decision is `not_ready`, even with `wait_for_enrichment: false`. Quivr retries after `record.enrichment_available`; the existing Match identity prevents duplicate alerts. Query vectors remain fixed with their Saved Query Version. After switching a Corpus's served vector space, create a new Saved Query Version and migrate its Subscriptions to it; vectors from different spaces cannot be compared.
+
+Operators can offer `meaning`, `keywords_or_meaning` and `keywords_and_meaning` without a TypeSafe key by adding those kinds to the plugin pin. The local stack offers them by default. Existing Subscriptions keep their pinned plugin version; use [evaluator migration](/plugins/switch-plugins-without-restarting#upgrade-an-alert-rule) to move them to `0.3.0`.

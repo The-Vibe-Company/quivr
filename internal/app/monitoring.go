@@ -21,6 +21,7 @@ import (
 // versionParts reads the evaluated Record Version: its canonical text Parts,
 // with a worker scope limited to the Version's own Corpus, and its metadata.
 type versionParts struct {
+	vectors  subscriptionEmbeddingReader
 	content  content.Service
 	metadata interface {
 		RecordMetadata(ctx context.Context, org, recordID, versionID string) (monitoring.RecordMetadata, error)

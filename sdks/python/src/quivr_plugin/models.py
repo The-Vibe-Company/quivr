@@ -221,6 +221,16 @@ class SubscriptionLimits(Model):
 
 
 @dataclass(kw_only=True)
+class SubscriptionContributionVectors(Model):
+    "Since Plugin API 0.10. Opt in to canonical Part vectors and saved query vectors. query_text_pointer selects a string in the expression by RFC 6901 JSON Pointer; the core embeds it when the Saved Query Version is created."
+
+    parts: bool | None = None
+    query: bool | None = None
+    query_text_pointer: str | None = None
+    query_expression_schema: Any | None = None
+
+
+@dataclass(kw_only=True)
 class SubscriptionContribution(Model):
     "An alert rule, since Plugin API 0.2: decides whether one Record Version matches each Saved Query expression of a batch."
 
@@ -230,6 +240,7 @@ class SubscriptionContribution(Model):
     timeout_ms: int | None = None
     retry: RetryIntent | None = None
     limits: SubscriptionLimits | None = None
+    vectors: SubscriptionContributionVectors | None = None
 
 
 @dataclass(kw_only=True)
@@ -393,10 +404,17 @@ class InvocationFixture(Model):
 
 
 @dataclass(kw_only=True)
+class RecordPartVectorsItem(Model):
+    segment_id: str
+    vector: list[float]
+
+
+@dataclass(kw_only=True)
 class RecordPart(Model):
     key: str
     role: str
     text: str
+    vectors: list[RecordPartVectorsItem] | None = None
 
 
 @dataclass(kw_only=True)
@@ -450,6 +468,8 @@ class EvaluatedRecord(Model):
     accepted_at: str | None = None
     provenance: RecordProvenance | None = None
     extensions: dict[str, ExtensionEntry] | None = None
+    vector_space_id: str | None = None
+    vectors_ready: bool | None = None
 
 
 @dataclass(kw_only=True)
@@ -462,11 +482,20 @@ class SubscriptionRef(Model):
 
 
 @dataclass(kw_only=True)
+class EvaluationQueryVector(Model):
+    "Since Plugin API 0.10. Immutable vector from the semantic-search query encoder. Missing if this Saved Query Version has no vector in the article space."
+
+    vector_space_id: str
+    vector: list[float]
+
+
+@dataclass(kw_only=True)
 class Evaluation(Model):
     id: str
     expression: dict[str, Any]
     configuration: dict[str, Any]
     subscriptions: list[SubscriptionRef]
+    query_vector: EvaluationQueryVector | None = None
 
 
 @dataclass(kw_only=True)
@@ -513,6 +542,8 @@ class FixtureRecord(Model):
     accepted_at: str | None = None
     provenance: RecordProvenance | None = None
     extensions: dict[str, ExtensionEntry] | None = None
+    vector_space_id: str | None = None
+    vectors_ready: bool | None = None
 
 
 @dataclass(kw_only=True)
@@ -521,6 +552,7 @@ class FixtureEvaluation(Model):
     expression: dict[str, Any]
     configuration: dict[str, Any] | None = None
     expect: Literal["match", "no_match", "not_ready"] | None = None
+    query_vector: EvaluationQueryVector | None = None
 
 
 @dataclass(kw_only=True)
@@ -1166,6 +1198,7 @@ __all__ = [
     "ErrorEnvelope",
     "EvaluatedRecord",
     "Evaluation",
+    "EvaluationQueryVector",
     "Evidence",
     "ExpectedDelivery",
     "ExpectedDeliveryError",
@@ -1208,6 +1241,7 @@ __all__ = [
     "ReceiveAnswer",
     "ReceiveInstanceRef",
     "RecordPart",
+    "RecordPartVectorsItem",
     "RecordProvenance",
     "RecordSource",
     "RelationInput",
@@ -1243,6 +1277,7 @@ __all__ = [
     "SignedUrlReference",
     "SourceIdentity",
     "SubscriptionContribution",
+    "SubscriptionContributionVectors",
     "SubscriptionFixture",
     "SubscriptionLimits",
     "SubscriptionRef",

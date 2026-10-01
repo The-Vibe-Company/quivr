@@ -277,7 +277,47 @@
             }
           }
         },
-        "vectors": false
+        "vectors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parts": {
+              "type": "boolean"
+            },
+            "query": {
+              "type": "boolean"
+            },
+            "query_text_pointer": {
+              "type": "string",
+              "pattern": "^/",
+              "maxLength": 256
+            },
+            "query_expression_schema": {
+              "type": ["object", "boolean"],
+              "description": "Optional JSON Schema 2020-12 selecting expressions that need query vectors. Nonmatching expressions do not invoke the query encoder; absent means every valid expression."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "query": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              },
+              "then": {
+                "required": [
+                  "query_text_pointer"
+                ]
+              }
+            }
+          ],
+          "description": "Since Plugin API 0.10. Opt in to canonical Part vectors and saved query vectors. query_text_pointer selects a string in the expression by RFC 6901 JSON Pointer; the core embeds it when the Saved Query Version is created."
+        }
       }
     },
     "Connector": {

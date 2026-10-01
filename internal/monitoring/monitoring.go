@@ -65,6 +65,7 @@ type Definition struct {
 }
 
 type SavedQueryVersion struct {
+	QueryVectors []QueryVector
 	SavedQueryID string
 	VersionID    string
 	Definition   Definition
@@ -130,15 +131,19 @@ type Destination struct {
 }
 
 type SavedQueryInput struct {
-	Key        string     `json:"idempotency_key"`
-	Name       string     `json:"name"`
-	Definition Definition `json:"definition"`
+	PrepareVectors func(context.Context) ([]QueryVector, error) `json:"-"`
+	QueryVectors   []QueryVector                                `json:"-"`
+	Key            string                                       `json:"idempotency_key"`
+	Name           string                                       `json:"name"`
+	Definition     Definition                                   `json:"definition"`
 }
 
 // SavedQueryVersionInput publishes a new Version of an existing Saved Query.
 type SavedQueryVersionInput struct {
-	Key        string     `json:"idempotency_key"`
-	Definition Definition `json:"definition"`
+	PrepareVectors func(context.Context) ([]QueryVector, error) `json:"-"`
+	QueryVectors   []QueryVector                                `json:"-"`
+	Key            string                                       `json:"idempotency_key"`
+	Definition     Definition                                   `json:"definition"`
 }
 
 type SubscriptionInput struct {
@@ -223,6 +228,7 @@ type SearchProfiles interface {
 }
 
 type Service struct {
+	QueryEncoder SavedQueryEncoder
 	Store        Store
 	Corpora      CorpusAuthorizer
 	Destinations map[string]Destination
@@ -251,6 +257,11 @@ func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in Sa
 	}
 	if err := s.validDefinition(ctx, scope, in.Definition); err != nil {
 		return SavedQuery{}, err
+	}
+	if s.QueryEncoder != nil {
+		in.PrepareVectors = func(ctx context.Context) ([]QueryVector, error) {
+			return s.QueryEncoder.EncodeSavedQuery(ctx, scope.Organization, in.Definition)
+		}
 	}
 	return s.Store.CreateSavedQuery(ctx, scope.Organization, in)
 }
@@ -338,7 +349,16 @@ func (s Service) CreateSavedQueryVersion(ctx context.Context, scope corpus.Scope
 	if err := s.validDefinition(ctx, scope, in.Definition); err != nil {
 		return SavedQueryVersion{}, err
 	}
+	if s.QueryEncoder != nil {
+		in.PrepareVectors = func(ctx context.Context) ([]QueryVector, error) {
+			return s.QueryEncoder.EncodeSavedQuery(ctx, scope.Organization, in.Definition)
+		}
+	}
 	return s.Store.CreateSavedQueryVersion(ctx, scope.Organization, id, in)
+}
+
+type SavedQueryEncoder interface {
+	EncodeSavedQuery(context.Context, string, Definition) ([]QueryVector, error)
 }
 
 // DeleteSavedQuery logically deletes a Saved Query no Subscription uses any

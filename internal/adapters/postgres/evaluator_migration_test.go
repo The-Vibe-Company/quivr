@@ -28,7 +28,11 @@ func alertsVersion(t *testing.T, version string) registry.Registration {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin, err := plugins.LoadPinManifest([]byte(strings.Replace(string(raw), "version: 0.2.0", "version: "+version, 1)), version, plugins.PinConfig{Endpoint: "http://127.0.0.1:9971"})
+	report := plugins.Validate(raw)
+	if !report.Valid {
+		t.Fatalf("invalid alerts manifest: %v", report.Errors)
+	}
+	pin, err := plugins.LoadPinManifest([]byte(strings.Replace(string(raw), "version: "+report.Manifest.Version, "version: "+version, 1)), version, plugins.PinConfig{Endpoint: "http://127.0.0.1:9971"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +63,12 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 	}
 	registrations := postgres.PluginStore{Pool: pool}
 	seed := configured(t, plugins.PinConfig{Manifest: alertsManifest, Endpoint: "http://127.0.0.1:9970"})
+	seed.Registrations[0] = alertsVersion(t, "0.2.0")
+	seed.Registrations[0].State = registry.StateActive
+	for index := range seed.Roles {
+		seed.Roles[index].RegistrationID = seed.Registrations[0].ID
+		seed.Roles[index].Version = seed.Registrations[0].Version
+	}
 	if _, err := registrations.ApplyConfiguration(ctx, seed); err != nil {
 		t.Fatal(err)
 	}

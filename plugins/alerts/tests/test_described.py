@@ -54,6 +54,33 @@ class FakeServer(unittest.TestCase):
 
 
 class Decisions(FakeServer):
+    def test_mixed_checks_share_jev_and_preserve_order(self):
+        evaluations = [
+            (D(STRIKE), {}), ({**D(STRIKE), "meaning_check": "jev"}, {}),
+            ({"kind": "keywords_or_meaning", "match": {"term": "unrelated"}, "description": STRIKE, "meaning_check": "jev"}, {}),
+            ({"kind": "keywords_or_meaning", "match": {"term": "unrelated"}, "description": VISAS, "meaning_check": "jev"}, {}),
+            ({"kind": "keywords_and_meaning", "match": {"term": "dockers"}, "description": STRIKE, "meaning_check": "jev"}, {}),
+            ({"kind": "keywords_and_meaning", "match": {"term": "dockers"}, "description": VISAS, "meaning_check": "jev"}, {}),
+        ]
+        answer = self.ask(evaluations, parts=FR_PARTS)
+        self.assertEqual(answer.status, 200, answer.body)
+        decisions = answer.body["decisions"]
+        self.assertEqual([item["decision"] for item in decisions], ["match", "match", "match", "no_match", "match", "no_match"])
+        self.assertEqual([item["id"] for item in decisions], [f"e{index}" for index in range(1, 7)])
+        self.assertEqual([sorted(item["descriptions"]) for item in self.fake.requests], [sorted([STRIKE, VISAS])])
+        details = decisions[4]["evidence"]["details"]
+        self.assertEqual((details["kind"], details["meaning_check"]), ("keywords_and_meaning", "jev"))
+        self.assertEqual(details["keywords"]["terms"], [{"term": "dockers", "part_keys": ["title", "body"]}])
+
+    def test_mixed_keywords_decide_without_a_key_or_enrichment(self):
+        self.key = None
+        expressions = [
+            {"kind": "keywords_or_meaning", "match": {"term": "dockers"}, "description": STRIKE, "meaning_check": "jev"},
+            {"kind": "keywords_and_meaning", "match": {"term": "unrelated"}, "description": STRIKE, "meaning_check": "jev"},
+        ]
+        self.assertEqual(self.decisions([(item, {}) for item in expressions], parts=FR_PARTS, enriched=False), ["match", "no_match"])
+        self.assertEqual(self.fake.requests, [])
+
     def test_the_evidence_names_the_classifier_its_score_and_the_parts_it_saw(self):
         decision = self.ask([(D(STRIKE), {})], parts=FR_PARTS).body["decisions"][0]
         evidence = decision["evidence"]
@@ -72,8 +99,13 @@ class Decisions(FakeServer):
 class Batching(FakeServer):
     def test_one_call_decides_every_described_alert_and_identical_descriptions_are_asked_once(self):
         evaluations = [(D(STRIKE), {}), (D(VISAS), {}), (D("  Dock workers going on  strike at a harbour "), {"threshold": 0.4}),
-                       (D(STRIKE), {"threshold": 0.9}), ({"kind": "keywords", "match": {"term": "grève"}}, {})]
-        self.assertEqual(self.decisions(evaluations, parts=FR_PARTS), ["match", "no_match", "match", "match", "match"])
+                       (D(STRIKE), {"threshold": 0.9}), ({"kind": "keywords", "match": {"term": "grève"}}, {}),
+                       ({"kind": "meaning", "description": "A separate local topic", "meaning_check": "vectors"}, {})]
+        parts = [FR_PARTS[0], {**FR_PARTS[1], "vectors": [{"segment_id": "body-1", "vector": [0, 1]}]}]
+        self.assertEqual(self.decisions(evaluations, parts=parts,
+                                       record={"vector_space_id": "text-space-1", "vectors_ready": True},
+                                       query_vectors=[None] * 5 + [{"vector_space_id": "text-space-1", "vector": [0, 1]}]),
+                         ["match", "no_match", "match", "match", "match", "match"])
         self.assertEqual(len(self.fake.requests), 1)
         self.assertEqual(sorted(self.fake.requests[0]["descriptions"]), sorted([STRIKE, VISAS]))
         self.assertEqual(self.fake.requests[0]["model"], "jev-1.13.0")
@@ -186,6 +218,19 @@ class Schema(unittest.TestCase):
                                           ({**D(STRIKE), "sources": []}, {}), ({**D(STRIKE), "sources": [" "]}, {}), ({**D(STRIKE), "sources": ["a", "a"]}, {})]:
             with self.subTest(expression=expression, configuration=configuration):
                 self.assertEqual(reply([(expression, configuration)]).status, 400)
+
+    def test_malformed_meaning_selectors_and_mixed_expressions_are_refused(self):
+        for expression in [
+            {**D(STRIKE), "meaning_check": "unknown"}, {**D(STRIKE), "meaning_check": None},
+            {**D(STRIKE), "kind": "keywords_or_meaning"},
+            {"kind": "keywords_and_meaning", "match": {"term": "dockers"}},
+            {**D(STRIKE), "kind": "keywords_and_meaning", "match": {"all": []}},
+            {**D(STRIKE), "kind": "keywords_or_meaning", "match": {"term": "dockers"}, "meaning_check": "other"},
+            {**D(STRIKE), "kind": "keywords_or_meaning", "match": {"term": "dockers"}},
+            {**D(STRIKE), "kind": "meaning"}, {**D(STRIKE), "kind": "meaning", "meaning_check": "jev"},
+        ]:
+            with self.subTest(expression=expression):
+                self.assertEqual(reply([(expression, {})]).status, 400)
 
 
 class Environment(FakeServer):

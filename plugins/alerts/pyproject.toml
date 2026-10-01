@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quivr-alerts"
-version = "0.2.0"
-description = "Quivr first-party alert rules: keyword alerts with metadata filters, and described alerts judged by a classifier."
+version = "0.3.0"
+description = "Quivr first-party alert rules: keywords, local vector meaning checks and Jev, with mixed modes."
 requires-python = ">=3.12"
 license = "MIT"
 # The Quivr Plugin SDK is installed from the Quivr repository (see README.md).

@@ -116,6 +116,12 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	if err = s.validPair(in.Evaluator, query); err != nil {
 		return PreviewResult{}, err
 	}
+	if in.Definition != nil && s.QueryEncoder != nil {
+		query.QueryVectors, err = s.QueryEncoder.EncodeSavedQuery(ctx, scope.Organization, query.Definition)
+		if err != nil {
+			return PreviewResult{}, err
+		}
+	}
 	limit := in.Limit
 	if limit <= 0 {
 		limit = DefaultPreviewRecords
@@ -135,7 +141,7 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	}
 	judge, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	item := BatchItem{ID: PreviewID, Expression: query.Definition.Expression, Configuration: in.Evaluator.Configuration,
+	item := BatchItem{ID: PreviewID, Expression: query.Definition.Expression, Configuration: in.Evaluator.Configuration, QueryVectors: query.QueryVectors,
 		Subscriptions: []SubscriptionRef{{SubscriptionID: PreviewID, SubscriptionVersionID: PreviewID, SavedQueryID: query.SavedQueryID, SavedQueryVersionID: query.VersionID}}}
 	if item.Expression == nil {
 		item.Expression = map[string]any{}
@@ -216,6 +222,9 @@ func (s Service) previewOne(ctx context.Context, evaluator EvaluationPort, org s
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		return nil, err
+	}
+	if err := loadVectors(ctx, evaluator, s.Versions, org, r.CorpusID, r.VersionID, &article); err != nil {
 		return nil, err
 	}
 	outcomes, err := evaluator.Evaluate(ctx, Batch{Organization: org, CorpusID: r.CorpusID, RecordID: r.RecordID, VersionID: r.VersionID,

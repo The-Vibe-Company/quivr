@@ -337,11 +337,11 @@
       "file": "manifests/invalid/subscription-vectors.yaml",
       "schema": "plugin-manifest.schema.json",
       "valid": false,
-      "schema_valid": false,
+      "schema_valid": true,
       "errors": [
-        "reserved_field"
+        "incompatible_plugin_api"
       ],
-      "description": "vectors is reserved for a later Plugin API version."
+      "description": "Vector opt-in requires a range admitting Plugin API 0.10."
     },
     {
       "file": "manifests/invalid/no-contribution.yaml",
@@ -2008,6 +2008,13 @@
       "manifest": "manifests/valid/retrieval.yaml",
       "request": "requests/retrieval/search-round-1.json",
       "description": "near_vector needs query_text or a vector."
+    },
+    {
+      "file": "requests/subscription/vectors.json",
+      "schema": "subscription-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Plugin API 0.10 optional canonical Part segment vectors and immutable query vectors identify their common space."
     }
   ]
 }

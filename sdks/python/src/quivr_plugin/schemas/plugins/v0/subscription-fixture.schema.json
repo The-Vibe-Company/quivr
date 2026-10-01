@@ -43,6 +43,12 @@
         },
         "extensions": {
           "$ref": "subscription-request.schema.json#/properties/record/properties/extensions"
+        },
+        "vector_space_id": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/vector_space_id"
+        },
+        "vectors_ready": {
+          "$ref": "subscription-request.schema.json#/properties/record/properties/vectors_ready"
         }
       }
     },
@@ -76,6 +82,9 @@
               "not_ready"
             ],
             "description": "Expected decision. The Contract Runner and quivr plugin dev report a different answer."
+          },
+          "query_vector": {
+            "$ref": "subscription-request.schema.json#/properties/evaluations/items/properties/query_vector"
           }
         }
       }

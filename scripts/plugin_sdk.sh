@@ -133,7 +133,7 @@ for _ in range(100):
     try: urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/requests", timeout=1).close(); break
     except OSError: time.sleep(.05)' "$fake_port"
 TYPESAFE_API_KEY=test-key TYPESAFE_API_URL="http://127.0.0.1:$fake_port/v1/systemone" \
-  "$quivr" plugin test --report "$work/alerts-contract-report.json" --fixture fixtures/sample.json --fixture tests/data/described.json . > "$work/alerts-contract.log" 2>&1 || { cat "$work/alerts-contract.log"; exit 1; }
+  "$quivr" plugin test --report "$work/alerts-contract-report.json" --fixture fixtures/sample.json --fixture tests/data/described.json --fixture tests/data/vectors.json --fixture tests/data/vectors-not-ready.json . > "$work/alerts-contract.log" 2>&1 || { cat "$work/alerts-contract.log"; exit 1; }
 grep -q "PASS  batch            \[subscription\] tests/data/described.json" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/alerts-contract.log" || { cat "$work/alerts-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.json"

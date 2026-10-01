@@ -1,14 +1,15 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.9.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.10.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
 connector attachments, `0.5.0` the connector push mode (`receive`), and
 `0.6.0` the `ingestion` Contribution, `0.7.0` the `retrieval` Contribution, and
 `0.8.0` segment-only `segment_and_embed` requests (`spaces: []`), and `0.9.0`
-a vector space's declared `input_price`. JSON Schemas in this
+a vector space's declared `input_price`, and `0.10.0` optional subscription
+Part and query vectors. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -67,13 +68,13 @@ are **reserved** (declare `retrieval` for search). A manifest that declares them
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.9.0` and still serves every `0.1` to `0.8` plugin unchanged: a
+implements `0.10.0` and still serves every `0.1` to `0.9` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0` or `0.9.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0` or `0.10.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
-at its `modes` and a vector space's `input_price` (0.9) at that field.
+at its `modes`, a vector space's `input_price` (0.9), and subscription `vectors` (0.10) at their fields.
 A patch version only adds optional fields; a plugin that validates requests
 strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
@@ -129,6 +130,7 @@ version.
 | `contributions.normalizer.limits` | Declared `max_response_bytes` (default 4 MiB, at most 16 MiB) and `max_parts` (default and maximum 256) |
 | `contributions.subscription.expression_schema` | JSON Schema 2020-12 of the Saved Query expression (a JSON object) the rule interprets |
 | `contributions.subscription.configuration_schema` | Optional JSON Schema 2020-12 of the per-Subscription evaluator configuration (a JSON object); absent accepts any object |
+| `contributions.subscription.vectors` | Since 0.10, optional `{parts: true, query: true, query_text_pointer: "/description"}`. The pointer selects the expression's query text; it is required when `query` is true. Only requested vectors are sent |
 | `contributions.subscription.max_batch_size` | Most evaluations per request, 1–256, default 32; the core splits larger batches |
 | `contributions.subscription.timeout_ms`, `.retry.max_attempts`, `.limits.max_response_bytes` | As for the normalizer |
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
@@ -156,7 +158,7 @@ Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
 `>=0.3.0 <0.2.0`, is invalid. `fixtures/ranges.json` is normative for every
 implementation.
 
-This engine implements Plugin API `0.3.1` (and serves `0.1.0`, `0.2.0` and `0.3.0`) and reports
+This engine implements Plugin API `0.10.0` (and still serves earlier versions) and reports
 engine version `0.1.0`. Release builds may override the engine version.
 `quivr plugin inspect --json` reports both, and the negotiated Plugin API
 version under `compatibility.plugin_api.version`.
@@ -304,9 +306,30 @@ yield the same decisions and evidence. Requests stay within 16 MiB: the core
 splits a batch whose request would be larger. The call deadline is
 `timeout_ms`, capped by the core at 30 seconds.
 
-Per-Part `vector` and per-evaluation `query_vector` are **reserved** for
-local-vector matching; Plugin API 0.2 never sends them and the schemas reject
-them.
+Since Plugin API 0.10, a manifest can opt in to `vectors`. Without that field,
+none of the following fields are sent. With it:
+
+- `record.vector_space_id` identifies the Corpus's served text space;
+- `record.vectors_ready` is false until every canonical text segment in its
+  routed generation has an embedding in that space;
+- with `parts: true`, each Part's `vectors` is an array of `{segment_id, vector}`;
+- with `query: true`, each evaluation's `query_vector` is `{vector_space_id, vector}`.
+
+The core selects the string at `query_text_pointer` when a Saved Query Version
+is created and stores its vector for each distinct served space of its Corpora.
+The optional `query_expression_schema` selects which valid expressions need
+query vectors; nonmatching expressions never invoke the encoder. This lets a
+plugin offer local and external meaning checks without making the external
+backend depend on local embeddings. Absent selection means all valid expressions.
+It uses semantic search's query encoder, including the ingestion plugin's
+`embed_query` route, and never recomputes a pinned Version during evaluation
+or an idempotent creation replay. Deduplication also includes the pinned vectors.
+Missing vectors are explicit: the plugin answers `not_ready`, and the existing
+`record.enrichment_available` trigger evaluates again without duplicate Matches.
+Older Saved Query Versions have no query vectors; create a new query Version
+and move its Subscriptions. Do the same after changing a Corpus's served space:
+vectors from different spaces must never be compared. The singular Part
+`vector` field remains reserved; segments use `vectors`.
 
 **Response** (`subscription-response.schema.json`): `decisions`, exactly one
 per requested evaluation id.

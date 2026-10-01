@@ -32,6 +32,42 @@ func subscriptionManifest(t *testing.T, maxBatch string) *plugins.Manifest {
 	return report.Manifest
 }
 
+func TestSubscriptionFixtureVectorsRequireOptIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vectors.json")
+	fixture := `{"record":{"vector_space_id":"served-text","vectors_ready":true,"parts":[{"key":"body","role":"body","text":"Port workers strike","vectors":[{"segment_id":"segment-body","vector":[1,0]}]}]},"evaluations":[{"expression":{"kind":"substring","text":"strike"},"query_vector":{"vector_space_id":"served-text","vector":[1,0]}}]}`
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		manifest := subscriptionManifest(t, "")
+		if enabled {
+			manifest.Contributions.Subscription.Vectors = &plugins.SubscriptionVectors{Parts: true, Query: true, QueryTextPointer: "/text"}
+		}
+		batches, issues, err := devhost.BuildSubscriptionRequests(path, manifest)
+		if err != nil || len(issues) != 0 || len(batches) != 1 {
+			t.Fatalf("enabled=%v: batches=%d issues=%v err=%v", enabled, len(batches), issues, err)
+		}
+		var request struct {
+			Record struct {
+				Space string           `json:"vector_space_id"`
+				Ready *bool            `json:"vectors_ready"`
+				Parts []map[string]any `json:"parts"`
+			} `json:"record"`
+			Evaluations []map[string]any `json:"evaluations"`
+		}
+		if err := json.Unmarshal(batches[0].Body, &request); err != nil {
+			t.Fatal(err)
+		}
+		if enabled {
+			if request.Record.Space != "served-text" || request.Record.Ready == nil || !*request.Record.Ready || request.Record.Parts[0]["vectors"] == nil || request.Evaluations[0]["query_vector"] == nil {
+				t.Fatalf("fixture vectors lost: %s", batches[0].Body)
+			}
+		} else if request.Record.Space != "" || request.Record.Ready != nil || request.Record.Parts[0]["vectors"] != nil || request.Evaluations[0]["query_vector"] != nil {
+			t.Fatalf("vectors leaked without opt-in: %s", batches[0].Body)
+		}
+	}
+}
+
 func TestBuildSubscriptionRequests(t *testing.T) {
 	path := normativeSubscriptions + "subscriptions/strike.json"
 	raw, err := os.ReadFile(path)

@@ -133,6 +133,23 @@ type RecordMetadata struct {
 type Article struct {
 	Parts    []Part
 	Metadata RecordMetadata
+	Vectors  *ArticleVectors
+}
+
+type SegmentVector struct {
+	SegmentID string    `json:"segment_id"`
+	Vector    []float32 `json:"vector"`
+}
+
+type QueryVector struct {
+	SpaceID string    `json:"vector_space_id"`
+	Vector  []float32 `json:"vector"`
+}
+
+type ArticleVectors struct {
+	SpaceID string
+	Ready   bool
+	Parts   map[string][]SegmentVector
 }
 
 // SubscriptionRef names a Subscription Version an evaluation stands for.
@@ -148,6 +165,7 @@ type SubscriptionRef struct {
 // BatchItem is one distinct evaluation: a Saved Query expression and an
 // evaluator configuration, shared by every Subscription it stands for.
 type BatchItem struct {
+	QueryVectors  []QueryVector
 	ID            string
 	Expression    map[string]any
 	Configuration map[string]any

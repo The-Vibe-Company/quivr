@@ -179,6 +179,9 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, e.retryAll(ctx, group, "content_unavailable")
 	}
+	if err := loadVectors(ctx, evaluator, e.Versions, in.Organization, in.CorpusID, in.VersionID, &article); err != nil {
+		return true, e.retryAll(ctx, group, "content_unavailable")
+	}
 	items := distinctItems(group)
 	batch := Batch{Organization: in.Organization, CorpusID: in.CorpusID, RecordID: in.RecordID, VersionID: in.VersionID, Enriched: first.target.Enriched, Article: article, Items: items}
 	outcomes, calls := e.evaluate(ctx, evaluator, batch)
@@ -245,7 +248,7 @@ func distinctItems(group []pending) []BatchItem {
 			configuration = map[string]any{}
 		}
 		// encoding/json sorts object keys: equal values have equal keys.
-		raw, _ := json.Marshal([]any{expression, configuration})
+		raw, _ := json.Marshal([]any{expression, configuration, p.target.QueryVectors})
 		keys[i] = string(raw)
 		ref := SubscriptionRef{SubscriptionID: p.in.SubscriptionID, SubscriptionVersionID: p.in.SubscriptionVersionID, SavedQueryID: p.target.Subscription.SavedQueryID, SavedQueryVersionID: p.target.Subscription.SavedQueryVersionID, Owner: p.target.Subscription.Owner}
 		if j, ok := byKey[keys[i]]; ok {
@@ -253,7 +256,7 @@ func distinctItems(group []pending) []BatchItem {
 			continue
 		}
 		byKey[keys[i]] = len(distinct)
-		distinct = append(distinct, keyed{key: keys[i], item: BatchItem{Expression: expression, Configuration: configuration, Subscriptions: []SubscriptionRef{ref}}})
+		distinct = append(distinct, keyed{key: keys[i], item: BatchItem{Expression: expression, Configuration: configuration, QueryVectors: p.target.QueryVectors, Subscriptions: []SubscriptionRef{ref}}})
 	}
 	sort.Slice(distinct, func(a, b int) bool { return distinct[a].key < distinct[b].key })
 	items := make([]BatchItem, len(distinct))
@@ -266,6 +269,24 @@ func distinctItems(group []pending) []BatchItem {
 		group[i].item = byKey[keys[i]]
 	}
 	return items
+}
+
+type VectorReader interface {
+	ArticleVectors(context.Context, string, string, string) (*ArticleVectors, error)
+}
+
+func loadVectors(ctx context.Context, evaluator EvaluationPort, reader VersionReader, org, corpusID, versionID string, article *Article) error {
+	requester, ok := evaluator.(interface{ WantsVectors() bool })
+	if !ok || !requester.WantsVectors() {
+		return nil
+	}
+	vectors, ok := reader.(VectorReader)
+	if !ok {
+		return nil
+	}
+	var err error
+	article.Vectors, err = vectors.ArticleVectors(ctx, org, corpusID, versionID)
+	return err
 }
 
 // evaluate decides every item in chunks of the evaluator's batch size, at

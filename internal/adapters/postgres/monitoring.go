@@ -92,11 +92,15 @@ func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monit
 	}
 	id := content.StableID("saved_query", org, in.Key)
 	versionID := content.StableID("saved_query_version", org, id, "1")
+	vectors, err := s.prepareQueryVectors(ctx, org, "saved_queries", in.Key, in, in.QueryVectors, in.PrepareVectors)
+	if err != nil {
+		return monitoring.SavedQuery{}, err
+	}
 	existing, err := s.monitoringCommand(ctx, org, "saved_queries", in.Key, in, id, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "INSERT INTO saved_queries(organization,id,name,current_version_id) VALUES($1,$2,$3,$4)", org, id, in.Name, versionID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids,query_vectors) VALUES($1,$2,$3,$4,$5,$6)", org, id, versionID, definition, in.Definition.CorpusIDs, vectors); err != nil {
 			return err
 		}
 		_, err := appendScopedEvents(ctx, tx, org, "saved_query.created", "saved_query", id, id, in.Definition.CorpusIDs)
@@ -110,8 +114,8 @@ func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monit
 
 func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitoring.SavedQuery, error) {
 	q := monitoring.SavedQuery{}
-	var definition []byte
-	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition)
+	var definition, vectors []byte
+	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition,v.query_vectors FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition, &vectors)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return q, monitoring.ErrNotFound
 	}
@@ -119,18 +123,24 @@ func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitorin
 		return q, err
 	}
 	q.Current.SavedQueryID = q.ID
+	if err := json.Unmarshal(vectors, &q.Current.QueryVectors); err != nil {
+		return q, err
+	}
 	err = unmarshalNumbers(definition, &q.Current.Definition)
 	return q, err
 }
 
 func (s ContentStore) SavedQueryVersion(ctx context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
 	v := monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: versionID}
-	var definition []byte
-	err := s.Pool.QueryRow(ctx, `SELECT definition FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition)
+	var definition, vectors []byte
+	err := s.Pool.QueryRow(ctx, `SELECT definition,query_vectors FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition, &vectors)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, monitoring.ErrNotFound
 	}
 	if err != nil {
+		return v, err
+	}
+	if err := json.Unmarshal(vectors, &v.QueryVectors); err != nil {
 		return v, err
 	}
 	return v, unmarshalNumbers(definition, &v.Definition)
@@ -149,6 +159,10 @@ func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id strin
 		SavedQueryID string `json:"saved_query_id"`
 		monitoring.SavedQueryVersionInput
 	}{id, in}
+	vectors, err := s.prepareQueryVectors(ctx, org, "saved_query_versions", in.Key, canonical, in.QueryVectors, in.PrepareVectors)
+	if err != nil {
+		return monitoring.SavedQueryVersion{}, err
+	}
 	existing, err := s.monitoringCommand(ctx, org, "saved_query_versions", in.Key, canonical, versionID, func(tx pgx.Tx) error {
 		var deleted bool
 		var previous []string
@@ -162,7 +176,7 @@ func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id strin
 		if deleted {
 			return monitoring.ErrSavedQueryDeleted
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids) VALUES($1,$2,$3,$4,$5)", org, id, versionID, definition, in.Definition.CorpusIDs); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO saved_query_versions(organization,saved_query_id,id,definition,corpus_ids,query_vectors) VALUES($1,$2,$3,$4,$5,$6)", org, id, versionID, definition, in.Definition.CorpusIDs, vectors); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE saved_queries SET current_version_id=$3 WHERE organization=$1 AND id=$2", org, id, versionID); err != nil {
@@ -175,6 +189,34 @@ func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id strin
 		return monitoring.SavedQueryVersion{}, err
 	}
 	return s.SavedQueryVersion(ctx, org, id, existing)
+}
+
+func (s ContentStore) prepareQueryVectors(ctx context.Context, org, family, key string, canonical any, vectors []monitoring.QueryVector, prepare func(context.Context) ([]monitoring.QueryVector, error)) ([]byte, error) {
+	if prepare != nil {
+		request, err := json.Marshal(canonical)
+		if err != nil {
+			return nil, err
+		}
+		var previous []byte
+		err = s.Pool.QueryRow(ctx, "SELECT canonical_request FROM monitoring_requests WHERE organization=$1 AND route_family=$2 AND request_key=$3", org, family, key).Scan(&previous)
+		if err == nil {
+			if !bytes.Equal(previous, request) {
+				return nil, monitoring.ErrConflict
+			}
+			return nil, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		vectors, err = prepare(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if vectors == nil {
+		vectors = []monitoring.QueryVector{}
+	}
+	return json.Marshal(vectors)
 }
 
 // DeleteSavedQuery logically deletes a Saved Query once, when no Subscription

@@ -592,6 +592,7 @@ def parts():
             step('alert_plugin',subscription_plugin.verify),
             # Keyword alerts decided by plugins/alerts: the evidence names the matched terms, a filter alone alerts.
             step('keyword_alerts',subscription_plugin.keywords),
+            step('vector_alerts',subscription_plugin.vectors),
             # Described alerts judged through the fake System One server, never TypeSafe: one call per article for every described alert.
             step('described_alerts',subscription_plugin.described),
             step('alert_plugin_outage',subscription_plugin.outage),

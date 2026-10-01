@@ -1,7 +1,7 @@
 # Quivr Plugin SDK for Python
 
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
-([contract](../../contracts/plugins/v0/README.md), Plugin API 0.2) so that a
+([contract](../../contracts/plugins/v0/README.md), Plugin API 0.10) so that a
 Python normalizer or alert rule is a single function. It has no Temporal, Weaviate or database clients, and its
 only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
 later.
@@ -74,7 +74,7 @@ evaluations freely.
 | Concern | Behavior |
 | --- | --- |
 | Models | Dataclasses generated from the contract schemas (`quivr_plugin.models`), with `from_dict` and `to_dict` |
-| Routes | `GET /v0/discovery` (plugin identity, the declared Contributions, the highest Plugin API version the manifest range admits — `0.1.0` or `0.2.0` —, `sha256:` digest of the exact `quivr-plugin.yaml` bytes), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription` |
+| Routes | `GET /v0/discovery` (plugin identity, the declared Contributions, the highest Plugin API version the manifest range admits — supported minors `0.1.0` through `0.10.0`, including `0.3.1` —, `sha256:` digest of the exact `quivr-plugin.yaml` bytes), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription` |
 | Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration`; a subscription expression or evaluation configuration against the declared schemas → 400 `invalid_expression` or `invalid_subscription_configuration` |
 | Errors | `RetryableError` → 503, `retryable: true`. `TerminalError` → 422, `retryable: false`. Unexpected exception → 500 `internal_error`, `retryable: false`. Always the protocol error envelope |
 | Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation. For a subscription, also one decision per evaluation, evidence for every match, Part keys that exist and details of at most 16 KiB (500 `invalid_response`) |

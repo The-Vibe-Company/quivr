@@ -2,14 +2,19 @@
 
 Quivr's first-party alert rules, a `subscription` plugin built with the
 [Python Plugin SDK](../../sdks/python/README.md). A Subscription pinned to
-`{"plugin_id": "alerts", "version": "0.2.0"}` gets a Match when a new article
-satisfies its Saved Query's expression. It offers two alert kinds:
+`{"plugin_id": "alerts", "version": "0.3.0"}` gets a Match when a new article
+satisfies its Saved Query's expression. It requires Plugin API `>=0.10.0 <0.11.0`
+and offers these alert kinds:
 
 - **`keywords`**: a boolean keyword query over the article's title and body, with
   optional filters on its metadata;
-- **`described`**: a plain-language description that a classifier, TypeSafe's Jev,
-  judges each article against ([below](#described-alerts)). The article's text is
-  sent to TypeSafe, and the kind is off without `TYPESAFE_API_KEY`.
+- **`meaning`**: a plain-language description checked against stored vectors,
+  entirely locally, with required `meaning_check: "vectors"`;
+- **`described`**: the existing Jev check ([below](#described-alerts)). Omitted
+  `meaning_check` or `"jev"` sends text to TypeSafe; `"vectors"` selects the local
+  check where the installation permits this kind;
+- **`keywords_or_meaning` / `keywords_and_meaning`**: a keyword tree combined with
+  a description, with an explicit `meaning_check: "vectors"` or `"jev"`.
 
 People writing alerts should start with the guides:
 [keyword alerts](https://docs.quivr.thevibecompany.co/guides/keyword-alerts) and
@@ -117,8 +122,9 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `fields` | `{}` | Name → JSON Pointer, added to or replacing the built-in names. Names match `[a-z][a-z0-9_]*` |
-| `text_roles` | `["title", "body"]` | Part roles that terms search and described alerts send |
-| `described.threshold` | `0.5` | Default score threshold of described alerts, 0.2 to 0.95 |
+| `text_roles` | `["title", "body"]` | Part roles that terms search and Jev sees; vectors uses all supplied Part vectors |
+| `described.threshold` | `0.5` | Default Jev score threshold, 0.2 to 0.95 |
+| `vectors.threshold` | `0.8` | Default local cosine threshold, 0.2 to 0.95; independent of the Jev threshold |
 
 ```json
 {"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
@@ -130,21 +136,90 @@ name has no value: its filter is never satisfied, and the plugin logs a warning.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `wait_for_enrichment` | `false` for keywords, `true` for described | Answer `not_ready` until the article is enriched (embeddings attached). The core asks again on `record.enrichment_available` |
-| `threshold` | installer's `described.threshold` | Described alerts only: the score at or above which the article matches, 0.2 to 0.95. Keyword alerts ignore it |
+| `wait_for_enrichment` | `false` for keywords, `true` for meaning checks | Answer `not_ready` until enriched. A decisive mixed-mode keyword check bypasses this wait. The core asks again on `record.enrichment_available` |
+| `threshold` | `described.threshold` for Jev, `vectors.threshold` for vectors | Inclusive meaning-check threshold, 0.2 to 0.95. Keyword alerts ignore it |
 
 Rules run when an article becomes searchable. Keyword alerts need no enrichment, so
 they decide at once by default. If a deployment never enriches articles, a Subscription
 with `wait_for_enrichment: true` never decides.
 
 **Pin `kinds`** (core startup config): the alert kinds this installation accepts.
-An installation without `TYPESAFE_API_KEY` pins `"kinds": ["keywords"]`, so a
-described alert is `422 invalid_expression` at creation. Absent, both kinds are
-accepted.
+For a local-only installation, pin `"kinds": ["keywords", "meaning",
+"keywords_or_meaning", "keywords_and_meaning"]`. This leaves `described` out;
+use `meaning` for a local description. A kind allowlist alone cannot restrict
+the backend of a mixed expression: configure clients to select `vectors`.
+An unresolved mixed Jev check without `TYPESAFE_API_KEY` returns
+`described_unavailable`; it does not silently switch backends. Absent `kinds`,
+all kinds are accepted, but Jev still needs the key.
 
 **Secret:** `TYPESAFE_API_KEY`, read from the plugin's environment only and declared
 in the manifest with `required: false`. `TYPESAFE_API_URL` optionally replaces the
 System One endpoint, for example with the fake server in tests.
+
+## Local meaning checks
+
+This expression uses only stored embeddings, numeric summaries of the article
+and description, without instantiating or calling Jev:
+
+```json
+{"kind": "meaning", "description": "Labour strikes at ports and harbours", "meaning_check": "vectors"}
+```
+
+`description` has the same bounds as described alerts. Optional `sources`
+restricts the whole evaluation before either keyword or meaning checks. The
+manifest opts into `subscription.vectors` with `parts: true`, `query: true` and
+`query_text_pointer: "/description"`. Its `query_expression_schema` selects only
+expressions with an explicit `meaning_check: "vectors"`, so only vector-backed
+descriptions are embedded. Keyword expressions and default or explicit Jev
+expressions do not require the query encoder. Every meaning expression places
+its description at that pointer. The core owns query encoding and article
+enrichment.
+
+| Request field | Meaning |
+| --- | --- |
+| `record.vector_space_id` | Identity of the article's vector space |
+| `record.vectors_ready` | Whether article vectors are available |
+| `record.parts[].vectors[]` | Stored segments, each with `segment_id` and numeric `vector` |
+| `evaluations[].query_vector` | Optional saved query vector with `vector_space_id` and numeric `vector` |
+
+The maximum cosine similarity across all valid Part segments decides the
+evaluation. Query and article spaces must match exactly. Missing, unready or
+mismatched vectors return `not_ready`, even with `wait_for_enrichment: false`.
+Zero, nonfinite and dimension-mismatched vectors cannot match; invalid segments
+are skipped, and no valid comparable segment means `not_ready`.
+
+A match names the winning Part in `evidence.part_keys`. Its details contain
+`kind`, `meaning_check: "vectors"`, `similarity`, `threshold`, `vector_space_id`
+and `segment_id`. The unrounded cosine decides; evidence rounds it to six
+decimal places. A negative result explains the best similarity and threshold.
+
+The default **0.80** retains every labeled positive in the small bilingual E5
+calibration, including rephrased and translated articles. It also matches 11
+of 140 negative pairs: cosine measures proximity, not a factual yes/no judgement.
+See the [measured results and limitations](calibration/README.md), and tune
+`vectors.threshold` or each Subscription's `threshold` for your traffic. The
+core re-evaluates `not_ready` after enrichment and owns Match uniqueness; this
+plugin stores no delivery or deduplication state.
+
+## Mixed keyword and meaning checks
+
+Both mixed kinds require `match`, `description` and `meaning_check`:
+
+```json
+{"kind": "keywords_and_meaning", "match": {"term": "dockers"},
+ "description": "Labour strikes at ports and harbours", "meaning_check": "vectors"}
+```
+
+| Kind | Early keyword decision | Otherwise |
+| --- | --- | --- |
+| `keywords_or_meaning` | A positive tree returns `match` | Meaning decides, or returns `not_ready` |
+| `keywords_and_meaning` | A negative tree returns `no_match` | Meaning decides, or returns `not_ready` |
+
+Early decisions need neither enrichment, query vectors nor a classifier key.
+An OR keyword match carries keyword evidence and `matched_by: "keywords"`.
+An AND match combines the meaning evidence with `details.keywords` and the
+supporting Part keys in article order. Mixed Jev evaluations that need meaning
+share the existing described batch call; local evaluations never join it.
 
 ## Decisions and evidence
 
@@ -181,19 +256,22 @@ System One endpoint, for example with the fake server in tests.
 {"kind": "described", "description": "Labour strikes at ports and harbours"}
 ```
 
+Omitted `meaning_check` preserves Jev; explicit `"jev"` is equivalent. Use
+`"vectors"` for the [local backend](#local-meaning-checks) when this kind is allowed.
+
 The description has 3 to 1000 characters, with at least one character that is not a
 space. An optional `sources` (1 to 64 distinct Source Namespaces) limits the alert to
 those sources, compared like the keyword `source` filter: an article from another
 source is `no_match` at once, without waiting for enrichment and without a classifier
 question for that alert. Each batch is decided as follows.
 
-1. **One call.** All described evaluations of the batch that are ready and watch the
+1. **One call.** All Jev evaluations of the batch that are ready and watch the
    article's source share one
    classifier call. Their descriptions are deduplicated after runs of spaces are
    collapsed, then sorted, so each distinct description is asked once. Evaluations
    that differ only in threshold share their question. The core already
    deduplicates identical expression and configuration pairs across Subscriptions
-   and owners. There is no keyword pre-filter.
+   and owners. Pure described alerts have no keyword pre-filter.
 2. **What the classifier sees** (`state`):
    - `title`: the `title` Parts;
    - `source`: the Source Namespace;
@@ -246,7 +324,7 @@ moving to another model version.
 
 | Situation | Plugin error | The core |
 | --- | --- | --- |
-| No `TYPESAFE_API_KEY` and a described evaluation is due | `described_unavailable`, terminal | Isolates the described evaluations by halving the batch, decides the others, retries these with backoff |
+| No `TYPESAFE_API_KEY` and a Jev check is due | `described_unavailable`, terminal | Isolates unavailable evaluations by halving the batch, decides the others, retries these with backoff |
 | HTTP 401 or 403 | `classifier_unauthorized`, terminal | Same |
 | Other 4xx, or an answer without a valid Noul | `classifier_refused_request`, `classifier_invalid_answer`, terminal | Same |
 | Timeout, connection failure, HTTP 408, 429, 5xx or 529 | `classifier_unavailable`, retryable | Retries the whole batch with backoff; keyword evaluations of that batch wait too |
@@ -299,7 +377,7 @@ It exits 1 and explains the mistake for an invalid query. From Python, use
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e <quivr-v2 checkout>/sdks/python -e .
-python3 -m unittest discover -s tests            # grammar, matching, evidence, schema, described alerts
+python3 -m unittest discover -s tests            # grammar, matching, evidence, schema, Jev and local vectors
 quivr plugin dev --fixture fixtures/sample.json  # replay the keyword sample batch
 quivr plugin test .                              # Contract Runner certification (keyword fixture)
 ```

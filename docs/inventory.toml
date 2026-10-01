@@ -83,6 +83,7 @@ excluded = [
 "docs/start/functional.md" = { audience = "functional", kind = "start-page" }
 "docs/start/plugin-author.md" = { audience = "plugin-author", kind = "start-page" }
 "plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
+"plugins/alerts/calibration/README.md" = { audience = "plugin-author", kind = "concept", summary = "the local E5 alert threshold measurements and their limits" }
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }

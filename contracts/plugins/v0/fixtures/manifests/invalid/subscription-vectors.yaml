@@ -1,4 +1,4 @@
-# vectors is reserved for a later Plugin API version (local-vector matching).
+# Vector opt-in requires Plugin API 0.10.
 id: example-alerts
 version: 0.3.0
 compatibility:
@@ -7,4 +7,4 @@ compatibility:
 contributions:
   subscription:
     expression_schema: {type: object}
-    vectors: {parts: true, query: true}
+    vectors: {parts: true, query: true, query_text_pointer: /text}

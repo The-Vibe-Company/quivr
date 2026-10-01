@@ -41,14 +41,17 @@ type SubscriptionBatch struct {
 type subscriptionFixture struct {
 	Configuration json.RawMessage `json:"configuration,omitempty"`
 	Record        struct {
-		Enriched   bool               `json:"enriched"`
-		Parts      []subscriptionPart `json:"parts"`
-		Source     json.RawMessage    `json:"source,omitempty"`
-		AcceptedAt string             `json:"accepted_at,omitempty"`
-		Provenance json.RawMessage    `json:"provenance,omitempty"`
-		Extensions json.RawMessage    `json:"extensions,omitempty"`
+		VectorSpaceID string             `json:"vector_space_id,omitempty"`
+		VectorsReady  *bool              `json:"vectors_ready,omitempty"`
+		Enriched      bool               `json:"enriched"`
+		Parts         []subscriptionPart `json:"parts"`
+		Source        json.RawMessage    `json:"source,omitempty"`
+		AcceptedAt    string             `json:"accepted_at,omitempty"`
+		Provenance    json.RawMessage    `json:"provenance,omitempty"`
+		Extensions    json.RawMessage    `json:"extensions,omitempty"`
 	} `json:"record"`
 	Evaluations []struct {
+		QueryVector   json.RawMessage `json:"query_vector,omitempty"`
 		Expression    json.RawMessage `json:"expression"`
 		Configuration json.RawMessage `json:"configuration,omitempty"`
 		Expect        string          `json:"expect,omitempty"`
@@ -56,9 +59,10 @@ type subscriptionFixture struct {
 }
 
 type subscriptionPart struct {
-	Key  string `json:"key"`
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Vectors json.RawMessage `json:"vectors,omitempty"`
+	Key     string          `json:"key"`
+	Role    string          `json:"role"`
+	Text    string          `json:"text"`
 }
 
 type subscriptionRef struct {
@@ -69,6 +73,7 @@ type subscriptionRef struct {
 }
 
 type subscriptionEvaluation struct {
+	QueryVector   json.RawMessage   `json:"query_vector,omitempty"`
 	ID            string            `json:"id"`
 	Expression    json.RawMessage   `json:"expression"`
 	Configuration json.RawMessage   `json:"configuration"`
@@ -76,6 +81,8 @@ type subscriptionEvaluation struct {
 }
 
 type subscriptionRecord struct {
+	VectorSpaceID   string             `json:"vector_space_id,omitempty"`
+	VectorsReady    *bool              `json:"vectors_ready,omitempty"`
 	CorpusID        string             `json:"corpus_id"`
 	RecordID        string             `json:"record_id"`
 	RecordVersionID string             `json:"record_version_id"`
@@ -162,7 +169,7 @@ func BuildSubscriptionRequests(path string, m *plugins.Manifest) ([]Subscription
 			expect[id] = e.Expect
 		}
 		evaluations = append(evaluations, subscriptionEvaluation{
-			ID: id, Expression: e.Expression, Configuration: evalConfig,
+			ID: id, Expression: e.Expression, Configuration: evalConfig, QueryVector: e.QueryVector,
 			Subscriptions: []subscriptionRef{{
 				SubscriptionID:        fmt.Sprintf("dev-subscription-%d", n),
 				SubscriptionVersionID: fmt.Sprintf("dev-subscription-version-%d", n),
@@ -180,6 +187,24 @@ func BuildSubscriptionRequests(path string, m *plugins.Manifest) ([]Subscription
 	}
 	record := subscriptionRecord{CorpusID: "dev-corpus", RecordID: "dev-record-" + short, RecordVersionID: "dev-version-" + short,
 		Enriched: f.Record.Enriched, Parts: parts, Source: f.Record.Source, AcceptedAt: f.Record.AcceptedAt, Provenance: f.Record.Provenance, Extensions: f.Record.Extensions}
+	wants := m.Contributions.Subscription.Vectors
+	if wants != nil && (wants.Parts || wants.Query) {
+		record.VectorSpaceID, record.VectorsReady = f.Record.VectorSpaceID, f.Record.VectorsReady
+		if record.VectorsReady == nil {
+			ready := false
+			record.VectorsReady = &ready
+		}
+	}
+	if wants == nil || !wants.Parts {
+		for index := range record.Parts {
+			record.Parts[index].Vectors = nil
+		}
+	}
+	if wants == nil || !wants.Query {
+		for index := range evaluations {
+			evaluations[index].QueryVector = nil
+		}
+	}
 	// Metadata the fixture omits takes development defaults, as the core
 	// always sends it.
 	if len(record.Source) == 0 {

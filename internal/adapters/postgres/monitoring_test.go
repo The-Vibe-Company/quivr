@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -16,6 +17,62 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestSavedQueryVectorsAreFrozenAndReplayDoesNotEncode(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	config := pool.Config()
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	store := postgres.ContentStore{Pool: pool}
+	org := fmt.Sprintf("adapter-query-vectors-%d", time.Now().UnixNano())
+	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write"}, Corpora: []string{"*"}}
+	created, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "corpus", Name: "Neutral news"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := []monitoring.QueryVector{{SpaceID: "space-one", Vector: []float32{1, 0}}}
+	second := []monitoring.QueryVector{{SpaceID: "space-two", Vector: []float32{0, 1}}}
+	definition := monitoring.Definition{CorpusIDs: []string{created.ID}, Expression: map[string]any{"description": "Port strikes"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}
+	prepare := func(vectors []monitoring.QueryVector) func(context.Context) ([]monitoring.QueryVector, error) {
+		return func(ctx context.Context) ([]monitoring.QueryVector, error) {
+			if _, err := store.Generation(ctx, org, created.ID); err != nil {
+				return nil, err
+			}
+			return vectors, nil
+		}
+	}
+	input := monitoring.SavedQueryInput{Key: "query", Name: "Ports", Definition: definition, PrepareVectors: prepare(first)}
+	query, err := store.CreateSavedQuery(ctx, org, input)
+	if err != nil || !reflect.DeepEqual(query.Current.QueryVectors, first) {
+		t.Fatalf("initial vectors: %+v, %v", query, err)
+	}
+	input.PrepareVectors = func(context.Context) ([]monitoring.QueryVector, error) {
+		return nil, errors.New("encoder unavailable during replay")
+	}
+	replayed, err := store.CreateSavedQuery(ctx, org, input)
+	if err != nil || replayed.Current.VersionID != query.Current.VersionID || !reflect.DeepEqual(replayed.Current.QueryVectors, first) {
+		t.Fatalf("replay should use stored vectors: %+v, %v", replayed, err)
+	}
+	edit := monitoring.SavedQueryVersionInput{Key: "edit", Definition: definition, PrepareVectors: prepare(second)}
+	version, err := store.CreateSavedQueryVersion(ctx, org, query.ID, edit)
+	if err != nil || !reflect.DeepEqual(version.QueryVectors, second) {
+		t.Fatalf("new version vectors: %+v, %v", version, err)
+	}
+	edit.PrepareVectors = input.PrepareVectors
+	if _, err := store.CreateSavedQueryVersion(ctx, org, query.ID, edit); err != nil {
+		t.Fatalf("edit replay called encoder: %v", err)
+	}
+	old, err := store.SavedQueryVersion(ctx, org, query.ID, query.Current.VersionID)
+	if err != nil || !reflect.DeepEqual(old.QueryVectors, first) {
+		t.Fatalf("historical vectors changed: %+v, %v", old, err)
+	}
+}
 
 func adapterPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	t.Helper()

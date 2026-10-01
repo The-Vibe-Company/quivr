@@ -233,6 +233,13 @@ func ValidateSubscriptionItem(m *Manifest, expression, configuration []byte) []I
 	return issues
 }
 
+func SubscriptionQueryVectorApplies(m *Manifest, expression []byte) bool {
+	sub := m.Contributions.Subscription
+	return sub.Vectors != nil && sub.Vectors.Query &&
+		len(validateObject("expression", CodeInvalidExpression, expression, sub.ExpressionSchema)) == 0 &&
+		len(validateObject("expression", CodeInvalidExpression, expression, sub.Vectors.QueryExpressionSchema)) == 0
+}
+
 func validateObject(name, code string, value []byte, schemaRaw json.RawMessage) []Issue {
 	path := "/" + name
 	instance, err := decodeInstance(value)

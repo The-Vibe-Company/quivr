@@ -1,0 +1,20 @@
+{
+  "description": "An explicit vectors_ready:false blocks an otherwise matching local query even when enriched is true. Synthetic vectors are not model calibration.",
+  "record": {
+    "enriched": true,
+    "vector_space_id": "text-space-1",
+    "vectors_ready": false,
+    "parts": [
+      {"key": "body", "role": "body", "text": "Dock workers stopped unloading ships after wage talks failed.",
+       "vectors": [{"segment_id": "body-1", "vector": [1, 0]}]}
+    ]
+  },
+  "evaluations": [
+    {
+      "description": "A valid matching query waits for article vectors to become ready.",
+      "expression": {"kind": "meaning", "description": "Dock workers going on strike at a harbour", "meaning_check": "vectors"},
+      "query_vector": {"vector_space_id": "text-space-1", "vector": [1, 0]},
+      "expect": "not_ready"
+    }
+  ]
+}

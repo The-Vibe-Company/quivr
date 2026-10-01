@@ -97,6 +97,7 @@ Since Plugin API 0.2. One Record Version's text Parts and metadata (source ident
 | `record.parts[].role` | string | yes | — |
 | `record.parts[].text` | string | yes | — |
 | `record.parts[].vector` | reserved | no | Reserved: a document that sets it is rejected. |
+| `record.parts[].vectors` | array of object | no | At most 1024 items. |
 | `record.source` | object | no | Where the Record comes from: its Source Namespace and Record Key, and the Source Position of the accepted revision when the producer sent one. Always sent by the core since Plugin API 0.2. |
 | `record.source.namespace` | string | yes | — |
 | `record.source.record_key` | string | yes | — |
@@ -109,6 +110,8 @@ Since Plugin API 0.2. One Record Version's text Parts and metadata (source ident
 | `record.provenance.connector` | object | no | Present when origin is connector. |
 | `record.provenance.normalization` | object | no | Present when an external normalizer produced the published Manifest. |
 | `record.extensions` | `Extensions` (shared Manifest schema) | no | The Version's structured metadata by namespace (for example author, section or categories when the source provides them). Absent when the Version has none. |
+| `record.vector_space_id` | string | no | — |
+| `record.vectors_ready` | boolean | no | Since Plugin API 0.10. False when canonical segment vectors are missing from the served text space. Absent when vectors were not requested. |
 | `evaluations` | array of object | yes | Distinct evaluations to decide, each answered by exactly one decision with the same id. 1 to 256 items. |
 | `evaluations[].id` | string | yes | Opaque, unique within the request. 1 to 128 characters. |
 | `evaluations[].expression` | object | yes | The pinned Saved Query Version expression, valid against the manifest's expression_schema. |
@@ -119,7 +122,9 @@ Since Plugin API 0.2. One Record Version's text Parts and metadata (source ident
 | `evaluations[].subscriptions[].saved_query_id` | string | yes | — |
 | `evaluations[].subscriptions[].saved_query_version_id` | string | yes | — |
 | `evaluations[].subscriptions[].owner` | string | no | The Subscription Owner (an opaque end-user reference of the client application); absent for a global Subscription. Informational like the ids. 1 to 128 characters. |
-| `evaluations[].query_vector` | reserved | no | Reserved: a document that sets it is rejected. |
+| `evaluations[].query_vector` | object | no | Since Plugin API 0.10. Immutable vector from the semantic-search query encoder. Missing if this Saved Query Version has no vector in the article space. |
+| `evaluations[].query_vector.vector_space_id` | string | yes | — |
+| `evaluations[].query_vector.vector` | array of number | yes | 1 to 4096 items. |
 | `configuration` | object | yes | The validated plugin (installer) configuration, as for every Contribution. |
 
 **Response body (200)** (`subscription-response.schema.json`)
@@ -571,8 +576,11 @@ Schema: `subscription-fixture.schema.json`.
 | `record.accepted_at` | any | no | — |
 | `record.provenance` | any | no | — |
 | `record.extensions` | any | no | — |
+| `record.vector_space_id` | any | no | — |
+| `record.vectors_ready` | any | no | — |
 | `evaluations` | array of object | yes | 1 to 256 items. |
 | `evaluations[].description` | string | no | 1 to 1024 characters. |
 | `evaluations[].expression` | object | yes | — |
 | `evaluations[].configuration` | object | no | Subscription evaluator configuration. Defaults to an empty object. |
 | `evaluations[].expect` | `match`, `no_match`, `not_ready` | no | Expected decision. The Contract Runner and quivr plugin dev report a different answer. |
+| `evaluations[].query_vector` | any | no | — |

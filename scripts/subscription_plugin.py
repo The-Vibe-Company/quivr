@@ -19,7 +19,7 @@ stays in the single ``plugin`` pin:
 Each runs as its own process with the repository's Python Plugin SDK. Every
 oracle is a public HTTP read or a webhook.
 """
-import os, pathlib, shutil, signal, subprocess, time, urllib.request
+import json, os, pathlib, shutil, signal, subprocess, time, urllib.request
 
 import normalizer_plugin
 
@@ -28,7 +28,7 @@ MODULE = NAME.replace('-', '_')
 VERSION = '0.1.0'
 EVALUATOR = f'{NAME}@{VERSION}'
 ALERTS = normalizer_plugin.ROOT / 'plugins' / 'alerts'
-KEYWORD_EVALUATOR = 'alerts@0.2.0'
+KEYWORD_EVALUATOR = 'alerts@0.3.0'
 # Installer configuration of the alerts pin: the built-in field names only. A
 # deployment maps its own names here, e.g. {"fields": {"author": "/extensions/<namespace>/data/author"}}.
 ALERTS_CONFIGURATION = {}
@@ -61,7 +61,8 @@ def select(stack, enabled, described='off'):
 def kinds(stack, described=None):
     """The alert kinds the alerts pin offers: described only with a classifier."""
     mode = stack.state.get('described', 'off') if described is None else described
-    return ['keywords', 'described'] if mode != 'off' else ['keywords']
+    local = ['keywords', 'meaning', 'keywords_or_meaning', 'keywords_and_meaning']
+    return local + ['described'] if mode != 'off' else local
 
 
 def directory(stack):
@@ -222,6 +223,35 @@ def verify(stack):
 def keywords(stack):
     """Keyword alerts through plugins/alerts: matched terms in the evidence, filters, invalid trees."""
     stack.tests('^TestKeywordAlerts', environment())
+
+
+def vectors(stack):
+    base = f"http://127.0.0.1:{stack.state['api_port']}"
+    def call(method, path, body=None):
+        request = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
+                                         headers={'Authorization': 'Bearer ' + stack.state['admin'], 'Content-Type': 'application/json'}, method=method)
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+    key = stack.name + '-vectors'
+    corpus = call('POST', '/v0/corpora', {'name': 'Local vector alerts', 'idempotency_key': key})['corpus_id']
+    cursor = call('GET', '/v0/changes?corpus_id=' + corpus)['next_cursor']
+    query = call('POST', '/v0/saved-queries', {'idempotency_key': key, 'name': 'Port strikes', 'definition': {
+        'corpus_ids': [corpus], 'expression': {'kind': 'meaning', 'meaning_check': 'vectors', 'description': 'Labour strikes at ports and harbours'},
+        'retrieval_profile': 'default', 'temporal_policy': 'from_activation'}})
+    version = query['current_version']['version_id']
+    subscription = call('POST', '/v0/subscriptions', {'idempotency_key': key, 'name': 'Local port strikes',
+        'saved_query_id': query['saved_query_id'], 'saved_query_version_id': version,
+        'evaluator': {'plugin_id': 'alerts', 'version': '0.3.0', 'configuration': {'wait_for_enrichment': False}},
+        'destination_id': 'local-receiver-org-a'})
+    env = {**environment(stack), 'QUIVR_TEST_VECTOR_CORPUS': corpus, 'QUIVR_TEST_VECTOR_QUERY': query['saved_query_id'],
+           'QUIVR_TEST_VECTOR_VERSION': version, 'QUIVR_TEST_VECTOR_SUBSCRIPTION': subscription['subscription_id'],
+           'QUIVR_TEST_VECTOR_CURSOR': cursor}
+    stack.compose('stop', 'tei')
+    try:
+        stack.tests('^TestVectorAlertsPending$', env)
+    finally:
+        stack.compose('up', '-d', '--wait', '--wait-timeout', '180', 'tei')
+    stack.tests('^TestVectorAlertsEnrichmentMatchesOnce$', env)
 
 
 def described(stack):

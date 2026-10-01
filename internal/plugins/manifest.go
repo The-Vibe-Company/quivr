@@ -19,13 +19,13 @@ import (
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.9.0"
+const PluginAPIVersion = "0.10.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -39,7 +39,7 @@ const RetrievalSince = "0.7.0"
 // FieldSince is the Plugin API version that introduced a manifest field
 // inside a Contribution (a JSON Pointer). A manifest that declares it needs a
 // plugin_api range that admits that version or a later supported one.
-var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.0"}
+var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.0", "/contributions/subscription/vectors": "0.10.0"}
 
 // PushSince is the Plugin API version that introduced the connector push
 // mode: the core relays webhook deliveries to receive.
@@ -69,9 +69,7 @@ var ReservedContributions = []string{"enricher", "validator", "projector", "retr
 
 // reservedFields are manifest fields (JSON Pointers) kept for a later Plugin
 // API version.
-var reservedFields = []struct{ path, message string }{
-	{"/contributions/subscription/vectors", "Part and query vectors for subscription rules are reserved for a later Plugin API version; remove vectors"},
-}
+var reservedFields = []struct{ path, message string }{}
 
 // Effective defaults applied when a manifest omits the field.
 const (
@@ -174,6 +172,7 @@ func (c Contributions) Names() []string {
 // Subscription is an alert rule (Plugin API 0.2): it decides whether one
 // Record Version matches each Saved Query expression of a batch.
 type Subscription struct {
+	Vectors *SubscriptionVectors `json:"vectors,omitempty"`
 	// ExpressionSchema is the JSON Schema of the Saved Query expression.
 	ExpressionSchema json.RawMessage `json:"expression_schema"`
 	// ConfigurationSchema is the JSON Schema of the per-Subscription
@@ -183,6 +182,13 @@ type Subscription struct {
 	TimeoutMS           int                `json:"timeout_ms"`
 	Retry               Retry              `json:"retry"`
 	Limits              SubscriptionLimits `json:"limits"`
+}
+
+type SubscriptionVectors struct {
+	Parts                 bool            `json:"parts"`
+	Query                 bool            `json:"query"`
+	QueryTextPointer      string          `json:"query_text_pointer,omitempty"`
+	QueryExpressionSchema json.RawMessage `json:"query_expression_schema,omitempty"`
 }
 
 // Ingestion segments and embeds Record Versions (Plugin API 0.6): it cuts the
@@ -522,6 +528,13 @@ func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 			}
 		}
 		if sub, ok := contributions["subscription"].(map[string]any); ok {
+			if vectors, ok := sub["vectors"].(map[string]any); ok {
+				if schema, present := vectors["query_expression_schema"]; present {
+					if _, err := compileUserSchema(schema); err != nil {
+						issues = append(issues, Issue{Code: CodeInvalidExpressionSchema, Path: "/contributions/subscription/vectors/query_expression_schema", Message: fmt.Sprintf("the query selection schema is not a valid JSON Schema: %v", err)})
+					}
+				}
+			}
 			for _, field := range []struct{ name, code, label string }{
 				{"expression_schema", CodeInvalidExpressionSchema, "expression"},
 				{"configuration_schema", CodeInvalidConfigSchema, "Subscription configuration"},

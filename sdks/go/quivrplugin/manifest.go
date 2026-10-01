@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.9.0"
+const PluginAPIVersion = "0.10.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
