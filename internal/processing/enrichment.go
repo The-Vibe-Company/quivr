@@ -21,6 +21,12 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	if v.Availability.State != "retrieval_ready" || (v.Processing.State == "blocked" && v.Processing.Phase == "enrichment") {
 		return nil
 	}
+	if v.Steps.Enriched != nil {
+		// Already enriched: a retry after a worker died before reporting the
+		// success ends here, whatever plan it now follows, so its pin is
+		// released instead of deriving again and failing forever (THE-861).
+		return nil
+	}
 	if err = s.Content.EnrichmentProgress(ctx, org, v.ID, "running", ""); err != nil {
 		return err
 	}

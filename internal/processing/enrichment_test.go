@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
@@ -18,6 +19,8 @@ type oneVersion struct {
 	content.EmbeddingRepository
 	progress []string
 	timeouts int
+	// enriched is when the Version's enrichment succeeded; nil until then.
+	enriched *time.Time
 }
 
 var manifest = content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "a long article"}}}}
@@ -27,7 +30,7 @@ func (s *oneVersion) Receipt(context.Context, string, string) (content.Receipt, 
 }
 func (s *oneVersion) Version(context.Context, string, string, string) (content.StoredVersion, error) {
 	return content.StoredVersion{RecordID: "record", ID: "version", CorpusID: "corpus", ManifestBlob: content.Blob{Key: "manifest"}, TextBlob: content.Blob{Key: "text"},
-		Availability: content.Availability{State: "retrieval_ready", Searchable: true}}, nil
+		Availability: content.Availability{State: "retrieval_ready", Searchable: true}, Steps: content.Steps{Enriched: s.enriched}}, nil
 }
 func (s *oneVersion) Record(context.Context, string, string) (content.Record, error) {
 	return content.Record{ID: "record", Source: content.Source{CorpusID: "corpus"}}, nil
@@ -102,5 +105,24 @@ func TestEnrichmentStopsAfterRepeatedPluginDeadlines(t *testing.T) {
 	}
 	if store.timeouts != processing.EnrichmentTimeoutBudget {
 		t.Fatalf("%d deadlines counted, want %d: the outage must not count", store.timeouts, processing.EnrichmentTimeoutBudget)
+	}
+}
+
+// A retried enrichment of a Version whose enrichment already succeeded ends at
+// once, whatever plan the worker follows now: a worker killed between the
+// success and its report to Temporal must not leave the retry deriving again
+// and failing forever, so the activity releases the pin and the plugin
+// version can leave draining (THE-861).
+func TestEnrichmentAlreadySucceededEndsTheRetry(t *testing.T) {
+	enriched := time.Now()
+	store := &oneVersion{enriched: &enriched}
+	p := &plugin{errs: []error{errors.New("derived on another plan: projection missing")}}
+	service := processing.Service{Content: content.Service{Repository: store, Blobs: store, Embeddings: store},
+		Plugin: &processing.PluginDeriver{Plugin: p}, Routing: served{}}
+	if err := service.Enrich(context.Background(), "org", "receipt"); err != nil {
+		t.Fatalf("retried enrichment of an enriched Version: %v; want it to end", err)
+	}
+	if len(p.errs) == 0 || len(store.progress) > 0 {
+		t.Fatalf("an enriched Version was enriched again: plugin called %t, progress %q", len(p.errs) == 0, store.progress)
 	}
 }
