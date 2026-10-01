@@ -1,0 +1,25 @@
+.agents/skills/armada-coordinator/MERGE.md
+  s_d658e7251951c2::t_b73befb1bdeebd 5-12
+.agents/skills/armada-coordinator/SKILL.md
+  s_d658e7251951c2::t_a6272db365f91d 27,31,37,41
+.agents/skills/armada-worker/SKILL.md
+  s_d658e7251951c2::t_928e1d1578437e 15,36
+skills-lock.json
+  s_d658e7251951c2::t_cb393ba2a100ac 8-9,15,22,29-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af336e102c4a1568136dd74a76789302a9188e10",
+  "prompts": {},
+  "sessions": {
+    "s_d658e7251951c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0cf2ced-2bdf-45f0-afe3-62c9cf64923f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
