@@ -90,6 +90,8 @@ type API struct {
 	// answers 404.
 	Quarantine      *quarantine.Service
 	reprocessSchema *jsonschema.Schema
+	// changePoll is how often an open change stream reads the journal again.
+	changePoll time.Duration
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {

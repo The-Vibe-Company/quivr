@@ -96,6 +96,9 @@ type Config struct {
 	// Pipeline Plan changed, to follow it without restart (Go duration,
 	// default 2s).
 	PluginPlanPoll string `json:"plugin_plan_poll"`
+	// ChangeStreamPoll is how often an open change stream reads the journal
+	// again (Go duration, default 250ms).
+	ChangeStreamPoll string `json:"change_stream_poll"`
 	// PinnedPluginAttempts is how many attempts work pinned to a Pipeline
 	// Plan gets once a plugin of that plan has left the active plan and cannot
 	// be reached, before the work stops with a pinned_plugin_unavailable
@@ -267,6 +270,12 @@ func Run(command string) error {
 	if cfg.ChangeRetention != "" {
 		if retention, err = time.ParseDuration(cfg.ChangeRetention); err != nil || retention <= 0 {
 			return errors.New("change_retention must be a positive duration")
+		}
+	}
+	streamPoll := httpapi.DefaultStreamPoll
+	if cfg.ChangeStreamPoll != "" {
+		if streamPoll, err = time.ParseDuration(cfg.ChangeStreamPoll); err != nil || streamPoll <= 0 {
+			return errors.New("change_stream_poll must be a positive duration")
 		}
 	}
 	prune, err := cfg.ChangePrune.parse(retention)
@@ -553,7 +562,7 @@ func Run(command string) error {
 		go pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute)
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{ContentStore: store}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Recent: previews, Versions: versionParts{content: contents, metadata: previews}}), httpapi.WithOperations(operations.Service{Store: store}),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),

@@ -56,7 +56,7 @@ func catalogServer(t *testing.T, catalog *memoryCatalog) (*httptest.Server, stri
 	key := catalogCursorKey
 	journal := &memoryJournal{}
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed), httpapi.WithConnectors(catalogConnectors(t)))
+	handler, err := httpapi.New(knownCorpora{}, content.Service{Catalog: catalog}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 0), httpapi.WithConnectors(catalogConnectors(t)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,14 +18,17 @@ import (
 // Option configures optional API capabilities.
 type Option func(*API)
 
-// WithChanges enables the public change feed over the committed journal.
-func WithChanges(feed changes.Service) Option {
-	return func(a *API) { a.Changes = feed }
+// WithChanges enables the public change feed over the committed journal. An
+// open stream reads the journal again every poll; zero is DefaultStreamPoll.
+func WithChanges(feed changes.Service, poll time.Duration) Option {
+	return func(a *API) { a.Changes, a.changePoll = feed, poll }
 }
+
+// DefaultStreamPoll is how often an open change stream reads the journal again.
+const DefaultStreamPoll = 250 * time.Millisecond
 
 const (
 	changeSchemaVersion = "1"
-	streamPollInterval  = 250 * time.Millisecond
 	streamKeepalive     = 15 * time.Second
 	streamWriteTimeout  = 10 * time.Second
 	streamPageSize      = 100
@@ -180,7 +183,11 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 	}
 	slog.Info("change stream opened", "organization", scope.Organization, "corpus_id", corpusID)
 	defer slog.Info("change stream closed", "organization", scope.Organization, "corpus_id", corpusID)
-	ticker := time.NewTicker(streamPollInterval)
+	poll := a.changePoll
+	if poll <= 0 {
+		poll = DefaultStreamPoll
+	}
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	lastWrite := time.Now()
 	for {

@@ -32,7 +32,7 @@ stay visible. The Spec 1 obligation map is in
 - SeaweedFS 4.45 can crash with a raft map race when it restarts on existing
   data. The harness gives a failed dependency start one more bounded attempt and
   records it in `readiness.json` (`dependency_start_retries`).
-- Change-cursor expiry is proven with a second API at 2 s retention.
+- Change-cursor expiry is proven with a second API at 1 s retention.
   In-stream expiry is proven only by handler tests.
 - Physical pruning of the change journal (THE-697) is proven on org_r only:
   the harness worker prunes it after 2 s through an explicit

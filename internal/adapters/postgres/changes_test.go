@@ -91,12 +91,13 @@ func TestChangeJournalWindowsAndRetention(t *testing.T) {
 		t.Fatal("start at head", head, err)
 	}
 
-	time.Sleep(1200 * time.Millisecond)
-	stale, err := store.ReadChanges(ctx, scope.Organization, a.ID, 0, 10, time.Second)
+	// A 1 µs window, the shortest PostgreSQL expresses: position 1 committed
+	// several round trips ago, so it is already past retention.
+	stale, err := store.ReadChanges(ctx, scope.Organization, a.ID, 0, 10, time.Microsecond)
 	if err != nil || !stale.Expired {
 		t.Fatal("unconsumed position older than retention did not expire", stale, err)
 	}
-	caughtUp, err := store.ReadChanges(ctx, scope.Organization, a.ID, 6, 10, time.Second)
+	caughtUp, err := store.ReadChanges(ctx, scope.Organization, a.ID, 6, 10, time.Microsecond)
 	if err != nil || caughtUp.Expired {
 		t.Fatal("cursor at head must not expire on a quiet journal", caughtUp, err)
 	}

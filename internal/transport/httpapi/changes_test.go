@@ -93,7 +93,8 @@ func changeServer(t *testing.T, journal *memoryJournal) *httptest.Server {
 	}
 	key := []byte("cursor-key-0123456789abcdef0123456789")
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed))
+	// Streams read the journal every 5 ms, like a deployment's change_stream_poll.
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, key, httpapi.WithChanges(feed, 5*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,6 +58,8 @@ type resyncClient struct {
 	// onPage runs after each catalog page of the current attempt with that
 	// page's Records, so a test can mutate content during traversal.
 	onPage func(attempt, page int, items []map[string]any)
+	// started is the Change Cursor the current scan captured before its first page.
+	started string
 }
 
 func (c *resyncClient) get(path string) (int, map[string]any) {
@@ -105,6 +107,7 @@ func (c *resyncClient) scan(first string) error {
 	if err := c.check(status, start); err != nil {
 		return err
 	}
+	c.started = start["next_cursor"].(string)
 	view := catalogView{}
 	path := first + "&limit=" + fmt.Sprint(c.limit)
 	for page := 0; ; page++ {
@@ -127,7 +130,7 @@ func (c *resyncClient) scan(first string) error {
 		}
 		path = recordsPath(c.corpus, next, c.limit)
 	}
-	c.view, c.cursor = view, start["next_cursor"].(string)
+	c.view, c.cursor = view, c.started
 	return nil
 }
 
@@ -347,7 +350,7 @@ func TestCatalogResyncRestartsAfterExpiry(t *testing.T) {
 	client.onPage = func(attempt, page int, _ []map[string]any) {
 		if attempt == 0 && page == 0 {
 			late = request(t, "POST", "/v0/records", admin, inlineCommand(c, "catalog-"+c+"-late", "late", "Arrivée pendant le parcours"), 202)["record_id"].(string)
-			time.Sleep(3 * time.Second)
+			awaitExpired(t, short, admin, changesPath(c, client.started, 0))
 		}
 	}
 	client.sync()

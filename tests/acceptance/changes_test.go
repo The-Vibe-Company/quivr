@@ -353,6 +353,34 @@ func TestChangeStreamResumesWithoutLoss(t *testing.T) {
 	}
 }
 
+// awaitExpired polls a change cursor on base until it answers 410, as it does
+// once the event after it is older than that API's retention, and returns the
+// error body.
+func awaitExpired(t *testing.T, base, token, path string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		req, _ := http.NewRequest("GET", base+path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		err = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		switch {
+		case err != nil || (res.StatusCode != 200 && res.StatusCode != 410):
+			t.Fatal("cursor read", path, res.StatusCode, body, err)
+		case res.StatusCode == 410:
+			return body
+		case time.Now().After(deadline):
+			t.Fatal("cursor never expired", path)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // TestChangeCursorExpiry uses a second API process with short retention.
 func TestChangeCursorExpiry(t *testing.T) {
 	short := os.Getenv("QUIVR_TEST_SHORT_RETENTION_URL")
@@ -363,15 +391,12 @@ func TestChangeCursorExpiry(t *testing.T) {
 	c := changeCorpus(t, "expiry")
 	cursor := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
 	request(t, "POST", "/v0/records", admin, inlineCommand(c, "expiry-1", "expiry-1", "Bientôt expiré"), 202)
-	time.Sleep(3 * time.Second)
 
-	stale := openChangeStream(t, short, admin, changesPath(c, cursor, 0), "")
-	var e map[string]any
-	if err := json.NewDecoder(stale.body.Body).Decode(&e); err != nil || stale.body.StatusCode != 410 || e["code"] != "cursor_expired" || e["resync_url"] == nil {
-		t.Fatal("expired poll cursor", stale.body.StatusCode, e, err)
+	if e := awaitExpired(t, short, admin, changesPath(c, cursor, 0)); e["code"] != "cursor_expired" || e["resync_url"] == nil {
+		t.Fatal("expired poll cursor", e)
 	}
 	s := openChangeStream(t, short, admin, "/v0/changes/stream?corpus_id="+url.QueryEscape(c), cursor)
-	e = nil
+	var e map[string]any
 	if err := json.NewDecoder(s.body.Body).Decode(&e); err != nil || s.body.StatusCode != 410 || e["code"] != "cursor_expired" || e["resync_url"] == nil {
 		t.Fatal("expired stream cursor before headers", s.body.StatusCode, e, err)
 	}

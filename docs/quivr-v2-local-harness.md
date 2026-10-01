@@ -154,9 +154,10 @@ conditions with a deadline and retain the last response on timeout; do not asser
 random server IDs, precise wall-clock durations or private workflow histories.
 Retrieve shared journal events using a captured cursor, deduplicate by event ID
 and verify SSE/polling resume against the same committed mutations. `make verify`
-starts a second API over the same database with `change_retention: 2s` so
+starts a second API over the same database with `change_retention: 1s` so
 pre-stream cursor expiry (HTTP 410) is proven publicly; in-stream `stream_error`
-is covered by transport tests. The worker also physically prunes the change
+is covered by transport tests. Open change streams read the journal every 50 ms
+(`change_stream_poll`). The worker also physically prunes the change
 journal of `org_r` (key `QUIVR_TEST_RETENTION`) after 2 s, every second
 (`change_prune` with `allow_short_retention`). The short retention is confined
 to `org_r`, so org_a/org_b cursors keep the default seven days.

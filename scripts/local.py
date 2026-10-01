@@ -46,6 +46,11 @@ DELIVERY_OVERRIDES={'retry_initial':'2s','retry_max':'2s','window':'20s','allow_
 # The worker physically prunes org_r's change journal after 2 s, every second (THE-697). The
 # short retention is confined to org_r so org_a/org_b cursors keep the default seven days.
 PRUNE_OVERRIDES={'interval':'1s','retention':'2s','organizations':['org_r'],'allow_short_retention':True}
+# The short-retention API expires a cursor once the event after it is 1 s old, so the expiry acceptance
+# tests wait about a second (THE-803). Catalog convergence reads its cursor every ~200 ms, well inside it.
+SHORT_CHANGE_RETENTION='1s'
+# Open change streams read the journal every 50 ms instead of 250 ms (THE-803).
+CHANGE_STREAM_POLL='50ms'
 OBSERVABILITY_OVERRIDES={'flush_interval':'200ms','record_query_text':True}
 # Every harness service port comes from one allocator that never hands a port out twice and stays
 # outside the kernel's ephemeral range, so two services cannot end up on one port (THE-728).
@@ -111,6 +116,7 @@ class Stack:
         cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
             # api and worker follow a plugin activation within this delay (THE-781).
             plugin_plan_poll='200ms',
+            change_stream_poll=CHANGE_STREAM_POLL,
             # Work pinned to a plan whose plugin left it and cannot be reached stops after two attempts (THE-782).
             pinned_plugin_attempts=2,
             # Backfills fill one Version a second, so the acceptance pauses one halfway; a paused one checks every 200ms (THE-784).
@@ -169,7 +175,7 @@ class Stack:
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
         (self.directory/'tokenizer-provenance.json').write_text((ROOT/'plugins/core-ingest/profile.json').read_text())
         # A second API over the same database with a short change retention proves public cursor expiry.
-        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
+        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         worker=self.directory/'worker.json';cfg['probe_listen']=f"127.0.0.1:{s['worker_probe_port']}";worker.write_text(json.dumps({**cfg,'change_prune':PRUNE_OVERRIDES}));worker.chmod(0o600)
         # Keyless variant (THE-691): same stack without credential_key, its own Organization
         # and log directory. Only verify_keyless uses it; the harness always returns to config.json.
@@ -267,7 +273,7 @@ class Stack:
         # Its pins are the stack's current ones: a start with other pins would apply them to the plan all
         # processes follow (THE-781).
         cfg=json.loads((self.directory/'config.json').read_text());s=self.state
-        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':'2s'}));short.chmod(0o600)
+        short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.save()
@@ -644,7 +650,7 @@ def finish(stack,steps,status,start):
         dirty=bool(run(['git','status','--porcelain','--untracked-files=no'],capture_output=True,text=True).stdout.strip())
         verify_report.write(stack.directory,{'status':status,'failed_step':steps.failed_step(),'run':stack.name,'part':getattr(stack,'part',None),'duration_seconds':round(time.monotonic()-start,3),'source':source,'dirty':dirty,
             'scope':f"Part {getattr(stack,'part',None)} of the stack verification (steps below; parts in scripts/local.py) over real PostgreSQL, Temporal, S3, Weaviate and TEI",
-            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':'2s','change_prune':PRUNE_OVERRIDES,'observability':OBSERVABILITY_OVERRIDES},'pins':pins(),
+            'steps':steps.items,'timing_overrides':{'delivery':DELIVERY_OVERRIDES,'change_retention_short_api':SHORT_CHANGE_RETENTION,'change_stream_poll':CHANGE_STREAM_POLL,'change_prune':PRUNE_OVERRIDES,'observability':OBSERVABILITY_OVERRIDES},'pins':pins(),
             'kept_project':stack.name if kept else None,'remaining_limits':verify_report.REMAINING_LIMITS,'artifacts':str(stack.directory),
             'preparation':preparation(stack,steps),'dependency_start_retries':getattr(stack,'readiness',{}).get('dependency_start_retries',[])})
         verify_report.redact_tree(stack.directory,verify_report.secrets_of(stack.state)+[CAPTURE_SECRET])

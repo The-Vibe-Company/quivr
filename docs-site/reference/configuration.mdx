@@ -27,6 +27,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `public_url` | no | The address where sources reach this API, such as `https://quivr.example.com`. Connector kinds that receive webhooks need it. |
 | `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
+| `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
 | `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
 | `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
