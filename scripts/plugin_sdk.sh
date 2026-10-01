@@ -104,6 +104,21 @@ grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
 grep -q "PASS  batch" contract.log || { cat contract.log; exit 1; }
 echo "quivr plugin test certified the scaffolded subscription template: $work/subscription-contract-report.json"
 
+cd "$e2e"
+"$quivr" plugin init source --kind connector > init-source.log
+cd source
+"$quivr" plugin inspect . > inspect.log
+python3 -m unittest discover -s tests
+"$quivr" plugin test --report "$work/connector-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
+grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
+echo "quivr plugin test certified the scaffolded connector: $work/connector-contract-report.json"
+
+cd "$root/sdks/python/examples/static-source"
+"$quivr" plugin inspect . > "$work/python-static-source-inspect.log"
+"$quivr" plugin test --report "$work/python-static-source-contract-report.json" . > "$work/python-static-source-contract.log" 2>&1 || { cat "$work/python-static-source-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/python-static-source-contract.log" || { cat "$work/python-static-source-contract.log"; exit 1; }
+echo "quivr plugin test certified the Python static source: $work/python-static-source-contract-report.json"
+
 # The reference plugin plugins/pdf-text: unit tests (including fixture
 # reproducibility) and Contract Runner certification. CI uploads the report.
 cd "$root/plugins/pdf-text"

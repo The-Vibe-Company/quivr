@@ -10,6 +10,8 @@ import types
 import typing
 from typing import Any, Literal, Self, Union
 
+from .credential import Credential, REDACTED
+
 
 class Model:
     """Base class of every generated Plugin Protocol model."""
@@ -34,6 +36,8 @@ def _type_hints(cls: type) -> dict[str, Any]:
 
 
 def _encode(value: Any) -> Any:
+    if isinstance(value, Credential):
+        return REDACTED
     if isinstance(value, Model):
         out = {}
         for field in dataclasses.fields(value):

@@ -1,0 +1,9 @@
+{
+  "description": "A revoked token is an access error for fetch and the credential check.",
+  "connector": {"kind": "static", "config": {"items": [{"key": "note-1", "title": "Harbour opens", "body": "The harbour opened on Monday."}]}},
+  "credential": {"token": "revoked-token-static-source"},
+  "expect": {
+    "error": {"error_class": "access", "code": "token_rejected"},
+    "check_credential": {"error_class": "access", "code": "token_rejected"}
+  }
+}

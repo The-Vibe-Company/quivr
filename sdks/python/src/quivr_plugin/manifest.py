@@ -70,7 +70,7 @@ class LoadedManifest:
     def contributions(self) -> list[str]:
         """Declared Contributions in protocol order, as discovery lists them."""
         declared = self.model.contributions
-        return [name for name in ("normalizer", "subscription") if getattr(declared, name) is not None]
+        return [name for name in ("normalizer", "subscription", "connector") if getattr(declared, name) is not None]
 
     @property
     def plugin_api(self) -> str:
@@ -150,8 +150,14 @@ def load_manifest(path: str | Path) -> LoadedManifest:
     problems = protocol_errors("plugin-manifest.schema.json", document)
     if problems:
         raise ManifestError(f"{path} does not match the plugin manifest schema: " + "; ".join(problems))
-    if "connector" in (document.get("contributions") or {}):
-        raise ManifestError(f"{path} declares a connector Contribution, which this SDK does not serve yet; write connectors with the Go SDK in sdks/go")
+    connector = (document.get("contributions") or {}).get("connector")
+    if connector:
+        if connector.get("attachments") is not None or any("push" in kind.get("modes", []) for kind in connector["kinds"].values()):
+            raise ManifestError(f"{path}: the Python connector adapter supports pull kinds without attachments only")
+        for kind in connector["kinds"].values():
+            for name in ("config_schema", "credential_schema"):
+                if kind.get(name) is not None:
+                    schema_errors(kind[name], {})
     return LoadedManifest(path=path.resolve(), raw=raw, model=PluginManifest.from_dict(document))
 
 

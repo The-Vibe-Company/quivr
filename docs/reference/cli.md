@@ -14,7 +14,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr worker`](#quivr-worker) | a configuration file (`QUIVR_CONFIG`) | Run the background work that processes content, pulls connectors and delivers events, until interrupted. |
 | [`quivr migrate`](#quivr-migrate) | a configuration file (`QUIVR_CONFIG`) | Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready. |
 | [`quivr plugin dev`](#quivr-plugin-dev) | nothing: works offline | Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`. |
-| [`quivr plugin init`](#quivr-plugin-init) | nothing: works offline | Write a new Python plugin from a template: a normalizer, or an alert rule with `--kind subscription`. |
+| [`quivr plugin init`](#quivr-plugin-init) | nothing: works offline | Write a new Python plugin from a template: a normalizer, an alert rule (`--kind subscription`) or a source collector (`--kind connector`). |
 | [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
 | [`quivr plugin test`](#quivr-plugin-test) | nothing: works offline | Certify that the engine can safely invoke every Contribution the plugin declares. |
 | [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
@@ -78,10 +78,10 @@ quivr plugin dev [--fixture <file>] [--watch] [--port <n>] [--startup-timeout <d
 
 ### quivr plugin init
 
-Write a new Python plugin from a template: a normalizer, or an alert rule with `--kind subscription`.
+Write a new Python plugin from a template: a normalizer, an alert rule (`--kind subscription`) or a source collector (`--kind connector`).
 
 ```text
-quivr plugin init <name> [--kind normalizer|subscription] [--dir <path>]
+quivr plugin init <name> [--kind normalizer|subscription|connector] [--dir <path>]
 ```
 
 ### quivr plugin inspect

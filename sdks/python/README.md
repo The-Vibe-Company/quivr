@@ -1,8 +1,8 @@
 # Quivr Plugin SDK for Python
 
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
-([contract](../../contracts/plugins/v0/README.md), Plugin API 0.10) so that a
-Python normalizer or alert rule is a single function. It has no Temporal, Weaviate or database clients, and its
+([contract](../../contracts/plugins/v0/README.md), Plugin API through 0.10.0) for
+Python normalizers, alert rules and pull collectors. It has no Temporal, Weaviate or database clients, and its
 only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
 later.
 
@@ -69,12 +69,21 @@ def evaluate(invocation: SubscriptionInvocation):
 expression and the configurations: the core batches, deduplicates and replays
 evaluations freely.
 
+## A source collector
+Run `quivr plugin init <name> --kind connector` for a working paged collector, fixture and tests; certify it with `quivr plugin test <name>`.
+Register a class with `@plugin.connector("static")`: `fetch(request: FetchRequest)` returns `ConnectorFetchResponse`, and `check_credential(request: CredentialRequest)` returns `ConnectorCredentialResponse`.
+The requests extend the generated models: read `request.connector.config`, `request.credential["token"]`, `request.checkpoint` and the engine clock `request.now`; return the next checkpoint with each page. The core alone persists progress.
+Raise `AccessError(code, message)` for refused access, `TransientError(code, message, retry_after_seconds=60)` for retryable failures, or `SourceError(code, message)` for unusable source data. Raise `NotDue()` from fetch to skip without moving the checkpoint.
+Use `request.logger` for redacted messages, structured extras and tracebacks. Credential repr and request model serialization hide secrets; `credential.decode()` explicitly returns raw values for a source client. String secrets shorter than four characters are not scrubbed from messages, matching the Go kit.
+The adapter validates kind config/credentials and page item, response, checkpoint and diagnostic bounds. Push kinds and attachment declarations are not supported; use the Go kit for those.
+See the runnable [static-source example](examples/static-source/static_source/connector.py) and its [manifest](examples/static-source/quivr-plugin.yaml).
+
 ## What the SDK does
 
 | Concern | Behavior |
 | --- | --- |
 | Models | Dataclasses generated from the contract schemas (`quivr_plugin.models`), with `from_dict` and `to_dict` |
-| Routes | `GET /v0/discovery` (plugin identity, the declared Contributions, the highest Plugin API version the manifest range admits — supported minors `0.1.0` through `0.10.0`, including `0.3.1` —, `sha256:` digest of the exact `quivr-plugin.yaml` bytes), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription` |
+| Routes | `GET /v0/discovery` (identity, Contributions, highest admitted Plugin API through `0.10.0` including `0.3.1`, exact manifest `sha256:` digest), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription`, `POST /v0/contributions/connector/{fetch,check_credential}` |
 | Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration`; a subscription expression or evaluation configuration against the declared schemas → 400 `invalid_expression` or `invalid_subscription_configuration` |
 | Errors | `RetryableError` → 503, `retryable: true`. `TerminalError` → 422, `retryable: false`. Unexpected exception → 500 `internal_error`, `retryable: false`. Always the protocol error envelope |
 | Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation. For a subscription, also one decision per evaluation, evidence for every match, Part keys that exist and details of at most 16 KiB (500 `invalid_response`) |

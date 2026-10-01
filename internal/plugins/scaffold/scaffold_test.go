@@ -38,6 +38,12 @@ func TestTemplatesAreValidPlugins(t *testing.T) {
 			}
 			fixture := filepath.Join(dir, "fixtures", "sample.json")
 			switch kind {
+			case scaffold.KindConnector:
+				for _, name := range []string{"sample.json", "revoked.json"} {
+					if run, issues, err := devhost.BuildConnectorRun(filepath.Join(dir, "fixtures", name), m); err != nil || len(issues) != 0 || run == nil {
+						t.Fatalf("%s fixture: %+v %v", name, issues, err)
+					}
+				}
 			case scaffold.KindNormalizer:
 				if _, issues, err := devhost.BuildFixtureRequest(fixture, m); err != nil || len(issues) != 0 {
 					t.Fatalf("sample fixture: %+v %v", issues, err)

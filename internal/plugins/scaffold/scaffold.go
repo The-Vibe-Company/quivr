@@ -1,5 +1,5 @@
 // Package scaffold writes the Python plugin templates embedded in the quivr
-// binary (`quivr plugin init`): a normalizer and an alert rule (subscription).
+// binary (`quivr plugin init`): normalizers, alert rules and connectors.
 // The templates depend only on the Quivr Plugin SDK (sdks/python).
 package scaffold
 
@@ -20,12 +20,13 @@ var templates embed.FS
 
 // Template kinds, one per Contribution.
 const (
+	KindConnector    = "connector"
 	KindNormalizer   = "normalizer"
 	KindSubscription = "subscription"
 )
 
 // Kinds lists the template kinds; the first is the default.
-var Kinds = []string{KindNormalizer, KindSubscription}
+var Kinds = []string{KindNormalizer, KindSubscription, KindConnector}
 
 const (
 	placeholderID     = "__PLUGIN_ID__"

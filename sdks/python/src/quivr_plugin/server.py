@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .blob import read_input
+from .connector import CREDENTIAL_PATH, FETCH_PATH, MAX_CONNECTOR_REQUEST_BYTES, Connector, invoke_connector
 from .errors import PluginError, TerminalError
 from .logs import configure_logging, invocation_context
 from .manifest import LoadedManifest, load_manifest
@@ -47,6 +48,8 @@ MAX_SUBSCRIPTION_REQUEST_BYTES = 16 << 20
 
 def max_request_bytes(path: str) -> int:
     """Largest request body accepted on a route."""
+    if path.split("?", 1)[0] in (FETCH_PATH, CREDENTIAL_PATH):
+        return MAX_CONNECTOR_REQUEST_BYTES
     return MAX_SUBSCRIPTION_REQUEST_BYTES if path.split("?", 1)[0] == SUBSCRIPTION_PATH else MAX_REQUEST_BYTES
 
 log = logging.getLogger("quivr_plugin.server")
@@ -106,6 +109,7 @@ class Plugin:
         self.manifest = load_manifest(manifest)
         self._normalizer: Normalizer | None = None
         self._subscription: SubscriptionHandler | None = None
+        self._connectors: dict[str, Connector] = {}
         self._health: HealthCheck | None = None
 
     def normalizer(self, fn: Normalizer) -> Normalizer:
@@ -127,6 +131,21 @@ class Plugin:
         self._health = fn
         return fn
 
+    def connector(self, kind: str):
+        """Register a class or instance implementing fetch and check_credential for a pull kind."""
+        contribution = self.manifest.model.contributions.connector
+        if contribution is None or kind not in contribution.kinds:
+            raise ValueError(f"connector kind {kind!r} is not declared in the manifest")
+
+        def register(implementation):
+            instance = implementation() if isinstance(implementation, type) else implementation
+            if not all(callable(getattr(instance, operation, None)) for operation in ("fetch", "check_credential")):
+                raise TypeError("a connector must implement fetch and check_credential")
+            self._connectors[kind] = instance
+            return implementation
+
+        return register
+
     def discovery(self) -> Discovery:
         m = self.manifest.model
         return Discovery(
@@ -140,7 +159,8 @@ class Plugin:
 
     def handle(self, method: str, path: str, body: bytes = b"") -> Reply:
         """Answer one protocol request; used by the HTTP server and by quivr_plugin.testing."""
-        routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST", SUBSCRIPTION_PATH: "POST"}
+        routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST", SUBSCRIPTION_PATH: "POST",
+                  FETCH_PATH: "POST", CREDENTIAL_PATH: "POST"}
         path = path.split("?", 1)[0]
         if path not in routes:
             return _error(404, "not_found", f"no Plugin Protocol v0 route {path}")
@@ -148,6 +168,9 @@ class Plugin:
             return _error(405, "method_not_allowed", f"{path} accepts {routes[path]} only")
         if path == DISCOVERY_PATH:
             return Reply(200, self.discovery().to_dict())
+        if path in (FETCH_PATH, CREDENTIAL_PATH):
+            status, document = invoke_connector(self.manifest, self._connectors, path, body)
+            return Reply(status, document)
         if path == HEALTH_PATH:
             try:
                 if self._health is not None:

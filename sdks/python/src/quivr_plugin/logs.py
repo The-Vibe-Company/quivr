@@ -42,7 +42,7 @@ class InvocationFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         value = _invocation.get()
-        record.invocation_id = value[0] if value else None
+        record.invocation_id = value[0] if value else getattr(record, "invocation_id", None)
         record.idempotency_key = value[1] if value else None
         return True
 
@@ -65,6 +65,8 @@ class JSONFormatter(logging.Formatter):
                 entry[key] = value
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
+        elif record.exc_text:
+            entry["exception"] = record.exc_text
         return json.dumps(entry, default=str, ensure_ascii=False)
 
 

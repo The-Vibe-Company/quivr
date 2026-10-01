@@ -10,7 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/scaffold"
 )
 
-const initUsage = "quivr plugin init <name> [--kind normalizer|subscription] [--dir <path>]"
+const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--dir <path>]"
 
 // initCommand writes an embedded Python plugin template: a normalizer (the
 // default) or an alert rule (--kind subscription).
@@ -73,7 +73,9 @@ func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int
 	fmt.Fprintln(stdout, "  python3 -m venv .venv && . .venv/bin/activate")
 	fmt.Fprintln(stdout, "  pip install -e <quivr-v2 checkout>/sdks/python   # the Quivr Plugin SDK")
 	fmt.Fprintln(stdout, "  python3 -m unittest discover -s tests")
-	fmt.Fprintln(stdout, "  quivr plugin dev --fixture fixtures/sample.json")
+	if kind != scaffold.KindConnector {
+		fmt.Fprintln(stdout, "  quivr plugin dev --fixture fixtures/sample.json")
+	}
 	fmt.Fprintln(stdout, "  quivr plugin test")
 	return ExitOK
 }

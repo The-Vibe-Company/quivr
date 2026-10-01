@@ -9,7 +9,7 @@ description = "Quivr first-party alert rules: keywords, local vector meaning che
 requires-python = ">=3.12"
 license = "MIT"
 # The Quivr Plugin SDK is installed from the Quivr repository (see README.md).
-dependencies = ["quivr-plugin-sdk>=0.2.1,<0.3"]
+dependencies = ["quivr-plugin-sdk>=0.2.1,<0.4"]
 
 [tool.setuptools]
 packages = ["alerts"]

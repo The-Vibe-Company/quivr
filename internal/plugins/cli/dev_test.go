@@ -54,7 +54,14 @@ func TestInitWritesTheRequestedTemplate(t *testing.T) {
 			t.Errorf("%v: exit %d %s", args, code, errOut)
 		}
 	}
-	if code, _, errOut := run("init", "demo", "--kind=connector"); code != 2 || !strings.Contains(errOut, "normalizer or subscription") {
+	collector := filepath.Join(t.TempDir(), "collector")
+	if code, out, errOut := run("init", "collector", "--kind=connector", "--dir", collector); code != 0 || !strings.Contains(out, "Created connector plugin collector") || strings.Contains(out, "plugin dev") {
+		t.Fatalf("init --kind connector: exit %d %s %s", code, out, errOut)
+	}
+	if code, out, _ := run("inspect", collector); code != 0 {
+		t.Fatalf("init --kind connector wrote no collector: %s", out)
+	}
+	if code, _, errOut := run("init", "demo", "--kind=unknown"); code != 2 || !strings.Contains(errOut, "connector") {
 		t.Errorf("unknown kind: exit %d %s", code, errOut)
 	}
 }
