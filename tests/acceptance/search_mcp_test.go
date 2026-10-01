@@ -13,15 +13,21 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// connectMCP starts `quivr mcp --profile <profile>` from the built binary with
-// only the given API key, and connects an MCP client to it over stdio.
-func connectMCP(t *testing.T, bin, profile, key string) *mcp.ClientSession {
-	t.Helper()
-	cmd := exec.Command(bin, "mcp", "--profile", profile)
+// mcpCommand is `quivr mcp --profile <profile>` from the built binary, with
+// only the given API key.
+func mcpCommand(t *testing.T, ctx context.Context, bin, profile, key string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, "mcp", "--profile", profile)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "QUIVR_API_URL=" + os.Getenv("QUIVR_TEST_URL"), "QUIVR_API_KEY=" + key}
 	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+// connectMCP starts `quivr mcp` and connects an MCP client to it over stdio.
+func connectMCP(t *testing.T, bin, profile, key string) *mcp.ClientSession {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
+	cmd := mcpCommand(t, context.Background(), bin, profile, key)
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "acceptance", Version: "v0"}, nil).Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
 		t.Fatalf("connect quivr mcp: %v", err)
@@ -322,5 +328,84 @@ func awaitMCPHit(t *testing.T, s *mcp.ClientSession, corpusID, query string) mcp
 			t.Fatalf("search tool never returned a hit for %q", query)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// TestCLIMCPAnswersEveryRequestWhenInputCloses pipes requests into `quivr mcp`
+// and closes its input at once, as a script does: every request still gets its
+// answer before the process exits 0.
+func TestCLIMCPAnswersEveryRequestWhenInputCloses(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_URL") == "" {
+		t.Skip("make verify")
+	}
+	bin := quivrBinary(t)
+	requests := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"script","version":"0"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_corpora","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_corpora","arguments":{}}}`,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := mcpCommand(t, ctx, bin, "read", os.Getenv("QUIVR_TEST_ADMIN"))
+	// exec closes the process's stdin as soon as it has copied the whole reader.
+	cmd.Stdin = strings.NewReader(strings.Join(requests, "\n") + "\n")
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("quivr mcp with closed input: %v, want exit 0; stdout:\n%s", err, out.String())
+	}
+
+	answered := map[int]bool{}
+	dec := json.NewDecoder(strings.NewReader(out.String()))
+	for dec.More() {
+		var answer struct {
+			ID     int             `json:"id"`
+			Error  json.RawMessage `json:"error"`
+			Result struct {
+				IsError bool `json:"isError"`
+			} `json:"result"`
+		}
+		if err := dec.Decode(&answer); err != nil {
+			t.Fatalf("stdout is not a stream of JSON-RPC answers: %v\n%s", err, out.String())
+		}
+		if answered[answer.ID] || answer.Error != nil || answer.Result.IsError {
+			t.Fatalf("answer to request %d is repeated or failed; stdout:\n%s", answer.ID, out.String())
+		}
+		answered[answer.ID] = true
+	}
+	for id := 1; id <= 4; id++ {
+		if !answered[id] {
+			t.Fatalf("request %d got no answer before quivr mcp exited; stdout:\n%s", id, out.String())
+		}
+	}
+
+	// An agent that follows tool-list changes keeps a request open for the whole
+	// session. Closing stdin without cancelling it still ends quivr mcp at once.
+	cmd = mcpCommand(t, ctx, bin, "read", os.Getenv("QUIVR_TEST_ADMIN"))
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	opts := &mcp.ClientOptions{ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {}}
+	// Connect sends the tool-list subscription; the list_corpora answer below
+	// proves the server has read it before stdin closes.
+	agent, err := mcp.NewClient(&mcp.Implementation{Name: "acceptance", Version: "v0"}, opts).Connect(ctx, &mcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
+	if err != nil {
+		t.Fatalf("connect quivr mcp: %v", err)
+	}
+	defer agent.Close()
+	decodeTool(t, agent, "list_corpora", nil, &struct{}{})
+	stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("quivr mcp with an open tool-list subscription and closed input: %v, want exit 0 at once", err)
 	}
 }

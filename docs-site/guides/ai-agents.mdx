@@ -37,8 +37,8 @@ The agent's MCP client starts `quivr mcp` itself. Most clients, such as Claude D
 No profile can withdraw, delete or rebuild anything. To check the server before you configure a client, list its tools with the environment variables set as above:
 
 ```bash
-(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' \
-   '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'; sleep 1) \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   | quivr mcp --profile read | jq -r 'select(.id == 2) | .result.tools[].name'
 ```
 

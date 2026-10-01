@@ -29,11 +29,13 @@ the API key decides which Corpora every tool may reach.
 
 An MCP client starts it and speaks JSON-RPC on stdin and stdout; diagnostics go
 to stderr. A refused or failed API call is returned to the agent as a tool
-error carrying the public error code, such as forbidden or unreachable.
+error carrying the public error code, such as forbidden or unreachable. When
+stdin closes, it waits up to a minute to answer the requests already received,
+then exits.
 
 Exit codes:
-  0  the client closed the connection
-  1  unexpected failure
+  0  the client closed the connection, and every request was answered
+  1  unexpected failure, or requests still unanswered a minute after stdin closed
   2  invalid arguments, or a missing or malformed API URL
   130  interrupted
 `
@@ -94,7 +96,8 @@ func serveMCP(ctx context.Context, env Env, args []string) int {
 	if err != nil {
 		return report(env, err)
 	}
-	transport := &mcp.IOTransport{Reader: io.NopCloser(env.Stdin), Writer: nopWriteCloser{env.Stdout}}
+	stdio := newMCPStdio(ctx, env.Stdin, env.Stdout)
+	transport := &mcp.IOTransport{Reader: io.NopCloser(stdio), Writer: nopWriteCloser{stdio}}
 	if err := server.Run(ctx, transport); err != nil {
 		if ctx.Err() != nil {
 			return ExitInterrupted
