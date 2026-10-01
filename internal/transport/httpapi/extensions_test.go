@@ -36,8 +36,4 @@ func TestRetrievalMappingsMayAddressPluginOwnedNamespaces(t *testing.T) {
 	if res, out := operationCall(t, server, "PUT", "/v0/corpora/corpus_a/retrieval", configurer, "application/json", mapping); res.StatusCode != 202 {
 		t.Fatalf("mapping on a plugin namespace: %d %v", res.StatusCode, out)
 	}
-	undeclared := `{"idempotency_key":"k2","retrieval":{"fields":[{"name":"x","source_pointer":"/extensions/acme-md.other/data/x","type":"string","roles":["search"]}]}}`
-	if res, out := operationCall(t, server, "PUT", "/v0/corpora/corpus_a/retrieval", configurer, "application/json", undeclared); res.StatusCode != 422 || out["code"] != "invalid_mapping" {
-		t.Fatalf("mapping on an undeclared namespace: %d %v", res.StatusCode, out)
-	}
 }

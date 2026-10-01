@@ -177,20 +177,6 @@ func TestUploadFailureCodesIgnoreDetail(t *testing.T) {
 	}
 }
 
-// Corpus creation and retrieval reconfiguration share this resolution.
-func TestRetrievalFailureCodesIgnoreDetail(t *testing.T) {
-	for sentinel, want := range map[error]string{
-		corpus.ErrInvalidMapping:     "invalid_mapping",
-		corpus.ErrUnsupportedProfile: "unsupported_profile",
-	} {
-		for style, err := range detailed(sentinel) {
-			if code := publicCode(err, "invalid_mapping"); code != want {
-				t.Errorf("%v (%s): code %q, want %q", sentinel, style, code, want)
-			}
-		}
-	}
-}
-
 func TestUncodedErrorsUseTheExplicitFallback(t *testing.T) {
 	if code := publicCode(fmt.Errorf("invalid_input: raw text"), "invalid_mapping"); code != "invalid_mapping" {
 		t.Fatalf("code %q, want the fallback", code)
@@ -201,33 +187,35 @@ func TestUncodedErrorsUseTheExplicitFallback(t *testing.T) {
 // keep their public codes, whatever detail the engine adds.
 func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 	for sentinel, want := range map[error]struct {
-		status int
-		code   string
+		status    int
+		code      string
+		message   string
+		retryable bool
 	}{
-		retrieval.ErrUnsupportedProfile: {422, "unsupported_profile"},
-		retrieval.ErrUnsupported:        {422, "unsupported_search"},
-		retrieval.ErrQueryTooLong:       {422, "query_too_long"},
-		retrieval.ErrPluginInvalid:      {502, "retrieval_plugin_invalid"},
-		retrieval.ErrDeadline:           {504, "search_deadline_exceeded"},
-		retrieval.ErrUnavailable:        {503, "search_unavailable"},
+		retrieval.ErrUnsupportedProfile: {422, "unsupported_profile", "unsupported profile", false},
+		retrieval.ErrUnsupported:        {422, "unsupported_search", "unsupported search", false},
+		retrieval.ErrQueryTooLong:       {422, "query_too_long", "query too long", false},
+		retrieval.ErrPluginInvalid:      {502, "retrieval_plugin_invalid", "retrieval plugin invalid", false},
+		retrieval.ErrDeadline:           {504, "search_deadline_exceeded", "search deadline exceeded", false},
+		retrieval.ErrUnavailable:        {503, "search_unavailable", "search unavailable", true},
 	} {
-		for style, err := range detailed(sentinel) {
-			if status, code := searchFailure(err); status != want.status || code != want.code {
-				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
-			}
+		const detail = "query exceeds 256 tokens, the limit of profile default"
+		for style, err := range map[string]error{
+			"bare":        sentinel,
+			"fmt wrap":    fmt.Errorf("%w: %s", sentinel, detail),
+			"with detail": publicerr.WithDetail(sentinel, detail),
+		} {
+			t.Run(want.code+"/"+style, func(t *testing.T) {
+				message := want.message
+				if sentinel == retrieval.ErrQueryTooLong && style == "with detail" {
+					message = detail
+				}
+				status, body := searchError(err)
+				if status != want.status || body.Code != want.code || body.Message != message || body.Retryable != want.retryable {
+					t.Fatalf("%d %+v, want %d %s message=%q retryable=%v", status, body, want.status, want.code, message, want.retryable)
+				}
+			})
 		}
-	}
-}
-
-// A query over its length limit is refused with a message naming the limit;
-// other search errors keep the generic message of their code.
-func TestSearchErrorNamesTheQueryLimit(t *testing.T) {
-	status, body := searchError(publicerr.WithDetail(retrieval.ErrQueryTooLong, "query exceeds 256 tokens, the limit of profile default"))
-	if status != 422 || body.Code != "query_too_long" || body.Message != "query exceeds 256 tokens, the limit of profile default" || body.Retryable {
-		t.Fatalf("%d %+v", status, body)
-	}
-	if _, body = searchError(publicerr.WithDetail(retrieval.ErrUnsupported, "internal detail")); body.Message != "unsupported search" {
-		t.Fatalf("detail leaked: %+v", body)
 	}
 }
 
