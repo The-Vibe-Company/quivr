@@ -59,7 +59,7 @@ A single `quivr` binary provides the `api`, `worker` and `migrate` commands.
 
 ## Quickstart
 
-Requirements (Linux; the local harness targets Linux hosts): Go 1.27.1, Docker with Compose v2, Python 3 with `venv`,
+Requirements (Linux x86_64, or macOS on Apple Silicon for `make dev`): Go 1.27.1, Docker with Compose v2, Python 3 with `venv`,
 Node.js 22+ and `jq`. The first run downloads pinned images and the E5 model (~1 GB).
 
 ```bash
@@ -72,8 +72,8 @@ make down     # stop everything, keep data (make reset also deletes volumes)
 `make verify` runs every feature's acceptance suite and one assembled monitoring
 journey on an isolated stack. It removes only its own project, even after a
 failure or Ctrl+C. It then prints the path of a `report.md` that names any failed
-step, the pinned versions and the dependency inventory. Linux x86_64 is the only
-supported platform; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
+step, the pinned versions and the dependency inventory. It runs on Linux x86_64
+only, as in CI; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
 
 `make dev` prints the API address and the path of a generated `config.json` holding
 throwaway local keys; `eval "$(make -s env)"` exports the address, a key and a webhook

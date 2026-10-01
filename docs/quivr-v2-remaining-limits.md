@@ -21,8 +21,10 @@ stay visible. The Spec 1 obligation map is in
 
 **Platform and harness**
 
-- Only linux/amd64 is supported: tokenizer wheel, TEI digest and `/proc`
-  process checks. macOS and linux/arm64 are not claimed.
+- `make dev` runs on linux/amd64 and macOS arm64; `make verify`, `make measure`
+  and `make eval` run on linux/amd64 only. On macOS the pinned TEI image, which
+  is published for amd64 only, runs under Docker Desktop's x86_64 emulation.
+  linux/arm64 and Intel Macs are not claimed.
 - The acceptance suite is order- and load-sensitive, so tests use their own
   Corpus and are scheduled explicitly (`tests/acceptance/README.md`).
 - Delivery retries run on a shortened policy under verification (initial 2 s,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Linux local text slice: host Go processes and isolated real dependencies."""
-from prepare_tokenizer import prepare as prepare_tokenizer
+"""The local stack (make dev, make verify): host Go processes and isolated real dependencies."""
+from prepare_tokenizer import prepare as prepare_tokenizer, requirements
 from prepare_embeddings import prepare as prepare_embeddings, MODEL
 import verify_report
 import gotest
@@ -19,8 +19,16 @@ GO=os.environ.get('GO','go')
 def run(args, **kwargs):
     return subprocess.run(args, check=True, cwd=ROOT, **kwargs)
 
+# macOS has no /proc: process checks ask ps, and TEI is reached on a published loopback port (THE-808).
+MACOS=sys.platform=='darwin'
+
+def ps(pid,field):
+    """One ps field of pid ('' when there is no such process); macOS only."""
+    return subprocess.run(['ps','-o',field+'=','-p',str(pid)],capture_output=True,text=True).stdout.strip()
+
 def alive(pid):
     """Whether pid still runs: an exited or killed process that is not reaped yet (a zombie) does not."""
+    if MACOS:return ps(pid,'stat')[:1] not in ('','Z')
     try:return pathlib.Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z'
     except (FileNotFoundError,IndexError):return False
 
@@ -85,7 +93,8 @@ class Stack:
     def save(self):
         self.statefile.write_text(json.dumps(self.state));self.statefile.chmod(0o600)
     def compose(self,*args,**kwargs):
-        return run(['docker','compose','-p',self.name,'-f','deploy/compose/compose.yaml',*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory),'QUIVR_MODEL_ROOT':str(MODEL)},**kwargs)
+        files=['-f','deploy/compose/compose.yaml']+(['-f','deploy/compose/compose.macos.yaml'] if MACOS else [])
+        return run(['docker','compose','-p',self.name,*files,*args],env={**os.environ,'QUIVR_DB_PASSWORD':self.state['password'],'QUIVR_LOCAL_ROOT':str(self.directory),'QUIVR_MODEL_ROOT':str(MODEL)},**kwargs)
     def config(self):
         address=self.compose('port','postgres','5432',capture_output=True,text=True).stdout.strip()
         s=self.state
@@ -93,8 +102,10 @@ class Stack:
         temporal=self.compose('port','temporal','7233',capture_output=True,text=True).stdout.strip()
         seaweed=self.compose('port','seaweed','8333',capture_output=True,text=True).stdout.strip()
         scope=lambda org,actions,corpora:dict(organization=org,actions=actions,corpora=corpora)
-        tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
-        tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
+        if MACOS:tei=self.compose('port','tei','80',capture_output=True,text=True).stdout.strip()
+        else:
+            tei_container=self.compose('ps','-q','tei',capture_output=True,text=True).stdout.strip()
+            tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
         s['tei_url']='http://'+tei;self.save()
         cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
@@ -227,7 +238,7 @@ class Stack:
     def signal_owned(self,pid,sig):
         try:
             # Refuse to signal a reused PID belonging to any unrelated program.
-            cmd=pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
+            cmd=ps(pid,'comm').encode() if MACOS else pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
             if cmd==str(self.directory/'quivr').encode():os.kill(pid,sig)
         except (FileNotFoundError,ProcessLookupError):pass
     def stop_worker(self):
@@ -691,7 +702,12 @@ def main():
     parser.add_argument('--part',default='',help='verify only these parts, comma-separated (default: every part, then the demo)')
     args=parser.parse_args()
     if args.command=='env':return environment()
+    # Fail before building or pulling anything on a host the stack does not run on (THE-808).
+    try:
+        if args.command in ('dev','verify'):requirements()
+    except RuntimeError as error:sys.exit(str(error))
     if args.command!='verify':return run_stack(args.command)
+    if MACOS:sys.exit('make verify runs on Linux x86_64 only, as in CI; on macOS, make dev and make check work.')
     known=list(parts())+[DEMO]
     chosen=[p for p in args.part.replace(' ',',').split(',') if p] or known
     unknown=[p for p in chosen if p not in known]

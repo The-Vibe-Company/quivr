@@ -1,0 +1,13 @@
+# Added by scripts/local.py on macOS only (THE-808). Docker Desktop does not route container IPs to the host,
+# and an internal network cannot publish ports, so TEI also joins a regular network and listens on a loopback
+# port. The pinned TEI image is published for linux/amd64 only; Docker Desktop runs it under x86_64 emulation,
+# so the engine still sees the exact pinned runtime. The model stays a read-only mount, offline.
+services:
+  tei:
+    platform: linux/amd64
+    networks: [inference, published]
+    ports:
+      - "127.0.0.1::80"
+
+networks:
+  published: {}

@@ -5,7 +5,9 @@ preserved in [LICENSE.tokenizers](LICENSE.tokenizers), retrieved from the
 [upstream tag](https://github.com/huggingface/tokenizers/blob/v0.23.2/LICENSE).
 The supported local/CI target is Linux x86_64, CPython >=3.10; the selected
 manylinux ABI3 wheel is pinned by SHA-256 in
-[requirements-linux-x86_64.txt](requirements-linux-x86_64.txt). Optional Hub
+[requirements-linux-x86_64.txt](requirements-linux-x86_64.txt). `make dev` on
+macOS arm64 installs the same release's macOS 11 arm64 ABI3 wheel, pinned in
+[requirements-macos-arm64.txt](requirements-macos-arm64.txt). Optional Hub
 packages are not installed: runtime loading uses an already verified local file.
 The selected wheel contains no standalone LICENSE or NOTICE files; the upstream
 Apache-2.0 text is therefore preserved explicitly alongside this notice.

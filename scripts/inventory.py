@@ -12,7 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Declared supported platform of the local harness and CI. Nothing else is claimed.
 PLATFORM = 'linux/amd64'
-UNSUPPORTED = ['macOS (any architecture): tokenizer, E5/TEI and /proc process checks are Linux x86_64 only',
+UNSUPPORTED = ['macOS: make dev runs on arm64 (TEI under x86_64 emulation); verification is Linux x86_64 only',
                'linux/arm64: no pinned tokenizer wheel or TEI image digest; not tested']
 
 LICENCE_PATTERNS = [

@@ -8,16 +8,16 @@ In about fifteen minutes you run Quivr locally, add a short news article, find i
 
 ## Before you start
 
-You need a Linux x86_64 machine: the local stack runs only there today. Check each tool:
+You need Linux on x86_64, or macOS on Apple Silicon (M1 or later). Check each tool:
 
 | Tool | Check | Version |
 | --- | --- | --- |
-| Docker with Compose v2 | `docker compose version` | Compose 2 or later |
+| Docker with Compose v2 | `docker compose version` | Compose 2 or later; on a Mac, Docker Desktop |
 | Go | `go version` | the one in `go.mod`, 1.27.1 |
 | Python with `venv` | `python3 -m venv --help` | 3.12 or later |
 | `jq`, `curl`, `git` | `jq --version` | any recent version |
 
-The first start downloads the pinned container images and the embedding model, about 1 GB.
+The first start downloads the pinned container images and the embedding model, about 1 GB. On a Mac, Docker Desktop runs the embedding server under its x86_64 emulation, because that image is published for x86_64 only.
 
 ## Run Quivr and try it
 

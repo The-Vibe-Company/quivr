@@ -4,10 +4,11 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
-import json, os, pathlib, shutil, stat, tempfile, unittest, uuid
+import json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time, unittest, uuid
 from unittest import mock
 
 import local
+import prepare_tokenizer
 import verify_report as vr
 
 
@@ -105,6 +106,35 @@ class Readiness(unittest.TestCase):
             stack.verifying = True
             stack.check_disk()
         self.assertEqual(json.loads((stack.directory / 'readiness.json').read_text())['docker_disk_used_percent'], 60.0)
+
+
+class Platforms(unittest.TestCase):
+    """make dev runs on Linux x86_64 and macOS arm64 (THE-808); anything else stops before building or pulling."""
+
+    def test_other_hosts_fail_fast_naming_the_supported_platforms(self):
+        for host in [('Linux', 'aarch64'), ('Darwin', 'x86_64'), ('Windows', 'AMD64')]:
+            with self.subTest(host=host), self.assertRaisesRegex(RuntimeError, rf'Linux x86_64 and on macOS with Apple Silicon \(arm64\); this machine is {host[0]} {host[1]}'):
+                prepare_tokenizer.requirements(host)
+
+    def test_every_supported_host_pins_the_profiles_tokenizers_by_hash(self):
+        version = prepare_tokenizer.PROFILE['implementation_version']
+        for host in prepare_tokenizer.SUPPORTED:
+            with self.subTest(host=host):
+                pins = [line for line in prepare_tokenizer.requirements(host).read_text().splitlines() if not line.startswith('#')]
+                self.assertEqual(len(pins), 1, pins)
+                self.assertRegex(pins[0], rf'^tokenizers=={version} --hash=sha256:[0-9a-f]{{64}}$')
+
+    def test_a_killed_child_is_not_alive_before_it_is_reaped(self):
+        # The harness never reaps the processes it kills; /proc on Linux and ps on macOS must both see the zombie as gone.
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        self.assertTrue(local.alive(child.pid))
+        os.kill(child.pid, signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while local.alive(child.pid) and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertFalse(local.alive(child.pid), f'pid {child.pid} still reported alive after SIGKILL')
 
 
 class StepsAndReport(unittest.TestCase):

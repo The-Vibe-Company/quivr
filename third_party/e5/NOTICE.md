@@ -17,7 +17,8 @@ Sources:
 `python3 scripts/prepare_embeddings.py` downloads absent/mismatched files, checks
 SHA-256 before atomic replacement and reports downloaded bytes/preparation time.
 No weights or image layers are committed here. Subsequent runtime execution is
-offline: a read-only model mount, `HF_HUB_OFFLINE=1`, an internal Docker network,
+offline: a read-only model mount, `HF_HUB_OFFLINE=1`, an internal Docker network
+(on Linux; on macOS `make dev` also publishes TEI on a loopback port, THE-808),
 float32, mean pooling and explicit `--auto-truncate false`. The adapter also checks
 TEI's version, source SHA, dtype, pooling, sequence limit and truncation setting.
 TEI's HTTP `/info` cannot attest mounted weight hashes; the local initializer's

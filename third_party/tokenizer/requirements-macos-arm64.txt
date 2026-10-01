@@ -1,0 +1,2 @@
+# CPython >=3.10 abi3, macOS 11+ arm64 (Apple Silicon). Same release as the Linux pin. No optional Hugging Face Hub/network client.
+tokenizers==0.23.2 --hash=sha256:986670e43691469dcee610ea0f846f91a8f84e91fc6f7a48d4c064414c0ec2bf

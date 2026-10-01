@@ -6,8 +6,12 @@ MODEL=ROOT/'.scratch/e5-model'
 LOCK=json.loads((ROOT/'third_party/e5/model-lock.json').read_text())
 def digest(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+# The hosts of scripts/prepare_tokenizer.py SUPPORTED. This file stays standalone: deploy/railway/tei.Dockerfile
+# copies it alone into its model stage.
+SUPPORTED={('Linux','x86_64'),('Darwin','arm64')}
 def prepare():
-    if platform.system()!='Linux' or platform.machine()!='x86_64':raise RuntimeError('E5 local reference requires Linux x86_64')
+    if (platform.system(),platform.machine()) not in SUPPORTED:
+        raise RuntimeError(f'The local stack runs on Linux x86_64 and on macOS with Apple Silicon (arm64); this machine is {platform.system()} {platform.machine()}.')
     start=time.monotonic();downloaded=0
     for name,sha in LOCK['files'].items():
         target=MODEL/name

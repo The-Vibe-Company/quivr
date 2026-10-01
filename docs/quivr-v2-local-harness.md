@@ -30,13 +30,21 @@ the notification-mechanics tests.
 
 | Target | Required behavior |
 | --- | --- |
-| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed |
+| `make dev` | Build or obtain pinned artifacts, start dependencies, run initializer, then API/worker; return only when startup checks succeed. Runs on Linux x86_64 and macOS arm64 (see below); fails at once elsewhere |
 | `make check` | Run everything that needs no Docker stack: docs, denylist, migrations, contracts, image context, `go vet`, `go test`, the scripts tests and the plugin SDK. Works on macOS; the command to run before pushing |
 | `make verify` | Run `make check`, then the acceptance scenarios in an isolated Compose project; collect a report and return nonzero on failure |
 | `make down` | Stop the development project's processes and containers and preserve its data volumes |
 | `make reset` | Stop the project and delete only its volumes and the state bound to that data. Generated credentials and ports are kept, and nothing is restarted: the next `make dev` initializes a fresh schema |
 | `make migrate` | Run the versioned initializer against the running project; report failures and required restarts. On a stopped project it fails and points to `make dev` |
 | `make adapter-postgres` | Run `go test ./internal/adapters/postgres/...` against a bare, migrated PostgreSQL in its own Compose project; works on macOS arm64 and Linux (see below) |
+
+On macOS arm64 (THE-808), `make dev` installs the tokenizer from its own
+hash-pinned wheel (`third_party/tokenizer/requirements-macos-arm64.txt`), and its
+process checks ask `ps` instead of reading `/proc`. The pinned TEI image is
+published for amd64 only, and the engine checks its `/info` version and sha, so
+Docker Desktop runs that same image under x86_64 emulation. Docker Desktop does
+not route container IPs to the host, so `deploy/compose/compose.macos.yaml` also
+publishes TEI on a loopback port.
 
 `QUIVR_PROJECT=<name>` selects another project for `down`, `reset` and `migrate`,
 for example a verification run kept with `QUIVR_KEEP_ON_FAILURE=1`.
@@ -290,8 +298,8 @@ the non-required `Retrieval baseline` workflow, on manual dispatch only.
 ## Implemented verification (THE-662)
 
 `make verify` runs on linux/amd64 only (ubuntu-24.04 in CI); no other platform is
-claimed. It runs the same commands locally and in CI; locally in this order,
-in CI as parallel jobs (below):
+claimed, and on macOS it refuses to start a stack. It runs the same commands
+locally and in CI; locally in this order, in CI as parallel jobs (below):
 1. `make check`, with no Docker stack:
    - `docs`, `denylist` and `migrations`;
    - `contracts`, which regenerates the transport and compares it with the
