@@ -154,9 +154,12 @@ def handler(state):
                     history = post.setdefault('edit_history_tweet_ids', [post['id']])
                     post.setdefault('author_id', '4242')
                     post.setdefault('lang', 'en')
+                    # An edit replaces its earlier versions in timelines; lookup by id
+                    # still serves each of them, with the whole edit history, as X does.
                     for old in history[:-1]:
                         lst['ids'].discard(old)
-                        state.posts.pop(old, None)
+                        if old in state.posts:
+                            state.posts[old]['edit_history_tweet_ids'] = history
                     state.posts[post['id']] = post
                     lst['ids'].add(post['id'])
                     if push:
