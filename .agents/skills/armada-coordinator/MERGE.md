@@ -2,6 +2,14 @@
 
 Run `armada merge <pr>` (add `--dry-run` to see the checklist only, `--wait` when main keeps moving, `--no-ticket` for a pull request no ticket owns). It checks everything below, takes the project's merge lock, merges pinned to the handed-back SHA, confirms the merge on GitHub and closes the ticket. Its output lists the workers in flight to tell and the worker session to archive. When a refusal names a rule, fix the cause (usually: ask the worker to bring the default branch in and report again) rather than merging by hand. When you must merge by hand, follow the same steps.
 
+## The owner's merge rule: `--reason` and `--ask-owner`
+
+`[policy] merge_approval` in `armada.toml` says in plain words which merges the owner wants to approve first, for example "merge on your own, except front-end changes: send me a link to check them first". Without it you merge everything on your own. With it, `armada merge` prints the rule and you judge each pull request: look at its files and at what users will see, then record why either way.
+
+- It may merge on your own: `armada merge <pr> --reason "<why>"`, for example `--reason "CLI only"`. The ticket's merged comment and the dashboard say `merged on its own (rule: …): CLI only`.
+- The rule keeps it for the owner: `armada merge <pr> --ask-owner --reason "<why>"`, for example `--reason "touches components/timeline"`. It merges nothing: it records the pull request as GitHub shows it now (title, files with +/−, CI, the preview deployment of its head) with the ticket's screenshots on the owner's Validations page, posts the approval link (`https://<dashboard>/approve/<id>`) on the ticket and prints it. Send it to the owner. Their decision arrives in your inbox as a `decision` item (it wakes `armada watch`): approved, run `armada merge <pr>`, which records `approved by <owner> at <time>`; changes requested, relay them to the worker.
+- Once the owner was asked about a pull request, `armada merge` refuses it until they approved that exact head; a head that is it with only main merged in still counts. Any other new head needs `--ask-owner` again.
+
 ## Main kept moving: `--wait`
 
 With several workers in flight, main often moves between a green hand-back and its merge. Instead of asking the worker to bring main in, run `armada merge <pr> --wait [--timeout <min>]` (30 minutes by default), in the background where your runtime allows it (Claude Code: `run_in_background`):

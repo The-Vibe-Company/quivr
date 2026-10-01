@@ -5,29 +5,29 @@
       "source": "The-Vibe-Company/armada",
       "sourceType": "github",
       "skillPath": "skills/armada-coordinator/SKILL.md",
-      "ref": "v0.2.21",
-      "computedHash": "d64e2559d50ea4fe30b3c4132e917c84b0414805ef5b8abd4c5a859dfe33d41c"
+      "ref": "v0.2.23",
+      "computedHash": "d8d886e8e191bbcfa43963d6536396402b55ed0cc5c36a76e7662ca2035be4ac"
     },
     "armada-runtime-claude-code": {
       "source": "The-Vibe-Company/armada",
       "sourceType": "github",
       "skillPath": "skills/armada-runtime-claude-code/SKILL.md",
-      "ref": "v0.2.21",
+      "ref": "v0.2.23",
       "computedHash": "44a349463c5841bb08a8591610fc35efb161ba8d6e61fd35336288cf49a15361"
     },
     "armada-runtime-conductor": {
       "source": "The-Vibe-Company/armada",
       "sourceType": "github",
       "skillPath": "skills/armada-runtime-conductor/SKILL.md",
-      "ref": "v0.2.21",
+      "ref": "v0.2.23",
       "computedHash": "b03cc5aa568a3ddc1c42cca1268cef7860d6170f11f80c29d1646b6c55ccfae7"
     },
     "armada-worker": {
       "source": "The-Vibe-Company/armada",
       "sourceType": "github",
       "skillPath": "skills/armada-worker/SKILL.md",
-      "ref": "v0.2.21",
-      "computedHash": "93794ab40e1565e19f4270d40853b7ff8e2d3c5c0dc2dcc993b3caf8b2814c71"
+      "ref": "v0.2.23",
+      "computedHash": "094e5fddc42d2788e7e2a4d9187f432822d65ab2ef95ca1d4ecf6d2bd8eedba0"
     },
     "ask-matt": {
       "source": "mattpocock/skills",
