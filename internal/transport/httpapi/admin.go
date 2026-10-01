@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -103,14 +102,9 @@ func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus
 			return
 		}
 	}
-	limit := 100
-	if q.Has("limit") {
-		n, err := strconv.Atoi(q.Get("limit"))
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, q, 100, 100)
+	if !ok {
+		return
 	}
 	var after *content.ActivityCursor
 	if q.Has("page_cursor") {

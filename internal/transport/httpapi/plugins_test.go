@@ -252,7 +252,9 @@ func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 	if items, _ := list["items"].([]any); res.StatusCode != 200 || len(items) != 1 || items[0].(map[string]any)["plan_id"] != "plan_1" {
 		t.Fatalf("plan history: %d %v", res.StatusCode, list)
 	}
-	if res, body := operationCall(t, server, "GET", "/v0/admin/plugins/plans?limit=101", pluginOperator, "", ""); res.StatusCode != 422 || body["code"] != "invalid_limit" {
-		t.Fatalf("plan history over the limit: %d %v", res.StatusCode, body)
+	for _, limit := range []string{"101", ""} {
+		if res, body := operationCall(t, server, "GET", "/v0/admin/plugins/plans?limit="+limit, pluginOperator, "", ""); res.StatusCode != 422 || body["code"] != "invalid_limit" {
+			t.Fatalf("plan history with limit %q: %d %v, want 422 invalid_limit", limit, res.StatusCode, body)
+		}
 	}
 }

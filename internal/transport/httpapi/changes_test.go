@@ -226,6 +226,7 @@ func TestPollingRejectsForeignCursorsAndScopes(t *testing.T) {
 		{"/v0/changes?corpus_id=corpus_a&cursor=", feedReader, 422, "invalid_cursor"},
 		{"/v0/changes?corpus_id=corpus_a&limit=0", feedReader, 422, "invalid_limit"},
 		{"/v0/changes?corpus_id=corpus_a&limit=101", feedReader, 422, "invalid_limit"},
+		{"/v0/changes?corpus_id=corpus_a&limit=", feedReader, 422, "invalid_limit"},
 		// A key in the query string is refused, never used.
 		{"/v0/changes?corpus_id=corpus_a&api_key=" + feedReader, feedReader, 422, "invalid_query"},
 		{"/v0/changes?corpus_id=corpus_a&cursor=x" + cursor, feedReader, 422, "invalid_cursor"},

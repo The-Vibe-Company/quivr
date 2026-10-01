@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
 
 // detailed returns err as a domain would report it with an explanation, in
@@ -152,6 +153,27 @@ func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {
 	}
 	if rec.Code != 422 || body.Code != "invalid_expression" || body.Field != "/saved_query_version_id" || body.Message != "/expression/text: minLength: got 0, want 1" || body.Retryable {
 		t.Fatalf("%d %+v", rec.Code, body)
+	}
+}
+
+// A refused upload answers the public code of its sentinel; the request schema
+// alone answers invalid_schema.
+func TestUploadFailureCodesIgnoreDetail(t *testing.T) {
+	for sentinel, want := range map[error]struct {
+		status int
+		code   string
+	}{
+		uploads.ErrInvalid:  {422, "invalid_input"},
+		content.ErrInvalid:  {422, "invalid_input"},
+		uploads.ErrNotFound: {404, "not_found"},
+		uploads.ErrConflict: {409, "idempotency_conflict"},
+	} {
+		for style, err := range detailed(sentinel) {
+			status, code := written(t, func(w *httptest.ResponseRecorder) { uploadError(w, err) })
+			if status != want.status || code != want.code {
+				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			}
+		}
 	}
 }
 

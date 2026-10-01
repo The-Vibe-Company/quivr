@@ -23,7 +23,8 @@ func uploadError(w http.ResponseWriter, err error) {
 	case errors.Is(err, uploads.ErrConflict):
 		failure(w, 409, "idempotency_conflict")
 	case errors.Is(err, uploads.ErrInvalid), errors.Is(err, content.ErrInvalid):
-		failure(w, 422, "invalid_schema")
+		// The request schema already refused a malformed body as invalid_schema.
+		failure(w, 422, publicCode(err, "invalid_input"))
 	default:
 		failure(w, 503, "storage_unavailable")
 	}

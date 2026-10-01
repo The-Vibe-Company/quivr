@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
@@ -225,7 +225,14 @@ func (a *API) decodeMonitoring(w http.ResponseWriter, r *http.Request, schema *j
 		return false
 	}
 	if err := schema.Validate(raw); err != nil {
-		failure(w, 422, "invalid_schema")
+		// A creation's owner answers the same code whether the request schema
+		// or the service refuses it, and in a body as in the listing filter.
+		// Elsewhere owner is not a member, so naming it stays invalid_schema.
+		if schema == a.monitoringSchemas.subscription && connectors.SchemaPointer(err) == "/owner" {
+			failure(w, 422, "invalid_owner")
+		} else {
+			failure(w, 422, "invalid_schema")
+		}
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -315,9 +322,14 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 			return
 		}
 	}
+	if !q.Has("owner") {
+		failure(w, 422, "invalid_query")
+		return
+	}
+	// An empty owner is refused like any other invalid one, as on creation.
 	ownerRef := q.Get("owner")
 	if ownerRef == "" {
-		failure(w, 422, "invalid_query")
+		failure(w, 422, "invalid_owner")
 		return
 	}
 	filter := monitoring.OwnerFilter{Owner: ownerRef}
@@ -328,14 +340,9 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 		failure(w, 422, "invalid_cursor")
 		return
 	}
-	limit := 100
-	if q.Has("limit") {
-		n, err := strconv.Atoi(q.Get("limit"))
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, q, 100, 100)
+	if !ok {
+		return
 	}
 	var after string
 	if q.Has("page_cursor") {

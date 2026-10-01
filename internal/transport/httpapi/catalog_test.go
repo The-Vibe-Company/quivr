@@ -134,6 +134,11 @@ func TestCatalogAuthorizationAndValidation(t *testing.T) {
 		{"/v0/records", catalogReader, 422, "invalid_query"},
 		{"/v0/records?corpus_id=corpus_a&limit=0", catalogReader, 422, "invalid_limit"},
 		{"/v0/records?corpus_id=corpus_a&limit=101", catalogReader, 422, "invalid_limit"},
+		{"/v0/records?corpus_id=corpus_a&limit=", catalogReader, 422, "invalid_limit"},
+		// Every list answers an empty limit or page cursor with the same code.
+		{"/v0/corpora?limit=", catalogReader, 422, "invalid_limit"},
+		{"/v0/connectors?limit=", catalogReader, 422, "invalid_limit"},
+		{"/v0/connectors?page_cursor=", catalogReader, 422, "invalid_cursor"},
 		{"/v0/records?corpus_id=corpus_a&page_cursor=", catalogReader, 422, "invalid_cursor"},
 		{"/v0/records?corpus_id=corpus_a&q=filter", catalogReader, 422, "invalid_query"},
 		{"/v0/records?corpus_id=corpus_a&corpus_id=corpus_b", catalogReader, 422, "invalid_query"},

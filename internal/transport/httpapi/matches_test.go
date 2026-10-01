@@ -182,6 +182,7 @@ func TestMatchHistoryPagesAndDeliveryRead(t *testing.T) {
 		"missing subscription": {"", monitorReader, 422, "invalid_query"},
 		"unknown parameter":    {url.Values{"subscription_id": {"subscription_s1"}, "corpus_id": {"c"}}.Encode(), monitorReader, 422, "invalid_query"},
 		"limit above maximum":  {url.Values{"subscription_id": {"subscription_s1"}, "limit": {"101"}}.Encode(), monitorReader, 422, "invalid_limit"},
+		"empty limit":          {url.Values{"subscription_id": {"subscription_s1"}, "limit": {""}}.Encode(), monitorReader, 422, "invalid_limit"},
 		"tampered cursor":      {url.Values{"subscription_id": {"subscription_s1"}, "page_cursor": {next + "x"}}.Encode(), monitorReader, 422, "invalid_cursor"},
 		"unknown Subscription": {url.Values{"subscription_id": {"missing"}}.Encode(), monitorReader, 404, "not_found"},
 	} {

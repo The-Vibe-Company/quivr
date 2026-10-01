@@ -76,6 +76,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -434,6 +435,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -546,6 +548,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -975,7 +978,8 @@ paths:
       - name: owner
         in: query
         required: true
-        description: A Subscription Owner, or none for global Subscriptions.
+        description: A Subscription Owner, or none for global Subscriptions. Without it the request is 422
+          invalid_query; an empty or refused owner is 422 invalid_owner, as on creation.
         schema:
           type: string
           minLength: 1
@@ -987,6 +991,7 @@ paths:
           minLength: 1
       - name: limit
         in: query
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -1350,6 +1355,7 @@ paths:
           minLength: 1
       - name: limit
         in: query
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -1446,6 +1452,7 @@ paths:
           minLength: 1
       - name: limit
         in: query
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -1521,6 +1528,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -1949,6 +1957,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -2117,6 +2126,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -2335,6 +2345,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -2511,6 +2522,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -2587,6 +2599,7 @@ paths:
       - name: limit
         in: query
         required: false
+        description: The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
         schema:
           type: integer
           minimum: 1
@@ -5653,7 +5666,8 @@ components:
       maxLength: 128
       description: Subscription Owner, an opaque end-user reference defined by the client application
         (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128
-        characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+        characters without control characters; none is reserved for the listing filter. A refused owner is 422
+        invalid_owner, in a creation body as in the listing filter.
     SubscriptionPage:
       type: object
       additionalProperties: false

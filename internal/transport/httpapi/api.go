@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -211,6 +212,22 @@ func publicCode(err error, fallback string) string {
 	}
 	return fallback
 }
+
+// pageLimit reads a list's optional limit parameter. Absent, it is def; any
+// present value outside 1..max, the empty one included, is 422 invalid_limit
+// on every route.
+func pageLimit(w http.ResponseWriter, q url.Values, def, max int) (int, bool) {
+	if !q.Has("limit") {
+		return def, true
+	}
+	n, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || n < 1 || n > max {
+		failure(w, 422, "invalid_limit")
+		return 0, false
+	}
+	return n, true
+}
+
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var requestID [16]byte
@@ -428,14 +445,9 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 			return
 		}
 	}
-	limit := 100
-	if q.Has("limit") {
-		n, err := strconv.Atoi(q.Get("limit"))
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, q, 100, 100)
+	if !ok {
+		return
 	}
 	after := ""
 	scope := scopeDigest(s)

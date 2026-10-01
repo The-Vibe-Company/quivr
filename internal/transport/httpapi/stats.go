@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -68,14 +67,9 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 	}
 	name := transport.StatsWindowName(window.Name)
 	if counted {
-		limit := limits[0]
-		if q.Has("limit") {
-			n, err := strconv.Atoi(q.Get("limit"))
-			if err != nil || n < 1 || n > limits[1] {
-				failure(w, 422, "invalid_limit")
-				return
-			}
-			limit = n
+		limit, ok := pageLimit(w, q, limits[0], limits[1])
+		if !ok {
+			return
 		}
 		a.counts(w, r, org, series, window, limit)
 		return

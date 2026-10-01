@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,9 +93,9 @@ func (a *API) decodeQuarantinePage(token, binding string) (string, error) {
 func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	q := r.URL.Query()
 	var f quarantine.Filter
-	limit := quarantine.MaxPage
 	for k, v := range q {
-		if len(v) != 1 || v[0] == "" {
+		// An empty limit or page cursor gets its own code below, as on every list.
+		if len(v) != 1 || (v[0] == "" && k != "limit" && k != "page_cursor") {
 			failure(w, 422, "invalid_query")
 			return
 		}
@@ -119,18 +118,15 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 			} else {
 				f.Before = &t
 			}
-		case "limit":
-			n, err := strconv.Atoi(v[0])
-			if err != nil || n < 1 || n > quarantine.MaxPage {
-				failure(w, 422, "invalid_limit")
-				return
-			}
-			limit = n
-		case "page_cursor":
+		case "limit", "page_cursor":
 		default:
 			failure(w, 422, "invalid_query")
 			return
 		}
+	}
+	limit, ok := pageLimit(w, q, quarantine.MaxPage, quarantine.MaxPage)
+	if !ok {
+		return
 	}
 	binding := quarantineBinding(scope, f)
 	after := ""

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -151,14 +150,9 @@ func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.
 const maxPlanList = 100
 
 func (a *API) listPlans(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	limit := 20
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > maxPlanList {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, r.URL.Query(), 20, maxPlanList)
+	if !ok {
+		return
 	}
 	plans, err := a.Plugins.PipelinePlans(r.Context(), scope, limit)
 	if err != nil {

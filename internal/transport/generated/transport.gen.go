@@ -1728,7 +1728,7 @@ type Match struct {
 	Evidence MatchEvidence `json:"evidence"`
 	MatchId  string        `json:"match_id"`
 
-	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
 	PreviousMatchId       *string            `json:"previous_match_id,omitempty"`
 	RecordId              string             `json:"record_id"`
@@ -1785,7 +1785,7 @@ type MonitoringReferences struct {
 	DeliveryId string `json:"delivery_id"`
 	MatchId    string `json:"match_id"`
 
-	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
 	PreviousMatchId       *string            `json:"previous_match_id,omitempty"`
 	RecordId              string             `json:"record_id"`
@@ -2549,7 +2549,7 @@ type Subscription struct {
 	Enabled bool   `json:"enabled"`
 	Name    string `json:"name"`
 
-	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner          *SubscriptionOwner `json:"owner,omitempty"`
 	SubscriptionId string             `json:"subscription_id"`
 }
@@ -2563,7 +2563,7 @@ type SubscriptionCreate struct {
 	IdempotencyKey string          `json:"idempotency_key"`
 	Name           string          `json:"name"`
 
-	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner               *SubscriptionOwner `json:"owner,omitempty"`
 	SavedQueryId        string             `json:"saved_query_id"`
 	SavedQueryVersionId string             `json:"saved_query_version_id"`
@@ -2627,7 +2627,7 @@ type SubscriptionEvaluatorRefusal struct {
 	VersionId string `json:"version_id"`
 }
 
-// SubscriptionOwner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+// SubscriptionOwner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 type SubscriptionOwner = string
 
 // SubscriptionPage defines model for SubscriptionPage.
@@ -2690,7 +2690,7 @@ type SubscriptionVersion struct {
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
 
-	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner               *SubscriptionOwner `json:"owner,omitempty"`
 	SavedQueryId        string             `json:"saved_query_id"`
 	SavedQueryVersionId string             `json:"saved_query_version_id"`
@@ -2924,11 +2924,14 @@ type WithdrawalCommand struct {
 // ListAdminDocumentsParams defines parameters for ListAdminDocuments.
 type ListAdminDocumentsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListPipelinePlansParams defines parameters for ListPipelinePlans.
 type ListPipelinePlansParams struct {
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -2940,7 +2943,9 @@ type ListQuarantinedVersionsParams struct {
 	QuarantinedAfter  *time.Time `form:"quarantined_after,omitempty" json:"quarantined_after,omitempty"`
 	QuarantinedBefore *time.Time `form:"quarantined_before,omitempty" json:"quarantined_before,omitempty"`
 	PageCursor        *string    `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit             *int       `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetMatchStatsParams defines parameters for GetMatchStats.
@@ -2962,7 +2967,9 @@ type GetPluginCallStatsParamsWindow string
 // GetReceivedStatsParams defines parameters for GetReceivedStats.
 type GetReceivedStatsParams struct {
 	Window *GetReceivedStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
-	Limit  *int                          `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetReceivedStatsParamsWindow defines parameters for GetReceivedStats.
@@ -2987,7 +2994,9 @@ type GetStepStatsParamsWindow string
 // GetTopQueriesParams defines parameters for GetTopQueries.
 type GetTopQueriesParams struct {
 	Window *GetTopQueriesParamsWindow `form:"window,omitempty" json:"window,omitempty"`
-	Limit  *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetTopQueriesParamsWindow defines parameters for GetTopQueries.
@@ -2997,7 +3006,9 @@ type GetTopQueriesParamsWindow string
 type PollChangesParams struct {
 	Cursor   *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	CorpusId string  `form:"corpus_id" json:"corpus_id"`
-	Limit    *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // StreamChangesParams defines parameters for StreamChanges.
@@ -3011,41 +3022,53 @@ type StreamChangesParams struct {
 type ListConnectorsParams struct {
 	CorpusId   *string `form:"corpus_id,omitempty" json:"corpus_id,omitempty"`
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
 type ListDeliveryAttemptsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListMatchesParams defines parameters for ListMatches.
 type ListMatchesParams struct {
 	SubscriptionId string  `form:"subscription_id" json:"subscription_id"`
 	PageCursor     *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit          *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListRecordsParams defines parameters for ListRecords.
 type ListRecordsParams struct {
 	CorpusId   string  `form:"corpus_id" json:"corpus_id"`
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListSubscriptionsParams defines parameters for ListSubscriptions.
 type ListSubscriptionsParams struct {
-	// Owner A Subscription Owner, or none for global Subscriptions.
+	// Owner A Subscription Owner, or none for global Subscriptions. Without it the request is 422 invalid_query; an empty or refused owner is 422 invalid_owner, as on creation.
 	Owner      string  `form:"owner" json:"owner"`
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
-	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // RequestBackfillJSONRequestBody defines body for RequestBackfill for application/json ContentType.

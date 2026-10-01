@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
@@ -121,14 +120,9 @@ func (a *API) pollChanges(w http.ResponseWriter, r *http.Request, scope corpus.S
 	if !ok {
 		return
 	}
-	limit := 100
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, r.URL.Query(), 100, 100)
+	if !ok {
+		return
 	}
 	page, err := a.Changes.Poll(r.Context(), scope, corpusID, cursor, limit)
 	if err != nil {

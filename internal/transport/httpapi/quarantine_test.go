@@ -101,6 +101,8 @@ func TestQuarantineRoutes(t *testing.T) {
 		{"list without plugins:admin", "GET", "/v0/admin/quarantine", organization, "", 403, "forbidden"},
 		{"reprocess without plugins:admin", "POST", "/v0/admin/quarantine/reprocess", organization, dry, 403, "forbidden"},
 		{"an unknown filter", "GET", "/v0/admin/quarantine?stage=ingestion", operator, "", 422, "invalid_query"},
+		{"an empty limit", "GET", "/v0/admin/quarantine?limit=", operator, "", 422, "invalid_limit"},
+		{"an empty page cursor", "GET", "/v0/admin/quarantine?page_cursor=", operator, "", 422, "invalid_cursor"},
 		{"an empty window", "GET", "/v0/admin/quarantine?quarantined_after=2026-01-02T00:00:00Z&quarantined_before=2026-01-01T00:00:00Z", operator, "", 422, "invalid_query"},
 		{"no dry run for the key", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"other","corpus_id":"corpus_a","dry_run":false}`, 409, "dry_run_required"},
 		{"another scope under the key", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":false}`, 409, "idempotency_conflict"},

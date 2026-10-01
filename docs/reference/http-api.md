@@ -128,7 +128,7 @@ Stable keyset traversal of one Corpus's authorized canonical Records in Record I
 | --- | --- | --- | --- | --- |
 | `corpus_id` | query | string | yes | Minimum length `1`. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -436,7 +436,7 @@ Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -539,7 +539,7 @@ Same durable journal as SSE. Without cursor, return empty items and current comm
 | --- | --- | --- | --- | --- |
 | `cursor` | query | string |  | Minimum length `1`. |
 | `corpus_id` | query | string | yes | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -708,9 +708,9 @@ Active (enabled, not deleted) Subscriptions of one Subscription Owner, or the gl
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
-| `owner` | query | string | yes | A Subscription Owner, or none for global Subscriptions. Minimum length `1`. Maximum length `128`. |
+| `owner` | query | string | yes | A Subscription Owner, or none for global Subscriptions. Without it the request is 422 invalid_query; an empty or refused owner is 422 invalid_owner, as on creation. Minimum length `1`. Maximum length `128`. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -909,7 +909,7 @@ Authorized historical Matches for a Subscription. Stable keyset page cursor, not
 | --- | --- | --- | --- | --- |
 | `subscription_id` | query | string | yes | Minimum length `1`. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -970,7 +970,7 @@ Paginated append-only transport history, without secrets or receiver bodies.
 | --- | --- | --- | --- | --- |
 | `delivery_id` | path | string | yes | Minimum length `1`. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1008,7 +1008,7 @@ Connector Instances of authorized Corpora, optionally filtered to one Corpus, in
 | --- | --- | --- | --- | --- |
 | `corpus_id` | query | string |  | Minimum length `1`. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1276,7 +1276,7 @@ The latest Pipeline Plans this deployment recorded, newest first. Each names the
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
-| `limit` | query | integer |  | Default `20`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `20`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1338,7 +1338,7 @@ The Record Versions stuck in quarantine, in Version id order, with the step each
 | `quarantined_after` | query | string (date-time) |  |  |
 | `quarantined_before` | query | string (date-time) |  |  |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1430,7 +1430,7 @@ The Organization's most recently accepted Record Versions across all its Corpora
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
 | `page_cursor` | query | string |  | Minimum length `1`. |
-| `limit` | query | integer |  | Default `100`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1526,7 +1526,7 @@ Documents received by the key's Organization over the window per source namespac
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
 | `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
-| `limit` | query | integer |  | Default `10`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `10`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -1565,7 +1565,7 @@ The most frequent search queries of the key's Organization over the window, norm
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
 | `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
-| `limit` | query | integer |  | Default `20`. Minimum `1`. Maximum `100`. |
+| `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `20`. Minimum `1`. Maximum `100`. |
 
 **Responses**
 
@@ -7888,7 +7888,7 @@ description: Absent owner means a global, organization-wide Subscription.
 
 ### `SubscriptionOwner`
 
-Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 
 Type: string. Minimum length `1`. Maximum length `128`.
 
@@ -7899,7 +7899,7 @@ Type: string. Minimum length `1`. Maximum length `128`.
 type: string
 minLength: 1
 maxLength: 128
-description: Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter (422 invalid_owner).
+description: Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 ```
 
 </details>

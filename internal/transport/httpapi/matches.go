@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -117,14 +116,9 @@ func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.S
 		failure(w, 422, "invalid_cursor")
 		return
 	}
-	limit := 100
-	if q.Has("limit") {
-		n, err := strconv.Atoi(q.Get("limit"))
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, q, 100, 100)
+	if !ok {
+		return
 	}
 	var after int64
 	if q.Has("page_cursor") {
@@ -239,14 +233,9 @@ func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.
 		failure(w, 422, "invalid_cursor")
 		return
 	}
-	limit := 100
-	if q.Has("limit") {
-		n, err := strconv.Atoi(q.Get("limit"))
-		if err != nil || n < 1 || n > 100 {
-			failure(w, 422, "invalid_limit")
-			return
-		}
-		limit = n
+	limit, ok := pageLimit(w, q, 100, 100)
+	if !ok {
+		return
 	}
 	after := 0
 	if q.Has("page_cursor") {

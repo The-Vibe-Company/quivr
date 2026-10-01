@@ -8,17 +8,21 @@ import (
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // MaxUploadBytes bounds a single presigned transfer expectation.
 const MaxUploadBytes = 1 << 30
 
 var (
-	ErrConflict = errors.New("idempotency_conflict")
-	ErrNotFound = errors.New("not_found")
-	ErrInvalid  = errors.New("invalid_input")
+	ErrConflict = publicerr.New("idempotency_conflict")
+	ErrNotFound = publicerr.New("not_found")
+	// ErrInvalid refuses an upload request the service cannot accept, after
+	// the request schema accepted it.
+	ErrInvalid = publicerr.New("invalid_input")
 	// ErrVerificationMismatch distinguishes altered bytes from a temporary
-	// transfer-verification failure.
+	// transfer-verification failure. It never reaches a client: the session
+	// reports verification_failed instead.
 	ErrVerificationMismatch = errors.New("verified_bytes_mismatch")
 )
 
