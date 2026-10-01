@@ -63,7 +63,7 @@ run:
   command: [go, run, .]
 ```
 
-`max_latency_ms` is the profile's latency objective, a p95 target: a search that takes longer still answers, and the API logs a warning that names the slowest phase. Quivr stops a search only at the profile's hard limit, four times `max_latency_ms`, at least 2 seconds and at most 9 seconds. Past it, Quivr answers `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
+`max_latency_ms` is the profile's latency objective, a p95 target: a search that takes longer still answers, the API logs a warning that names the slowest phase, and `GET /v0/admin/stats/searches` counts it in the profile's `over_objective`. Quivr stops a search only at the profile's hard limit, four times `max_latency_ms`, at least 2 seconds and at most 9 seconds. Past it, Quivr answers `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
 
 </Step>
 <Step title="Rank">

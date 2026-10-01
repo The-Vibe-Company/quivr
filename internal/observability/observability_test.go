@@ -122,6 +122,7 @@ func TestRecorderAggregatesEventsIntoEveryTier(t *testing.T) {
 	r.PluginCall(ok)
 	r.PluginCall(failed)
 	r.Search(Search{Organization: "org_a", Mode: "hybrid", Profile: "default", Query: "  Secret   Plans ", Results: 3, Duration: time.Millisecond})
+	r.Search(Search{Organization: "org_a", Mode: "hybrid", Profile: "default", Duration: 3 * time.Second, OverObjective: true})
 	r.Received("org_a", "news-feed")
 	r.Received("org_a", "news-feed")
 	r.Matched("org_a", "keywords")
@@ -135,8 +136,8 @@ func TestRecorderAggregatesEventsIntoEveryTier(t *testing.T) {
 			t.Fatalf("tier %s: plugin call row = %+v; want 2 calls, 1 error, one in (25,50] ms and one in (2.5,5] s", tier.Resolution, got)
 		}
 		search, _ := store.rowsOf(SeriesSearch, Key("hybrid", "default"), tier.Resolution)
-		if search.Count != 1 || search.Items != 3 || search.Errors != 0 {
-			t.Fatalf("tier %s: search row = %+v; want 1 search with 3 results", tier.Resolution, search)
+		if search.Count != 2 || search.Items != 3 || search.Errors != 0 || search.OverObjective != 1 {
+			t.Fatalf("tier %s: search row = %+v; want 2 searches with 3 results, 1 over its objective", tier.Resolution, search)
 		}
 		if received, _ := store.rowsOf(SeriesReceived, "news-feed", tier.Resolution); received.Count != 2 {
 			t.Fatalf("tier %s: received row = %+v; want 2 documents", tier.Resolution, received)
@@ -231,7 +232,7 @@ func TestReportSummarizesBucketsOfTheWindowTier(t *testing.T) {
 	older := Row{Organization: "org_a", Series: SeriesSearch, Key: Key("hybrid", "default"), Resolution: time.Minute, Start: start.Add(-2 * time.Minute),
 		Count: 2, Errors: 1, DurationSumMS: 60, LastErrorCode: "search_unavailable", LastErrorAt: start.Add(-90 * time.Second)}
 	older.Buckets[3] = 2
-	newer := Row{Organization: "org_a", Series: SeriesSearch, Key: Key("hybrid", "default"), Resolution: time.Minute, Start: start, Count: 2, DurationSumMS: 1000}
+	newer := Row{Organization: "org_a", Series: SeriesSearch, Key: Key("hybrid", "default"), Resolution: time.Minute, Start: start, Count: 2, OverObjective: 1, DurationSumMS: 1000}
 	newer.Buckets[6] = 2
 	outside := newer
 	outside.Start = start.Add(-3 * time.Hour)
@@ -250,7 +251,7 @@ func TestReportSummarizesBucketsOfTheWindowTier(t *testing.T) {
 		t.Fatalf("first point = %+v; want the older bucket with p50 37.5 ms", s.Points[0])
 	}
 	// Four searches: two in (25,50] ms and two in (250,500] ms.
-	want := Summary{Count: 4, Errors: 1, MeanMS: 265, P50MS: 50, P95MS: 475, LastErrorCode: "search_unavailable", LastErrorAt: older.LastErrorAt}
+	want := Summary{Count: 4, Errors: 1, OverObjective: 1, MeanMS: 265, P50MS: 50, P95MS: 475, LastErrorCode: "search_unavailable", LastErrorAt: older.LastErrorAt}
 	if s.Summary != want {
 		t.Fatalf("summary = %+v; want %+v", s.Summary, want)
 	}

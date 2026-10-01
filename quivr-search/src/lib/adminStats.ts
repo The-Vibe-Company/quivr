@@ -50,6 +50,8 @@ export interface SearchStats extends Series {
   mode: "lexical" | "semantic" | "hybrid";
   profile: string;
   results: number;
+  /** Searches slower than the profile's latency objective (THE-828). */
+  over_objective: number;
 }
 
 export interface StepStats extends Series {

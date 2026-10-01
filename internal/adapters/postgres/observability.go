@@ -30,18 +30,19 @@ func (s ObservabilityStore) UpsertRollups(ctx context.Context, rows []observabil
 			code, at = &r.LastErrorCode, &r.LastErrorAt
 		}
 		batch.Queue(`INSERT INTO observability_rollups AS r
-  (organization,series,resolution_s,bucket_start,key,count,errors,items_sum,duration_sum_ms,buckets,last_error_code,last_error_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  (organization,series,resolution_s,bucket_start,key,count,errors,items_sum,over_objective,duration_sum_ms,buckets,last_error_code,last_error_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 ON CONFLICT (organization,series,resolution_s,bucket_start,key) DO UPDATE SET
   count=r.count+excluded.count,
   errors=r.errors+excluded.errors,
   items_sum=r.items_sum+excluded.items_sum,
+  over_objective=r.over_objective+excluded.over_objective,
   duration_sum_ms=r.duration_sum_ms+excluded.duration_sum_ms,
   buckets=ARRAY(SELECT coalesce(a,0)+coalesce(b,0) FROM unnest(r.buckets,excluded.buckets) WITH ORDINALITY AS t(a,b,i) ORDER BY i),
   last_error_code=CASE WHEN excluded.last_error_at IS NOT NULL AND (r.last_error_at IS NULL OR excluded.last_error_at>=r.last_error_at)
     THEN excluded.last_error_code ELSE r.last_error_code END,
   last_error_at=greatest(r.last_error_at,excluded.last_error_at)`,
-			r.Organization, r.Series, int(r.Resolution/time.Second), r.Start, r.Key, r.Count, r.Errors, r.Items, r.DurationSumMS, r.Buckets[:], code, at)
+			r.Organization, r.Series, int(r.Resolution/time.Second), r.Start, r.Key, r.Count, r.Errors, r.Items, r.OverObjective, r.DurationSumMS, r.Buckets[:], code, at)
 	}
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error { return tx.SendBatch(ctx, batch).Close() })
 }
@@ -59,7 +60,7 @@ func (s ObservabilityStore) ReadRollups(ctx context.Context, org, series string,
 	if len(keys) > 0 {
 		only = keys
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT key,bucket_start,count,errors,items_sum,duration_sum_ms,buckets,coalesce(last_error_code,''),last_error_at
+	rows, err := s.Pool.Query(ctx, `SELECT key,bucket_start,count,errors,items_sum,over_objective,duration_sum_ms,buckets,coalesce(last_error_code,''),last_error_at
 FROM observability_rollups WHERE organization=$1 AND series=$2 AND resolution_s=$3 AND bucket_start>=$4 AND ($6::text[] IS NULL OR key=ANY($6))
 ORDER BY key,bucket_start LIMIT $5`, org, series, int(resolution/time.Second), from, maxRollupRows, only)
 	if err != nil {
@@ -71,7 +72,7 @@ ORDER BY key,bucket_start LIMIT $5`, org, series, int(resolution/time.Second), f
 		r := observability.Row{Organization: org, Series: series, Resolution: resolution}
 		var buckets []int64
 		var at *time.Time
-		if err := rows.Scan(&r.Key, &r.Start, &r.Count, &r.Errors, &r.Items, &r.DurationSumMS, &buckets, &r.LastErrorCode, &at); err != nil {
+		if err := rows.Scan(&r.Key, &r.Start, &r.Count, &r.Errors, &r.Items, &r.OverObjective, &r.DurationSumMS, &buckets, &r.LastErrorCode, &at); err != nil {
 			return nil, err
 		}
 		copy(r.Buckets[:], buckets)

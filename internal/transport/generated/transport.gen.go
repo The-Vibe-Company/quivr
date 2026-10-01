@@ -2434,6 +2434,9 @@ type SearchResponse struct {
 type SearchStats struct {
 	Mode SearchStatsMode `json:"mode"`
 
+	// OverObjective Searches that took longer than the profile's latency objective, its max_latency_ms. They still answered.
+	OverObjective int `json:"over_objective"`
+
 	// Points Non-empty buckets, oldest first.
 	Points  []StatsPoint `json:"points"`
 	Profile string       `json:"profile"`

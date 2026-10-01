@@ -2379,9 +2379,9 @@ paths:
     get:
       operationId: getSearchStats
       description: Searches of the key's Organization over the window per mode and search profile, with
-        errors, latency and the number of results returned, in the buckets of getPluginCallStats. The
-        profile is unknown for a search that named a profile the deployment does not serve. Requires
-        observability:read on a key that grants every Corpus.
+        errors, latency, the number of results returned and the number of searches over the profile's latency
+        objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a
+        profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
       parameters:
       - name: window
         in: query
@@ -4351,6 +4351,11 @@ components:
           type: integer
           minimum: 0
           description: Results returned by these searches in total.
+        over_objective:
+          type: integer
+          minimum: 0
+          description: Searches that took longer than the profile's latency objective, its max_latency_ms. They
+            still answered.
         summary:
           $ref: '#/components/schemas/StatsSummary'
         points:
@@ -4362,6 +4367,7 @@ components:
       - mode
       - profile
       - results
+      - over_objective
       - summary
       - points
     StepStats:

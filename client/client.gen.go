@@ -2434,6 +2434,9 @@ type SearchResponse struct {
 type SearchStats struct {
 	Mode SearchStatsMode `json:"mode"`
 
+	// OverObjective Searches that took longer than the profile's latency objective, its max_latency_ms. They still answered.
+	OverObjective int `json:"over_objective"`
+
 	// Points Non-empty buckets, oldest first.
 	Points  []StatsPoint `json:"points"`
 	Profile string       `json:"profile"`
@@ -3464,7 +3467,7 @@ type ClientInterface interface {
 
 	// GetSearchStats performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 	//
-	// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+	// Searches of the key's Organization over the window per mode and search profile, with errors, latency, the number of results returned and the number of searches over the profile's latency objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
 	GetSearchStats(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetStepStats performs a GET /v0/admin/stats/steps (the `GetStepStats` operationId) request.
@@ -4311,7 +4314,7 @@ func (c *Client) GetReceivedStats(ctx context.Context, params *GetReceivedStatsP
 
 // GetSearchStats performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 //
-// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+// Searches of the key's Organization over the window per mode and search profile, with errors, latency, the number of results returned and the number of searches over the profile's latency objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
 func (c *Client) GetSearchStats(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSearchStatsRequest(c.Server, params)
 	if err != nil {
@@ -9418,7 +9421,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 	//
-	// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+	// Searches of the key's Organization over the window per mode and search profile, with errors, latency, the number of results returned and the number of searches over the profile's latency objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetSearchStatsWithResponse(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*GetSearchStatsResponse, error)
@@ -14030,7 +14033,7 @@ func (c *ClientWithResponses) GetReceivedStatsWithResponse(ctx context.Context, 
 
 // GetSearchStatsWithResponse performs a GET /v0/admin/stats/searches (the `GetSearchStats` operationId) request.
 //
-// Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+// Searches of the key's Organization over the window per mode and search profile, with errors, latency, the number of results returned and the number of searches over the profile's latency objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) GetSearchStatsWithResponse(ctx context.Context, params *GetSearchStatsParams, reqEditors ...RequestEditorFn) (*GetSearchStatsResponse, error) {

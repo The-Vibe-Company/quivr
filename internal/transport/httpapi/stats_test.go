@@ -59,6 +59,8 @@ func TestStatsReadsAreScopedAndNeedObservabilityRead(t *testing.T) {
 	row := observability.Row{Organization: "org_a", Series: observability.SeriesPluginCall, Key: observability.Key("core.ingest", "1.0.0", "embed_query"),
 		Resolution: time.Minute, Start: start, Count: 2, Errors: 1, DurationSumMS: 40, LastErrorCode: "plugin_unavailable", LastErrorAt: start}
 	row.Buckets[3] = 2
+	search := observability.Row{Organization: "org_a", Series: observability.SeriesSearch, Key: observability.Key("hybrid", "deep"), Resolution: time.Minute, Start: start, Count: 3, Items: 12, OverObjective: 2}
+	search.Buckets[8] = 3
 	received := observability.Row{Organization: "org_a", Series: observability.SeriesReceived, Key: "news-feed", Resolution: 15 * time.Minute, Start: start.Truncate(15 * time.Minute), Count: 4}
 	query := observability.Row{Organization: "org_a", Series: observability.SeriesSearchQuery, Key: "must not be listed", Resolution: time.Hour, Start: start.Truncate(time.Hour), Count: 1}
 	var asked []string
@@ -68,7 +70,7 @@ func TestStatsReadsAreScopedAndNeedObservabilityRead(t *testing.T) {
 		fenced:   {Organization: "org_a", Actions: []string{"observability:read"}, Corpora: []string{"corpus_1"}},
 	}
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
-		httpapi.WithObservability(nil, observability.Reader{Store: rollupRows{rows: []observability.Row{row, received, query}, asked: &asked}}))
+		httpapi.WithObservability(nil, observability.Reader{Store: rollupRows{rows: []observability.Row{row, search, received, query}, asked: &asked}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +105,16 @@ func TestStatsReadsAreScopedAndNeedObservabilityRead(t *testing.T) {
 	if item["plugin_id"] != "core.ingest" || item["plugin_version"] != "1.0.0" || item["operation"] != "embed_query" ||
 		summary["count"] != float64(2) || summary["errors"] != float64(1) || summary["last_error_code"] != "plugin_unavailable" || summary["p50_ms"] != float64(37.5) {
 		t.Fatalf("plugin series %v", item)
+	}
+	// Searches per mode and profile, with those over the profile's latency
+	// objective.
+	res, list = operationCall(t, server, "GET", "/v0/admin/stats/searches", observer, "", "")
+	items, _ = list["items"].([]any)
+	if res.StatusCode != 200 || len(items) != 1 {
+		t.Fatalf("searches: %d %v", res.StatusCode, list)
+	}
+	if item := items[0].(map[string]any); item["mode"] != "hybrid" || item["profile"] != "deep" || item["results"] != float64(12) || item["over_objective"] != float64(2) {
+		t.Fatalf("search series %v; want hybrid deep with 12 results and 2 searches over the objective", item)
 	}
 	// Documents received: the largest source namespaces with their buckets,
 	// and the total over every namespace.

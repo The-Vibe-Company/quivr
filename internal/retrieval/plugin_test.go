@@ -180,6 +180,8 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 // max_latency_ms is the profile's objective, not its deadline (THE-813): a
 // search may run past it, up to the profile's hard bound, four times the
 // objective and at least 2 s. The plugin's rounds see how long they have left.
+// A search past its objective still answers, and is flagged so the search
+// rollups count it (THE-828).
 func TestASearchMayRunPastItsObjective(t *testing.T) {
 	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
 	var left time.Duration
@@ -187,11 +189,22 @@ func TestASearchMayRunPastItsObjective(t *testing.T) {
 		if deadline, ok := ctx.Deadline(); ok && left == 0 {
 			left = time.Until(deadline)
 		}
+		if request.Profile == "deep" {
+			// deep's objective is 50 ms, the shortest a manifest declares:
+			// the plugin outlasts it.
+			time.Sleep(60 * time.Millisecond)
+		}
 		return passthrough(ctx, request)
 	}
-	// deep's objective is 50 ms.
-	if _, err := rankedService(p, &scriptedRanker{answer: answer}).Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: "deep"}); err != nil {
-		t.Fatal(err)
+	s := rankedService(p, &scriptedRanker{answer: answer})
+	for profile, over := range map[string]bool{"deep": true, "default": false} {
+		result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Usage == nil || result.Usage.OverObjective != over {
+			t.Fatalf("profile %s: usage %+v; want over its objective %v", profile, result.Usage, over)
+		}
 	}
 	if left < time.Second {
 		t.Fatalf("the first round had %s left under a 50 ms objective; want the hard bound, at least 2 s", left)

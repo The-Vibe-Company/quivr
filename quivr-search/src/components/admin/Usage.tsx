@@ -154,6 +154,7 @@ export function Usage({ onUnauthorized }: SectionProps) {
             const rows = modeRows(list, v.bins);
             const total = rows.reduce((sum, r) => sum + r.count, 0);
             const errors = rows.reduce((sum, r) => sum + r.errors, 0);
+            const slow = rows.reduce((sum, r) => sum + r.overObjective, 0);
             const busiest = rows.reduce<(typeof rows)[number] | undefined>(
               (a, b) => (!a || b.count > a.count ? b : a),
               undefined,
@@ -168,7 +169,14 @@ export function Usage({ onUnauthorized }: SectionProps) {
                       ? `en ${v.name} · p95 ${short(busiest.p95)} (${busiest.label.toLowerCase()})`
                       : `en ${v.name}`
                   }
-                  alert={errors ? plural(errors, "échec") : undefined}
+                  alert={
+                    [
+                      errors ? plural(errors, "échec") : "",
+                      slow ? `${count(slow)} hors objectif de temps` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || undefined
+                  }
                 />
                 {total === 0 ? (
                   <Empty>

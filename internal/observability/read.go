@@ -17,6 +17,9 @@ type Reader struct {
 // and meaningful only when Count is positive.
 type Summary struct {
 	Count, Errors, Items int64
+	// OverObjective counts the searches slower than their profile's
+	// latency objective.
+	OverObjective        int64
 	P50MS, P95MS, MeanMS float64
 	LastErrorCode        string
 	LastErrorAt          time.Time
@@ -145,7 +148,7 @@ func (r Reader) TopQueries(ctx context.Context, org string, w Window, limit int)
 }
 
 func summarize(r Row) Summary {
-	s := Summary{Count: r.Count, Errors: r.Errors, Items: r.Items, LastErrorCode: r.LastErrorCode, LastErrorAt: r.LastErrorAt}
+	s := Summary{Count: r.Count, Errors: r.Errors, Items: r.Items, OverObjective: r.OverObjective, LastErrorCode: r.LastErrorCode, LastErrorAt: r.LastErrorAt}
 	if r.Count > 0 {
 		s.MeanMS = r.DurationSumMS / float64(r.Count)
 		s.P50MS, _ = Quantile(0.5, r.Buckets[:])

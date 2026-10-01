@@ -90,6 +90,7 @@ function searches(window: Window) {
       mode,
       profile: "default",
       results: sum(b.points) * 6,
+      over_objective: mode === "hybrid" ? 3 : 0,
       summary: {
         count: sum(b.points),
         errors: mode === "hybrid" ? 2 : 0,
@@ -287,7 +288,9 @@ test("l’utilisation montre les documents par source, les recherches, les alert
   await expect(chart.locator(".usage-tip")).toContainText(/\d+ documents?$/);
 
   const searchBlock = block(page, "Recherches");
-  await expect(searchBlock).toContainText("2 échecs");
+  await expect(searchBlock).toContainText(
+    "2 échecs · 3 hors objectif de temps",
+  );
   const modes = searchBlock.getByRole("table", {
     name: /Recherches et temps de réponse par mode/,
   });

@@ -25,7 +25,7 @@ func TestObservabilityRollupsMergeAndPrune(t *testing.T) {
 	recent := time.Now().UTC().Truncate(time.Minute)
 	row := func(start time.Time, resolution time.Duration, count, errors int64, bucket int, code string, at time.Time) observability.Row {
 		r := observability.Row{Organization: org, Series: observability.SeriesPluginCall, Key: observability.Key("core.ingest", "1.0.0", "embed_query"),
-			Resolution: resolution, Start: start, Count: count, Errors: errors, Items: count, DurationSumMS: float64(count) * 10, LastErrorCode: code, LastErrorAt: at}
+			Resolution: resolution, Start: start, Count: count, Errors: errors, Items: count, OverObjective: count - errors, DurationSumMS: float64(count) * 10, LastErrorCode: code, LastErrorAt: at}
 		r.Buckets[bucket] = count
 		return r
 	}
@@ -48,9 +48,9 @@ func TestObservabilityRollupsMergeAndPrune(t *testing.T) {
 	got := rows[0]
 	var want [observability.Buckets]int64
 	want[1], want[12] = 2, 3
-	if got.Count != 5 || got.Errors != 2 || got.Items != 5 || got.DurationSumMS != 50 || got.Buckets != want ||
+	if got.Count != 5 || got.Errors != 2 || got.Items != 5 || got.OverObjective != 3 || got.DurationSumMS != 50 || got.Buckets != want ||
 		got.LastErrorCode != "plugin_unavailable" || !got.LastErrorAt.Equal(later) {
-		t.Fatalf("merged row = %+v; want 5 calls, 2 errors, buckets %v and the later error plugin_unavailable", got, want)
+		t.Fatalf("merged row = %+v; want 5 calls, 2 errors, 3 over the objective, buckets %v and the later error plugin_unavailable", got, want)
 	}
 	if _, err := store.PruneRollups(ctx, time.Minute, old.Add(time.Hour)); err != nil {
 		t.Fatal(err)

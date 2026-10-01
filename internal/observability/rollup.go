@@ -133,7 +133,10 @@ type Row struct {
 	Start                     time.Time
 	Count, Errors             int64
 	// Items sums a per-event quantity: the result count of searches.
-	Items         int64
+	Items int64
+	// OverObjective counts the searches that took longer than their
+	// profile's latency objective (THE-828).
+	OverObjective int64
 	DurationSumMS float64
 	Buckets       [Buckets]int64
 	LastErrorCode string
@@ -157,6 +160,7 @@ func (r *Row) merge(o Row) {
 	r.Count += o.Count
 	r.Errors += o.Errors
 	r.Items += o.Items
+	r.OverObjective += o.OverObjective
 	r.DurationSumMS += o.DurationSumMS
 	for i := range r.Buckets {
 		r.Buckets[i] += o.Buckets[i]

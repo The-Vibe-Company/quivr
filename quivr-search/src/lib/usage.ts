@@ -169,6 +169,8 @@ export interface ModeRow {
   slot: number;
   count: number;
   errors: number;
+  /** Searches slower than their profile's latency objective. */
+  overObjective: number;
   p50?: number;
   p95?: number;
   /** p95 of every column, undefined where nobody searched. */
@@ -200,6 +202,7 @@ export function modeRows(list: StatsList<SearchStats>, bins: Bin[]) {
       ...m,
       count: items.reduce((sum, i) => sum + i.summary.count, 0),
       errors: items.reduce((sum, i) => sum + i.summary.errors, 0),
+      overObjective: items.reduce((sum, i) => sum + i.over_objective, 0),
       p50: busiest.summary.p50_ms,
       p95: busiest.summary.p95_ms,
       p95s,

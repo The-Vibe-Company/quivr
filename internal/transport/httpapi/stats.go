@@ -98,7 +98,7 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 		out := transport.SearchStatsList{Window: name, ResolutionSeconds: resolution, From: report.From, To: report.To, Items: []transport.SearchStats{}}
 		for _, s := range report.Series {
 			key := observability.KeyParts(s.Key, 2)
-			out.Items = append(out.Items, transport.SearchStats{Mode: transport.SearchStatsMode(key[0]), Profile: key[1], Results: int(s.Summary.Items), Summary: statsSummary(s.Summary), Points: statsPoints(s.Points)})
+			out.Items = append(out.Items, transport.SearchStats{Mode: transport.SearchStatsMode(key[0]), Profile: key[1], Results: int(s.Summary.Items), OverObjective: int(s.Summary.OverObjective), Summary: statsSummary(s.Summary), Points: statsPoints(s.Points)})
 		}
 		send(w, 200, out)
 	default:
@@ -199,5 +199,6 @@ func (a *API) recordSearch(org string, q retrieval.Request, result retrieval.Res
 	if err != nil {
 		_, code = searchFailure(err)
 	}
-	a.Recorder.Search(observability.Search{Organization: org, Mode: q.Mode, Profile: profile, Query: q.Query, Results: len(result.Hits), Duration: time.Since(started), ErrorCode: code})
+	a.Recorder.Search(observability.Search{Organization: org, Mode: q.Mode, Profile: profile, Query: q.Query, Results: len(result.Hits), Duration: time.Since(started), ErrorCode: code,
+		OverObjective: result.Usage != nil && result.Usage.OverObjective})
 }

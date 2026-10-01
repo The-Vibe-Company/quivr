@@ -49,6 +49,9 @@ type Usage struct {
 	Elapsed   time.Duration
 	PaidCalls int
 	CostCents float64
+	// OverObjective reports a search that took longer than its profile's
+	// latency objective, max_latency_ms.
+	OverObjective bool
 }
 
 // Profile is one search profile a deployment answers.
@@ -154,7 +157,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 			}
 			usage := session.Usage()
 			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: usage.PaidCalls, CostCents: usage.CostCents}
-			if out.Usage.Elapsed > profile.Objective() {
+			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
 				slog.Warn("search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
 			}

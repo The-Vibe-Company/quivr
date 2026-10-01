@@ -96,6 +96,9 @@ type Search struct {
 	Duration time.Duration
 	// ErrorCode is empty when the search succeeded.
 	ErrorCode string
+	// OverObjective reports a search that took longer than its profile's
+	// latency objective, max_latency_ms.
+	OverObjective bool
 }
 
 // Recorder aggregates events in memory and flushes them to its Store. The
@@ -139,7 +142,7 @@ func (r *Recorder) PluginCall(c PluginCall) {
 		return
 	}
 	r.metrics.pluginCall(c)
-	r.add(c.Organization, SeriesPluginCall, Key(c.Plugin, c.Version, c.Operation), Tiers, c.Duration, 0, c.ErrorCode)
+	r.add(c.Organization, SeriesPluginCall, Key(c.Plugin, c.Version, c.Operation), Tiers, c.Duration, 0, 0, c.ErrorCode)
 }
 
 // Search records one public search and, when enabled, its query text.
@@ -148,9 +151,13 @@ func (r *Recorder) Search(s Search) {
 		return
 	}
 	r.metrics.search(s)
-	r.add(s.Organization, SeriesSearch, Key(s.Mode, s.Profile), Tiers, s.Duration, int64(max(s.Results, 0)), s.ErrorCode)
+	var over int64
+	if s.OverObjective {
+		over = 1
+	}
+	r.add(s.Organization, SeriesSearch, Key(s.Mode, s.Profile), Tiers, s.Duration, int64(max(s.Results, 0)), over, s.ErrorCode)
 	if q := NormalizeQuery(s.Query); r.recordQueryText && q != "" {
-		r.add(s.Organization, SeriesSearchQuery, q, []Tier{QueryTier}, s.Duration, 0, s.ErrorCode)
+		r.add(s.Organization, SeriesSearchQuery, q, []Tier{QueryTier}, s.Duration, 0, 0, s.ErrorCode)
 	}
 }
 
@@ -160,7 +167,7 @@ func (r *Recorder) Received(org, sourceNamespace string) {
 	if r == nil || org == "" || sourceNamespace == "" {
 		return
 	}
-	r.add(org, SeriesReceived, sourceNamespace, Tiers, 0, 0, "")
+	r.add(org, SeriesReceived, sourceNamespace, Tiers, 0, 0, 0, "")
 }
 
 // Matched records one Match committed by a Subscription whose evaluator is
@@ -170,7 +177,7 @@ func (r *Recorder) Matched(org, evaluator string) {
 		return
 	}
 	r.metrics.match(evaluator)
-	r.add(org, SeriesMatch, evaluator, Tiers, 0, 0, "")
+	r.add(org, SeriesMatch, evaluator, Tiers, 0, 0, 0, "")
 }
 
 // Step records one processing step of one Organization.
@@ -178,13 +185,13 @@ func (r *Recorder) Step(org, step string, d time.Duration, errorCode string) {
 	if r == nil || org == "" {
 		return
 	}
-	r.add(org, SeriesStep, step, Tiers, d, 0, errorCode)
+	r.add(org, SeriesStep, step, Tiers, d, 0, 0, errorCode)
 }
 
-func (r *Recorder) add(org, series, key string, tiers []Tier, d time.Duration, items int64, errorCode string) {
+func (r *Recorder) add(org, series, key string, tiers []Tier, d time.Duration, items, overObjective int64, errorCode string) {
 	now := time.Now().UTC()
 	ms := durationMS(d)
-	event := Row{Organization: org, Series: series, Key: key, Count: 1, Items: items, DurationSumMS: ms}
+	event := Row{Organization: org, Series: series, Key: key, Count: 1, Items: items, OverObjective: overObjective, DurationSumMS: ms}
 	event.Buckets[bucketOf(ms)] = 1
 	if errorCode != "" {
 		event.Errors, event.LastErrorCode, event.LastErrorAt = 1, errorCode, now

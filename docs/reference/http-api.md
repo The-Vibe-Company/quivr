@@ -1465,7 +1465,7 @@ Calls, errors and latency of every plugin Contribution invoked for the key's Org
 
 Operation `getSearchStats`. Requires `observability:read`.
 
-Searches of the key's Organization over the window per mode and search profile, with errors, latency and the number of results returned, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
+Searches of the key's Organization over the window per mode and search profile, with errors, latency, the number of results returned and the number of searches over the profile's latency objective, in the buckets of getPluginCallStats. The profile is unknown for a search that named a profile the deployment does not serve. Requires observability:read on a key that grants every Corpus.
 
 **Parameters**
 
@@ -5273,6 +5273,7 @@ required:
 | `mode` | string | yes | One of `lexical`, `semantic`, `hybrid`. |
 | `profile` | string | yes | Minimum length `1`. |
 | `results` | integer | yes | Results returned by these searches in total. Minimum `0`. |
+| `over_objective` | integer | yes | Searches that took longer than the profile's latency objective, its max_latency_ms. They still answered. Minimum `0`. |
 | `summary` | [`StatsSummary`](#statssummary) | yes |  |
 | `points` | array of [`StatsPoint`](#statspoint) | yes | Non-empty buckets, oldest first. |
 
@@ -5296,6 +5297,10 @@ properties:
     type: integer
     minimum: 0
     description: Results returned by these searches in total.
+  over_objective:
+    type: integer
+    minimum: 0
+    description: Searches that took longer than the profile's latency objective, its max_latency_ms. They still answered.
   summary:
     $ref: '#/components/schemas/StatsSummary'
   points:
@@ -5307,6 +5312,7 @@ required:
   - mode
   - profile
   - results
+  - over_objective
   - summary
   - points
 ```
