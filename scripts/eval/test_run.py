@@ -147,7 +147,9 @@ class EvaluationSelection(unittest.TestCase):
                     self.corpora += 1
                     return 201, {'corpus_id': 'corpus'}
                 if path == '/v0/search/profiles':
-                    return 200, {'items': [{'name': 'deep', 'version': '0.1.0'}, {'name': 'default', 'version': '0.1.0'}]}
+                    provider = {'kind': 'plugin', 'plugin_id': 'jev.rerank', 'plugin_version': '0.1.0'}
+                    # The shape of SearchProfileDescription in contracts/http/v0/openapi.yaml: no version field.
+                    return 200, {'items': [{'name': 'deep', 'provider': provider}, {'name': 'default', 'provider': provider}]}
                 config = dict(self.stack.active) if self.stack else {}
                 self.searches.append({**body, 'configuration': config})
                 usage = {'paid_calls': int(body['profile'] == 'deep'), 'cost_cents': .1 if body['profile'] == 'deep' else 0}
@@ -156,7 +158,7 @@ class EvaluationSelection(unittest.TestCase):
                         output.write(json.dumps({'event': 'jev_rerank', 'profile': 'deep', **usage,
                                                  'input_tokens': 100, 'pairs': config.get('candidate_count', 30),
                                                  'cache_hits': 0, 'fallback': False}) + '\n')
-                return 200, {'retrieval_profile': {'version': '0.1.0'}, 'items': [{'record_id': 'r1'}], 'usage': usage}
+                return 200, {'retrieval_profile': {'version': 'plugin:jev.rerank@0.1.0/' + body['profile']}, 'items': [{'record_id': 'r1'}], 'usage': usage}
 
         for enabled, allow_paid in [(False, True), (True, True), (True, False)]:
             with self.subTest(enabled=enabled, allow_paid=allow_paid), tempfile.TemporaryDirectory() as directory:

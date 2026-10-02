@@ -110,7 +110,9 @@ def serving_profiles(client, corpus, advertised, probe_query='profile probe', al
             continue
         if is_deep(name) and client.stack is not None and 'jev_pin' in client.stack.state:
             _, listed = client.call('GET', '/v0/search/profiles')
-            served[name] = next(profile['version'] for profile in listed['items'] if profile['name'] == name)
+            provider = next(profile['provider'] for profile in listed['items'] if profile['name'] == name)
+            # The same identity a search's retrieval_profile.version carries.
+            served[name] = f"plugin:{provider['plugin_id']}@{provider['plugin_version']}/{name}"
             continue
         status, body = client.call('POST', '/v0/search', {'query': probe_query, 'corpus_ids': [corpus], 'mode': 'hybrid' if is_deep(name) else 'lexical', 'profile': name, 'limit': 1}, expected=(200, 422))
         if status == 200:
