@@ -3,70 +3,45 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"log/slog"
 	"net/http"
 	"strings"
-)
 
-// contentFailure maps a content error to its public status and code; single
-// requests and batch entries share it.
-func contentFailure(err error) (int, string) {
-	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		return 403, "forbidden"
-	case errors.Is(err, corpus.ErrNotFound):
-		return 404, "not_found"
-	case errors.Is(err, content.ErrConflict):
-		return 409, "idempotency_conflict"
-	case errors.Is(err, content.ErrUnverifiedBlob):
-		return 422, "unverified_blob"
-	case errors.Is(err, content.ErrExtensionOwned):
-		return 422, "extension_namespace_owned"
-	case errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported):
-		return 422, publicCode(err, "invalid_input")
-	default:
-		return 503, "content_unavailable"
-	}
-}
-func contentError(w http.ResponseWriter, err error) {
-	status, code := contentFailure(err)
-	failure(w, status, code)
-}
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+)
 
 // ingestCommand validates one raw IngestCommand and runs the acceptance path
 // shared by single submission and every batch entry, so a key replays the same
-// Receipt through either endpoint. A non-empty code reports the rejection.
-func (a *API) ingestCommand(ctx context.Context, scope corpus.Scope, raw any) (content.Receipt, int, string) {
+// Receipt through either endpoint. A non-nil error reports the rejection.
+func (a *API) ingestCommand(ctx context.Context, scope corpus.Scope, raw any) (content.Receipt, error) {
 	if a.ingestSchema.Validate(raw) != nil {
-		return content.Receipt{}, 422, "invalid_schema"
+		return content.Receipt{}, publicerr.InvalidSchema
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return content.Receipt{}, 422, "invalid_schema"
+		return content.Receipt{}, publicerr.InvalidSchema
 	}
 	var wire transport.IngestCommand
 	if err = json.Unmarshal(b, &wire); err != nil {
-		return content.Receipt{}, 422, "invalid_schema"
+		return content.Receipt{}, publicerr.InvalidSchema
 	}
 	c, err := commandFromTransport(wire)
 	if err != nil {
-		return content.Receipt{}, 422, "invalid_schema"
+		return content.Receipt{}, publicerr.InvalidSchema
 	}
 	if connectors.IsConnectorKey(c.Key) {
-		return content.Receipt{}, 422, "reserved_idempotency_key"
+		return content.Receipt{}, publicerr.ReservedIdempotencyKey
 	}
 	receipt, err := a.Content.Accept(ctx, scope, c)
 	if err != nil {
-		status, code := contentFailure(err)
-		return content.Receipt{}, status, code
+		return content.Receipt{}, err
 	}
-	return receipt, 202, ""
+	return receipt, nil
 }
 
 // batchEntry resolves one batch entry independently of its peers. Its index
@@ -78,14 +53,17 @@ func (a *API) batchEntry(ctx context.Context, scope corpus.Scope, index int, ent
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	item := transport.BatchItem{Index: index}
-	receipt, status, code := content.Receipt{}, 413, "entry_too_large"
-	if err := ctx.Err(); err != nil {
-		status, code = contentFailure(err)
-	} else if size <= maxRequestBytes {
-		receipt, status, code = a.ingestCommand(ctx, scope, entry)
+	var receipt content.Receipt
+	err := ctx.Err()
+	if err == nil {
+		if size > maxRequestBytes {
+			err = publicerr.EntryTooLarge
+		} else {
+			receipt, err = a.ingestCommand(ctx, scope, entry)
+		}
 	}
-	if code != "" {
-		e := apiError(status, code)
+	if err != nil {
+		_, e := errorResponse(err, publicerr.ContentUnavailable)
 		item.Error = &e
 		return item
 	}
@@ -97,16 +75,16 @@ func (a *API) batchEntry(ctx context.Context, scope corpus.Scope, index int, ent
 func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
 	if r.Method == "POST" && r.URL.Path == "/v0/records" {
 		if !scope.Allows("content:write") {
-			failure(w, 403, "forbidden")
+			writeError(w, publicerr.Forbidden, nil)
 			return true
 		}
 		raw, _, ok := readJSON(w, r, maxRequestBytes)
 		if !ok {
 			return true
 		}
-		receipt, status, code := a.ingestCommand(r.Context(), scope, raw)
-		if code != "" {
-			failure(w, status, code)
+		receipt, err := a.ingestCommand(r.Context(), scope, raw)
+		if err != nil {
+			writeError(w, err, publicerr.ContentUnavailable)
 		} else {
 			a.Commands.Accepted(telemetry.CommandRecord, 1)
 			slog.Info("command accepted", "component", "api", "command", telemetry.CommandRecord, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
@@ -117,7 +95,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 	}
 	if r.Method == "POST" && r.URL.Path == "/v0/records/batch" {
 		if !scope.Allows("content:write") {
-			failure(w, 403, "forbidden")
+			writeError(w, publicerr.Forbidden, nil)
 			return true
 		}
 		raw, payload, ok := readJSON(w, r, maxBatchBytes)
@@ -128,18 +106,18 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		envelope, _ := raw.(map[string]any)
 		entries, _ := envelope["items"].([]any)
 		if len(entries) > maxBatchEntries {
-			failure(w, 413, "batch_too_large")
+			writeError(w, publicerr.BatchTooLarge, nil)
 			return true
 		}
 		if a.batchSchema.Validate(raw) != nil {
-			failure(w, 422, "invalid_schema")
+			writeError(w, publicerr.InvalidSchema, nil)
 			return true
 		}
 		var sized struct {
 			Items []json.RawMessage `json:"items"`
 		}
 		if json.Unmarshal(payload, &sized) != nil {
-			failure(w, 400, "malformed_json")
+			writeError(w, publicerr.MalformedJson, nil)
 			return true
 		}
 		result := transport.BatchResult{Items: make([]transport.BatchItem, 0, len(entries))}
@@ -160,7 +138,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 	}
 	if r.Method == "POST" && r.URL.Path == "/v0/records/withdrawals" {
 		if !scope.Allows("content:write") {
-			failure(w, 403, "forbidden")
+			writeError(w, publicerr.Forbidden, nil)
 			return true
 		}
 		raw, ok := decodeRequest(w, r, a.withdrawSchema)
@@ -169,21 +147,21 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		}
 		b, err := json.Marshal(raw)
 		if err != nil {
-			failure(w, 422, "invalid_schema")
+			writeError(w, publicerr.InvalidSchema, nil)
 			return true
 		}
 		var wire transport.WithdrawalCommand
 		if err = json.Unmarshal(b, &wire); err != nil {
-			failure(w, 422, "invalid_schema")
+			writeError(w, publicerr.InvalidSchema, nil)
 			return true
 		}
 		if connectors.IsConnectorKey(wire.IdempotencyKey) {
-			failure(w, 422, "reserved_idempotency_key")
+			writeError(w, publicerr.ReservedIdempotencyKey, nil)
 			return true
 		}
 		receipt, err := a.Content.Withdraw(r.Context(), scope, withdrawalFromTransport(wire))
 		if err != nil {
-			contentError(w, err)
+			writeError(w, err, publicerr.ContentUnavailable)
 		} else {
 			a.Commands.Accepted(telemetry.CommandWithdrawal, 1)
 			slog.Info("command accepted", "component", "api", "command", telemetry.CommandWithdrawal, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
@@ -203,7 +181,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 	if len(path) == 3 && path[0] == "v0" && path[1] == "ingestion-receipts" {
 		receipt, err := a.Content.Receipt(r.Context(), scope, path[2])
 		if err != nil {
-			contentError(w, err)
+			writeError(w, err, publicerr.ContentUnavailable)
 		} else {
 			send(w, 200, receiptToTransport(receipt))
 		}
@@ -213,7 +191,7 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		if len(path) == 3 {
 			record, err := a.Content.Record(r.Context(), scope, path[2])
 			if err != nil {
-				contentError(w, err)
+				writeError(w, err, publicerr.ContentUnavailable)
 			} else {
 				send(w, 200, recordToTransport(record))
 			}
@@ -222,11 +200,11 @@ func (a *API) contentRoutes(w http.ResponseWriter, r *http.Request, scope corpus
 		if len(path) == 5 && path[3] == "versions" {
 			version, err := a.Content.Version(r.Context(), scope, path[2], path[4])
 			if err != nil {
-				contentError(w, err)
+				writeError(w, err, publicerr.ContentUnavailable)
 			} else {
 				wire, err := versionToTransport(version)
 				if err != nil {
-					contentError(w, err)
+					writeError(w, err, publicerr.ContentUnavailable)
 				} else {
 					send(w, 200, wire)
 				}

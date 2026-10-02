@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // WithTrustedPushProxies names the networks whose forwarding headers may be
@@ -112,7 +113,7 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 				_, _ = rand.Read(requestID[:])
 				w.Header().Set("X-Request-ID", hex.EncodeToString(requestID[:]))
 				w.Header().Set("Retry-After", "30")
-				failure(w, 503, "connectors_unavailable")
+				writeError(w, publicerr.ConnectorsUnavailable, nil)
 				return
 			}
 			if err == nil {
@@ -141,7 +142,7 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("connector push audit unavailable", "connector_id", id)
 		w.Header().Set("X-Request-ID", buffered.header.Get("X-Request-ID"))
 		w.Header().Set("Retry-After", "30")
-		failure(w, 503, "connectors_unavailable")
+		writeError(w, publicerr.ConnectorsUnavailable, nil)
 		return
 	}
 	for key, values := range buffered.header {

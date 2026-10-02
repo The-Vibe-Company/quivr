@@ -6,6 +6,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -20,11 +21,11 @@ func (a *API) evaluatorMigrationRoutes(w http.ResponseWriter, r *http.Request, s
 	}
 	switch {
 	case r.Method != "POST":
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	case !scope.Allows(monitoring.MigrationAction):
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 	case a.Monitoring.Moves == nil:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	default:
 		a.migrateEvaluators(w, r, scope)
 	}
@@ -45,7 +46,7 @@ func (a *API) migrateEvaluators(w http.ResponseWriter, r *http.Request, scope co
 	}
 	m, err := a.Monitoring.MigrateEvaluator(r.Context(), scope, request)
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	if !m.DryRun {

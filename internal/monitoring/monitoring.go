@@ -17,24 +17,24 @@ import (
 )
 
 var (
-	ErrForbidden            = publicerr.New("forbidden")
-	ErrNotFound             = publicerr.New("not_found")
-	ErrConflict             = publicerr.New("idempotency_conflict")
-	ErrUnsupportedProfile   = publicerr.New("unsupported_profile")
-	ErrUnsupportedEvaluator = publicerr.New("unsupported_evaluator")
-	ErrUnknownDestination   = publicerr.New("unknown_destination")
-	ErrUnknownSavedQuery    = publicerr.New("unknown_saved_query")
-	ErrTooLarge             = publicerr.New("definition_too_large")
+	ErrForbidden            = publicerr.Forbidden
+	ErrNotFound             = publicerr.NotFound
+	ErrConflict             = publicerr.IdempotencyConflict
+	ErrUnsupportedProfile   = publicerr.UnsupportedProfile
+	ErrUnsupportedEvaluator = publicerr.UnsupportedEvaluator
+	ErrUnknownDestination   = publicerr.UnknownDestination
+	ErrUnknownSavedQuery    = publicerr.UnknownSavedQuery
+	ErrTooLarge             = publicerr.DefinitionTooLarge
 	// ErrSubscriptionDeleted and ErrSavedQueryDeleted refuse commands that
 	// would change a logically deleted resource; deletion is never undone.
-	ErrSubscriptionDeleted = publicerr.New("subscription_deleted")
-	ErrSavedQueryDeleted   = publicerr.New("saved_query_deleted")
+	ErrSubscriptionDeleted = publicerr.SubscriptionDeleted
+	ErrSavedQueryDeleted   = publicerr.SavedQueryDeleted
 	// ErrSavedQueryInUse refuses deleting a Saved Query that a Subscription
 	// which is not deleted still belongs to.
-	ErrSavedQueryInUse = publicerr.New("saved_query_in_use")
+	ErrSavedQueryInUse = publicerr.SavedQueryInUse
 	// ErrInvalidOwner refuses a Subscription Owner that is not a bounded
 	// printable reference, or the reserved "none".
-	ErrInvalidOwner = publicerr.New("invalid_owner")
+	ErrInvalidOwner = publicerr.InvalidOwner
 )
 
 const (

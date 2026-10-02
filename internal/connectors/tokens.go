@@ -19,9 +19,9 @@ const ActionConnectorAdmin = "connectors:admin"
 const TokenRotationOverlap = 5 * time.Minute
 
 var (
-	ErrInvalidInstanceToken = publicerr.New("invalid_instance_token")
-	ErrTokenInactive        = publicerr.New("token_inactive")
-	ErrTokensUnavailable    = publicerr.New("tokens_unavailable")
+	ErrInvalidInstanceToken = publicerr.InvalidInstanceToken
+	ErrTokenInactive        = publicerr.TokenInactive
+	ErrTokensUnavailable    = publicerr.TokensUnavailable
 )
 
 // TokenInfo contains display metadata only, never a hash or bearer secret.

@@ -12,7 +12,7 @@ import (
 // ErrExtensionOwned rejects a client submission that writes an extension
 // namespace owned by a plugin: only that plugin's normalizer output may write
 // it, so plugin data can never be forged or silently overwritten.
-var ErrExtensionOwned = publicerr.New("extension_namespace_owned")
+var ErrExtensionOwned = publicerr.ExtensionNamespaceOwned
 
 // ExtensionRegistry is the deployment's extension namespaces: the built-in
 // ones (BuiltinExtensions) and those owned by plugins, registered at startup.

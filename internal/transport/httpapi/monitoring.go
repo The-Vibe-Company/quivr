@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -24,47 +25,6 @@ func WithMonitoring(service monitoring.Service) Option {
 
 type monitoringSchemas struct {
 	savedQuery, savedQueryVersion, subscription, subscriptionVersion, action, preview, rename *jsonschema.Schema
-}
-
-func monitoringFailure(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, monitoring.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, monitoring.ErrNotFound):
-		failure(w, 404, "not_found")
-	case errors.Is(err, monitoring.ErrConflict):
-		failure(w, 409, "idempotency_conflict")
-	case errors.Is(err, monitoring.ErrSubscriptionDeleted), errors.Is(err, monitoring.ErrSavedQueryDeleted),
-		errors.Is(err, monitoring.ErrSavedQueryInUse):
-		failure(w, 409, publicCode(err, "conflict"))
-	case errors.Is(err, monitoring.ErrInvalidOwner):
-		failure(w, 422, "invalid_owner")
-	case errors.Is(err, monitoring.ErrInvalidRetirement):
-		failure(w, 422, "invalid_input")
-	case errors.Is(err, monitoring.ErrUnsupportedProfile), errors.Is(err, monitoring.ErrUnsupportedEvaluator),
-		errors.Is(err, monitoring.ErrUnknownDestination), errors.Is(err, monitoring.ErrUnknownSavedQuery),
-		errors.Is(err, monitoring.ErrTooLarge):
-		failure(w, 422, publicCode(err, "invalid_input"))
-	case errors.Is(err, monitoring.ErrInvalidMigration):
-		failure(w, 422, "invalid_migration")
-	case errors.Is(err, monitoring.ErrInvalidExpression), errors.Is(err, monitoring.ErrInvalidEvaluatorConfiguration):
-		// The evaluator's declared schema refused the pinned expression or
-		// configuration: name the request member and the first schema issue.
-		e := apiError(422, publicCode(err, "invalid_input"))
-		if field, message := monitoring.Field(err); field != "" {
-			e.Field = &field
-			if message != "" {
-				e.Message = message
-			}
-		}
-		send(w, 422, e)
-	case errors.Is(err, monitoring.ErrPreviewUnavailable):
-		failure(w, 503, "evaluator_unavailable")
-	case errors.Is(err, monitoring.ErrPreviewFailed):
-		failure(w, 502, "evaluator_error")
-	default:
-		failure(w, 503, "storage_unavailable")
-	}
 }
 
 // monitoringRoutes serves /v0/saved-queries and /v0/subscriptions: creation,
@@ -86,13 +46,13 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v0/"+resource), "/")
 	if parts[0] != "" || a.Monitoring.Store == nil {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	parts = parts[1:]
 	for _, p := range parts {
 		if p == "" {
-			failure(w, 404, "not_found")
+			writeError(w, publicerr.NotFound, nil)
 			return true
 		}
 	}
@@ -104,7 +64,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		method = "POST"
 	case len(parts) == 1, len(parts) == 3 && parts[1] == "versions":
 	default:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	// The Subscription collection also lists by owner.
@@ -112,7 +72,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		method = "GET"
 	}
 	if r.Method != method {
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	}
 	action := "monitoring:read"
@@ -120,7 +80,7 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		action = "monitoring:write"
 	}
 	if !scope.Allows(action) {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return true
 	}
 	ctx := r.Context()
@@ -229,16 +189,16 @@ func (a *API) decodeMonitoring(w http.ResponseWriter, r *http.Request, schema *j
 		// or the service refuses it, and in a body as in the listing filter.
 		// Elsewhere owner is not a member, so naming it stays invalid_schema.
 		if schema == a.monitoringSchemas.subscription && connectors.SchemaPointer(err) == "/owner" {
-			failure(w, 422, "invalid_owner")
+			writeError(w, publicerr.InvalidOwner, nil)
 		} else {
-			failure(w, 422, "invalid_schema")
+			writeError(w, publicerr.InvalidSchema, nil)
 		}
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	if err := decoder.Decode(v); err != nil {
-		failure(w, 422, "invalid_schema")
+		writeError(w, publicerr.InvalidSchema, nil)
 		return false
 	}
 	return true
@@ -246,7 +206,7 @@ func (a *API) decodeMonitoring(w http.ResponseWriter, r *http.Request, schema *j
 
 func respondMonitoring(w http.ResponseWriter, status int, body any, err error) {
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	send(w, status, body)
@@ -318,18 +278,18 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "owner" && k != "page_cursor" && k != "limit") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
 	if !q.Has("owner") {
-		failure(w, 422, "invalid_query")
+		writeError(w, publicerr.InvalidQuery, nil)
 		return
 	}
 	// An empty owner is refused like any other invalid one, as on creation.
 	ownerRef := q.Get("owner")
 	if ownerRef == "" {
-		failure(w, 422, "invalid_owner")
+		writeError(w, publicerr.InvalidOwner, nil)
 		return
 	}
 	filter := monitoring.OwnerFilter{Owner: ownerRef}
@@ -337,7 +297,7 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 		filter = monitoring.OwnerFilter{Global: true}
 	}
 	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		failure(w, 422, "invalid_cursor")
+		writeError(w, publicerr.InvalidCursor, nil)
 		return
 	}
 	limit, ok := pageLimit(w, q, 100, 100)
@@ -348,16 +308,16 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeSubscriptionPage(q.Get("page_cursor"), ownerRef, scope); errors.Is(err, errPageScope) {
-			failure(w, 409, "cursor_scope_changed")
+			writeError(w, publicerr.CursorScopeChanged, nil)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	subs, err := a.Monitoring.Subscriptions(r.Context(), scope, filter, after, limit+1)
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := transport.SubscriptionPage{Items: make([]transport.Subscription, 0, min(len(subs), limit))}
@@ -376,15 +336,15 @@ func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope co
 // writes nothing, so it takes no idempotency key.
 func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	if a.Monitoring.Store == nil {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	if r.Method != "POST" {
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
 	if !scope.Allows("monitoring:write") {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return
 	}
 	var in monitoring.PreviewInput
@@ -393,7 +353,7 @@ func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope 
 	}
 	result, err := a.Monitoring.Preview(r.Context(), scope, in)
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	out := transport.SubscriptionPreview{Evaluated: result.Evaluated, Matched: len(result.Matches), NotReady: result.NotReady, Complete: result.Complete,

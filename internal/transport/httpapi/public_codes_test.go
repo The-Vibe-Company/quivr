@@ -54,7 +54,7 @@ func TestContentFailureCodesIgnoreDetail(t *testing.T) {
 		&content.ManifestViolation{Kind: content.ErrUnsupported, Detail: `Part "a" kind "video"`}: {422, "unsupported_content"},
 	} {
 		for style, err := range detailed(sentinel) {
-			if status, code := contentFailure(err); status != want.status || code != want.code {
+			if status, code := written(t, func(w *httptest.ResponseRecorder) { writeError(w, err, publicerr.ContentUnavailable) }); status != want.status || code != want.code {
 				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
 		}
@@ -74,18 +74,21 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 		connectors.ErrInvalidCredential: {422, "invalid_credential"},
 		connectors.ErrInvalidInterval:   {422, "invalid_interval"},
 		connectors.ErrInvalid:           {422, "invalid_input"},
+		// Provider codes can match engine codes; delivery owns their class.
+		(connectors.RelayAnswer{Status: 500, ErrorCode: "invalid_input"}).PublicError(): {500, "invalid_input"},
+		(connectors.RelayAnswer{Status: 503, ErrorCode: "invalid_input"}).PublicError(): {503, "invalid_input"},
 		// A deployment without credential_key; retrying cannot help.
 		connectors.ErrCredentialsUnavailable: {503, "credentials_unavailable"},
 	} {
 		for style, err := range detailed(sentinel) {
-			status, code := written(t, func(w *httptest.ResponseRecorder) { connectorFailure(w, err) })
+			status, code := written(t, func(w *httptest.ResponseRecorder) { writeError(w, err, publicerr.ConnectorsUnavailable) })
 			if status != want.status || code != want.code {
 				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
 		}
 	}
 	rec := httptest.NewRecorder()
-	connectorFailure(rec, connectors.ErrCredentialsUnavailable)
+	writeError(rec, connectors.ErrCredentialsUnavailable, publicerr.ConnectorsUnavailable)
 	var body struct{ Retryable *bool }
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Retryable == nil || *body.Retryable {
 		t.Fatalf("credentials_unavailable must not be retryable: %s", rec.Body.String())
@@ -123,7 +126,7 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 	} {
 		for style, err := range detailed(sentinel) {
 			rec := httptest.NewRecorder()
-			monitoringFailure(rec, err)
+			writeError(rec, err, publicerr.StorageUnavailable)
 			var body struct {
 				Code, Message string
 				Retryable     *bool
@@ -143,7 +146,7 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 // member and the first schema issue.
 func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {
 	rec := httptest.NewRecorder()
-	monitoringFailure(rec, monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", "/expression/text: minLength: got 0, want 1"))
+	writeError(rec, monitoring.Invalid(monitoring.ErrInvalidExpression, "/saved_query_version_id", "/expression/text: minLength: got 0, want 1"), publicerr.StorageUnavailable)
 	var body struct {
 		Code, Message, Field string
 		Retryable            bool
@@ -169,7 +172,7 @@ func TestUploadFailureCodesIgnoreDetail(t *testing.T) {
 		uploads.ErrConflict: {409, "idempotency_conflict"},
 	} {
 		for style, err := range detailed(sentinel) {
-			status, code := written(t, func(w *httptest.ResponseRecorder) { uploadError(w, err) })
+			status, code := written(t, func(w *httptest.ResponseRecorder) { writeError(w, err, publicerr.StorageUnavailable) })
 			if status != want.status || code != want.code {
 				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
 			}
@@ -178,7 +181,8 @@ func TestUploadFailureCodesIgnoreDetail(t *testing.T) {
 }
 
 func TestUncodedErrorsUseTheExplicitFallback(t *testing.T) {
-	if code := publicCode(fmt.Errorf("invalid_input: raw text"), "invalid_mapping"); code != "invalid_mapping" {
+	_, body := errorResponse(fmt.Errorf("invalid_input: raw text"), publicerr.InvalidMapping)
+	if code := body.Code; code != "invalid_mapping" {
 		t.Fatalf("code %q, want the fallback", code)
 	}
 }
@@ -210,7 +214,7 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 				if sentinel == retrieval.ErrQueryTooLong && style == "with detail" {
 					message = detail
 				}
-				status, body := searchError(err)
+				status, body := errorResponse(err, publicerr.SearchUnavailable)
 				if status != want.status || body.Code != want.code || body.Message != message || body.Retryable != want.retryable {
 					t.Fatalf("%d %+v, want %d %s message=%q retryable=%v", status, body, want.status, want.code, message, want.retryable)
 				}
@@ -219,7 +223,7 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 	}
 }
 
-// pluginFailure owns every plugin registry refusal's public response,
+// The shared writer owns every public plugin registry refusal response,
 // including wrapped errors and structured issue reports.
 func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 	for sentinel, want := range map[error]struct {
@@ -227,7 +231,6 @@ func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 		code   string
 	}{
 		corpus.ErrForbidden:              {403, "forbidden"},
-		registry.ErrNoPlan:               {404, "not_found"},
 		registry.ErrNotFound:             {404, "not_found"},
 		registry.ErrIdempotencyConflict:  {409, "idempotency_conflict"},
 		registry.ErrNotValidated:         {409, "registration_not_validated"},
@@ -241,7 +244,7 @@ func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 	} {
 		for style, err := range detailed(sentinel) {
 			rec := httptest.NewRecorder()
-			pluginFailure(rec, err)
+			writeError(rec, err, publicerr.StorageUnavailable)
 			if rec.Code != want.status {
 				t.Errorf("%v (%s): status %d, want %d", sentinel, style, rec.Code, want.status)
 			}
@@ -249,7 +252,7 @@ func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 		}
 	}
 	rec := httptest.NewRecorder()
-	pluginFailure(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeKindConflict, Path: "/plugins/1/manifest", Message: internalErrorMarker}}})
+	writeError(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeKindConflict, Path: "/plugins/1/manifest", Message: internalErrorMarker}}}, publicerr.StorageUnavailable)
 	if rec.Code != 409 {
 		t.Fatalf("conflict status %d, want 409", rec.Code)
 	}

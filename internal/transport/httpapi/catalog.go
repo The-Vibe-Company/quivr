@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -53,17 +54,17 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "corpus_id" && k != "page_cursor" && k != "limit") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
 	corpusID := q.Get("corpus_id")
 	if corpusID == "" {
-		failure(w, 422, "invalid_query")
+		writeError(w, publicerr.InvalidQuery, nil)
 		return
 	}
 	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		failure(w, 422, "invalid_cursor")
+		writeError(w, publicerr.InvalidCursor, nil)
 		return
 	}
 	limit, ok := pageLimit(w, q, 100, 100)
@@ -71,34 +72,31 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 		return
 	}
 	if !s.Allows("content:read") {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return
 	}
 	if !s.Contains(corpusID) {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
-	if _, err := a.Service.Store.Read(r.Context(), s.Organization, corpusID); errors.Is(err, corpus.ErrNotFound) {
-		failure(w, 404, "not_found")
-		return
-	} else if err != nil {
-		failure(w, 503, "content_unavailable")
+	if _, err := a.Service.Store.Read(r.Context(), s.Organization, corpusID); err != nil {
+		writeError(w, err, publicerr.ContentUnavailable)
 		return
 	}
 	after := ""
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeRecordPage(q.Get("page_cursor"), corpusID, s); errors.Is(err, errPageScope) {
-			send(w, 409, scopeChanged(corpusID))
+			writeError(w, publicerr.CursorScopeChanged, nil, corpusID)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	records, err := a.Content.Records(r.Context(), s, corpusID, after, limit+1)
 	if err != nil {
-		contentError(w, err)
+		writeError(w, err, publicerr.ContentUnavailable)
 		return
 	}
 	page := transport.RecordPage{Items: make([]transport.Record, 0, min(len(records), limit))}

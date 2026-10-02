@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -24,33 +24,33 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if a.Relay == nil || len(parts) != 3 || parts[0] == "" || parts[2] == "" {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	auth := connectors.APIAuth{}
 	bearer := r.Header.Get("Authorization")
 	if bearer != "" {
 		if !strings.HasPrefix(bearer, "Bearer ") {
-			failure(w, 401, "invalid_api_key")
+			writeError(w, publicerr.InvalidApiKey, nil)
 			return true
 		}
 		credential := strings.TrimPrefix(bearer, "Bearer ")
 		if scope, ok := a.Keys[credential]; ok {
 			auth.Scope = &scope
 			if !scope.Allows(corpus.ActionConnectorPush) {
-				failure(w, 403, "forbidden")
+				writeError(w, publicerr.Forbidden, nil)
 				return true
 			}
 		} else if strings.HasPrefix(credential, "qit_") {
 			auth.InstanceToken = credential
 		} else {
-			failure(w, 401, "invalid_api_key")
+			writeError(w, publicerr.InvalidApiKey, nil)
 			return true
 		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
 	if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(parts[2]) > 8192 {
-		failure(w, 413, "request_too_large")
+		writeError(w, publicerr.RequestTooLarge, nil)
 		return true
 	}
 	headers := relayedHeaders(r.Header)
@@ -59,36 +59,16 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 	defer cancel()
 	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
 	switch {
-	case errors.Is(err, connectors.ErrInvalidInstanceToken):
-		failure(w, 401, "invalid_instance_token")
-	case errors.Is(err, connectors.ErrAPIKeyRequired):
-		failure(w, 401, "invalid_api_key")
-	case errors.Is(err, connectors.ErrInvalidSignature):
-		failure(w, 401, "invalid_signature")
-	case errors.Is(err, connectors.ErrReplay):
-		failure(w, 409, "push_replayed")
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, corpus.ErrNotFound):
-		failure(w, 404, "not_found")
-	case errors.Is(err, connectors.ErrInvalidIdempotencyKey):
-		failure(w, 400, "invalid_idempotency_key")
-	case errors.Is(err, connectors.ErrInvalidAPIBody):
-		failure(w, 400, "invalid_json")
-	case errors.Is(err, connectors.ErrInvalidAPIRequest):
-		invalid(w, "invalid_schema", "/body")
-	case errors.Is(err, connectors.ErrPushItemRejected):
-		failure(w, 422, "item_rejected")
 	case err != nil:
-		failure(w, 503, "connectors_unavailable")
+		writeError(w, err, publicerr.ConnectorsUnavailable)
 	case answer.ErrorCode != "":
 		if answer.RetryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(int(answer.RetryAfter/time.Second)))
 		}
-		failure(w, answer.Status, answer.ErrorCode)
+		writeError(w, answer.PublicError(), nil)
 	case answer.Allow != "":
 		w.Header().Set("Allow", answer.Allow)
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	case answer.Receipts != nil:
 		receipts := make([]transport.Receipt, 0, len(answer.Receipts))
 		for _, receipt := range answer.Receipts {

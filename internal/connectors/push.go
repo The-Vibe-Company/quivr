@@ -12,6 +12,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // WebhookPath prefixes the public webhook route of a Connector Instance whose
@@ -367,4 +368,21 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 		answer.ContentType, answer.Body = "", ""
 	}
 	return answer, nil
+}
+
+// PublicError adapts an engine delivery refusal to its catalog condition.
+// A provider's failure code retains the class already selected by delivery;
+// even a provider code matching an engine code belongs to that provider.
+func (a RelayAnswer) PublicError() error {
+	if a.ErrorCode == "" {
+		return nil
+	}
+	switch a.Status {
+	case 500:
+		return publicerr.WithResponseCode(publicerr.DeliveryFailed, a.ErrorCode)
+	case 503:
+		return publicerr.WithResponseCode(publicerr.DeliveryUnavailable, a.ErrorCode)
+	default:
+		return publicerr.New(a.ErrorCode)
+	}
 }

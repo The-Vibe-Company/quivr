@@ -21,6 +21,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // Action is the operator permission for the plugin registry. Keys get it only
@@ -55,24 +56,24 @@ var (
 	// never seeded because the configuration pins no plugin.
 	ErrNoPlan = errors.New("no active pipeline plan")
 	// ErrNotFound is an unknown registration or plan.
-	ErrNotFound = errors.New("not_found")
+	ErrNotFound = publicerr.NotFound
 	// ErrIdempotencyConflict is an idempotency key reused for another
 	// registration.
-	ErrIdempotencyConflict = errors.New("idempotency_conflict")
+	ErrIdempotencyConflict = publicerr.IdempotencyConflict
 	// ErrInvalid is a registration request whose manifest or settings the
 	// engine refuses; the error lists the issues.
-	ErrInvalid = errors.New("invalid_plugin")
+	ErrInvalid = publicerr.InvalidPlugin
 	// ErrNotValidated refuses to activate a registration the Contract Runner
 	// has not certified.
-	ErrNotValidated = errors.New("registration_not_validated")
+	ErrNotValidated = publicerr.RegistrationNotValidated
 	// ErrConflict refuses an activation that breaks a startup rule; the error
 	// lists the issues.
-	ErrConflict = errors.New("plugin_conflict")
+	ErrConflict = publicerr.PluginConflict
 	// ErrUnreachable refuses a rollback to a plugin that does not answer
 	// discovery with its manifest; the error lists the issues.
-	ErrUnreachable = errors.New("plugin_unreachable")
+	ErrUnreachable = publicerr.PluginUnreachable
 	// ErrNoPreviousPlan refuses a rollback when no earlier plan exists.
-	ErrNoPreviousPlan = errors.New("no_previous_plan")
+	ErrNoPreviousPlan = publicerr.NoPreviousPlan
 )
 
 // IssueError carries the issues of an ErrInvalid or ErrConflict refusal.
@@ -363,7 +364,13 @@ func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, erro
 	if !scope.Allows(Action) {
 		return Plan{}, corpus.ErrForbidden
 	}
-	return s.Store.ActivePlan(ctx)
+	plan, err := s.Store.ActivePlan(ctx)
+	if errors.Is(err, ErrNoPlan) {
+		// An operator asked for the active plan as a resource. Internal
+		// consumers still distinguish ErrNoPlan when initializing a pipeline.
+		err = fmt.Errorf("%w: %w", publicerr.NotFound, err)
+	}
+	return plan, err
 }
 
 // ActivePlugins returns the active plan for the operator views, behind

@@ -30,10 +30,10 @@ const (
 var (
 	// ErrPreviewUnavailable fails a preview whose evaluator could not be
 	// reached or declared a transient failure. Retrying may succeed.
-	ErrPreviewUnavailable = publicerr.New("evaluator_unavailable")
+	ErrPreviewUnavailable = publicerr.EvaluatorUnavailable
 	// ErrPreviewFailed fails a preview whose evaluator refused or broke an
 	// evaluation. A partial preview would claim that articles do not match.
-	ErrPreviewFailed = publicerr.New("evaluator_error")
+	ErrPreviewFailed = publicerr.EvaluatorError
 )
 
 // PreviewInput asks how a proposed Subscription would have judged the most

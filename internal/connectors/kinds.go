@@ -86,8 +86,9 @@ type fieldError struct {
 	pointer string
 }
 
-func (e *fieldError) Error() string { return e.err.Error() + " at " + e.pointer }
-func (e *fieldError) Unwrap() error { return e.err }
+func (e *fieldError) Error() string       { return e.err.Error() + " at " + e.pointer }
+func (e *fieldError) Unwrap() error       { return e.err }
+func (e *fieldError) PublicField() string { return e.pointer }
 
 // WithField attaches the JSON Pointer of the offending request member.
 func WithField(err error, pointer string) error {

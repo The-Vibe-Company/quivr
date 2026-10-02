@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // KindProjectionRebuild rebuilds one Corpus's search projection from canonical
@@ -53,15 +54,15 @@ func Terminal(state string) bool {
 
 var (
 	// ErrConflict reports an idempotency key reused with a different canonical request.
-	ErrConflict = errors.New("idempotency_conflict")
+	ErrConflict = publicerr.IdempotencyConflict
 	// ErrNotRunning means the Operation left the running state (terminal or
 	// cancellation requested), so no further effects such as activation apply.
 	ErrNotRunning = errors.New("operation not running")
 	// ErrNotTerminal rejects a rerun of an Operation without a final outcome.
-	ErrNotTerminal = errors.New("operation_not_terminal")
+	ErrNotTerminal = publicerr.OperationNotTerminal
 	// ErrUnsupportedKind rejects control of an Operation kind without a
 	// registered command permission and cancellation-aware worker.
-	ErrUnsupportedKind = errors.New("unsupported_operation_kind")
+	ErrUnsupportedKind = publicerr.UnsupportedOperationKind
 	// ErrSuperseded fails a generation whose pinned retrieval configuration is
 	// older than the one the Corpus already serves, so it can never revert it.
 	ErrSuperseded = errors.New("retrieval_configuration_superseded")

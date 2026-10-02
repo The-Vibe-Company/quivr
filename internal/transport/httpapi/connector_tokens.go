@@ -6,6 +6,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -22,11 +23,11 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 		return false
 	}
 	if !scope.Allows(connectors.ActionConnectorAdmin) {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return true
 	}
 	if a.Connectors.Store == nil || parts[0] == "" {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -36,7 +37,7 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 		q := r.URL.Query()
 		for key, values := range q {
 			if (key != "limit" && key != "after") || len(values) != 1 || (key == "after" && len(values[0]) > 128) {
-				failure(w, 422, "invalid_query")
+				writeError(w, publicerr.InvalidQuery, nil)
 				return true
 			}
 		}
@@ -46,7 +47,7 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 		}
 		tokens, err := a.Connectors.ListTokens(ctx, scope, parts[0], q.Get("after"), limit+1)
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		page := transport.ConnectorTokenList{Items: []transport.ConnectorToken{}}
@@ -62,7 +63,7 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 	case len(parts) == 2 && r.Method == "POST":
 		issued, err := a.Connectors.CreateToken(ctx, scope, parts[0])
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		w.Header().Set("Location", r.URL.Path+"/"+issued.Token.ID)
@@ -70,7 +71,7 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 	case len(parts) == 4 && parts[2] != "" && parts[3] == "rotate" && r.Method == "POST":
 		issued, err := a.Connectors.RotateToken(ctx, scope, parts[0], parts[2])
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		w.Header().Set("Location", "/v0/connectors/"+parts[0]+"/tokens/"+issued.Token.ID)
@@ -78,14 +79,14 @@ func (a *API) connectorTokenRoutes(w http.ResponseWriter, r *http.Request, scope
 	case len(parts) == 3 && parts[2] != "" && r.Method == "DELETE":
 		token, err := a.Connectors.RevokeToken(ctx, scope, parts[0], parts[2])
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 200, tokenToTransport(token))
 	case len(parts) == 2, len(parts) == 3 && parts[2] != "", len(parts) == 4 && parts[2] != "" && parts[3] == "rotate":
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	default:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	}
 	return true
 }

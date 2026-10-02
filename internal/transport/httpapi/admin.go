@@ -11,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -63,15 +64,15 @@ func (a *API) adminDocumentRoutes(w http.ResponseWriter, r *http.Request, scope 
 	}
 	switch {
 	case r.Method != "GET":
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	case !scope.Allows(content.ObservabilityRead):
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 	case a.Activity.Store == nil:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	case timeline:
 		activity, err := a.Activity.Version(r.Context(), scope, versionID)
 		if err != nil {
-			activityFailure(w, err)
+			writeError(w, err, publicerr.StorageUnavailable)
 			return true
 		}
 		out := transport.DocumentTimeline{Document: documentToTransport(activity), Steps: []transport.TimelineStep{}}
@@ -98,7 +99,7 @@ func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "page_cursor" && k != "limit") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
@@ -110,16 +111,16 @@ func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeDocumentPage(q.Get("page_cursor"), scope); errors.Is(err, errPageScope) {
-			failure(w, 409, "cursor_scope_changed")
+			writeError(w, publicerr.CursorScopeChanged, nil)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	items, err := a.Activity.Latest(r.Context(), scope, after, limit+1)
 	if err != nil {
-		activityFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := transport.AdminDocumentPage{Items: make([]transport.AdminDocument, 0, min(len(items), limit))}
@@ -133,17 +134,6 @@ func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus
 		page.Items = append(page.Items, documentToTransport(item))
 	}
 	send(w, 200, page)
-}
-
-func activityFailure(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, corpus.ErrNotFound):
-		failure(w, 404, "not_found")
-	default:
-		failure(w, 503, "storage_unavailable")
-	}
 }
 
 func documentToTransport(a content.Activity) transport.AdminDocument {

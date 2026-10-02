@@ -20,27 +20,28 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
 	// ErrDryRunRequired refuses a backfill no dry run with the same key and
 	// scope was recorded for.
-	ErrDryRunRequired = errors.New("dry_run_required")
+	ErrDryRunRequired = publicerr.DryRunRequired
 	// ErrCostConfirmationRequired refuses a backfill whose estimated cost
 	// exceeds the deployment's threshold without confirm_cost.
-	ErrCostConfirmationRequired = errors.New("cost_confirmation_required")
+	ErrCostConfirmationRequired = publicerr.CostConfirmationRequired
 	// ErrRegistrationNotActive refuses a registration that is not the active
 	// plan's ingestion plugin.
-	ErrRegistrationNotActive = errors.New("registration_not_active")
+	ErrRegistrationNotActive = publicerr.RegistrationNotActive
 	// ErrInvalid refuses target spaces or a window the backfill cannot use;
 	// the error says why.
-	ErrInvalid = errors.New("invalid_backfill")
+	ErrInvalid = publicerr.InvalidBackfill
 	// ErrRebuildRequired refuses a Corpus whose routed generation predates
 	// named vector spaces: only a rebuild can give it new spaces.
-	ErrRebuildRequired = errors.New("rebuild_required")
+	ErrRebuildRequired = publicerr.RebuildRequired
 	// ErrInProgress refuses a backfill of a Corpus another backfill has not
 	// finished: both would rewrite the same segments' vectors.
-	ErrInProgress = errors.New("backfill_in_progress")
+	ErrInProgress = publicerr.BackfillInProgress
 )
 
 // invalid wraps ErrInvalid with the reason.

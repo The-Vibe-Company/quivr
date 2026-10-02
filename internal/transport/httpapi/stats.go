@@ -8,6 +8,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
@@ -32,14 +33,14 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 		"received": observability.SeriesReceived, "matches": observability.SeriesMatch, "top-queries": observability.SeriesSearchQuery, "connector-pushes": observability.SeriesConnectorPush}[name]
 	switch {
 	case series == "":
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	case r.Method != "GET":
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	// The rollups cover every Corpus of the Organization, query text included.
 	case !scope.Allows(content.ObservabilityRead) || !scope.AllCorpora():
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 	case a.Stats.Store == nil:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	default:
 		a.stats(w, r, scope.Organization, series)
 	}
@@ -56,25 +57,25 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 	limits, counted := countedLimits[series]
 	for k, v := range q {
 		if (k != "window" && (k != "limit" || series == observability.SeriesMatch || !counted) && (k != "connector_id" || series != observability.SeriesConnectorPush)) || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
 	window, ok := observability.ParseWindow(q.Get("window"))
 	if !ok {
-		failure(w, 422, "invalid_window")
+		writeError(w, publicerr.InvalidWindow, nil)
 		return
 	}
 	name := transport.StatsWindowName(window.Name)
 	if series == observability.SeriesConnectorPush && q.Has("connector_id") {
 		id := q.Get("connector_id")
 		if id == "" || len(id) > 256 || q.Has("limit") {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 		report, err := a.Stats.Report(r.Context(), org, series, window, observability.Key(id, "received"), observability.Key(id, "refused"))
 		if err != nil {
-			failure(w, 503, "storage_unavailable")
+			writeError(w, publicerr.StorageUnavailable, nil)
 			return
 		}
 		out := transport.ConnectorPushStatsList{Window: name, ResolutionSeconds: int(window.Tier.Resolution / time.Second), From: report.From, To: report.To, Items: []transport.ConnectorPushStats{}}
@@ -100,7 +101,7 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 	}
 	report, err := a.Stats.Report(r.Context(), org, series, window)
 	if err != nil {
-		failure(w, 503, "storage_unavailable")
+		writeError(w, publicerr.StorageUnavailable, nil)
 		return
 	}
 	resolution := int(window.Tier.Resolution / time.Second)
@@ -139,7 +140,7 @@ func (a *API) counts(w http.ResponseWriter, r *http.Request, org, series string,
 		counts, err = a.Stats.Counts(r.Context(), org, series, window, limit)
 	}
 	if err != nil {
-		failure(w, 503, "storage_unavailable")
+		writeError(w, publicerr.StorageUnavailable, nil)
 		return
 	}
 	name := transport.StatsWindowName(window.Name)
@@ -222,7 +223,8 @@ func (a *API) recordSearch(org string, q retrieval.Request, result retrieval.Res
 	}
 	code := ""
 	if err != nil {
-		_, code = searchFailure(err)
+		_, body := errorResponse(err, publicerr.SearchUnavailable)
+		code = body.Code
 	}
 	a.Recorder.Search(observability.Search{Organization: org, Mode: q.Mode, Profile: profile, Query: q.Query, Results: len(result.Hits), Duration: time.Since(started), ErrorCode: code,
 		OverObjective: result.Usage != nil && result.Usage.OverObjective})

@@ -2,15 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -50,17 +49,17 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 	}
 	switch {
 	case r.Method != method:
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	case !scope.Allows(registry.Action):
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 	case a.Plugins.Store == nil:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	case rest == "" && method == "POST":
 		a.registerPlugin(w, r, scope)
 	case rest == "":
 		registrations, err := a.Plugins.Registrations(r.Context(), scope)
 		if err != nil {
-			pluginFailure(w, err)
+			writeError(w, err, publicerr.StorageUnavailable)
 			return true
 		}
 		out := transport.PluginRegistrationList{Items: make([]transport.PluginRegistration, 0, len(registrations))}
@@ -85,7 +84,7 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 	default:
 		reg, err := a.Plugins.Registration(r.Context(), scope, segments[0])
 		if err != nil {
-			pluginFailure(w, err)
+			writeError(w, err, publicerr.StorageUnavailable)
 			return true
 		}
 		send(w, 200, registrationToTransport(reg))
@@ -119,7 +118,7 @@ func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpu
 	reg, err := a.Plugins.Register(r.Context(), scope, registry.Request{Key: in.IdempotencyKey, Manifest: []byte(in.Manifest), Endpoint: in.Endpoint,
 		Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces, Fixtures: in.Fixtures})
 	if err != nil {
-		pluginFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	w.Header().Set("Location", pluginsPath+"/"+reg.ID)
@@ -156,7 +155,7 @@ func (a *API) listPlans(w http.ResponseWriter, r *http.Request, scope corpus.Sco
 	}
 	plans, err := a.Plugins.PipelinePlans(r.Context(), scope, limit)
 	if err != nil {
-		pluginFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	out := transport.PipelinePlanList{Items: make([]transport.PipelinePlan, 0, len(plans))}
@@ -192,7 +191,7 @@ func registrationToTransport(reg registry.Registration) transport.PluginRegistra
 
 func sendPlan(w http.ResponseWriter, plan registry.Plan, err error) {
 	if err != nil {
-		pluginFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	send(w, 200, planToTransport(plan))
@@ -207,38 +206,6 @@ func planToTransport(plan registry.Plan) transport.PipelinePlan {
 		out.Roles = append(out.Roles, transport.PipelinePlanRole{Role: role.Role, RegistrationId: role.RegistrationID, PluginId: role.PluginID, Version: role.Version})
 	}
 	return out
-}
-
-// pluginFailure maps registry errors to public codes and typed diagnostics.
-func pluginFailure(w http.ResponseWriter, err error) {
-	detailed := func(status int, code string) {
-		e := apiError(status, code)
-		e.Message = pluginErrorMessage(err, e.Message)
-		send(w, status, e)
-	}
-	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, registry.ErrNoPlan), errors.Is(err, registry.ErrNotFound):
-		failure(w, 404, "not_found")
-	case errors.Is(err, registry.ErrIdempotencyConflict):
-		failure(w, 409, "idempotency_conflict")
-	case errors.Is(err, registry.ErrInvalid):
-		detailed(422, "invalid_plugin")
-	case errors.Is(err, registry.ErrNotValidated):
-		failure(w, 409, "registration_not_validated")
-	case errors.Is(err, registry.ErrConflict):
-		detailed(409, "plugin_conflict")
-	case errors.Is(err, registry.ErrUnreachable):
-		detailed(409, "plugin_unreachable")
-	case errors.Is(err, registry.ErrNoPreviousPlan):
-		failure(w, 409, "no_previous_plan")
-	case errors.Is(err, content.ErrSpaceOwner), errors.Is(err, content.ErrSpaceChanged):
-		// The vector space registry refuses the plan's spaces.
-		detailed(409, "plugin_conflict")
-	default:
-		failure(w, 503, "storage_unavailable")
-	}
 }
 
 func nonNil(values []string) []string {

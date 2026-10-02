@@ -18,10 +18,10 @@ import (
 )
 
 var (
-	ErrConflict       = publicerr.New("idempotency_conflict")
-	ErrUnsupported    = publicerr.New("unsupported_content")
-	ErrInvalid        = publicerr.New("invalid_input")
-	ErrUnverifiedBlob = publicerr.New("unverified_blob")
+	ErrConflict       = publicerr.IdempotencyConflict
+	ErrUnsupported    = publicerr.UnsupportedContent
+	ErrInvalid        = publicerr.InvalidInput
+	ErrUnverifiedBlob = publicerr.UnverifiedBlob
 	// ErrArtifactMissing and ErrArtifactCorrupt report durable object-storage
 	// integrity failures, distinct from transient unavailability.
 	ErrArtifactMissing = errors.New("durable_artifact_missing")

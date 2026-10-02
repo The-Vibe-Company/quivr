@@ -14,7 +14,7 @@ import (
 
 const OutcomeEvaluatorRetired = "evaluator_retired"
 
-var ErrInvalidRetirement = publicerr.New("invalid_input")
+var ErrInvalidRetirement = publicerr.InvalidInput
 
 type EvaluationCounts struct {
 	PluginID    string `json:"plugin_id"`

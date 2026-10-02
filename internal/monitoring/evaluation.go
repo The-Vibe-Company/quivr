@@ -42,10 +42,10 @@ var (
 
 	// ErrInvalidExpression refuses a Subscription Version whose pinned Saved
 	// Query expression the evaluator's declared schema rejects.
-	ErrInvalidExpression = publicerr.New("invalid_expression")
+	ErrInvalidExpression = publicerr.InvalidExpression
 	// ErrInvalidEvaluatorConfiguration refuses a Subscription Version whose
 	// evaluator configuration the evaluator's declared schema rejects.
-	ErrInvalidEvaluatorConfiguration = publicerr.New("invalid_subscription_configuration")
+	ErrInvalidEvaluatorConfiguration = publicerr.InvalidSubscriptionConfiguration
 )
 
 // fieldError points a refused command at the request member that caused it.
@@ -55,8 +55,9 @@ type fieldError struct {
 	message string
 }
 
-func (e *fieldError) Error() string { return e.err.Error() + " " + e.pointer + ": " + e.message }
-func (e *fieldError) Unwrap() error { return e.err }
+func (e *fieldError) Error() string       { return e.err.Error() + " " + e.pointer + ": " + e.message }
+func (e *fieldError) Unwrap() error       { return e.err }
+func (e *fieldError) PublicField() string { return e.pointer }
 
 // Invalid wraps a validation sentinel with the JSON Pointer of the request
 // member at fault and a human explanation.

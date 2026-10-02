@@ -2,20 +2,20 @@ package backfill
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
 	// ErrCoverageIncomplete refuses to promote a space that some Corpus's
 	// routed generation does not carry, or carries without a vector for
 	// every current segment, unless the promotion is forced.
-	ErrCoverageIncomplete = errors.New("coverage_incomplete")
+	ErrCoverageIncomplete = publicerr.CoverageIncomplete
 	// ErrNotEvaluation refuses to promote a space the registry has retired.
-	ErrNotEvaluation = errors.New("not_evaluation_space")
+	ErrNotEvaluation = publicerr.NotEvaluationSpace
 )
 
 // Promotion is the outcome of promoting a vector space to served.

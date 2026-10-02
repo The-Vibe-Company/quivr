@@ -3,13 +3,13 @@ package httpapi
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 
 	"crypto/hmac"
@@ -18,27 +18,6 @@ import (
 // WithConnectors enables the Connector Instance routes.
 func WithConnectors(service connectors.Service) Option {
 	return func(a *API) { a.Connectors = service }
-}
-
-func connectorFailure(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, corpus.ErrNotFound):
-		failure(w, 404, "not_found")
-	case errors.Is(err, connectors.ErrConflict), errors.Is(err, connectors.ErrNamespaceInUse), errors.Is(err, connectors.ErrDisabled), errors.Is(err, connectors.ErrTokenInactive):
-		failure(w, 409, publicCode(err, "idempotency_conflict"))
-	case errors.Is(err, connectors.ErrCredentialsUnavailable):
-		// The deployment has no credential_key: retrying cannot succeed until
-		// an operator configures one, so the refusal is not retryable.
-		e := apiError(503, "credentials_unavailable")
-		e.Retryable = false
-		send(w, 503, e)
-	case errors.Is(err, connectors.ErrUnsupportedKind), errors.Is(err, connectors.ErrInvalidConfig), errors.Is(err, connectors.ErrInvalidCredential), errors.Is(err, connectors.ErrInvalidInterval), errors.Is(err, connectors.ErrInvalid):
-		invalid(w, publicCode(err, "invalid_input"), connectors.Field(err))
-	default:
-		failure(w, 503, "connectors_unavailable")
-	}
 }
 
 func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
@@ -128,23 +107,14 @@ func decodeIntoAtMost(w http.ResponseWriter, r *http.Request, limit int64, schem
 		return false
 	}
 	if err := schema.Validate(raw); err != nil {
-		invalid(w, "invalid_schema", connectors.SchemaPointer(err))
+		writeError(w, publicerr.WithField(publicerr.InvalidSchema, connectors.SchemaPointer(err)), nil)
 		return false
 	}
 	if json.Unmarshal(payload, v) != nil {
-		failure(w, 422, "invalid_schema")
+		writeError(w, publicerr.InvalidSchema, nil)
 		return false
 	}
 	return true
-}
-
-// invalid writes a 422 locating the offending request member when known.
-func invalid(w http.ResponseWriter, code, field string) {
-	e := apiError(422, code)
-	if field != "" {
-		e.Field = &field
-	}
-	send(w, 422, e)
 }
 
 func rawJSON(v *map[string]any) json.RawMessage {
@@ -164,7 +134,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		return false
 	}
 	if a.Connectors.Store == nil {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	path := strings.Split(strings.TrimPrefix(r.URL.Path, "/v0/connectors"), "/")
@@ -181,14 +151,14 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 	case len(path) == 3 && path[1] != "" && path[2] == "schedule" && r.Method == "PUT":
 	case len(path) == 3 && path[1] != "" && path[2] == "runs" && r.Method == "POST":
 	case len(path) <= 3:
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	default:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	if !scope.Allows(action) {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return true
 	}
 	ctx := r.Context()
@@ -222,7 +192,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		}
 		inst, err := a.Connectors.Create(ctx, scope, in)
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 201, a.connectorToTransport(inst))
@@ -231,7 +201,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 	case len(path) == 2:
 		inst, err := a.Connectors.Read(ctx, scope, path[1])
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 200, a.connectorToTransport(inst))
@@ -242,7 +212,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		}
 		inst, err := a.Connectors.Disable(ctx, scope, path[1])
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 200, a.connectorToTransport(inst))
@@ -253,7 +223,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		}
 		req, err := a.Connectors.RequestRun(ctx, scope, path[1], body.IdempotencyKey)
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 202, transport.ConnectorRunRequest{ConnectorId: req.ConnectorID, RunAt: req.RunAt.UTC()})
@@ -264,7 +234,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		}
 		inst, err := a.Connectors.ChangeSchedule(ctx, scope, path[1], body.IntervalSeconds)
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 200, a.connectorToTransport(inst))
@@ -275,7 +245,7 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		}
 		inst, err := a.Connectors.ReplaceCredential(ctx, scope, path[1], connectors.CredentialInput{Key: body.IdempotencyKey, Secret: rawJSON(body.Secret), ExpiresAt: body.ExpiresAt})
 		if err != nil {
-			connectorFailure(w, err)
+			writeError(w, err, publicerr.ConnectorsUnavailable)
 			return true
 		}
 		send(w, 200, a.connectorToTransport(inst))
@@ -285,20 +255,20 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 
 func (a *API) connectorKinds(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	if a.Connectors.Store == nil {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	if r.Method != "GET" {
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
 	if len(r.URL.Query()) > 0 {
-		failure(w, 422, "invalid_query")
+		writeError(w, publicerr.InvalidQuery, nil)
 		return
 	}
 	catalog, err := a.Connectors.Kinds(s)
 	if err != nil {
-		connectorFailure(w, err)
+		writeError(w, err, publicerr.ConnectorsUnavailable)
 		return
 	}
 	out := transport.ConnectorKindCatalog{CredentialDeposits: "unavailable", MinIntervalSeconds: int(catalog.MinInterval / time.Second), Items: []transport.ConnectorKindDescription{}}
@@ -311,13 +281,13 @@ func (a *API) connectorKinds(w http.ResponseWriter, r *http.Request, s corpus.Sc
 			d.Description = &k.Description
 		}
 		if json.Unmarshal(k.ConfigSchema, &d.ConfigSchema) != nil {
-			failure(w, 503, "connectors_unavailable")
+			writeError(w, publicerr.ConnectorsUnavailable, nil)
 			return
 		}
 		if k.CredentialSchema != nil {
 			var schema map[string]any
 			if json.Unmarshal(k.CredentialSchema, &schema) != nil {
-				failure(w, 503, "connectors_unavailable")
+				writeError(w, publicerr.ConnectorsUnavailable, nil)
 				return
 			}
 			d.CredentialSchema = &schema
@@ -332,7 +302,7 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 	for k, v := range q {
 		// An empty limit or page cursor gets its own code below, as on every list.
 		if (k != "limit" && k != "page_cursor" && k != "corpus_id") || len(v) != 1 || (k == "corpus_id" && v[0] == "") {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
@@ -346,21 +316,21 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 	if q.Has("page_cursor") {
 		parts := strings.Split(q.Get("page_cursor"), ".")
 		if len(parts) != 2 {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 		var c cursor
 		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(connectorPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != binding {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 		after = c.After
 	}
 	items, err := a.Connectors.List(r.Context(), s, corpusID, after, limit+1)
 	if err != nil {
-		connectorFailure(w, err)
+		writeError(w, err, publicerr.ConnectorsUnavailable)
 		return
 	}
 	page := transport.ConnectorPage{Items: []transport.Connector{}}

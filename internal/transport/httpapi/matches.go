@@ -10,6 +10,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -63,15 +64,15 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 		}
 	}
 	if a.Monitoring.MatchStore == nil || (resource != "matches" && (id == "" || strings.Contains(id, "/"))) {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return true
 	}
 	if r.Method != "GET" {
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	}
 	if !scope.Allows("monitoring:read") {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return true
 	}
 	ctx := r.Context()
@@ -82,12 +83,12 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 	case "delivery":
 		d, err := a.Monitoring.Delivery(ctx, scope, id)
 		if err != nil {
-			monitoringFailure(w, err)
+			writeError(w, err, publicerr.StorageUnavailable)
 			return true
 		}
 		out, err := deliveryToTransport(d)
 		if err != nil {
-			failure(w, 503, "storage_unavailable")
+			writeError(w, publicerr.StorageUnavailable, nil)
 			return true
 		}
 		send(w, 200, out)
@@ -103,17 +104,17 @@ func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.S
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "subscription_id" && k != "page_cursor" && k != "limit") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
 	subscriptionID := q.Get("subscription_id")
 	if subscriptionID == "" {
-		failure(w, 422, "invalid_query")
+		writeError(w, publicerr.InvalidQuery, nil)
 		return
 	}
 	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		failure(w, 422, "invalid_cursor")
+		writeError(w, publicerr.InvalidCursor, nil)
 		return
 	}
 	limit, ok := pageLimit(w, q, 100, 100)
@@ -124,16 +125,16 @@ func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.S
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeMatchPage(q.Get("page_cursor"), subscriptionID, scope); errors.Is(err, errPageScope) {
-			failure(w, 409, "cursor_scope_changed")
+			writeError(w, publicerr.CursorScopeChanged, nil)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	matches, err := a.Monitoring.Matches(r.Context(), scope, subscriptionID, after, limit+1)
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := transport.MatchPage{Items: make([]transport.Match, 0, min(len(matches), limit))}
@@ -225,12 +226,12 @@ func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "page_cursor" && k != "limit") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
 	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		failure(w, 422, "invalid_cursor")
+		writeError(w, publicerr.InvalidCursor, nil)
 		return
 	}
 	limit, ok := pageLimit(w, q, 100, 100)
@@ -241,16 +242,16 @@ func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeAttemptPage(q.Get("page_cursor"), deliveryID, scope); errors.Is(err, errPageScope) {
-			failure(w, 409, "cursor_scope_changed")
+			writeError(w, publicerr.CursorScopeChanged, nil)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	attempts, err := a.Monitoring.Attempts(r.Context(), scope, deliveryID, after, limit+1)
 	if err != nil {
-		monitoringFailure(w, err)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := transport.DeliveryAttemptPage{Items: make([]transport.DeliveryAttempt, 0, min(len(attempts), limit))}

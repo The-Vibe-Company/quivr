@@ -21,17 +21,18 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
 	// ErrDryRunRequired refuses a reprocess no dry run with the same key and
 	// scope was recorded for.
-	ErrDryRunRequired = errors.New("dry_run_required")
+	ErrDryRunRequired = publicerr.DryRunRequired
 	// ErrInProgress refuses a reprocess of a Corpus another reprocess has
 	// not finished: both would rerun the same Versions.
-	ErrInProgress = errors.New("reprocess_in_progress")
+	ErrInProgress = publicerr.ReprocessInProgress
 	// ErrInvalid refuses a scope the reprocess cannot use; the error says why.
-	ErrInvalid = errors.New("invalid_reprocess")
+	ErrInvalid = publicerr.InvalidReprocess
 )
 
 // Filter selects quarantined Versions. Every set field narrows the selection:
@@ -104,7 +105,7 @@ func (s Service) List(ctx context.Context, scope corpus.Scope, f Filter, after s
 		return nil, corpus.ErrForbidden
 	}
 	if err := checkWindow(f); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", publicerr.InvalidQuery, err)
 	}
 	var corpora []string
 	switch {
@@ -116,7 +117,11 @@ func (s Service) List(ctx context.Context, scope corpus.Scope, f Filter, after s
 	if limit <= 0 || limit > MaxPage {
 		limit = MaxPage
 	}
-	return s.Store.Quarantined(ctx, scope.Organization, corpora, f, after, limit)
+	entries, err := s.Store.Quarantined(ctx, scope.Organization, corpora, f, after, limit)
+	if errors.Is(err, ErrInvalid) {
+		err = fmt.Errorf("%w: %w", publicerr.InvalidQuery, err)
+	}
+	return entries, err
 }
 
 // Request answers a dry run with its count, which it records, or accepts a

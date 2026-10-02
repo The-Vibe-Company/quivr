@@ -8,6 +8,357 @@ info:
     THE-640 adds text search and asynchronous Corpus projection rebuild initiation.
 security:
 - ApiKey: []
+# Public engine error classes and the operations that can return them.
+# Documentation only: responses and schemas below remain authoritative.
+# embedded errors occur inside a successful result, not as its HTTP status.
+# response_code records a domain condition reported with an existing envelope code.
+# response_code_from marks delivery conditions whose public code comes from the provider.
+x-public-errors:
+  delivery_failed:
+    status_class: 500
+    retryable: false
+    response_code_from: provider_delivery
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  delivery_unavailable:
+    status_class: 503
+    retryable: true
+    response_code_from: provider_delivery
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  invalid_idempotency_key:
+    status_class: 400
+    retryable: false
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  ip_not_allowed:
+    status_class: 403
+    retryable: false
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  rate_limited:
+    status_class: 429
+    retryable: true
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+
+  backfill_in_progress:
+    status_class: 409
+    retryable: false
+    operations: [requestBackfill, rerunOperation]
+  batch_too_large:
+    status_class: 413
+    retryable: false
+    operations: [ingestBatch]
+  changes_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [pollChanges, streamChanges]
+  connector_disabled:
+    status_class: 409
+    retryable: false
+    operations: [createConnectorToken, requestConnectorRun, rotateConnectorToken]
+  connectors_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [challengeConnectorAPI, changeConnectorSchedule, createConnector, createConnectorToken, disableConnector, getConnector, listConnectorKinds, listConnectorTokens, listConnectors, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery, replaceConnectorCredential, requestConnectorRun, revokeConnectorToken, rotateConnectorToken]
+  content_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [getReceipt, getRecord, getVersion, ingestBatch, ingestRecord, listRecords, withdrawRecord]
+  cost_confirmation_required:
+    status_class: 409
+    retryable: false
+    operations: [requestBackfill]
+  coverage_incomplete:
+    status_class: 409
+    retryable: false
+    operations: [promoteVectorSpace]
+  credentials_unavailable:
+    status_class: 503
+    retryable: false
+    operations: [createConnector, replaceConnectorCredential]
+  cursor_expired:
+    status_class: 410
+    retryable: false
+    operations: [pollChanges, streamChanges]
+  cursor_scope_changed:
+    status_class: 409
+    retryable: false
+    operations: [listAdminDocuments, listCorpora, listDeliveryAttempts, listMatches, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
+  definition_too_large:
+    status_class: 422
+    retryable: false
+    operations: [createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, previewSubscription]
+  dependency_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [listVectorSpaces]
+  dry_run_required:
+    status_class: 409
+    retryable: false
+    operations: [reprocessQuarantine, requestBackfill]
+  entry_too_large:
+    status_class: 413
+    retryable: false
+    operations: [ingestBatch]
+  evaluator_error:
+    status_class: 502
+    retryable: false
+    operations: [previewSubscription]
+  evaluator_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [previewSubscription]
+  extension_namespace_owned:
+    status_class: 422
+    retryable: false
+    operations: [ingestBatch, ingestRecord, withdrawRecord]
+  forbidden:
+    status_class: 403
+    retryable: false
+    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, listConnectorPushStats, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+  idempotency_conflict:
+    status_class: 409
+    retryable: false
+    operations: [activatePlugin, cancelOperation, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, ingestBatch, ingestRecord, migrateSubscriptionEvaluators, pauseOperation, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan, withdrawRecord]
+  invalid_api_key:
+    status_class: 401
+    retryable: false
+    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, listConnectorPushStats, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+  invalid_backfill:
+    status_class: 422
+    retryable: false
+    operations: [requestBackfill]
+  invalid_config:
+    status_class: 422
+    retryable: false
+    operations: [changeConnectorSchedule, createConnector, replaceConnectorCredential]
+  invalid_credential:
+    status_class: 422
+    retryable: false
+    operations: [changeConnectorSchedule, createConnector, replaceConnectorCredential]
+  invalid_cursor:
+    status_class: 422
+    retryable: false
+    operations: [listAdminDocuments, listConnectors, listCorpora, listDeliveryAttempts, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
+  invalid_expression:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, createSubscriptionVersion, migrateSubscriptionEvaluators, previewSubscription]
+  invalid_input:
+    status_class: 422
+    retryable: false
+    operations: [confirmUpload, createConnector, createUpload, ingestBatch, ingestRecord, retireEvaluations, withdrawRecord]
+  invalid_instance_token:
+    status_class: 401
+    retryable: false
+    operations: [challengeConnectorAPI, pushConnectorAPI]
+  invalid_interval:
+    status_class: 422
+    retryable: false
+    operations: [changeConnectorSchedule, createConnector, replaceConnectorCredential]
+  invalid_json:
+    status_class: 400
+    retryable: false
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  invalid_limit:
+    status_class: 422
+    retryable: false
+    operations: [listConnectorPushStats, getReceivedStats, getTopQueries, listAdminDocuments, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, retireEvaluations]
+  invalid_mapping:
+    status_class: 422
+    retryable: false
+    operations: [configureRetrieval, createCorpus]
+  invalid_migration:
+    status_class: 422
+    retryable: false
+    operations: [migrateSubscriptionEvaluators]
+  invalid_owner:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, listSubscriptions]
+  invalid_plugin:
+    status_class: 422
+    retryable: false
+    operations: [activatePlugin, registerPlugin]
+  invalid_query:
+    status_class: 422
+    retryable: false
+    operations: [listConnectorPushStats, getEvaluationRetirement, getMatchStats, getPluginCallStats, getReceivedStats, getSearchStats, getStepStats, getTopQueries, listAdminDocuments, listConnectorKinds, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSubscriptions, pollChanges, streamChanges]
+  invalid_reprocess:
+    status_class: 422
+    retryable: false
+    operations: [reprocessQuarantine]
+  invalid_schema:
+    status_class: 422
+    retryable: false
+    operations: [activatePlugin, cancelOperation, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, ingestBatch, ingestRecord, migrateSubscriptionEvaluators, pauseOperation, previewSubscription, promoteVectorSpace, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan, searchRecords, withdrawRecord]
+  invalid_signature:
+    status_class: 401
+    retryable: false
+    operations: [pushConnectorAPI, relayConnectorDelivery]
+  invalid_subscription_configuration:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, createSubscriptionVersion, migrateSubscriptionEvaluators, previewSubscription]
+  invalid_window:
+    status_class: 422
+    retryable: false
+    operations: [listConnectorPushStats, getMatchStats, getPluginCallStats, getReceivedStats, getSearchStats, getStepStats, getTopQueries]
+  item_rejected:
+    status_class: 422
+    retryable: false
+    operations: [challengeConnectorAPI, pushConnectorAPI, relayConnectorChallenge, relayConnectorDelivery]
+  malformed_json:
+    status_class: 400
+    retryable: false
+    operations: [activatePlugin, cancelOperation, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, ingestBatch, ingestRecord, migrateSubscriptionEvaluators, pauseOperation, previewSubscription, promoteVectorSpace, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan, searchRecords, withdrawRecord]
+  method_not_allowed:
+    status_class: 405
+    retryable: false
+    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorPushStats, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+  no_previous_plan:
+    status_class: 409
+    retryable: false
+    operations: [rollbackPipelinePlan]
+  not_evaluation_space:
+    status_class: 422
+    retryable: false
+    operations: [promoteVectorSpace]
+  not_found:
+    status_class: 404
+    retryable: false
+    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createConnectorToken, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, getConnector, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceipt, getReceivedStats, getRecord, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, getVersion, ingestBatch, ingestRecord, listActivePlugins, listAdminDocuments, listConnectorKinds, listConnectorPushStats, listConnectorTokens, listConnectors, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listRecords, listSearchProfiles, listSubscriptions, listVectorSpaces, migrateSubscriptionEvaluators, pauseOperation, pollChanges, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, revokeConnectorToken, rollbackPipelinePlan, rotateConnectorToken, searchRecords, streamChanges, withdrawRecord]
+  operation_not_terminal:
+    status_class: 409
+    retryable: false
+    operations: [cancelOperation, pauseOperation, rerunOperation, resumeOperation]
+  plugin_conflict:
+    status_class: 409
+    retryable: false
+    operations: [activatePlugin, rollbackPipelinePlan]
+  plugin_unreachable:
+    status_class: 409
+    retryable: false
+    operations: [rollbackPipelinePlan]
+  push_replayed:
+    status_class: 409
+    retryable: false
+    operations: [pushConnectorAPI, relayConnectorDelivery]
+  query_too_long:
+    status_class: 422
+    retryable: false
+    operations: [searchRecords]
+  rebuild_required:
+    status_class: 409
+    retryable: false
+    operations: [requestBackfill]
+  registration_not_active:
+    status_class: 409
+    retryable: false
+    operations: [requestBackfill, rerunOperation]
+  registration_not_validated:
+    status_class: 409
+    retryable: false
+    operations: [activatePlugin, rollbackPipelinePlan]
+  reprocess_in_progress:
+    status_class: 409
+    retryable: false
+    operations: [reprocessQuarantine, rerunOperation]
+  request_too_large:
+    status_class: 413
+    retryable: false
+    operations: [activatePlugin, cancelOperation, challengeConnectorAPI, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, ingestBatch, ingestRecord, migrateSubscriptionEvaluators, pauseOperation, previewSubscription, promoteVectorSpace, pushConnectorAPI, rebuildCorpusProjection, registerPlugin, relayConnectorChallenge, relayConnectorDelivery, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan, searchRecords, withdrawRecord]
+  reserved_idempotency_key:
+    status_class: 422
+    retryable: false
+    operations: [ingestBatch, ingestRecord, withdrawRecord]
+  retrieval_plugin_invalid:
+    status_class: 502
+    retryable: false
+    operations: [searchRecords]
+  saved_query_deleted:
+    status_class: 409
+    retryable: false
+    operations: [createSavedQueryVersion, deleteSavedQuery, getSavedQuery, getSavedQueryVersion, renameSavedQuery]
+  saved_query_in_use:
+    status_class: 409
+    retryable: false
+    operations: [deleteSavedQuery]
+  search_deadline_exceeded:
+    status_class: 504
+    retryable: false
+    operations: [searchRecords]
+  search_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [searchRecords]
+  source_filter_unavailable:
+    status_class: 422
+    retryable: false
+    operations: [searchRecords]
+  source_namespace_in_use:
+    status_class: 409
+    retryable: false
+    operations: [createConnector]
+  storage_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [activatePlugin, cancelOperation, configureRetrieval, confirmUpload, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableSubscription, enableSubscription, getActivePipelinePlan, getBlob, listConnectorPushStats, getCorpus, getDelivery, getDocumentTimeline, getEvaluationRetirement, getMatch, getMatchStats, getOperation, getPipelinePlan, getPluginCallStats, getPluginRegistration, getReceivedStats, getSavedQuery, getSavedQueryVersion, getSearchStats, getStepStats, getSubscription, getSubscriptionVersion, getTopQueries, getUpload, listActivePlugins, listAdminDocuments, listCorpora, listDeliveryAttempts, listEvaluationBacklog, listMatches, listPipelinePlans, listPluginRegistrations, listQuarantinedVersions, listSubscriptions, migrateSubscriptionEvaluators, pauseOperation, previewSubscription, promoteVectorSpace, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, reprocessQuarantine, requestBackfill, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan]
+  subscription_changed:
+    status_class: 409
+    retryable: false
+    embedded: true
+    operations: [migrateSubscriptionEvaluators]
+  subscription_deleted:
+    status_class: 409
+    retryable: false
+    operations: [createSubscriptionVersion, deleteSubscription, disableSubscription, enableSubscription, getSubscription, getSubscriptionVersion, renameSubscription]
+  token_inactive:
+    status_class: 409
+    retryable: false
+    operations: [rotateConnectorToken]
+  tokens_unavailable:
+    status_class: 503
+    retryable: true
+    response_code: connectors_unavailable
+    operations: [challengeConnectorAPI, createConnectorToken, listConnectorTokens, pushConnectorAPI, revokeConnectorToken, rotateConnectorToken]
+  unknown_destination:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, createSubscriptionVersion, previewSubscription]
+  unknown_saved_query:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, createSubscriptionVersion, previewSubscription]
+  unsupported_connector_kind:
+    status_class: 422
+    retryable: false
+    operations: [changeConnectorSchedule, createConnector, replaceConnectorCredential]
+  unsupported_content:
+    status_class: 422
+    retryable: false
+    operations: [ingestBatch, ingestRecord, withdrawRecord]
+  unsupported_evaluator:
+    status_class: 422
+    retryable: false
+    operations: [createSubscription, createSubscriptionVersion, migrateSubscriptionEvaluators, previewSubscription]
+  unsupported_media_type:
+    status_class: 415
+    retryable: false
+    operations: [activatePlugin, cancelOperation, changeConnectorSchedule, configureRetrieval, confirmUpload, createConnector, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, createUpload, deleteSavedQuery, deleteSubscription, disableConnector, disableSubscription, enableSubscription, ingestBatch, ingestRecord, migrateSubscriptionEvaluators, pauseOperation, previewSubscription, promoteVectorSpace, rebuildCorpusProjection, registerPlugin, renameSavedQuery, renameSubscription, replaceConnectorCredential, reprocessQuarantine, requestBackfill, requestConnectorRun, rerunOperation, resumeOperation, retireEvaluations, rollbackPipelinePlan, searchRecords, withdrawRecord]
+  unsupported_operation_kind:
+    status_class: 422
+    retryable: false
+    operations: [cancelOperation, pauseOperation, rerunOperation, resumeOperation]
+  unsupported_profile:
+    status_class: 422
+    retryable: false
+    operations: [configureRetrieval, createCorpus, createSavedQuery, createSavedQueryVersion, createSubscription, createSubscriptionVersion, previewSubscription, searchRecords]
+  unsupported_search:
+    status_class: 422
+    retryable: false
+    operations: [searchRecords]
+  unverified_blob:
+    status_class: 422
+    retryable: false
+    operations: [ingestBatch, ingestRecord, withdrawRecord]
 paths:
   /v0/records:
     post:

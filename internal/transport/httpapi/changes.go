@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -33,34 +33,6 @@ const (
 	streamPageSize      = 100
 )
 
-func changeFailure(w http.ResponseWriter, corpusID string, err error) {
-	switch {
-	case errors.Is(err, changes.ErrCursorExpired):
-		send(w, 410, changeError(corpusID, err))
-	case errors.Is(err, changes.ErrCursorScope):
-		send(w, 409, scopeChanged(corpusID))
-	case errors.Is(err, changes.ErrCursorInvalid):
-		failure(w, 422, "invalid_cursor")
-	default:
-		failure(w, 503, "changes_unavailable")
-	}
-}
-
-// scopeChanged rejects a cursor issued for another Corpus filter or
-// authorization scope; the client discards its view and resynchronizes.
-func scopeChanged(corpusID string) transport.Error {
-	resync := changes.ResyncURL(corpusID)
-	return transport.Error{Code: "cursor_scope_changed", Message: "cursor scope changed; resynchronize", ResyncUrl: &resync}
-}
-
-func changeError(corpusID string, err error) transport.Error {
-	if errors.Is(err, changes.ErrCursorExpired) {
-		resync := changes.ResyncURL(corpusID)
-		return transport.Error{Code: "cursor_expired", Message: "cursor expired; resynchronize", ResyncUrl: &resync}
-	}
-	return transport.Error{Code: "changes_unavailable", Message: "changes unavailable", Retryable: true}
-}
-
 func changeToTransport(c changes.Change) transport.ChangeEvent {
 	corpusID := c.CorpusID
 	event := transport.ChangeEvent{EventId: c.ID, Type: c.Type, SchemaVersion: changeSchemaVersion, OccurredAt: c.OccurredAt.UTC(), Resource: transport.ResourceReference{Kind: c.ResourceKind, Id: c.ResourceID, CorpusId: &corpusID}, Cursor: c.Cursor}
@@ -78,38 +50,35 @@ func changeToTransport(c changes.Change) transport.ChangeEvent {
 // changeRequest authorizes a change-feed request and returns its Corpus and cursor.
 func (a *API) changeRequest(w http.ResponseWriter, r *http.Request, scope corpus.Scope, allowed map[string]bool) (string, string, bool) {
 	if a.Changes.Journal == nil {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return "", "", false
 	}
 	q := r.URL.Query()
 	for k, v := range q {
 		if !allowed[k] || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return "", "", false
 		}
 	}
 	if q.Has("cursor") && q.Get("cursor") == "" {
-		failure(w, 422, "invalid_cursor")
+		writeError(w, publicerr.InvalidCursor, nil)
 		return "", "", false
 	}
 	if !scope.Allows("changes:read") {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return "", "", false
 	}
 	corpusID := q.Get("corpus_id")
 	if corpusID == "" {
-		failure(w, 422, "invalid_query")
+		writeError(w, publicerr.InvalidQuery, nil)
 		return "", "", false
 	}
 	if !scope.Contains(corpusID) {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return "", "", false
 	}
-	if _, err := a.Service.Store.Read(r.Context(), scope.Organization, corpusID); errors.Is(err, corpus.ErrNotFound) {
-		failure(w, 404, "not_found")
-		return "", "", false
-	} else if err != nil {
-		failure(w, 503, "changes_unavailable")
+	if _, err := a.Service.Store.Read(r.Context(), scope.Organization, corpusID); err != nil {
+		writeError(w, err, publicerr.ChangesUnavailable)
 		return "", "", false
 	}
 	return corpusID, q.Get("cursor"), true
@@ -126,7 +95,7 @@ func (a *API) pollChanges(w http.ResponseWriter, r *http.Request, scope corpus.S
 	}
 	page, err := a.Changes.Poll(r.Context(), scope, corpusID, cursor, limit)
 	if err != nil {
-		changeFailure(w, corpusID, err)
+		writeError(w, err, publicerr.ChangesUnavailable, corpusID)
 		return
 	}
 	items := make([]transport.ChangeEvent, 0, len(page.Items))
@@ -150,7 +119,7 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 	}
 	position, err := a.Changes.Start(setup, scope, corpusID, cursor)
 	if err != nil {
-		changeFailure(w, corpusID, err)
+		writeError(w, err, publicerr.ChangesUnavailable, corpusID)
 		return
 	}
 	cancel()
@@ -192,7 +161,8 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 			return
 		}
 		if err != nil {
-			b, _ := json.Marshal(changeError(corpusID, err))
+			_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+			b, _ := json.Marshal(body)
 			write("event: stream_error\ndata: %s\n\n", b)
 			return
 		}

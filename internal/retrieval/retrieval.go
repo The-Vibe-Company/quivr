@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // ProfileVersion identifies the projection recipe every generation is built
@@ -36,21 +37,21 @@ const MaxLimit = 50
 // segments when that many match, so deduplication cannot shrink a page.
 const CandidateLimit = 3 * MaxLimit
 
-var ErrUnsupported = errors.New("unsupported_search")
+var ErrUnsupported = publicerr.UnsupportedSearch
 
 // ErrQueryTooLong reports a query over the length the profile or the owner of
 // the searched vector space accepts. It carries a publicerr detail naming the
 // limit, which the API returns as the message.
-var ErrQueryTooLong = errors.New("query_too_long")
+var ErrQueryTooLong = publicerr.QueryTooLong
 
 // ErrUnsupportedProfile reports a profile the pinned retrieval plugin does
 // not declare.
-var ErrUnsupportedProfile = errors.New("unsupported_profile")
-var ErrUnavailable = errors.New("search_unavailable")
+var ErrUnsupportedProfile = publicerr.UnsupportedProfile
+var ErrUnavailable = publicerr.SearchUnavailable
 
 // ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
 // generation predates projected Source Namespaces; a rebuild enables it.
-var ErrSourceFilterUnavailable = errors.New("source_filter_unavailable")
+var ErrSourceFilterUnavailable = publicerr.SourceFilterUnavailable
 
 // ErrRouteChanged reports that routing moved to a generation of other spaces
 // while vectors were derived for the prior one; the caller retries.

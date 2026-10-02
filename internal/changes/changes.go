@@ -8,22 +8,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 var (
 	// ErrCursorInvalid reports a malformed, tampered or unknown Change Cursor.
-	ErrCursorInvalid = errors.New("invalid_cursor")
+	ErrCursorInvalid = publicerr.InvalidCursor
 	// ErrCursorScope reports a cursor issued for another Corpus or authorization scope.
-	ErrCursorScope = errors.New("cursor_scope_changed")
+	ErrCursorScope = publicerr.CursorScopeChanged
 	// ErrCursorExpired reports that unconsumed positions aged out of retention.
-	ErrCursorExpired = errors.New("cursor_expired")
+	ErrCursorExpired = publicerr.CursorExpired
 )
 
 // DefaultRetention is the public event-retention window.

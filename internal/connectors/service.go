@@ -14,17 +14,17 @@ import (
 )
 
 var (
-	ErrConflict          = publicerr.New("idempotency_conflict")
-	ErrNamespaceInUse    = publicerr.New("source_namespace_in_use")
-	ErrUnsupportedKind   = publicerr.New("unsupported_connector_kind")
-	ErrInvalidConfig     = publicerr.New("invalid_config")
-	ErrInvalidCredential = publicerr.New("invalid_credential")
-	ErrInvalidInterval   = publicerr.New("invalid_interval")
-	ErrInvalid           = publicerr.New("invalid_input")
-	ErrDisabled          = publicerr.New("connector_disabled")
+	ErrConflict          = publicerr.IdempotencyConflict
+	ErrNamespaceInUse    = publicerr.SourceNamespaceInUse
+	ErrUnsupportedKind   = publicerr.UnsupportedConnectorKind
+	ErrInvalidConfig     = publicerr.InvalidConfig
+	ErrInvalidCredential = publicerr.InvalidCredential
+	ErrInvalidInterval   = publicerr.InvalidInterval
+	ErrInvalid           = publicerr.InvalidInput
+	ErrDisabled          = publicerr.ConnectorDisabled
 	// ErrCredentialsUnavailable refuses a credential deposit or rotation on a
 	// deployment without credential_key, before the secret is digested or stored.
-	ErrCredentialsUnavailable = publicerr.New("credentials_unavailable")
+	ErrCredentialsUnavailable = publicerr.CredentialsUnavailable
 )
 
 // DefaultMinInterval is the product floor for polling intervals.

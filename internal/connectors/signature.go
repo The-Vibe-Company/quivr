@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // Signature declares provider-owned cryptographic verification and engine
@@ -63,9 +65,9 @@ type ReplayStore interface {
 }
 
 var (
-	ErrAPIKeyRequired    = errors.New("connector API key required")
-	ErrInvalidSignature  = errors.New("invalid connector signature or timestamp")
-	ErrReplay            = errors.New("replayed connector push")
+	ErrAPIKeyRequired    = publicerr.InvalidApiKey
+	ErrInvalidSignature  = publicerr.InvalidSignature
+	ErrReplay            = publicerr.PushReplayed
 	ErrReplayUnavailable = errors.New("connector replay protection unavailable")
 )
 

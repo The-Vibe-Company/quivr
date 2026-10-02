@@ -17,6 +17,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
@@ -77,6 +78,7 @@ func TestBackfillFailureMessagesIgnoreDetail(t *testing.T) {
 		sentinel                  error
 	}{
 		{backfillsPath, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`, "invalid_backfill", "", 422, backfill.ErrInvalid},
+		{backfillsPath, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`, "storage_unavailable", "", 503, registry.ErrNoPlan},
 		{spacesPath + "example.space@1/promote", `{}`, "coverage_incomplete", "", 409, backfill.ErrCoverageIncomplete},
 		{spacesPath + "example.space@1/promote", `{}`, "coverage_incomplete", "vector space example.space@1 lacks a vector for 7 current segments in 2 Corpora; backfill them, or force the promotion", 409,
 			&backfill.IncompleteError{Promotion: backfill.Promotion{Served: "example.space@1", SegmentsMissing: 7, CorporaIncomplete: 2}}},
@@ -156,7 +158,7 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 		for style, err := range detailed(tc.err) {
 			t.Run(tc.code+"/"+style, func(t *testing.T) {
 				rec := httptest.NewRecorder()
-				pluginFailure(rec, err)
+				writeError(rec, err, publicerr.StorageUnavailable)
 				if rec.Code != tc.status {
 					t.Fatalf("status %d, want %d", rec.Code, tc.status)
 				}
@@ -179,7 +181,7 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 				issues[i] = plugins.Issue{Code: plugins.CodeKindConflict, Path: "/manifest", PluginID: tc.id, PluginVersion: tc.version, Cause: plugins.IssueCause(internalErrorMarker), Message: internalErrorMarker}
 			}
 			rec := httptest.NewRecorder()
-			pluginFailure(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: issues})
+			writeError(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: issues}, publicerr.StorageUnavailable)
 			var body struct{ Message string }
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
@@ -233,7 +235,7 @@ func TestRollbackFailureReportsTypedCause(t *testing.T) {
 				t.Fatalf("rollback: %v, want unreachable", err)
 			}
 			rec := httptest.NewRecorder()
-			pluginFailure(rec, fmt.Errorf("%s: %w", internalErrorMarker, err))
+			writeError(rec, fmt.Errorf("%s: %w", internalErrorMarker, err), publicerr.StorageUnavailable)
 			assertPublicMessage(t, rec, "plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.static-source@0.1.0 cause="+tc.cause)
 		})
 	}

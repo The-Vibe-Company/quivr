@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrForbidden          = publicerr.New("forbidden")
-	ErrNotFound           = publicerr.New("not_found")
-	ErrInvalidMapping     = publicerr.New("invalid_mapping")
-	ErrUnsupportedProfile = publicerr.New("unsupported_profile")
+	ErrForbidden          = publicerr.Forbidden
+	ErrNotFound           = publicerr.NotFound
+	ErrInvalidMapping     = publicerr.InvalidMapping
+	ErrUnsupportedProfile = publicerr.UnsupportedProfile
 )
 
 type Corpus struct {

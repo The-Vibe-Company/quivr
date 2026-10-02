@@ -15,16 +15,17 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
 // ErrDeadline reports a search that outran its profile's hard bound
 // (plugins.RetrievalProfile.Deadline).
-var ErrDeadline = errors.New("search_deadline_exceeded")
+var ErrDeadline = publicerr.SearchDeadlineExceeded
 
 // ErrPluginInvalid reports a retrieval plugin answer the engine refuses: a
 // ranking with a candidate it never served, too many rounds or requests, or
 // any other contract violation.
-var ErrPluginInvalid = errors.New("retrieval_plugin_invalid")
+var ErrPluginInvalid = publicerr.RetrievalPluginInvalid
 
 // Ranker is the pinned retrieval plugin as search calls it.
 type Ranker interface {

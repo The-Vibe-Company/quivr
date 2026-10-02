@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -42,51 +42,36 @@ func isWebhookRoute(path string) bool { return strings.HasPrefix(path, connector
 func (a *API) relayDelivery(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, connectors.WebhookPath)
 	if a.Relay == nil || id == "" || strings.Contains(id, "/") {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		w.Header().Set("Allow", "GET, POST")
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
 	if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 {
 		// The receive contract bounds the relayed body and query.
-		failure(w, 413, "request_too_large")
+		writeError(w, publicerr.RequestTooLarge, nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
 	answer, err := a.Relay.Deliver(ctx, id, connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: relayedHeaders(r.Header), Body: body})
-	if errors.Is(err, connectors.ErrNoWebhook) {
-		failure(w, 404, "not_found")
-		return
-	}
 	if err != nil {
-		switch {
-		case errors.Is(err, connectors.ErrInvalidSignature):
-			failure(w, 401, "invalid_signature")
-		case errors.Is(err, connectors.ErrReplay):
-			failure(w, 409, "push_replayed")
-		case errors.Is(err, connectors.ErrInvalidIdempotencyKey):
-			failure(w, 400, "invalid_idempotency_key")
-		case errors.Is(err, connectors.ErrInvalidAPIBody):
-			failure(w, 400, "invalid_json")
-		case errors.Is(err, connectors.ErrInvalidAPIRequest):
-			invalid(w, "invalid_schema", "/body")
-		case errors.Is(err, connectors.ErrPushItemRejected):
-			failure(w, 422, "item_rejected")
-		default:
-			failure(w, 503, "connectors_unavailable")
-		}
+		writeError(w, err, publicerr.ConnectorsUnavailable)
 		return
 	}
-	if answer.DeclaredAPI && answer.ErrorCode != "" {
+	if answer.ErrorCode != "" {
 		if answer.RetryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(int(answer.RetryAfter/time.Second)))
 		}
-		failure(w, answer.Status, answer.ErrorCode)
+		err := answer.PublicError()
+		if !answer.DeclaredAPI {
+			err = &plainError{err: err, body: answer.Body, contentType: answer.ContentType}
+		}
+		writeError(w, err, nil)
 		return
 	}
 	if answer.Receipts != nil {
@@ -99,7 +84,7 @@ func (a *API) relayDelivery(w http.ResponseWriter, r *http.Request) {
 	}
 	if answer.Allow != "" {
 		w.Header().Set("Allow", answer.Allow)
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
 	if answer.DeclaredAPI {

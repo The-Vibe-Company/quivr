@@ -45,10 +45,10 @@ func TestUncodedError(t *testing.T) {
 	}
 }
 
-func TestSentinelsWithSameCodeStayDistinct(t *testing.T) {
+func TestSentinelsWithSameCodeShareIdentity(t *testing.T) {
 	a, b := publicerr.New("idempotency_conflict"), publicerr.New("idempotency_conflict")
-	if errors.Is(a, b) || errors.Is(fmt.Errorf("%w", a), b) {
-		t.Fatal("sentinels sharing a code must not match each other")
+	if !errors.Is(a, b) || !errors.Is(fmt.Errorf("%w", a), b) {
+		t.Fatal("one public code must have one sentinel identity, including through wrapping")
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -173,10 +174,10 @@ func resolveRoute(routes []apiRoute, method, path string) (*apiRoute, string) {
 }
 
 var (
-	ErrInvalidIdempotencyKey = errors.New("invalid connector API idempotency key")
-	ErrInvalidAPIBody        = errors.New("invalid connector API JSON body")
-	ErrInvalidAPIRequest     = errors.New("invalid connector API request")
-	ErrPushItemRejected      = errors.New("connector push item rejected")
+	ErrInvalidIdempotencyKey = publicerr.InvalidIdempotencyKey
+	ErrInvalidAPIBody        = publicerr.InvalidJson
+	ErrInvalidAPIRequest     = publicerr.WithField(publicerr.InvalidSchema, "/body")
+	ErrPushItemRejected      = publicerr.ItemRejected
 )
 
 // DeliverAPI resolves a declared route and authorizes it before opening any

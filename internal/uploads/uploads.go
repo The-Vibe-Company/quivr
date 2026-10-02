@@ -15,11 +15,11 @@ import (
 const MaxUploadBytes = 1 << 30
 
 var (
-	ErrConflict = publicerr.New("idempotency_conflict")
-	ErrNotFound = publicerr.New("not_found")
+	ErrConflict = publicerr.IdempotencyConflict
+	ErrNotFound = publicerr.NotFound
 	// ErrInvalid refuses an upload request the service cannot accept, after
 	// the request schema accepted it.
-	ErrInvalid = publicerr.New("invalid_input")
+	ErrInvalid = publicerr.InvalidInput
 	// ErrVerificationMismatch distinguishes altered bytes from a temporary
 	// transfer-verification failure. It never reaches a client: the session
 	// reports verification_failed instead.

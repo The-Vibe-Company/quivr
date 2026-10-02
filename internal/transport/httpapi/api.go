@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"io"
 	"log/slog"
 	"mime"
@@ -24,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr-v2/contracts"
+	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -38,7 +38,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
-
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -210,24 +209,6 @@ func send(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
-func apiError(status int, code string) transport.Error {
-	return transport.Error{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retryable: status == 503 || status == 429}
-}
-func failure(w http.ResponseWriter, status int, code string) {
-	send(w, status, apiError(status, code))
-}
-
-// publicCode returns the stable public code carried by err, never its text,
-// so detail a domain adds to an error cannot change the API contract.
-// fallback applies only to an error that carries no code. Domains wrap at most
-// one coded sentinel per error, so the code matches the sentinel the caller
-// selected the status from.
-func publicCode(err error, fallback string) string {
-	if code, ok := publicerr.Code(err); ok {
-		return code
-	}
-	return fallback
-}
 
 // pageLimit reads a list's optional limit parameter. Absent, it is def; any
 // present value outside 1..max, the empty one included, is 422 invalid_limit
@@ -238,7 +219,7 @@ func pageLimit(w http.ResponseWriter, q url.Values, def, max int) (int, bool) {
 	}
 	n, err := strconv.Atoi(q.Get("limit"))
 	if err != nil || n < 1 || n > max {
-		failure(w, 422, "invalid_limit")
+		writeError(w, publicerr.InvalidLimit, nil)
 		return 0, false
 	}
 	return n, true
@@ -265,12 +246,12 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
-		failure(w, 401, "invalid_api_key")
+		writeError(w, publicerr.InvalidApiKey, nil)
 		return
 	}
 	scope, ok := a.Keys[strings.TrimPrefix(auth, "Bearer ")]
 	if !ok {
-		failure(w, 401, "invalid_api_key")
+		writeError(w, publicerr.InvalidApiKey, nil)
 		return
 	}
 	if r.URL.Path == "/v0/changes/stream" && r.Method == "GET" {
@@ -362,42 +343,40 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			if !scope.Allows("corpora:write") || !scope.AllCorpora() {
-				failure(w, 403, "forbidden")
+				writeError(w, publicerr.Forbidden, nil)
 				return
 			}
 			a.create(w, r, scope)
 		case "GET":
 			if !scope.Allows("corpora:read") {
-				failure(w, 403, "forbidden")
+				writeError(w, publicerr.Forbidden, nil)
 				return
 			}
 			a.list(w, r, scope)
 		default:
-			failure(w, 405, "method_not_allowed")
+			writeError(w, publicerr.MethodNotAllowed, nil)
 		}
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v0/corpora/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v0/corpora/"), "/") && r.Method == "GET" {
 		if !scope.Allows("corpora:read") {
-			failure(w, 403, "forbidden")
+			writeError(w, publicerr.Forbidden, nil)
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/v0/corpora/")
 		if !scope.Contains(id) {
-			failure(w, 404, "not_found")
+			writeError(w, publicerr.NotFound, nil)
 			return
 		}
 		c, err := a.Service.Read(ctx, scope, id)
-		if errors.Is(err, corpus.ErrNotFound) {
-			failure(w, 404, "not_found")
-		} else if err != nil {
-			failure(w, 503, "storage_unavailable")
+		if err != nil {
+			writeError(w, err, publicerr.StorageUnavailable)
 		} else {
 			send(w, 200, c)
 		}
 		return
 	}
-	failure(w, 404, "not_found")
+	writeError(w, publicerr.NotFound, nil)
 }
 func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	raw, ok := decodeRequest(w, r, a.schema)
@@ -410,23 +389,19 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	}
 	canonical, err := json.Marshal(data)
 	if err != nil {
-		failure(w, 422, "invalid_schema")
+		writeError(w, publicerr.InvalidSchema, nil)
 		return
 	}
 	var input transport.CorpusRequest
 	if err := json.Unmarshal(canonical, &input); err != nil {
-		failure(w, 422, "invalid_schema")
+		writeError(w, publicerr.InvalidSchema, nil)
 		return
 	}
 	c, conflict, err := a.Service.Create(r.Context(), s, corpus.CreateInput{Key: input.IdempotencyKey, Name: input.Name, Retrieval: data["retrieval"].(map[string]any)})
-	if errors.Is(err, corpus.ErrInvalidMapping) || errors.Is(err, corpus.ErrUnsupportedProfile) {
-		failure(w, 422, publicCode(err, "invalid_mapping"))
-	} else if errors.Is(err, corpus.ErrForbidden) {
-		failure(w, 403, "forbidden")
-	} else if err != nil {
-		failure(w, 503, "storage_unavailable")
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
 	} else if conflict {
-		failure(w, 409, "idempotency_conflict")
+		writeError(w, publicerr.IdempotencyConflict, nil)
 	} else {
 		send(w, 201, c)
 	}
@@ -476,7 +451,7 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	q := r.URL.Query()
 	for k, v := range q {
 		if (k != "limit" && k != "page_cursor") || len(v) != 1 {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
@@ -489,21 +464,21 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	if q.Has("page_cursor") {
 		parts := strings.Split(q.Get("page_cursor"), ".")
 		if len(parts) != 2 {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
 		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 		var c cursor
 		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(corpusPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 		after = c.After
 	}
 	items, err := a.Service.List(r.Context(), s, after, limit+1)
 	if err != nil {
-		failure(w, 503, "storage_unavailable")
+		writeError(w, publicerr.StorageUnavailable, nil)
 		return
 	}
 	page := map[string]any{"items": items}
@@ -534,7 +509,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Sc
 		return nil, false
 	}
 	if err := schema.Validate(raw); err != nil {
-		failure(w, 422, "invalid_schema")
+		writeError(w, publicerr.InvalidSchema, nil)
 		return nil, false
 	}
 	return raw, true
@@ -545,7 +520,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Sc
 func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte, bool) {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
-		failure(w, 415, "unsupported_media_type")
+		writeError(w, publicerr.UnsupportedMediaType, nil)
 		return nil, nil, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -554,18 +529,18 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 		var large *http.MaxBytesError
 		deadline, hasDeadline := r.Context().Deadline()
 		if errors.As(err, &large) {
-			failure(w, 413, "request_too_large")
+			writeError(w, publicerr.RequestTooLarge, nil)
 		} else if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
 			(r.Context().Err() != nil || hasDeadline && !time.Now().Before(deadline)) {
 			// The connection's read deadline may fire before the context timer.
-			failure(w, 503, "content_unavailable")
+			writeError(w, publicerr.ContentUnavailable, nil)
 		} else {
-			failure(w, 400, "malformed_json")
+			writeError(w, publicerr.MalformedJson, nil)
 		}
 		return nil, nil, false
 	}
 	if !utf8.Valid(payload) {
-		failure(w, 400, "malformed_json")
+		writeError(w, publicerr.MalformedJson, nil)
 		return nil, nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -574,14 +549,14 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 	if err := decoder.Decode(&raw); err != nil {
 		var large *http.MaxBytesError
 		if errors.As(err, &large) {
-			failure(w, 413, "request_too_large")
+			writeError(w, publicerr.RequestTooLarge, nil)
 		} else {
-			failure(w, 400, "malformed_json")
+			writeError(w, publicerr.MalformedJson, nil)
 		}
 		return nil, nil, false
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		failure(w, 400, "malformed_json")
+		writeError(w, publicerr.MalformedJson, nil)
 		return nil, nil, false
 	}
 	return raw, payload, true

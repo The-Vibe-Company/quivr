@@ -2,12 +2,12 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
@@ -31,27 +31,20 @@ func vectorSpaceRoute(r *http.Request) (string, bool) {
 
 func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id string) {
 	if !scope.Allows("corpora:read") {
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 		return
 	}
 	if a.Spaces == nil || !scope.Contains(id) {
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
-	if _, err := a.Service.Read(r.Context(), scope, id); errors.Is(err, corpus.ErrNotFound) {
-		failure(w, 404, "not_found")
-		return
-	} else if err != nil {
-		failure(w, 503, "dependency_unavailable")
+	if _, err := a.Service.Read(r.Context(), scope, id); err != nil {
+		writeError(w, err, publicerr.DependencyUnavailable)
 		return
 	}
 	g, spaces, total, err := a.Spaces.VectorSpaces(r.Context(), scope.Organization, id)
-	if errors.Is(err, corpus.ErrNotFound) {
-		failure(w, 404, "not_found")
-		return
-	}
 	if err != nil {
-		failure(w, 503, "dependency_unavailable")
+		writeError(w, err, publicerr.DependencyUnavailable)
 		return
 	}
 	out := transport.VectorSpaceList{ProjectionGenerationId: g.ID, Segments: int(total), Items: []transport.VectorSpace{}}

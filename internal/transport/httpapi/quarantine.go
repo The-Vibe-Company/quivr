@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
@@ -40,11 +41,11 @@ func (a *API) quarantineRoutes(w http.ResponseWriter, r *http.Request, scope cor
 	}
 	switch {
 	case r.Method != method:
-		failure(w, 405, "method_not_allowed")
+		writeError(w, publicerr.MethodNotAllowed, nil)
 	case a.Quarantine == nil:
-		failure(w, 404, "not_found")
+		writeError(w, publicerr.NotFound, nil)
 	case !scope.Allows(operations.BackfillPermission):
-		failure(w, 403, "forbidden")
+		writeError(w, publicerr.Forbidden, nil)
 	case method == "GET":
 		a.listQuarantine(w, r, scope)
 	default:
@@ -96,7 +97,7 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 	for k, v := range q {
 		// An empty limit or page cursor gets its own code below, as on every list.
 		if len(v) != 1 || (v[0] == "" && k != "limit" && k != "page_cursor") {
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 		switch k {
@@ -109,7 +110,7 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 		case "quarantined_after", "quarantined_before":
 			t, err := time.Parse(time.RFC3339Nano, v[0])
 			if err != nil {
-				failure(w, 422, "invalid_query")
+				writeError(w, publicerr.InvalidQuery, nil)
 				return
 			}
 			t = t.UTC()
@@ -120,7 +121,7 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 			}
 		case "limit", "page_cursor":
 		default:
-			failure(w, 422, "invalid_query")
+			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
 	}
@@ -133,27 +134,18 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 	if q.Has("page_cursor") {
 		var err error
 		if after, err = a.decodeQuarantinePage(q.Get("page_cursor"), binding); errors.Is(err, errPageScope) {
-			failure(w, 409, "cursor_scope_changed")
+			writeError(w, publicerr.CursorScopeChanged, nil)
 			return
 		} else if err != nil {
-			failure(w, 422, "invalid_cursor")
+			writeError(w, publicerr.InvalidCursor, nil)
 			return
 		}
 	}
 	// One more than the page tells whether another follows.
 	entries, err := a.Quarantine.List(r.Context(), scope, f, after, limit+1)
 	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-		return
-	case errors.Is(err, corpus.ErrNotFound):
-		failure(w, 404, "not_found")
-		return
-	case errors.Is(err, quarantine.ErrInvalid):
-		failure(w, 422, "invalid_query")
-		return
 	case err != nil:
-		failure(w, 503, "storage_unavailable")
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := transport.QuarantinePage{Items: make([]transport.QuarantinedVersion, 0, min(len(entries), limit))}
@@ -188,20 +180,8 @@ func (a *API) requestReprocess(w http.ResponseWriter, r *http.Request, scope cor
 	f := quarantine.Filter{CorpusID: in.CorpusID, Plugin: in.Plugin, Code: in.Code, After: in.QuarantinedAfter, Before: in.QuarantinedBefore}
 	estimate, op, err := a.Quarantine.Request(r.Context(), scope, quarantine.Request{Key: in.IdempotencyKey, Filter: f, DryRun: in.DryRun})
 	switch {
-	case errors.Is(err, corpus.ErrForbidden):
-		failure(w, 403, "forbidden")
-	case errors.Is(err, corpus.ErrNotFound):
-		failure(w, 404, "not_found")
-	case errors.Is(err, operations.ErrConflict):
-		failure(w, 409, "idempotency_conflict")
-	case errors.Is(err, quarantine.ErrDryRunRequired):
-		failure(w, 409, quarantine.ErrDryRunRequired.Error())
-	case errors.Is(err, quarantine.ErrInProgress):
-		failure(w, 409, quarantine.ErrInProgress.Error())
-	case errors.Is(err, quarantine.ErrInvalid):
-		failure(w, 422, quarantine.ErrInvalid.Error())
 	case err != nil:
-		failure(w, 503, "storage_unavailable")
+		writeError(w, err, publicerr.StorageUnavailable)
 	case in.DryRun:
 		send(w, 200, reprocessEstimateToTransport(estimate))
 	default:

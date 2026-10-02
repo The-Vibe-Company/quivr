@@ -22,10 +22,10 @@ const (
 var (
 	// ErrInvalidMigration refuses a migration from the version new
 	// Subscription Versions already pin.
-	ErrInvalidMigration = publicerr.New("invalid_migration")
+	ErrInvalidMigration = publicerr.InvalidMigration
 	// ErrSubscriptionChanged leaves a Subscription that got another current
 	// Version while the migration ran; running it again looks at it again.
-	ErrSubscriptionChanged = publicerr.New("subscription_changed")
+	ErrSubscriptionChanged = publicerr.SubscriptionChanged
 )
 
 // EvaluatorMoves lists and moves the Subscriptions pinning an evaluator.
