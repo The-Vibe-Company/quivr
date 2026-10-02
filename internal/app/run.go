@@ -624,7 +624,7 @@ func Run(command string) error {
 			// Searches are counted, and the rollups read back (observability:read).
 			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
-			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents}))
+			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Tokens: connectors.Service{Tokens: connectorStore}, Replays: connectorStore}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}

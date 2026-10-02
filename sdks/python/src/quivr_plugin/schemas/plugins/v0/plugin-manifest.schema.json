@@ -695,7 +695,7 @@
       "required": [
         "routes"
       ],
-      "description": "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Since 0.12, instance_token accepts only an instance-scoped bearer token. Requires push mode.",
+      "description": "Since Plugin API 0.11: named ingress routes on push kinds. quivr_key requires connector:push on the instance Corpus; instance_token (since 0.12) accepts only an instance-scoped bearer token; signature (since 0.12) uses provider verification plus engine freshness and replay protection.",
       "properties": {
         "routes": {
           "type": "array",
@@ -734,8 +734,12 @@
           "description": "Relative path, without leading or trailing slash. A {name} template matches one nonempty segment. Literal routes take precedence; ambiguous templates are invalid."
         },
         "auth": {
-          "enum": ["quivr_key", "instance_token"],
-          "default": "quivr_key"
+          "default": "quivr_key",
+          "enum": [
+            "quivr_key",
+            "instance_token",
+            "signature"
+          ]
         },
         "request_schema": {
           "type": [
@@ -743,8 +747,60 @@
             "boolean"
           ],
           "description": "Optional JSON Schema 2020-12 for the parsed JSON body; external references are forbidden."
+        },
+        "signature": {
+          "$ref": "#/$defs/ConnectorSignature"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "auth": {
+                "const": "signature"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "signature"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "signature"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ConnectorSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "header",
+        "window_seconds"
+      ],
+      "properties": {
+        "header": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+        },
+        "timestamp_header": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+        },
+        "window_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      },
+      "description": "Since Plugin API 0.12: provider signature header, optional signed Unix-seconds timestamp header, and replay window. The plugin verifies the cryptographic signature. GET challenges bypass POST freshness/replay checks."
     }
   }
 }

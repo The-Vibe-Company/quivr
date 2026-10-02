@@ -26,6 +26,7 @@ Latest Plugin API: `0.12.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Vector space input_price | `0.9.0` |
 | Subscription Part and query vectors | `0.10.0` |
 | Connector API routes secured by a Quivr key | `0.11.0` |
+| Connector signature freshness and replay protection | `0.12.0` |
 | Instance-scoped bearer tokens for connector API routes | `0.12.0` |
 <!-- /plugin-api -->
 
@@ -150,7 +151,7 @@ version.
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
 | `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
-| `contributions.connector.kinds.<kind>.api.routes` | Since 0.11, 1–32 named GET/POST routes with `name`, relative `path`, `auth: quivr_key` and optional local JSON Schema `request_schema`; since 0.12, `auth: instance_token`. Requires push mode. Names are unique; path templates match one segment; literals take precedence and ambiguous templates are refused |
+| `contributions.connector.kinds.<kind>.api.routes` | Since 0.11, 1–32 named GET/POST routes with `name`, relative `path`, `auth: quivr_key` (or `instance_token` / `signature` since 0.12), signature metadata and optional local JSON Schema `request_schema`. Requires push mode. Names are unique; path templates match one segment; literals take precedence and ambiguous templates are refused |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
 | `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`, and since 0.9 an optional `input_price` (`usd_per_million_tokens`) that backfill estimates use, the cost being unknown without it; the id is the plugin id or starts with `<id>.` |
 | `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
@@ -519,9 +520,13 @@ is a normative example.
 ### Connector push
 
 Since Plugin API 0.5, a kind with `modes: [pull, push]` also receives what
-the source sends. The core owns one public route per Connector Instance,
-`/v0/connector-webhooks/<instance>` under the deployment's `public_url`, and
-sends that address to the plugin as `connector.webhook_url` in fetch
+the source sends. Undeclared push kinds use the legacy public route
+`/v0/connector-webhooks/<instance>` under the deployment's `public_url`.
+Signature kinds declaring POST `receive` instead advertise
+`/v0/connectors/<instance>/api/receive`; the legacy address is an alias.
+Signature kinds with custom paths omit `connector.webhook_url`; register their
+declared routes explicitly. They have no universal legacy callback.
+The core sends the advertised address as `connector.webhook_url` in fetch
 requests, so the plugin registers it with the source and is never exposed
 itself. For each `GET` or `POST` to the route, with a body of at most 1 MiB,
 the core calls **`receive`** (`connector-receive-request.schema.json`) with the
@@ -963,26 +968,23 @@ SDK's sample connector, and publishes their reports as the
 `go-retrieval-contract-report` workflow artifacts. Write a connector with the
 [Go SDK](../../../sdks/go/README.md).
 
-## Declare secure ingress routes (Plugin API 0.11; tokens since 0.12)
+## Declare secure ingress routes (Plugin API 0.11; tokens and signatures since 0.12)
 
 A push kind may declare `api.routes`. The engine serves them at
-`/v0/connectors/{instance_id}/api/<path>` and authenticates every call with a
+`/v0/connectors/{instance_id}/api/<path>` and authenticates routes declared `auth: quivr_key` with a
 Quivr API key that grants `connector:push` on the instance's Corpus and
-Organization for `auth: quivr_key`. Since Plugin API 0.12, `auth: instance_token`
-accepts only the instance's bearer token; Quivr keys and another instance's
-tokens are refused. Tokens grant no normal API or management access. Bearer
-credentials are never relayed to the plugin. `/v0/connector-webhooks/{id}` keeps
-its behavior.
+Organization. Keys are never relayed to the plugin. Signature routes (since 0.12) use the provider signature policy below;
+instance_token routes accept only the instance bearer token, issued by operators with connectors:admin. Quivr keys and other instances’ tokens are refused. Tokens grant no normal API or management access.
 
 Each route has a unique `name` (`^[a-z][a-z0-9_]{0,63}$`), `method` (`GET` or
-`POST`), `path` and `auth` (`quivr_key` or `instance_token`). Paths are relative, with no leading or
+`POST`), `path` and `auth`. Paths are relative, with no leading or
 trailing slash, query, dot segments or percent escapes; literals use letters,
 digits, `_`, `-` and internal dots. `{parameter}` matches one nonempty segment;
 parameter names cannot repeat within a path. Literal segments take precedence
 on method mismatches too. Routes of equal specificity that overlap are invalid,
 except the same path served with different methods. Request schemas must compile
 as JSON Schema 2020-12 without external references. A manifest's Plugin API range
-must admit 0.11.0 or later to declare `api`, and 0.12.0 or later for `instance_token`.
+must admit 0.11.0 or later to declare `api`, and 0.12.0 or later for `instance_token` or `signature`.
 
 Operators with `connectors:admin` scoped to the instance's Organization and
 Corpus create, list, rotate and revoke tokens under `/v0/connectors/{id}/tokens`.
@@ -999,7 +1001,7 @@ walks through this lifecycle.
 
 The generalized `connector/receive` request adds `route` (the declared name),
 `body` (parsed JSON, null for a bodyless GET), and `request.path` (the actual
-relative path). Legacy webhook requests omit all three. POST bodies must be JSON;
+relative path). Undeclared legacy webhook requests omit all three. POST bodies must be JSON;
 when present, `request_schema` is checked before the plugin is called. The existing
 raw `request.body_base64`, query, header and timeout bounds still apply; secure
 routes also strip Authorization. The receive response contract is unchanged.
@@ -1013,3 +1015,53 @@ are rejected before ingestion. Reads and management use the normal Quivr API.
 
 See [Write a connector](../../../docs-site/plugins/write-a-connector.mdx) for the
 author workflow and the [HTTP reference](../../http/v0/openapi.yaml) for errors.
+
+## Provider signatures (Plugin API 0.12)
+
+Declare `auth: signature` with `signature: {header, timestamp_header?,
+window_seconds}`. Header names are case-insensitive HTTP tokens, at most 128
+characters; they must be forwarded provider headers, distinct from one another
+and from `Authorization`, `Cookie`, `Idempotency-Key` and hop-by-hop headers.
+The replay window is 1–86400 seconds. Signature metadata is required for
+signature auth and forbidden for other modes. The Plugin API range must admit
+0.12.0 or later.
+
+For POST, the engine requires exactly one nonempty signature header. When
+`timestamp_header` is declared it must contain exactly one Unix-seconds integer
+within the window in either direction. The provider must sign that timestamp;
+the plugin verifies the provider's cryptographic signature over the exact raw
+request before returning accepted items. Missing, ambiguous, malformed or stale
+headers yield a JSON Error with `401 invalid_signature`.
+
+Before calling the plugin, the engine atomically reserves SHA-256 fingerprints
+of the signature and any `Idempotency-Key`, scoped to the instance. A duplicate
+of either key yields `409 push_replayed` before any plugin or ingestion call.
+PostgreSQL shares reservations across replicas and restarts; expiry is the
+receipt time plus the declared window. Expired rows are removed on the next
+reservation for that instance. Storage failures fail closed with a JSON Error.
+Plugin refusals and failed deliveries release the reservation within the
+original request deadline so valid retries can succeed; successful pushes
+retain it. If expiry of that deadline or unavailable storage prevents cleanup,
+the reservation stays until its window expires and retries return 409 meanwhile. Partial ingestion retries keep stable
+item revisions to replay the same Receipts.
+
+GET signature routes are synchronous provider challenges: POST signature and
+replay checks do not apply, and the plugin must return no items. A signature
+kind's old webhook address resolves the declared signature `receive` path
+through the same guards. Other undeclared webhook kinds retain their behavior.
+
+## Changelog
+
+### Plugin API 0.12.0
+
+Provider signature declarations add timestamp-window checks and durable replay
+protection. The first-party X plugin declares POST receive and GET challenge at
+`/v0/connectors/{id}/api/receive`. X signs no timestamp, so the engine uses a
+300-second signature replay cache. After that window, an identical body can be
+accepted again; the engine cannot infer freshness from X's signature alone.
+The plugin continues to verify its HMAC-SHA256 signature. Accepted X pushes
+return 202 with Receipts; CRC challenges still answer synchronously.
+
+The old X address `/v0/connector-webhooks/{id}` remains an alias, sharing the
+same replay cache and responses. It is scheduled for removal in engine 1.0.0;
+use the declared address for new registrations.

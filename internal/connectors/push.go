@@ -26,6 +26,29 @@ func WebhookURL(publicURL, id string) string {
 	return strings.TrimRight(publicURL, "/") + WebhookPath + url.PathEscape(id)
 }
 
+// receiverWebhookURL advertises the declared signature receive address when
+// available, while existing undeclared push kinds keep their webhook URL.
+func receiverWebhookURL(c Connector, publicURL, id string) string {
+	if publicURL == "" {
+		return ""
+	}
+	if api, ok := c.(APIReceiver); ok {
+		signed := false
+		for _, route := range api.APIRoutes() {
+			signed = signed || route.Auth == "signature"
+			if route.Path == "receive" && route.Method == "POST" && route.Auth == "signature" {
+				return strings.TrimRight(publicURL, "/") + "/v0/connectors/" + url.PathEscape(id) + "/api/receive"
+			}
+		}
+		if signed {
+			// Custom signature routes have no universal callback URL. They
+			// must be registered explicitly using their declared paths.
+			return ""
+		}
+	}
+	return WebhookURL(publicURL, id)
+}
+
 // Push states a kind reports for its push channel, and the derived public
 // state (degraded) of Connector Health.
 const (
@@ -183,6 +206,9 @@ type RelayAnswer struct {
 	Body        string
 	// ErrorCode identifies an engine-generated failure, never a plugin reply.
 	ErrorCode string
+	// DeclaredAPI also identifies replies sent through a declared route's
+	// legacy alias, whose engine errors use the declared API contract.
+	DeclaredAPI bool
 	// RetryAfter asks the source to retry later (a 503).
 	RetryAfter time.Duration
 	Receipts   []content.Receipt
@@ -204,6 +230,7 @@ type Relay struct {
 	Registry *Registry
 	Sealer   Sealer
 	Ingest   Ingestor
+	Replays  ReplayStore
 }
 
 func unavailable(code string) RelayAnswer {
@@ -223,10 +250,25 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		slog.Warn("connector delivery failed", "connector_id", id, "code", "storage_unavailable")
 		return unavailable("storage_unavailable"), nil
 	}
-	connector, ok := r.Registry.Lookup(target.Kind)
+	entry, ok := r.Registry.current()[target.Kind]
+	connector := entry.connector
 	receiver, pushes := connector.(Receiver)
 	if !target.Enabled || !ok || !pushes || !receiver.Pushes() {
 		return RelayAnswer{}, ErrNoWebhook
+	}
+	// A kind declaring signature ingress cannot bypass its guards through
+	// the legacy webhook. Its receive path is the compatibility alias.
+	for _, declared := range entry.routes {
+		if declared.Auth == "signature" {
+			route, allow := resolveRoute(entry.routes, req.Method, "receive")
+			if route == nil || route.Auth != "signature" {
+				if allow != "" {
+					return RelayAnswer{Status: 405, Allow: allow}, nil
+				}
+				return RelayAnswer{}, ErrNoWebhook
+			}
+			return r.deliverRoute(ctx, target, connector, receiver, route, "receive", req)
+		}
 	}
 	return r.deliver(ctx, target, connector, receiver, req, "", nil)
 }

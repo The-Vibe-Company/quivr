@@ -132,7 +132,7 @@ func (s Service) WebhookURL(in Instance) string {
 	if r, pushes := c.(Receiver); !ok || !pushes || !r.Pushes() {
 		return ""
 	}
-	return WebhookURL(s.PublicURL, in.ID)
+	return receiverWebhookURL(c, s.PublicURL, in.ID)
 }
 
 // CreateInput is a creation command. Secret is the raw kind-specific secret.

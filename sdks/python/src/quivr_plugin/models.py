@@ -244,17 +244,27 @@ class SubscriptionContribution(Model):
 
 
 @dataclass(kw_only=True)
+class ConnectorSignature(Model):
+    "Since Plugin API 0.12: provider signature header, optional signed Unix-seconds timestamp header, and replay window. The plugin verifies the cryptographic signature. GET challenges bypass POST freshness/replay checks."
+
+    header: str
+    timestamp_header: str | None = None
+    window_seconds: int
+
+
+@dataclass(kw_only=True)
 class ConnectorAPIRoute(Model):
     name: str
     method: Literal["GET", "POST"]
     path: str
-    auth: Literal["quivr_key", "instance_token"] = "quivr_key"
+    auth: Literal["quivr_key", "instance_token", "signature"] = "quivr_key"
     request_schema: Any | None = None
+    signature: ConnectorSignature | None = None
 
 
 @dataclass(kw_only=True)
 class ConnectorAPI(Model):
-    "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Since 0.12, instance_token accepts only an instance-scoped bearer token. Requires push mode."
+    "Since Plugin API 0.11: named ingress routes on push kinds. quivr_key requires connector:push on the instance Corpus; instance_token (since 0.12) accepts only an instance-scoped bearer token; signature (since 0.12) uses provider verification plus engine freshness and replay protection."
 
     routes: list[ConnectorAPIRoute]
 
@@ -1210,6 +1220,7 @@ __all__ = [
     "ConnectorOrigin",
     "ConnectorReceiveRequest",
     "ConnectorReceiveResponse",
+    "ConnectorSignature",
     "ConnectorUploadAttachmentRequest",
     "ConnectorUploadAttachmentResponse",
     "Decision",

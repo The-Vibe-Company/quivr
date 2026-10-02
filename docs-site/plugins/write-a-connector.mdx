@@ -260,3 +260,26 @@ explains one-time issuance, five-minute rotation overlap and immediate revocatio
 ## Go further
 
 A kind can also store binary attachments next to an item: declare `contributions.connector.attachments` and implement `OpenAttachment`, and Quivr asks for each file's size and checksum, then gives the plugin a one-time upload URL. A kind with `modes: [pull, push]` also receives the webhooks a source sends to Quivr, through `receive`; the X list connector works this way. The [plugin protocol](/reference/plugin-protocol#connector) lists every field of `fetch` and its answer, and the first-party `plugins/rss` is a complete connector built on this SDK.
+
+## Verify provider signatures
+
+For a provider that signs pushes, declare `auth: signature` and
+`signature: {header, timestamp_header?, window_seconds}` on its POST route.
+This requires Plugin API 0.12. Use a window between 1 and 86400 seconds.
+If the provider signs a timestamp, name its Unix-seconds header; Quivr rejects
+calls outside the window before invoking your plugin. Your handler still
+verifies the cryptographic signature over the raw request before accepting
+items. Preserve `request.body_base64` for that check.
+
+Quivr reserves signature and `Idempotency-Key` fingerprints per instance in
+PostgreSQL before calling your handler. A replay returns `409 push_replayed`;
+invalid signature or timestamp headers return `401 invalid_signature`.
+Reservations last for the window and are released on refusal or failed
+processing within the request deadline so a valid retry can succeed. If the deadline expires or storage prevents cleanup, the reservation remains until its window expires and retries return 409 meanwhile. A provider without signed timestamps
+has replay protection only within the cache window.
+
+Declare a GET signature route for synchronous challenges. It bypasses POST
+signature and replay guards, and must return no ingestion items. If your kind
+has signature routes, its legacy webhook is an alias only for its declared
+signature `receive` path. The first-party X plugin uses POST receive and GET
+challenge on that path; its old address is scheduled for removal in engine 1.0.0.

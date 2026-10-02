@@ -723,6 +723,17 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 				}
 			}
 		}
+		api, _ := kind["api"].(map[string]any)
+		routes, _ := api["routes"].([]any)
+		for _, raw := range routes {
+			route, _ := raw.(map[string]any)
+			if route["auth"] == "signature" {
+				if _, admitted := admitsFeature(r, FeatureConnectorSignature); !admitted {
+					issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/connector/kinds/" + pointerToken(name) + "/api", Message: fmt.Sprintf("signature routes require a plugin_api range admitting %s or later", FeatureSince(FeatureConnectorSignature))})
+					break
+				}
+			}
+		}
 		if !declaresMode(kind, "push") {
 			continue
 		}

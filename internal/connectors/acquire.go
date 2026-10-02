@@ -207,7 +207,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var notice string
 	reads := target.ReadsToday
 	for i := 0; i < pages; i++ {
-		page, err := connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: WebhookURL(a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
+		page, err := connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: receiverWebhookURL(connector, a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
 		if errors.Is(err, ErrNotDue) && i == 0 {
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})

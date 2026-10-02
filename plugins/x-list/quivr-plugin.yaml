@@ -5,11 +5,11 @@
 # relays to receive; polling stays the fallback. The id and extension namespace keep the names of the
 # former built-in x_list kind, so existing instances and Records carry over.
 id: connector.x_list
-version: 1.0.0
+version: 1.1.0
 description: Polls the posts of an X list and withdraws posts deleted at the source.
 compatibility:
   engine: ">=0.1.0 <0.2.0"
-  plugin_api: ">=0.5.0 <0.6.0"
+  plugin_api: ">=0.12.0 <0.13.0"
 contributions:
   connector:
     kinds:
@@ -94,6 +94,18 @@ contributions:
             consumer_secret: {type: string, minLength: 1, title: Consumer secret, writeOnly: true}
         default_interval_seconds: 120
         modes: [pull, push]
+        api:
+          routes:
+            - name: receive
+              method: POST
+              path: receive
+              auth: signature
+              signature: {header: x-twitter-webhooks-signature, window_seconds: 300}
+            - name: challenge
+              method: GET
+              path: receive
+              auth: signature
+              signature: {header: x-twitter-webhooks-signature, window_seconds: 300}
     timeout_ms: 25000
     limits:
       max_items: 100

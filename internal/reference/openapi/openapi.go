@@ -257,12 +257,25 @@ func permissions(op *yaml.Node) string {
 func (r *renderer) operation(o operation) {
 	p := r.page
 	facts := []string{"Operation " + reference.Code(str(get(o.op, "operationId"))) + "."}
+	optionalAuth := false
+	for _, req := range items(get(o.op, "security")) {
+		if len(req.Content) == 0 {
+			optionalAuth = true
+		}
+	}
 	if perms := permissions(o.op); perms != "" {
-		facts = append(facts, "Requires "+perms+".")
+		if optionalAuth {
+			facts = append(facts, "API-key calls require "+perms+".")
+		} else {
+			facts = append(facts, "Requires "+perms+".")
+		}
 	}
 	if sec := get(o.op, "security"); sec != nil {
 		var schemes []string
 		for _, req := range items(sec) {
+			if len(req.Content) == 0 {
+				schemes = append(schemes, "no API key (see operation description)")
+			}
 			each(req, func(name string, _ *yaml.Node) { schemes = append(schemes, reference.Code(name)) })
 		}
 		if len(schemes) == 0 {

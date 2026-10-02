@@ -20,13 +20,17 @@ type pushKind struct {
 	err      error
 	received *[]ReceiveRequest
 	routes   []APIRoute
+	fetched  *[]FetchRequest
 }
 
 func (pushKind) Kind() string                   { return "alerts" }
 func (pushKind) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
 func (pushKind) CredentialSchema() []byte       { return []byte(`{"type":"object"}`) }
 func (pushKind) DefaultInterval() time.Duration { return time.Minute }
-func (k pushKind) Fetch(context.Context, FetchRequest) (Page, error) {
+func (k pushKind) Fetch(_ context.Context, req FetchRequest) (Page, error) {
+	if k.fetched != nil {
+		*k.fetched = append(*k.fetched, req)
+	}
 	return k.page, nil
 }
 func (k pushKind) Pushes() bool          { return k.pushes }
@@ -274,6 +278,37 @@ func TestAPIChallengeRecordsReadsBeforeAnswering(t *testing.T) {
 				}
 			} else if answer.Status != 200 || answer.Body != "challenge answer" || answer.Receipts != nil {
 				t.Fatalf("challenge answer %+v", answer)
+			}
+		})
+	}
+}
+
+// Public presentation and acquisition must give the provider the same
+// declared callback address, including deployments mounted under a prefix.
+func TestSignedKindAdvertisesDeclaredWebhookForProviderSetup(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{"receive", "https://quivr.example.com/base/v0/connectors/connector_1/api/receive"},
+		{"events/{category}", ""},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			var fetched []FetchRequest
+			kind := pushKind{pushes: true, page: Page{Checkpoint: json.RawMessage(`{}`)}, fetched: &fetched, routes: []APIRoute{{Name: "receive", Method: "POST", Path: tc.path, Auth: "signature", Signature: &Signature{Header: "x-signature", WindowSeconds: 300}}}}
+			registry, err := NewRegistry(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := "https://quivr.example.com/base/"
+			in := Instance{Organization: "org_a", ID: "connector_1", CorpusID: "corpus_1", Namespace: "wire", Kind: "alerts", Config: json.RawMessage(`{}`), Enabled: true}
+			if got := (Service{Registry: registry, PublicURL: base}).WebhookURL(in); got != tc.want {
+				t.Fatalf("advertised URL=%q want %q", got, tc.want)
+			}
+			runs := &fakeRuns{target: Target{Instance: in, RunSequence: 3}}
+			a := Acquirer{Store: runs, Registry: registry, Ingest: &fakeIngest{}, PublicURL: base}
+			if err := a.Run(context.Background(), in.Organization, in.ID, 3); err != nil {
+				t.Fatal(err)
+			}
+			if len(fetched) != 1 || fetched[0].WebhookURL != tc.want {
+				t.Fatalf("provider setup requests=%+v want webhook %s", fetched, tc.want)
 			}
 		})
 	}

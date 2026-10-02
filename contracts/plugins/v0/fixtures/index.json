@@ -2123,6 +2123,74 @@
       "schema": "connector-receive-request.schema.json",
       "valid": true,
       "schema_valid": true
+    },
+    {
+      "file": "manifests/valid/connector-api-signature.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Signature routes declare provider header, optional Unix timestamp and replay window."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-missing-metadata.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses missing-metadata."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-bad-window.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses bad-window."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-unsafe-header.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses unsafe-header."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-key-metadata.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses key-metadata."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-reserved-header.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses reserved-header."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Signature routes require Plugin API 0.12."
     }
   ]
 }

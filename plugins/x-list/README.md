@@ -10,7 +10,7 @@ build, test or pin the plugin.
   module; `make plugin-boundary` keeps it off the engine's packages.
 - **Manifest** [quivr-plugin.yaml](quivr-plugin.yaml): plugin id and extension
   namespace `connector.x_list`, the names the former built-in kind used, so
-  existing Connector Instances and Records carry over. Plugin API 0.5: the
+  existing Connector Instances and Records carry over. Plugin API 0.12: the
   plugin binds Relation targets to the instance's `corpus_id` and
   `source_namespace`, receives webhook deliveries (`modes: [pull, push]`), and
   declares `max_checkpoint_bytes` 512 KiB for the deletion recheck set (up to
@@ -19,7 +19,12 @@ build, test or pin the plugin.
   keep Filtered Stream rules, the webhook and its link in step with the list
   members (`stream.go`); `Receive` answers the CRC check and maps signed
   deliveries with `MapPost`, like polling (`webhook.go`). The X endpoint shapes
-  follow X's public docs and are tested against fakes only.
+  follow X's public docs and are tested against fakes only. The declared
+  address is `/v0/connectors/{id}/api/receive`: POST uses provider signature
+  auth and a 300-second replay window; GET answers CRC synchronously. The old
+  `/v0/connector-webhooks/{id}` address is an alias until engine 1.0.0.
+  X signs no timestamp; the engine blocks repeated signatures within the
+  window, and the plugin still checks the raw-body HMAC-SHA256.
 - **Configuration**: `api_endpoint`, the X API origin (default
   `https://api.x.com`). Set it only to point at a test fake.
   `allow_short_recheck` accepts `recheck_interval_seconds` below 60 so tests

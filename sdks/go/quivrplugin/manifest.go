@@ -121,15 +121,17 @@ type ConnectorKind struct {
 }
 
 // ConnectorAPI declares the secure routes served by a push kind (since 0.11).
+// Signature policies require Plugin API 0.12.
 type ConnectorAPI struct {
 	Routes []ConnectorAPIRoute `json:"routes"`
 }
 type ConnectorAPIRoute struct {
-	Name          string          `json:"name"`
-	Method        string          `json:"method"`
-	Path          string          `json:"path"`
-	Auth          string          `json:"auth"`
-	RequestSchema json.RawMessage `json:"request_schema,omitempty"`
+	Name          string              `json:"name"`
+	Method        string              `json:"method"`
+	Path          string              `json:"path"`
+	Auth          string              `json:"auth"`
+	RequestSchema json.RawMessage     `json:"request_schema,omitempty"`
+	Signature     *ConnectorSignature `json:"signature,omitempty"`
 }
 
 // Pushes reports whether the kind declares the push mode (Plugin API 0.5):
@@ -154,6 +156,13 @@ const (
 	// MaxAttachmentBytes is the engine's cap on one attachment.
 	MaxAttachmentBytes int64 = 25 << 20
 )
+
+// ConnectorSignature declares engine freshness and replay protection (since 0.12).
+type ConnectorSignature struct {
+	Header          string `json:"header"`
+	TimestampHeader string `json:"timestamp_header,omitempty"`
+	WindowSeconds   int    `json:"window_seconds"`
+}
 
 type loadedManifest struct {
 	Manifest
@@ -296,6 +305,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 			for _, route := range kind.API.Routes {
 				if route.Auth == "instance_token" && !features.speaks("instance_token") {
 					return nil, fmt.Errorf("%s: kind %s instance_token requires Plugin API %s", path, name, FeatureSince["instance_token"])
+				}
+				if route.Auth == "signature" && !features.speaks("connector_signature") {
+					return nil, fmt.Errorf("%s: signature routes require Plugin API %s", path, FeatureSince["connector_signature"])
 				}
 			}
 		}

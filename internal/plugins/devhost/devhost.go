@@ -298,6 +298,10 @@ func Discover(ctx context.Context, baseURL string, report plugins.Report) (strin
 								mismatch("/plugin_api", "discovery implements Plugin API %s, but instance_token needs %s or later", doc.PluginAPI, plugins.FeatureSince(plugins.FeatureInstanceToken))
 								break
 							}
+							if route.Auth == "signature" && !api.Speaks(plugins.FeatureConnectorSignature) {
+								mismatch("/plugin_api", "signature routes need Plugin API %s or later", plugins.FeatureSince(plugins.FeatureConnectorSignature))
+								break
+							}
 						}
 					}
 				}

@@ -21,6 +21,7 @@ var FeatureSince = map[string]string{
 	"input_price":          "0.9.0",
 	"subscription_vectors": "0.10.0",
 	"connector_api":        "0.11.0",
+	"connector_signature":  "0.12.0",
 	"instance_token":       "0.12.0",
 }
 

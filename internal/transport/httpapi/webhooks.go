@@ -12,6 +12,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
 // WithRelay enables the public webhook routes of push Connector Instances.
@@ -61,6 +62,46 @@ func (a *API) relayDelivery(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, connectors.ErrNoWebhook) {
 		failure(w, 404, "not_found")
 		return
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, connectors.ErrInvalidSignature):
+			failure(w, 401, "invalid_signature")
+		case errors.Is(err, connectors.ErrReplay):
+			failure(w, 409, "push_replayed")
+		case errors.Is(err, connectors.ErrInvalidAPIBody):
+			failure(w, 400, "invalid_json")
+		case errors.Is(err, connectors.ErrInvalidAPIRequest):
+			invalid(w, "invalid_schema", "/body")
+		case errors.Is(err, connectors.ErrPushItemRejected):
+			failure(w, 422, "item_rejected")
+		default:
+			failure(w, 503, "connectors_unavailable")
+		}
+		return
+	}
+	if answer.DeclaredAPI && answer.ErrorCode != "" {
+		if answer.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(answer.RetryAfter/time.Second)))
+		}
+		failure(w, answer.Status, answer.ErrorCode)
+		return
+	}
+	if answer.Receipts != nil {
+		receipts := make([]transport.Receipt, 0, len(answer.Receipts))
+		for _, receipt := range answer.Receipts {
+			receipts = append(receipts, receiptToTransport(receipt))
+		}
+		send(w, 202, transport.ConnectorPushReceipts{Receipts: receipts})
+		return
+	}
+	if answer.Allow != "" {
+		w.Header().Set("Allow", answer.Allow)
+		failure(w, 405, "method_not_allowed")
+		return
+	}
+	if answer.DeclaredAPI {
+		w.Header().Set("Quivr-Response-Origin", "plugin")
 	}
 	if answer.ContentType != "" {
 		w.Header().Set("Content-Type", answer.ContentType)

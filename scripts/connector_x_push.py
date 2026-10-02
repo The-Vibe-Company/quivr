@@ -68,7 +68,7 @@ def verify(stack, fake_x_url):
     try:
         deliveries = control({'posts': [{'id': post_id, 'text': 'Delivered while the plugin is down', 'author_id': author, 'created_at': created, 'push': True}]})['deliveries']
         # Like X, the fake delivers to every webhook linked to the app's stream; only this instance's counts.
-        mine = [d['status'] for d in deliveries if d['url'].endswith('/v0/connector-webhooks/' + connector)]
+        mine = [d['status'] for d in deliveries if d['url'].endswith('/v0/connectors/' + connector + '/api/receive')]
         assert mine == [503], deliveries
         health = await_health(lambda h: h.get('push', {}).get('error', {}).get('code') == 'plugin_unavailable', 'the outage never showed in push health')
         assert health['push']['state'] == 'degraded', health

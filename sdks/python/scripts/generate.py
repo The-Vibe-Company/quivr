@@ -223,9 +223,10 @@ class Generator:
             if not prop.isidentifier() or keyword.iskeyword(prop):
                 raise SystemExit(f"{key}: property {prop!r} is not a Python identifier")
             annotation = self.type_of(rel, f"{pointer}/properties/{prop}", sub, cls + camel(prop))
-            literal = sub["const"] if "const" in sub else (sub["enum"][0] if len(sub.get("enum", [])) == 1 else None)
-            if "enum" in sub and "default" in sub:
-                literal = sub["default"]
+            literal = sub["const"] if "const" in sub else (
+                sub["default"] if sub.get("default") in sub.get("enum", [])
+                else (sub["enum"][0] if len(sub.get("enum", [])) == 1 else None)
+            )
             if prop in required and literal is not None:
                 lines.append(f"    {prop}: {annotation} = {json.dumps(literal)}")
             elif prop in required:

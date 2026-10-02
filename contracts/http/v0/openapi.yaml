@@ -1677,17 +1677,14 @@ paths:
       schema: {type: string, maxLength: 8192}
     post:
       operationId: pushConnectorAPI
-      security:
-      - ApiKey: []
-      - InstanceToken: []
+      security: [{ApiKey: []}, {InstanceToken: []}, {}]
       x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [4XX]}
       summary: Push data to a declared source route
       description: >-
-        Resolve a named POST route from the instance kind's manifest (Plugin API 0.11).
-        Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization,
-        for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this
-        instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes
-        authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token.
+        Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12).
+        For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization,
+        checked before any plugin call. For auth instance_token, requires this instance’s bearer token;
+        Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token.
         Missing or invalid key is 401; missing action 403;
         out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405
         with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is
@@ -1703,7 +1700,13 @@ paths:
         marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response
         variant (x-quivr-plugin-response), even when its status overlaps an engine response;
         the engine response schemas below apply to responses without that header.
-        The legacy connector-webhooks route keeps its existing behavior.
+        For auth signature, the plugin verifies the provider signature; the engine checks one nonempty
+        signature header and optional signed Unix-seconds timestamp within the declared window
+        (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per
+        instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed.
+        Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards.
+        X declares receive at api/receive with a 300-second signature cache and no timestamp.
+        Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
       x-required-permissions: [connector:push]
       requestBody:
         required: true
@@ -1727,14 +1730,13 @@ paths:
               schema: {type: string, enum: [plugin]}
     get:
       operationId: challengeConnectorAPI
-      security:
-      - ApiKey: []
-      - InstanceToken: []
+      security: [{ApiKey: []}, {InstanceToken: []}, {}]
       x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [2XX, 4XX]}
       summary: Answer a declared source challenge
       description: >-
-        Resolve a declared GET route with the same connector:push key authorization, scope,
-        request limits and deadline as POST. Only synchronous provider challenges are supported;
+        Resolve a declared GET route with the same request limits and deadline as POST.
+        Routes with auth: quivr_key require connector:push authorization and instance scope.
+        Only synchronous provider challenges are supported;
         a GET answer carrying ingestion items is rejected before ingestion. Reads and management
         stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status,
         content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header
@@ -1746,6 +1748,8 @@ paths:
         instance_token; credentials for one mode cannot authenticate the other.
         A 204 challenge must have an empty response body; a plugin answer
         combining 204 with a nonempty body returns 500 plugin_invalid_response.
+        Signature GET routes need no bearer key and bypass POST signature and replay checks;
+        the provider challenge is still verified and answered by the plugin.
       x-required-permissions: [connector:push]
       responses:
         '200':

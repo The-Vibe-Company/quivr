@@ -64,10 +64,12 @@ Posts older than `recheck_window_seconds` are not rechecked. If you must honour 
 
 With webhooks on, posts from the list's members arrive within seconds; polling stays on as the fallback. You need:
 
-1. `public_url` in Quivr's configuration: the address where X reaches the API, such as `https://quivr.example.com`. Each instance's webhook address is `<public_url>/v0/connector-webhooks/<connector_id>`, shown as `webhook_url`.
+1. `public_url` in Quivr's configuration: the address where X reaches the API, such as `https://quivr.example.com`. Each instance's webhook address is `<public_url>/v0/connectors/<connector_id>/api/receive`, shown as `webhook_url`.
 2. The `x-list` plugin pinned on the `api` processes too, since the API relays each delivery to it.
 3. The consumer secret deposited with the token: `{"bearer_token": "…", "consumer_secret": "…"}`.
 4. `"webhook": {"enabled": true}` in the instance's `config`. Set `max_rules` and `max_rule_length` to your plan's limits.
+
+POST deliveries use X's `x-twitter-webhooks-signature` HMAC header. The engine refuses repeated signatures or `Idempotency-Key` values within 300 seconds, and the plugin verifies the signature over the raw body. X does not sign a timestamp, so an identical signed body can be accepted again after that window. Successful pushes return `202` with Receipts. GET CRC challenges still answer synchronously. The old `/v0/connector-webhooks/{connector_id}` address is an alias with the same replay protection until engine 1.0.0.
 
 The plugin turns the list's members into Filtered Stream rules tagged `quivr:<connector_id>`, registers the webhook and keeps both in step at each resync. `health.push.state` is `pending` until then, `active` once deliveries arrive, and `degraded` with an `error` when polling had to take over. A post seen both ways is one Record with one Version. Turning the mode off leaves the rules and the webhook at X until you delete them in the developer console.
 

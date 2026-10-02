@@ -39,7 +39,7 @@ func xDeliver(t *testing.T, base, list, id string, body map[string]any) []int {
 	}
 	var statuses []int
 	for _, d := range out.Deliveries {
-		if strings.HasSuffix(d.URL, "/v0/connector-webhooks/"+id) {
+		if strings.HasSuffix(d.URL, "/v0/connectors/"+id+"/api/receive") {
 			statuses = append(statuses, d.Status)
 		}
 	}
@@ -93,7 +93,7 @@ func TestConnectorXListReceivesPostsThroughWebhooksWithPollingAsFallback(t *test
 		"webhook": map[string]any{"enabled": true, "resync_interval_seconds": 5, "poll_interval_seconds": 3600}}
 	created := request(t, "POST", "/v0/connectors", token, xConnector("x-push", corpusID, "x", list, webhook), 201)
 	id := created["connector_id"].(string)
-	if url, _ := created["webhook_url"].(string); !strings.HasSuffix(url, "/v0/connector-webhooks/"+id) {
+	if url, _ := created["webhook_url"].(string); !strings.HasSuffix(url, "/v0/connectors/"+id+"/api/receive") {
 		t.Fatalf("webhook_url %v", created["webhook_url"])
 	}
 	// Force a pull run now: the schedule pulls the next run in when it changes.
@@ -112,7 +112,7 @@ func TestConnectorXListReceivesPostsThroughWebhooksWithPollingAsFallback(t *test
 
 	// A signed delivery is relayed and accepted: the post arrives while no
 	// pull run is due for an hour.
-	if got := xDeliver(t, base, list, id, map[string]any{"posts": []any{xAuthored("1810000000000000001", "Pushed wire post", author, 2*time.Minute, true)}}); fmt.Sprint(got) != "[200]" {
+	if got := xDeliver(t, base, list, id, map[string]any{"posts": []any{xAuthored("1810000000000000001", "Pushed wire post", author, 2*time.Minute, true)}}); fmt.Sprint(got) != "[202]" {
 		t.Fatalf("delivery answered %v", got)
 	}
 	recordsByKey(t, token, corpusID, cursor, map[string]int{"1810000000000000001": 1})
@@ -153,7 +153,7 @@ func TestConnectorXListReceivesPostsThroughWebhooksWithPollingAsFallback(t *test
 	// deliveries, and push is active again.
 	xControlPath(t, base, "/_control/app", map[string]any{"crc_fails": false})
 	awaitXHealth(t, token, id, state("active"))
-	if got := xDeliver(t, base, list, id, map[string]any{"posts": []any{xAuthored("1810000000000000004", "Delivered again", author, 2*time.Minute, true)}}); fmt.Sprint(got) != "[200]" {
+	if got := xDeliver(t, base, list, id, map[string]any{"posts": []any{xAuthored("1810000000000000004", "Delivered again", author, 2*time.Minute, true)}}); fmt.Sprint(got) != "[202]" {
 		t.Fatalf("delivery after recovery answered %v", got)
 	}
 	awaitXHealth(t, token, id, pushState("active"))

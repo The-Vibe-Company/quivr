@@ -18,6 +18,7 @@ const (
 	FeatureInputPrice          Feature = "input_price"
 	FeatureSubscriptionVectors Feature = "subscription_vectors"
 	FeatureConnectorAPI        Feature = "connector_api"
+	FeatureConnectorSignature  Feature = "connector_signature"
 	FeatureInstanceToken       Feature = "instance_token"
 )
 
@@ -43,6 +44,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureInputPrice, "0.9.0", "Vector space input_price", "", ""},
 	{FeatureSubscriptionVectors, "0.10.0", "Subscription Part and query vectors", "", "/contributions/subscription/vectors"},
 	{FeatureConnectorAPI, "0.11.0", "Connector API routes secured by a Quivr key", "", ""},
+	{FeatureConnectorSignature, "0.12.0", "Connector signature freshness and replay protection", "", ""},
 	{FeatureInstanceToken, "0.12.0", "Instance-scoped bearer tokens for connector API routes", "", ""},
 }
 

@@ -27,24 +27,26 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		failure(w, 404, "not_found")
 		return true
 	}
-	bearer := r.Header.Get("Authorization")
-	if !strings.HasPrefix(bearer, "Bearer ") {
-		failure(w, 401, "invalid_api_key")
-		return true
-	}
-	credential := strings.TrimPrefix(bearer, "Bearer ")
 	auth := connectors.APIAuth{}
-	if scope, ok := a.Keys[credential]; ok {
-		auth.Scope = &scope
-		if !scope.Allows(corpus.ActionConnectorPush) {
-			failure(w, 403, "forbidden")
+	bearer := r.Header.Get("Authorization")
+	if bearer != "" {
+		if !strings.HasPrefix(bearer, "Bearer ") {
+			failure(w, 401, "invalid_api_key")
 			return true
 		}
-	} else if strings.HasPrefix(credential, "qit_") {
-		auth.InstanceToken = credential
-	} else {
-		failure(w, 401, "invalid_api_key")
-		return true
+		credential := strings.TrimPrefix(bearer, "Bearer ")
+		if scope, ok := a.Keys[credential]; ok {
+			auth.Scope = &scope
+			if !scope.Allows(corpus.ActionConnectorPush) {
+				failure(w, 403, "forbidden")
+				return true
+			}
+		} else if strings.HasPrefix(credential, "qit_") {
+			auth.InstanceToken = credential
+		} else {
+			failure(w, 401, "invalid_api_key")
+			return true
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
 	if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(parts[2]) > 8192 {
@@ -59,6 +61,12 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case errors.Is(err, connectors.ErrInvalidInstanceToken):
 		failure(w, 401, "invalid_instance_token")
+	case errors.Is(err, connectors.ErrAPIKeyRequired):
+		failure(w, 401, "invalid_api_key")
+	case errors.Is(err, connectors.ErrInvalidSignature):
+		failure(w, 401, "invalid_signature")
+	case errors.Is(err, connectors.ErrReplay):
+		failure(w, 409, "push_replayed")
 	case errors.Is(err, corpus.ErrForbidden):
 		failure(w, 403, "forbidden")
 	case errors.Is(err, corpus.ErrNotFound):
