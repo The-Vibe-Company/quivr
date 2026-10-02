@@ -186,10 +186,22 @@ export interface Engine {
   ws: Workspace;
   /** POST bodies the app sent, by path. */
   sent: { path: string; body: any }[];
-  /** Search requests the app sent; sources is their source filter, if any. */
-  searches: { query: string; mode: string; limit: number; sources?: string[] }[];
-  /** sourceFilter false answers like a corpus built before source filtering. */
-  options: { sourceFilter: boolean };
+  /**
+   * Search requests the app sent; sources is their source filter, if any, and
+   * profile is set when it is not "default".
+   */
+  searches: { query: string; mode: string; limit: number; sources?: string[]; profile?: string }[];
+  /**
+   * sourceFilter false answers like a corpus built before source filtering.
+   * profiles is the list GET /v0/search/profiles answers (absent: 404, like an
+   * older engine). deep picks how a `deep` search answers: re-ranked by Jev,
+   * in hybrid order because the re-ranker was unavailable, or past its deadline.
+   */
+  options: {
+    sourceFilter: boolean;
+    profiles?: { name: string; provider: { kind: string; plugin_id?: string } }[];
+    deep: "jev" | "fallback" | "deadline";
+  };
   /** Sends the next incoming article on the live stream. */
   arrive: () => Article;
   close: () => Promise<void>;
@@ -198,7 +210,7 @@ export interface Engine {
 export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> {
   const sent: Engine["sent"] = [];
   const searches: Engine["searches"] = [];
-  const options: Engine["options"] = { sourceFilter: true };
+  const options: Engine["options"] = { sourceFilter: true, deep: "jev" };
   const streams = new Set<http.ServerResponse>();
   const server = http.createServer((req, res) => {
     res.writeHead(200, {
@@ -244,9 +256,14 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       return json(route, { items: ws.articles.map(feedItem), live: true });
     if (path === "/v0/changes")
       return json(route, { items: [], next_cursor: "c0", has_more: false });
+    if (path === "/v0/search/profiles" && options.profiles)
+      return json(route, { items: options.profiles });
     if (path === "/v0/search") {
       const sources: string[] | undefined = body.filter?.source_namespaces;
-      searches.push({ query: body.query, mode: body.mode, limit: body.limit, sources });
+      const profile = body.profile === "default" ? undefined : body.profile;
+      searches.push({ query: body.query, mode: body.mode, limit: body.limit, sources, profile });
+      if (profile === "deep" && options.deep === "deadline")
+        return json(route, { code: "search_deadline_exceeded", message: "search deadline exceeded", retryable: true }, 504);
       if (sources && !options.sourceFilter)
         return json(route, { code: "source_filter_unavailable", message: "source filter unavailable", retryable: false }, 422);
       const typed = words(body.query);
@@ -289,6 +306,31 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
             excerpt: { text: a!.body.slice(0, 120), start: 0, end: 120, coordinate_system: "unicode_code_point" },
           })),
           retrieval_profile: { name: "default", version: "1" },
+        });
+      }
+      if (profile === "deep") {
+        // Like jev.rerank: the passages with a typed word first, each with its
+        // probability; or hybrid order when the re-ranker was unavailable.
+        if (options.deep === "fallback")
+          return json(route, {
+            items: hits.map((h) => ({ ...h, explanation: "re-ranker unavailable: deadline" })),
+            retrieval_profile: { name: "deep", version: "plugin:jev.rerank@0.1.0/deep" },
+            usage: { rounds: 2, elapsed_ms: 2140, paid_calls: 0, cost_cents: 0 },
+          });
+        const scored = hits
+          .map((h) => {
+            const literal = typed.some((w) => fold(h.excerpt.text).includes(w));
+            return { h, p: literal ? 0.91 - h.rank / 100 : 0.12 };
+          })
+          .sort((a, b) => b.p - a.p);
+        return json(route, {
+          items: scored.map(({ h, p }, i) => ({
+            ...h,
+            rank: i + 1,
+            explanation: `Jev jev-1.13.0, rubric answers-query-v1, noul; noul=${p}`,
+          })),
+          retrieval_profile: { name: "deep", version: "plugin:jev.rerank@0.1.0/deep" },
+          usage: { rounds: 2, elapsed_ms: 1420, paid_calls: 1, cost_cents: 0.4 },
         });
       }
       return json(route, { items: hits, retrieval_profile: { name: "default", version: "1" } });

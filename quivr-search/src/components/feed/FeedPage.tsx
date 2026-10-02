@@ -6,8 +6,10 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { Broadcast, NotePencil, Plus } from "@phosphor-icons/react";
+import { Broadcast, Coins, NotePencil, Plus } from "@phosphor-icons/react";
 import { APIError, search, tokenize } from "../../lib/search";
+import { asPercent, elapsed, explain, paid, type Why } from "../../lib/deep";
+import type { SearchUsage } from "../../types";
 import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
 import { createAlert, alertMessage, type Alert } from "../../lib/alerts";
 import { NotationError, parse } from "../../lib/notation";
@@ -37,12 +39,16 @@ interface Hit {
   excerpt: string;
   /** Found by meaning only: the passage has none of the words typed. */
   near: boolean;
+  /** Why a deep search ranked it here. */
+  why: Why | null;
 }
 
 type Row = { item: FeedItem; hit?: Hit };
 
 const SEARCH_LIMIT = 50;
 const DEBOUNCE_MS = 250;
+// A deep search may make a paid call: it waits for a longer pause in typing.
+const DEEP_DEBOUNCE_MS = 800;
 
 const fold = (text: string) =>
   text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -54,6 +60,9 @@ export function FeedPage({
   query,
   near,
   onNear,
+  deepOffered,
+  deep,
+  onDeep,
   onQuery,
   filter,
   onFilter,
@@ -75,6 +84,10 @@ export function FeedPage({
   query: string;
   near: boolean;
   onNear: (near: boolean) => void;
+  /** The engine answers a `deep` profile served by a plugin. */
+  deepOffered: boolean;
+  deep: boolean;
+  onDeep: (deep: boolean) => void;
   onQuery: (query: string) => void;
   filter: Filter;
   onFilter: (filter: Filter) => void;
@@ -98,6 +111,8 @@ export function FeedPage({
   const [searchedSource, setSearchedSource] = useState("");
   const [searching, setSearching] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [searchError, setSearchError] = useState("");
+  // The shown results come from a deep search, with what it spent if said.
+  const [deepShown, setDeepShown] = useState<{ usage?: SearchUsage } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [following, setFollowing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -114,8 +129,12 @@ export function FeedPage({
   // passages are grouped by article, in the engine's order. A chosen source
   // is searched on its own, so its best matches come back even when other
   // sources rank higher. A corpus the engine cannot filter yet falls back to
-  // narrowing the top 50 of every source.
+  // narrowing the top 50 of every source. A deep search ("Recherche
+  // approfondie") always fetches hybrid candidates, then the plugin re-ranks
+  // them; it is never remembered beyond this page's life.
   const source = filter.kind === "source" ? filter.namespace : "";
+  const deepOn = deepOffered && deep;
+  const meaning = near || deepOn;
   useEffect(() => {
     if (!query) {
       setHits(null);
@@ -126,11 +145,17 @@ export function FeedPage({
     setSearching("loading");
     setSearchError("");
     const timer = setTimeout(() => {
-      const mode = near ? "hybrid" : "lexical";
+      const mode = meaning ? "hybrid" : "lexical";
       const run = (within: string) =>
-        search(query, mode, corpus, controller.signal, SEARCH_LIMIT, within ? [within] : []).then(
-          (data) => ({ data, within }),
-        );
+        search(
+          query,
+          mode,
+          corpus,
+          controller.signal,
+          SEARCH_LIMIT,
+          within ? [within] : [],
+          deepOn ? "deep" : "default",
+        ).then((data) => ({ data, within }));
       run(source)
         .catch((error) => {
           if (source && error instanceof APIError && error.code === "source_filter_unavailable")
@@ -148,12 +173,14 @@ export function FeedPage({
               version_id: r.version_id,
               excerpt: r.excerpt.text.replace(/\s+/g, " ").trim(),
               near:
-                near &&
+                meaning &&
                 words.length > 0 &&
                 !words.some((w) => text.includes(w)),
+              why: deepOn ? explain(r.explanation) : null,
             });
           }
           setHits([...seen.values()]);
+          setDeepShown(deepOn ? { usage: data.usage } : null);
           setSearchedSource(within);
           setSearching("ready");
         })
@@ -162,18 +189,20 @@ export function FeedPage({
           if (error instanceof APIError && error.status === 401)
             return onUnauthorized();
           setSearchError(
-            error instanceof APIError && error.status === 503 && near
-              ? "La recherche par idées proches est momentanément indisponible. Cherchez les mots exacts, ou réessayez."
-              : error.message,
+            deepOn && error instanceof APIError
+              ? deepError(error)
+              : error instanceof APIError && error.status === 503 && near
+                ? "La recherche par idées proches est momentanément indisponible. Cherchez les mots exacts, ou réessayez."
+                : error.message,
           );
           setSearching("error");
         });
-    }, DEBOUNCE_MS);
+    }, deepOn ? DEEP_DEBOUNCE_MS : DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, near, corpus, source, attempt, onUnauthorized]);
+  }, [query, near, meaning, deepOn, corpus, source, attempt, onUnauthorized]);
 
   const byId = useMemo(() => {
     const map = new Map<string, FeedItem>();
@@ -363,7 +392,7 @@ export function FeedPage({
       ? { title: "Rien ici pour ce filtre.", text: "Retirez le filtre pour voir tous les résultats." }
       : {
           title: "Aucun article ne parle de ça.",
-          text: near
+          text: meaning
             ? "Essayez un autre mot, ou créez une alerte : vous serez prévenu dès qu’un article en parlera."
             : "Activez « Idées proches » pour trouver aussi les articles qui en parlent avec d’autres mots.",
         };
@@ -437,16 +466,50 @@ export function FeedPage({
               <button
                 type="button"
                 role="switch"
-                aria-checked={near}
+                aria-checked={meaning}
+                aria-disabled={deepOn || undefined}
+                aria-describedby={deepOn ? "near-locked" : undefined}
                 className="near-switch"
-                title="Trouve aussi les articles qui parlent du même sujet avec d’autres mots"
-                onClick={() => onNear(!near)}
+                title={
+                  deepOn
+                    ? "La recherche approfondie cherche toujours aussi les idées proches"
+                    : "Trouve aussi les articles qui parlent du même sujet avec d’autres mots"
+                }
+                onClick={() => {
+                  if (!deepOn) onNear(!near);
+                }}
               >
                 <span className="switch-track" aria-hidden="true">
                   <span className="switch-knob" />
                 </span>
                 Idées proches
               </button>
+              {deepOn && (
+                <span id="near-locked" className="visually-hidden">
+                  Toujours actif pendant une recherche approfondie.
+                </span>
+              )}
+              {deepOffered && (
+                <>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={deep}
+                    aria-describedby="deep-hint"
+                    className="near-switch deep-switch"
+                    title={DEEP_HINT}
+                    onClick={() => onDeep(!deep)}
+                  >
+                    <span className="switch-track" aria-hidden="true">
+                      <span className="switch-knob" />
+                    </span>
+                    Recherche approfondie
+                  </button>
+                  <span id="deep-hint" className="visually-hidden">
+                    {DEEP_HINT}
+                  </span>
+                </>
+              )}
               <div className="sorts" role="group" aria-label="Trier">
                 {(
                   [
@@ -510,18 +573,36 @@ export function FeedPage({
               {feed.error}
             </Notice>
           )}
+          {query && searching === "loading" && deepOn && (
+            <p className="deep-wait" aria-hidden="true">
+              Re-classement des passages en cours… quelques secondes.
+            </p>
+          )}
           {query && searching === "loading" && (
-            <LoadingState label="Recherche en cours…" rows={4} />
+            <LoadingState
+              label={
+                deepOn
+                  ? "Recherche approfondie en cours, quelques secondes…"
+                  : "Recherche en cours…"
+              }
+              rows={4}
+            />
           )}
           {query && searching === "error" && (
             <Notice
               title="La recherche n’a pas abouti."
               onRetry={() => setAttempt((a) => a + 1)}
               actions={
-                near && (
-                  <button className="text-button" onClick={() => onNear(false)}>
-                    Chercher les mots exacts
+                deepOn ? (
+                  <button className="text-button" onClick={() => onDeep(false)}>
+                    Revenir à la recherche normale
                   </button>
+                ) : (
+                  near && (
+                    <button className="text-button" onClick={() => onNear(false)}>
+                      Chercher les mots exacts
+                    </button>
+                  )
                 )
               }
             >
@@ -550,6 +631,13 @@ export function FeedPage({
               Chaque nouvel article apparaît ici en quelques secondes, sans
               recharger la page.
             </EmptyState>
+          )}
+          {query && (
+            <div className="deep-status" role="status">
+              {searching === "ready" && deepShown && (
+                <DeepSummary usage={deepShown.usage} hits={hits || []} />
+              )}
+            </div>
           )}
           {empty && (
             <div className="feed-none">
@@ -711,6 +799,7 @@ function FeedRow({
             </ul>
           )}
           {hit?.near && <span className="row-near">Même sujet, autres mots</span>}
+          {hit?.why && <WhyTag why={hit.why} />}
           {item.updated_at && <span className="row-updated">Corrigé</span>}
         </div>
         {hit && hit.excerpt && (
@@ -720,5 +809,80 @@ function FeedRow({
         )}
       </div>
     </li>
+  );
+}
+
+const DEEP_HINT =
+  "Re-classe les résultats selon leur chance de répondre à la recherche. Plus lent, quelques secondes, et peut faire un appel payant.";
+
+function deepError(error: APIError) {
+  if (error.code === "search_deadline_exceeded" || error.status === 504)
+    return "La recherche approfondie a pris trop de temps. Réessayez, ou revenez à la recherche normale.";
+  if (error.code === "unsupported_profile")
+    return "Le moteur ne propose plus la recherche approfondie. Revenez à la recherche normale.";
+  if (error.code === "retrieval_plugin_invalid" || error.status === 502)
+    return "Le re-classement a renvoyé une réponse invalide. Réessayez, ou revenez à la recherche normale.";
+  if (error.status === 503)
+    return "La recherche approfondie est momentanément indisponible. Réessayez, ou revenez à la recherche normale.";
+  return error.message;
+}
+
+/** One line on what a deep search did: re-ranked or not, time, paid calls. */
+function DeepSummary({ usage, hits }: { usage?: SearchUsage; hits: Hit[] }) {
+  const fallback = hits.find((h) => h.why?.kind === "fallback")?.why;
+  return (
+    <div className="deep-summary" data-fallback={!!fallback || undefined}>
+      <p>
+        <span className="deep-summary-name">Recherche approfondie</span>
+        <span aria-hidden="true"> · </span>
+        <span>
+          {fallback ? "non re-classée" : "re-classée par pertinence"}
+        </span>
+        {usage && (
+          <>
+            <span aria-hidden="true"> · </span>
+            <span>en {elapsed(usage.elapsed_ms)}</span>
+            <span aria-hidden="true"> · </span>
+            <span className="deep-paid">
+              <Coins size={13} aria-hidden="true" />
+              {paid(usage)}
+            </span>
+          </>
+        )}
+      </p>
+      {fallback?.kind === "fallback" && (
+        <p className="deep-fallback">
+          Le re-classement n’a pas pu se faire : {fallback.reason}. Les
+          résultats suivent l’ordre de la recherche avec idées proches.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Why a deep search ranked this article here. */
+function WhyTag({ why }: { why: Why }) {
+  if (why.kind === "score")
+    return (
+      <span
+        className="row-why"
+        title={`Probabilité, estimée par le re-classement, que ce passage réponde à la recherche (${why.text})`}
+      >
+        <span className="why-meter" aria-hidden="true">
+          <span style={{ width: `${Math.round(why.probability * 100)}%` }} />
+        </span>
+        {asPercent(why.probability)} de chances de répondre
+      </span>
+    );
+  if (why.kind === "fallback")
+    return (
+      <span className="row-why" data-kind="fallback" title={why.text}>
+        Non re-classé
+      </span>
+    );
+  return (
+    <span className="row-why" data-kind="other" title={why.text}>
+      {why.text.length > 80 ? why.text.slice(0, 79) + "…" : why.text}
+    </span>
   );
 }

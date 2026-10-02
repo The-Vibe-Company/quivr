@@ -453,6 +453,13 @@ mark {
 .near-switch[aria-checked="true"] .switch-knob {
   left: 12px;
 }
+.near-switch[aria-disabled="true"] {
+  color: var(--ink-faint);
+  cursor: default;
+}
+.near-switch[aria-disabled="true"] .switch-track {
+  opacity: 0.55;
+}
 .sorts {
   display: flex;
   gap: 2px;
@@ -641,6 +648,71 @@ mark {
 .row-updated {
   color: var(--warning);
   font-weight: 600;
+}
+/* Recherche approfondie: why a hit ranks here, and what the search spent */
+.row-why {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row-why[data-kind="other"] {
+  white-space: normal;
+}
+.why-meter {
+  position: relative;
+  width: 34px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.why-meter > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.deep-status:empty {
+  display: none;
+}
+.deep-summary {
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+.deep-summary p {
+  margin: 0;
+}
+.deep-summary p:first-child > span {
+  white-space: nowrap;
+}
+.deep-summary-name {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.deep-paid {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.deep-paid svg {
+  flex: none;
+}
+.deep-summary .deep-fallback {
+  margin-top: 4px;
+  max-width: 72ch;
+  color: var(--warning);
+}
+.deep-wait {
+  margin: 20px 22px -8px;
+  font-size: 12.5px;
+  color: var(--ink-faint);
 }
 .row-excerpt {
   margin: 7px 0 0;

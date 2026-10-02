@@ -7,7 +7,8 @@ import { FeedPage, type Filter } from "./components/feed/FeedPage";
 import { AlertsView } from "./components/alerts/AlertsView";
 import { AdminView } from "./components/admin/AdminView";
 import { Notice } from "./components/ui";
-import { APIError, login, session } from "./lib/search";
+import { APIError, login, searchProfiles, session } from "./lib/search";
+import { offersDeep } from "./lib/deep";
 import { useAlertList, useConnectorList, useFeedStream } from "./lib/workspace";
 import { useReadState } from "./lib/readState";
 import { groupSources } from "./components/connectors/SourceList";
@@ -175,6 +176,10 @@ function Dashboard({
   const [view, setView] = useState<View>(initial.view);
   const [input, setInput] = useState(initial.query);
   const [near, setNear] = useState(initial.near);
+  // "Recherche approfondie": offered when the engine serves it, off at every
+  // visit, and never written to the address or to storage.
+  const [deepOffered, setDeepOffered] = useState(false);
+  const [deep, setDeep] = useState(false);
   const [doc, setDoc] = useState<Doc | null>(initial.doc);
   const [alert, setAlert] = useState<string | null>(initial.alert);
   const [version, setVersion] = useState<string | null>(initial.version);
@@ -204,6 +209,14 @@ function Dashboard({
     () => new Map(feed.items.map((item) => [item.record_id, item.title])),
     [feed.items],
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    searchProfiles(controller.signal)
+      .then((list) => setDeepOffered(offersDeep(list.items || [])))
+      .catch(() => setDeepOffered(false));
+    return () => controller.abort();
+  }, []);
 
   const notify = useCallback((text: string) => {
     setToast({ text, at: Date.now() });
@@ -422,6 +435,9 @@ function Dashboard({
           query={query}
           near={near}
           onNear={setNear}
+          deepOffered={deepOffered}
+          deep={deep}
+          onDeep={setDeep}
           filter={filter}
           onFilter={setFilter}
           doc={doc}

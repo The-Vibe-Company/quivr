@@ -29,10 +29,27 @@ export interface SearchResult {
   };
   embedding_artifact_id?: string;
   vector_space_id?: string;
+  /** Why the retrieval plugin ranked this hit here, when it says so. */
+  explanation?: string;
+}
+/** What a search answered by a retrieval plugin spent. */
+export interface SearchUsage {
+  rounds: number;
+  elapsed_ms: number;
+  paid_calls: number;
+  cost_cents: number;
 }
 export interface SearchResponse {
   items: SearchResult[];
   retrieval_profile: { name: string; version: string };
+  usage?: SearchUsage;
+}
+export interface SearchProfile {
+  name: string;
+  description?: string;
+  max_latency_ms?: number;
+  max_cost_cents?: number;
+  provider: { kind: "engine" | "plugin"; plugin_id?: string; plugin_version?: string };
 }
 export interface DocumentDetail {
   record_id: string;

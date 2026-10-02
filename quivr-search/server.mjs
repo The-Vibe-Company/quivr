@@ -117,7 +117,7 @@ async function jsonBody(req) {
     throw fail(400, "Requête invalide.");
   }
 }
-async function upstream(path, method = "GET", body) {
+async function upstream(path, method = "GET", body, timeout = 8000) {
   const response = await fetch(core + path, {
     method,
     headers: {
@@ -125,7 +125,7 @@ async function upstream(path, method = "GET", body) {
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(timeout),
     redirect: "error",
   });
   const chunks = [];
@@ -376,7 +376,12 @@ const server = http.createServer(async (req, res) => {
           body.corpus_ids[0] !== id
         )
           throw fail(403, "Corpus non autorisé.");
-        response = await upstream(path, "POST", body);
+        // The body goes through unchanged, profile included. A deep search
+        // may take up to the engine's hard bound, 9 s, before it answers.
+        response = await upstream(path, "POST", body, 10000);
+      } else if (path === "/v0/search/profiles" && req.method === "GET") {
+        // The profiles the engine answers: the page offers deep only when listed.
+        response = await upstream(path);
       } else if (path === "/v0/records" && req.method === "POST") {
         const body = await jsonBody(req);
         if (

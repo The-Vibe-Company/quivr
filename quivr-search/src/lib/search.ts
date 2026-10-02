@@ -1,4 +1,10 @@
-import type { DocumentDetail, Mode, Receipt, SearchResponse } from "../types";
+import type {
+  DocumentDetail,
+  Mode,
+  Receipt,
+  SearchProfile,
+  SearchResponse,
+} from "../types";
 export class APIError extends Error {
   constructor(
     public status: number,
@@ -56,13 +62,14 @@ export const search = (
   signal?: AbortSignal,
   limit = 10,
   sources: string[] = [],
+  profile: "default" | "deep" = "default",
 ) =>
   request<SearchResponse>(
     "/v0/search",
     {
       query,
       mode,
-      profile: "default",
+      profile,
       limit,
       corpus_ids: [corpus],
       // The engine ranks within these sources, before the limit.
@@ -70,6 +77,8 @@ export const search = (
     },
     signal,
   );
+export const searchProfiles = (signal?: AbortSignal) =>
+  request<{ items: SearchProfile[] }>("/v0/search/profiles", undefined, signal);
 export const fetchDocument = (
   record: string,
   version: string,

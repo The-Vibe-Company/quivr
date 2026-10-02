@@ -110,6 +110,48 @@ async function startDemo(t, upstreamPort, env = {}) {
   return `http://127.0.0.1:${port}`;
 }
 
+test("search relays the engine's profile list and the chosen profile", async (t) => {
+  const seen = [];
+  const profiles = {
+    items: [
+      { name: "default", provider: { kind: "plugin", plugin_id: "core.retrieve" } },
+      { name: "deep", provider: { kind: "plugin", plugin_id: "jev.rerank" } },
+    ],
+  };
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    seen.push({ method: req.method, url: req.url, body: Buffer.concat(chunks).toString("utf8") });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify(
+        req.url === "/v0/search/profiles"
+          ? profiles
+          : { items: [], retrieval_profile: { name: "deep", version: "v" } },
+      ),
+    );
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+
+  const list = await fetch(base + "/v0/search/profiles");
+  assert.equal(list.status, 200);
+  assert.deepEqual(await list.json(), profiles);
+  const body = { query: "q", mode: "hybrid", profile: "deep", limit: 50, corpus_ids: ["demo"] };
+  const search = await fetch(base + "/v0/search", {
+    method: "POST",
+    headers: { Origin: base, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal(search.status, 200);
+  assert.deepEqual(JSON.parse(seen.at(-1).body), body);
+});
+
 test("connector routes are fenced to the demo corpus and mutations must be same-origin", async (t) => {
   const seen = [];
   const upstream = http.createServer(async (req, res) => {
