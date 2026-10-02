@@ -12,7 +12,7 @@ import (
 )
 
 func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	raw, ok := decodeRequest(w, r, a.searchSchema)
+	raw, ok := decodeRequest(w, r, a.schemas["SearchRequest"])
 	if !ok {
 		return
 	}

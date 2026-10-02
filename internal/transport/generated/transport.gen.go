@@ -3912,2746 +3912,1037 @@ type ServerInterface interface {
 	ConfirmUpload(w http.ResponseWriter, r *http.Request, uploadId string)
 }
 
-// ServerInterfaceWrapper converts contexts to parameters.
+// ServerInterfaceWrapper passes transport inputs without eagerly parsing them.
+// Services authorize before invoking the bounded contract validators.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
 	HandlerMiddlewares []MiddlewareFunc
 	ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
 }
-
 type MiddlewareFunc func(http.Handler) http.Handler
 
-// ListActivePlugins operation middleware
 func (siw *ServerInterfaceWrapper) ListActivePlugins(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListActivePlugins(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RequestBackfill operation middleware
 func (siw *ServerInterfaceWrapper) RequestBackfill(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RequestBackfill(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListAdminDocuments operation middleware
 func (siw *ServerInterfaceWrapper) ListAdminDocuments(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListAdminDocumentsParams
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAdminDocuments(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetDocumentTimeline operation middleware
 func (siw *ServerInterfaceWrapper) GetDocumentTimeline(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "version_id" -------------
-	var versionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "version_id", r.PathValue("version_id"), &versionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version_id", Err: err})
-		return
-	}
+	versionId := string(r.PathValue("version_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDocumentTimeline(w, r, versionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListPluginRegistrations operation middleware
 func (siw *ServerInterfaceWrapper) ListPluginRegistrations(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPluginRegistrations(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RegisterPlugin operation middleware
 func (siw *ServerInterfaceWrapper) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterPlugin(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetActivePipelinePlan operation middleware
 func (siw *ServerInterfaceWrapper) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetActivePipelinePlan(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RollbackPipelinePlan operation middleware
 func (siw *ServerInterfaceWrapper) RollbackPipelinePlan(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RollbackPipelinePlan(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListPipelinePlans operation middleware
 func (siw *ServerInterfaceWrapper) ListPipelinePlans(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListPipelinePlansParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPipelinePlans(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetPipelinePlan operation middleware
 func (siw *ServerInterfaceWrapper) GetPipelinePlan(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "plan_id" -------------
-	var planId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "plan_id", r.PathValue("plan_id"), &planId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plan_id", Err: err})
-		return
-	}
+	planId := string(r.PathValue("plan_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPipelinePlan(w, r, planId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetPluginRegistration operation middleware
 func (siw *ServerInterfaceWrapper) GetPluginRegistration(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "registration_id" -------------
-	var registrationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "registration_id", r.PathValue("registration_id"), &registrationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "registration_id", Err: err})
-		return
-	}
+	registrationId := string(r.PathValue("registration_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPluginRegistration(w, r, registrationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ActivatePlugin operation middleware
 func (siw *ServerInterfaceWrapper) ActivatePlugin(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "registration_id" -------------
-	var registrationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "registration_id", r.PathValue("registration_id"), &registrationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "registration_id", Err: err})
-		return
-	}
+	registrationId := string(r.PathValue("registration_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ActivatePlugin(w, r, registrationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListQuarantinedVersions operation middleware
 func (siw *ServerInterfaceWrapper) ListQuarantinedVersions(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListQuarantinedVersionsParams
-
-	// ------------- Optional query parameter "corpus_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "plugin" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "plugin", r.URL.Query(), &params.Plugin, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "plugin"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "code" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", r.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "quarantined_after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "quarantined_after", r.URL.Query(), &params.QuarantinedAfter, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "quarantined_after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "quarantined_after", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "quarantined_before" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "quarantined_before", r.URL.Query(), &params.QuarantinedBefore, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "quarantined_before"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "quarantined_before", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListQuarantinedVersions(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ReprocessQuarantine operation middleware
 func (siw *ServerInterfaceWrapper) ReprocessQuarantine(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReprocessQuarantine(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// PromoteVectorSpace operation middleware
 func (siw *ServerInterfaceWrapper) PromoteVectorSpace(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "vector_space_id" -------------
-	var vectorSpaceId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "vector_space_id", r.PathValue("vector_space_id"), &vectorSpaceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vector_space_id", Err: err})
-		return
-	}
+	vectorSpaceId := string(r.PathValue("vector_space_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PromoteVectorSpace(w, r, vectorSpaceId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListConnectorPushStats operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectorPushStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListConnectorPushStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "connector_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "connector_id", r.URL.Query(), &params.ConnectorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "connector_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListConnectorPushStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetMatchStats operation middleware
 func (siw *ServerInterfaceWrapper) GetMatchStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetMatchStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMatchStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetPluginCallStats operation middleware
 func (siw *ServerInterfaceWrapper) GetPluginCallStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetPluginCallStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPluginCallStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetReceivedStats operation middleware
 func (siw *ServerInterfaceWrapper) GetReceivedStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetReceivedStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReceivedStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetSearchStats operation middleware
 func (siw *ServerInterfaceWrapper) GetSearchStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetSearchStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSearchStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetStepStats operation middleware
 func (siw *ServerInterfaceWrapper) GetStepStats(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetStepStatsParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetStepStats(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetTopQueries operation middleware
 func (siw *ServerInterfaceWrapper) GetTopQueries(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params GetTopQueriesParams
-
-	// ------------- Optional query parameter "window" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetTopQueries(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListEvaluationBacklog operation middleware
 func (siw *ServerInterfaceWrapper) ListEvaluationBacklog(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListEvaluationBacklogParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListEvaluationBacklog(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RetireEvaluations operation middleware
 func (siw *ServerInterfaceWrapper) RetireEvaluations(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RetireEvaluations(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetEvaluationRetirement operation middleware
 func (siw *ServerInterfaceWrapper) GetEvaluationRetirement(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "retirement_id" -------------
-	var retirementId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "retirement_id", r.PathValue("retirement_id"), &retirementId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "retirement_id", Err: err})
-		return
-	}
+	retirementId := string(r.PathValue("retirement_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetEvaluationRetirement(w, r, retirementId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// MigrateSubscriptionEvaluators operation middleware
 func (siw *ServerInterfaceWrapper) MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.MigrateSubscriptionEvaluators(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetBlob operation middleware
 func (siw *ServerInterfaceWrapper) GetBlob(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "blob_id" -------------
-	var blobId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "blob_id", r.PathValue("blob_id"), &blobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "blob_id", Err: err})
-		return
-	}
+	blobId := string(r.PathValue("blob_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBlob(w, r, blobId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// PollChanges operation middleware
 func (siw *ServerInterfaceWrapper) PollChanges(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params PollChangesParams
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Required query parameter "corpus_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PollChanges(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// StreamChanges operation middleware
 func (siw *ServerInterfaceWrapper) StreamChanges(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params StreamChangesParams
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Required query parameter "corpus_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		}
-		return
-	}
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Last-Event-ID" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Last-Event-ID")]; found {
-		var LastEventID string
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Last-Event-ID", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Last-Event-ID", valueList[0], &LastEventID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Last-Event-ID", Err: err})
-			return
-		}
-
-		params.LastEventID = &LastEventID
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StreamChanges(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListConnectorKinds operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectorKinds(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListConnectorKinds(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RelayConnectorChallenge operation middleware
 func (siw *ServerInterfaceWrapper) RelayConnectorChallenge(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RelayConnectorChallenge(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RelayConnectorDelivery operation middleware
 func (siw *ServerInterfaceWrapper) RelayConnectorDelivery(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RelayConnectorDelivery(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListConnectors operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectors(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListConnectorsParams
-
-	// ------------- Optional query parameter "corpus_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListConnectors(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateConnector operation middleware
 func (siw *ServerInterfaceWrapper) CreateConnector(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateConnector(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetConnector operation middleware
 func (siw *ServerInterfaceWrapper) GetConnector(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetConnector(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ChallengeConnectorAPI operation middleware
 func (siw *ServerInterfaceWrapper) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "path" -------------
-	var path string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "path", r.PathValue("path"), &path, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
+	connectorId := string(r.PathValue("connector_id"))
+	path := string(r.PathValue("path"))
 	var params ChallengeConnectorAPIParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey string
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = &IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ChallengeConnectorAPI(w, r, connectorId, path, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// PushConnectorAPI operation middleware
 func (siw *ServerInterfaceWrapper) PushConnectorAPI(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "path" -------------
-	var path string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "path", r.PathValue("path"), &path, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
+	connectorId := string(r.PathValue("connector_id"))
+	path := string(r.PathValue("path"))
 	var params PushConnectorAPIParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey string
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = &IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PushConnectorAPI(w, r, connectorId, path, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ReplaceConnectorCredential operation middleware
 func (siw *ServerInterfaceWrapper) ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReplaceConnectorCredential(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// DisableConnector operation middleware
 func (siw *ServerInterfaceWrapper) DisableConnector(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DisableConnector(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RequestConnectorRun operation middleware
 func (siw *ServerInterfaceWrapper) RequestConnectorRun(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RequestConnectorRun(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ChangeConnectorSchedule operation middleware
 func (siw *ServerInterfaceWrapper) ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ChangeConnectorSchedule(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListConnectorTokens operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectorTokens(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
+	connectorId := string(r.PathValue("connector_id"))
 	var params ListConnectorTokensParams
-
-	// ------------- Optional query parameter "after" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListConnectorTokens(w, r, connectorId, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateConnectorToken operation middleware
 func (siw *ServerInterfaceWrapper) CreateConnectorToken(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateConnectorToken(w, r, connectorId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RevokeConnectorToken operation middleware
 func (siw *ServerInterfaceWrapper) RevokeConnectorToken(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "token_id" -------------
-	var tokenId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "token_id", r.PathValue("token_id"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
+	tokenId := string(r.PathValue("token_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeConnectorToken(w, r, connectorId, tokenId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RotateConnectorToken operation middleware
 func (siw *ServerInterfaceWrapper) RotateConnectorToken(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "connector_id" -------------
-	var connectorId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "token_id" -------------
-	var tokenId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "token_id", r.PathValue("token_id"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token_id", Err: err})
-		return
-	}
+	connectorId := string(r.PathValue("connector_id"))
+	tokenId := string(r.PathValue("token_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RotateConnectorToken(w, r, connectorId, tokenId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListCorpora operation middleware
 func (siw *ServerInterfaceWrapper) ListCorpora(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListCorporaParams
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListCorpora(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateCorpus operation middleware
 func (siw *ServerInterfaceWrapper) CreateCorpus(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateCorpus(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetCorpus operation middleware
 func (siw *ServerInterfaceWrapper) GetCorpus(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "corpus_id" -------------
-	var corpusId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "corpus_id", r.PathValue("corpus_id"), &corpusId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		return
-	}
+	corpusId := string(r.PathValue("corpus_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCorpus(w, r, corpusId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RebuildCorpusProjection operation middleware
 func (siw *ServerInterfaceWrapper) RebuildCorpusProjection(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "corpus_id" -------------
-	var corpusId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "corpus_id", r.PathValue("corpus_id"), &corpusId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		return
-	}
+	corpusId := string(r.PathValue("corpus_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RebuildCorpusProjection(w, r, corpusId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ConfigureRetrieval operation middleware
 func (siw *ServerInterfaceWrapper) ConfigureRetrieval(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "corpus_id" -------------
-	var corpusId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "corpus_id", r.PathValue("corpus_id"), &corpusId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		return
-	}
+	corpusId := string(r.PathValue("corpus_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ConfigureRetrieval(w, r, corpusId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListVectorSpaces operation middleware
 func (siw *ServerInterfaceWrapper) ListVectorSpaces(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "corpus_id" -------------
-	var corpusId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "corpus_id", r.PathValue("corpus_id"), &corpusId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		return
-	}
+	corpusId := string(r.PathValue("corpus_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListVectorSpaces(w, r, corpusId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetDelivery operation middleware
 func (siw *ServerInterfaceWrapper) GetDelivery(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "delivery_id" -------------
-	var deliveryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "delivery_id", r.PathValue("delivery_id"), &deliveryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "delivery_id", Err: err})
-		return
-	}
+	deliveryId := string(r.PathValue("delivery_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDelivery(w, r, deliveryId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListDeliveryAttempts operation middleware
 func (siw *ServerInterfaceWrapper) ListDeliveryAttempts(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "delivery_id" -------------
-	var deliveryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "delivery_id", r.PathValue("delivery_id"), &deliveryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "delivery_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
+	deliveryId := string(r.PathValue("delivery_id"))
 	var params ListDeliveryAttemptsParams
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDeliveryAttempts(w, r, deliveryId, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetReceipt operation middleware
 func (siw *ServerInterfaceWrapper) GetReceipt(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "receipt_id" -------------
-	var receiptId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "receipt_id", r.PathValue("receipt_id"), &receiptId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "receipt_id", Err: err})
-		return
-	}
+	receiptId := string(r.PathValue("receipt_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReceipt(w, r, receiptId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListMatches operation middleware
 func (siw *ServerInterfaceWrapper) ListMatches(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListMatchesParams
-
-	// ------------- Required query parameter "subscription_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "subscription_id", r.URL.Query(), &params.SubscriptionId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "subscription_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMatches(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetMatch operation middleware
 func (siw *ServerInterfaceWrapper) GetMatch(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "match_id" -------------
-	var matchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "match_id", r.PathValue("match_id"), &matchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "match_id", Err: err})
-		return
-	}
+	matchId := string(r.PathValue("match_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMatch(w, r, matchId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetOperation operation middleware
 func (siw *ServerInterfaceWrapper) GetOperation(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "operation_id" -------------
-	var operationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
-		return
-	}
+	operationId := string(r.PathValue("operation_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOperation(w, r, operationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CancelOperation operation middleware
 func (siw *ServerInterfaceWrapper) CancelOperation(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "operation_id" -------------
-	var operationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
-		return
-	}
+	operationId := string(r.PathValue("operation_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelOperation(w, r, operationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// PauseOperation operation middleware
 func (siw *ServerInterfaceWrapper) PauseOperation(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "operation_id" -------------
-	var operationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
-		return
-	}
+	operationId := string(r.PathValue("operation_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PauseOperation(w, r, operationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RerunOperation operation middleware
 func (siw *ServerInterfaceWrapper) RerunOperation(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "operation_id" -------------
-	var operationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
-		return
-	}
+	operationId := string(r.PathValue("operation_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RerunOperation(w, r, operationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ResumeOperation operation middleware
 func (siw *ServerInterfaceWrapper) ResumeOperation(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "operation_id" -------------
-	var operationId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "operation_id", r.PathValue("operation_id"), &operationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "operation_id", Err: err})
-		return
-	}
+	operationId := string(r.PathValue("operation_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResumeOperation(w, r, operationId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListRecords operation middleware
 func (siw *ServerInterfaceWrapper) ListRecords(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListRecordsParams
-
-	// ------------- Required query parameter "corpus_id" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "corpus_id", r.URL.Query(), &params.CorpusId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "corpus_id"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "corpus_id", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListRecords(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// IngestRecord operation middleware
 func (siw *ServerInterfaceWrapper) IngestRecord(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.IngestRecord(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// IngestBatch operation middleware
 func (siw *ServerInterfaceWrapper) IngestBatch(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.IngestBatch(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// WithdrawRecord operation middleware
 func (siw *ServerInterfaceWrapper) WithdrawRecord(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.WithdrawRecord(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetRecord operation middleware
 func (siw *ServerInterfaceWrapper) GetRecord(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "record_id" -------------
-	var recordId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "record_id", r.PathValue("record_id"), &recordId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "record_id", Err: err})
-		return
-	}
+	recordId := string(r.PathValue("record_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRecord(w, r, recordId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetVersion(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "record_id" -------------
-	var recordId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "record_id", r.PathValue("record_id"), &recordId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "record_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "version_id" -------------
-	var versionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "version_id", r.PathValue("version_id"), &versionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version_id", Err: err})
-		return
-	}
+	recordId := string(r.PathValue("record_id"))
+	versionId := string(r.PathValue("version_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetVersion(w, r, recordId, versionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateSavedQuery operation middleware
 func (siw *ServerInterfaceWrapper) CreateSavedQuery(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSavedQuery(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetSavedQuery operation middleware
 func (siw *ServerInterfaceWrapper) GetSavedQuery(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "saved_query_id" -------------
-	var savedQueryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
-		return
-	}
+	savedQueryId := string(r.PathValue("saved_query_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSavedQuery(w, r, savedQueryId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteSavedQuery operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSavedQuery(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "saved_query_id" -------------
-	var savedQueryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
-		return
-	}
+	savedQueryId := string(r.PathValue("saved_query_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteSavedQuery(w, r, savedQueryId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RenameSavedQuery operation middleware
 func (siw *ServerInterfaceWrapper) RenameSavedQuery(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "saved_query_id" -------------
-	var savedQueryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
-		return
-	}
+	savedQueryId := string(r.PathValue("saved_query_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameSavedQuery(w, r, savedQueryId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateSavedQueryVersion operation middleware
 func (siw *ServerInterfaceWrapper) CreateSavedQueryVersion(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "saved_query_id" -------------
-	var savedQueryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
-		return
-	}
+	savedQueryId := string(r.PathValue("saved_query_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSavedQueryVersion(w, r, savedQueryId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetSavedQueryVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetSavedQueryVersion(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "saved_query_id" -------------
-	var savedQueryId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "saved_query_id", r.PathValue("saved_query_id"), &savedQueryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "saved_query_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "version_id" -------------
-	var versionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "version_id", r.PathValue("version_id"), &versionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version_id", Err: err})
-		return
-	}
+	savedQueryId := string(r.PathValue("saved_query_id"))
+	versionId := string(r.PathValue("version_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSavedQueryVersion(w, r, savedQueryId, versionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// SearchRecords operation middleware
 func (siw *ServerInterfaceWrapper) SearchRecords(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SearchRecords(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListSearchProfiles operation middleware
 func (siw *ServerInterfaceWrapper) ListSearchProfiles(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListSearchProfiles(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// PreviewSubscription operation middleware
 func (siw *ServerInterfaceWrapper) PreviewSubscription(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PreviewSubscription(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ListSubscriptions operation middleware
 func (siw *ServerInterfaceWrapper) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
 	var params ListSubscriptionsParams
-
-	// ------------- Required query parameter "owner" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "owner", r.URL.Query(), &params.Owner, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "owner"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "owner", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "page_cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_cursor", r.URL.Query(), &params.PageCursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_cursor"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_cursor", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListSubscriptions(w, r, params)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateSubscription operation middleware
 func (siw *ServerInterfaceWrapper) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSubscription(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetSubscription operation middleware
 func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSubscription(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteSubscription operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteSubscription(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// DisableSubscription operation middleware
 func (siw *ServerInterfaceWrapper) DisableSubscription(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DisableSubscription(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// EnableSubscription operation middleware
 func (siw *ServerInterfaceWrapper) EnableSubscription(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.EnableSubscription(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// RenameSubscription operation middleware
 func (siw *ServerInterfaceWrapper) RenameSubscription(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameSubscription(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateSubscriptionVersion operation middleware
 func (siw *ServerInterfaceWrapper) CreateSubscriptionVersion(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSubscriptionVersion(w, r, subscriptionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetSubscriptionVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetSubscriptionVersion(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", r.PathValue("subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "version_id" -------------
-	var versionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "version_id", r.PathValue("version_id"), &versionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version_id", Err: err})
-		return
-	}
+	subscriptionId := string(r.PathValue("subscription_id"))
+	versionId := string(r.PathValue("version_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSubscriptionVersion(w, r, subscriptionId, versionId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// CreateUpload operation middleware
 func (siw *ServerInterfaceWrapper) CreateUpload(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateUpload(w, r)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// GetUpload operation middleware
 func (siw *ServerInterfaceWrapper) GetUpload(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "upload_id" -------------
-	var uploadId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "upload_id", r.PathValue("upload_id"), &uploadId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "upload_id", Err: err})
-		return
-	}
+	uploadId := string(r.PathValue("upload_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetUpload(w, r, uploadId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
 }
 
-// ConfirmUpload operation middleware
 func (siw *ServerInterfaceWrapper) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "upload_id" -------------
-	var uploadId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "upload_id", r.PathValue("upload_id"), &uploadId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "upload_id", Err: err})
-		return
-	}
+	uploadId := string(r.PathValue("upload_id"))
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ConfirmUpload(w, r, uploadId)
 	}))
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
 	}
-
 	handler.ServeHTTP(w, r)
-}
-
-type UnescapedCookieParamError struct {
-	ParamName string
-	Err       error
-}
-
-func (e *UnescapedCookieParamError) Error() string {
-	return fmt.Sprintf("error unescaping cookie parameter '%s'", e.ParamName)
-}
-
-func (e *UnescapedCookieParamError) Unwrap() error {
-	return e.Err
-}
-
-type UnmarshalingParamError struct {
-	ParamName string
-	Err       error
-}
-
-func (e *UnmarshalingParamError) Error() string {
-	return fmt.Sprintf("Error unmarshaling parameter %s as JSON: %s", e.ParamName, e.Err.Error())
-}
-
-func (e *UnmarshalingParamError) Unwrap() error {
-	return e.Err
-}
-
-type RequiredParamError struct {
-	ParamName string
-}
-
-func (e *RequiredParamError) Error() string {
-	return fmt.Sprintf("Query argument %s is required, but not found", e.ParamName)
-}
-
-type RequiredHeaderError struct {
-	ParamName string
-	Err       error
-}
-
-func (e *RequiredHeaderError) Error() string {
-	return fmt.Sprintf("Header parameter %s is required, but not found", e.ParamName)
-}
-
-func (e *RequiredHeaderError) Unwrap() error {
-	return e.Err
-}
-
-type InvalidParamFormatError struct {
-	ParamName string
-	Err       error
-}
-
-func (e *InvalidParamFormatError) Error() string {
-	return fmt.Sprintf("Invalid format for parameter %s: %s", e.ParamName, e.Err.Error())
-}
-
-func (e *InvalidParamFormatError) Unwrap() error {
-	return e.Err
-}
-
-type TooManyValuesForParamError struct {
-	ParamName string
-	Count     int
-}
-
-func (e *TooManyValuesForParamError) Error() string {
-	return fmt.Sprintf("Expected one value for %s, got %d", e.ParamName, e.Count)
 }
 
 // Handler creates http.Handler with routing matching OpenAPI spec.
@@ -6798,10 +5089,20 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 }
 
 type ListActivePluginsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 }
 
 type ListActivePluginsResponseObject interface {
 	VisitListActivePluginsResponse(w http.ResponseWriter) error
+}
+
+// ListActivePluginsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListActivePluginsResponseFunc func(http.ResponseWriter)
+
+func (response ListActivePluginsResponseFunc) VisitListActivePluginsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListActivePlugins200JSONResponse ActivePluginList
@@ -6836,11 +5137,21 @@ func (response ListActivePluginsdefaultJSONResponse) VisitListActivePluginsRespo
 }
 
 type RequestBackfillRequestObject struct {
-	Body *RequestBackfillJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *RequestBackfillJSONRequestBody
 }
 
 type RequestBackfillResponseObject interface {
 	VisitRequestBackfillResponse(w http.ResponseWriter) error
+}
+
+// RequestBackfillResponseFunc writes a deferred response, including streams and plugin answers.
+type RequestBackfillResponseFunc func(http.ResponseWriter)
+
+func (response RequestBackfillResponseFunc) VisitRequestBackfillResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RequestBackfill200JSONResponse BackfillEstimate
@@ -6897,11 +5208,21 @@ func (response RequestBackfilldefaultJSONResponse) VisitRequestBackfillResponse(
 }
 
 type ListAdminDocumentsRequestObject struct {
-	Params ListAdminDocumentsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListAdminDocumentsParams
 }
 
 type ListAdminDocumentsResponseObject interface {
 	VisitListAdminDocumentsResponse(w http.ResponseWriter) error
+}
+
+// ListAdminDocumentsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListAdminDocumentsResponseFunc func(http.ResponseWriter)
+
+func (response ListAdminDocumentsResponseFunc) VisitListAdminDocumentsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListAdminDocuments200JSONResponse AdminDocumentPage
@@ -6936,11 +5257,21 @@ func (response ListAdminDocumentsdefaultJSONResponse) VisitListAdminDocumentsRes
 }
 
 type GetDocumentTimelineRequestObject struct {
-	VersionId string `json:"version_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	VersionId   string `json:"version_id"`
 }
 
 type GetDocumentTimelineResponseObject interface {
 	VisitGetDocumentTimelineResponse(w http.ResponseWriter) error
+}
+
+// GetDocumentTimelineResponseFunc writes a deferred response, including streams and plugin answers.
+type GetDocumentTimelineResponseFunc func(http.ResponseWriter)
+
+func (response GetDocumentTimelineResponseFunc) VisitGetDocumentTimelineResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetDocumentTimeline200JSONResponse DocumentTimeline
@@ -6975,10 +5306,20 @@ func (response GetDocumentTimelinedefaultJSONResponse) VisitGetDocumentTimelineR
 }
 
 type ListPluginRegistrationsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 }
 
 type ListPluginRegistrationsResponseObject interface {
 	VisitListPluginRegistrationsResponse(w http.ResponseWriter) error
+}
+
+// ListPluginRegistrationsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListPluginRegistrationsResponseFunc func(http.ResponseWriter)
+
+func (response ListPluginRegistrationsResponseFunc) VisitListPluginRegistrationsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListPluginRegistrations200JSONResponse PluginRegistrationList
@@ -7013,11 +5354,21 @@ func (response ListPluginRegistrationsdefaultJSONResponse) VisitListPluginRegist
 }
 
 type RegisterPluginRequestObject struct {
-	Body *RegisterPluginJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *RegisterPluginJSONRequestBody
 }
 
 type RegisterPluginResponseObject interface {
 	VisitRegisterPluginResponse(w http.ResponseWriter) error
+}
+
+// RegisterPluginResponseFunc writes a deferred response, including streams and plugin answers.
+type RegisterPluginResponseFunc func(http.ResponseWriter)
+
+func (response RegisterPluginResponseFunc) VisitRegisterPluginResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RegisterPlugin202ResponseHeaders struct {
@@ -7062,10 +5413,20 @@ func (response RegisterPlugindefaultJSONResponse) VisitRegisterPluginResponse(w 
 }
 
 type GetActivePipelinePlanRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 }
 
 type GetActivePipelinePlanResponseObject interface {
 	VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error
+}
+
+// GetActivePipelinePlanResponseFunc writes a deferred response, including streams and plugin answers.
+type GetActivePipelinePlanResponseFunc func(http.ResponseWriter)
+
+func (response GetActivePipelinePlanResponseFunc) VisitGetActivePipelinePlanResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetActivePipelinePlan200JSONResponse PipelinePlan
@@ -7100,11 +5461,21 @@ func (response GetActivePipelinePlandefaultJSONResponse) VisitGetActivePipelineP
 }
 
 type RollbackPipelinePlanRequestObject struct {
-	Body *RollbackPipelinePlanJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *RollbackPipelinePlanJSONRequestBody
 }
 
 type RollbackPipelinePlanResponseObject interface {
 	VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+// RollbackPipelinePlanResponseFunc writes a deferred response, including streams and plugin answers.
+type RollbackPipelinePlanResponseFunc func(http.ResponseWriter)
+
+func (response RollbackPipelinePlanResponseFunc) VisitRollbackPipelinePlanResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RollbackPipelinePlan200JSONResponse PipelinePlan
@@ -7139,11 +5510,21 @@ func (response RollbackPipelinePlandefaultJSONResponse) VisitRollbackPipelinePla
 }
 
 type ListPipelinePlansRequestObject struct {
-	Params ListPipelinePlansParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListPipelinePlansParams
 }
 
 type ListPipelinePlansResponseObject interface {
 	VisitListPipelinePlansResponse(w http.ResponseWriter) error
+}
+
+// ListPipelinePlansResponseFunc writes a deferred response, including streams and plugin answers.
+type ListPipelinePlansResponseFunc func(http.ResponseWriter)
+
+func (response ListPipelinePlansResponseFunc) VisitListPipelinePlansResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListPipelinePlans200JSONResponse PipelinePlanList
@@ -7178,11 +5559,21 @@ func (response ListPipelinePlansdefaultJSONResponse) VisitListPipelinePlansRespo
 }
 
 type GetPipelinePlanRequestObject struct {
-	PlanId string `json:"plan_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	PlanId      string `json:"plan_id"`
 }
 
 type GetPipelinePlanResponseObject interface {
 	VisitGetPipelinePlanResponse(w http.ResponseWriter) error
+}
+
+// GetPipelinePlanResponseFunc writes a deferred response, including streams and plugin answers.
+type GetPipelinePlanResponseFunc func(http.ResponseWriter)
+
+func (response GetPipelinePlanResponseFunc) VisitGetPipelinePlanResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetPipelinePlan200JSONResponse PipelinePlan
@@ -7217,11 +5608,21 @@ func (response GetPipelinePlandefaultJSONResponse) VisitGetPipelinePlanResponse(
 }
 
 type GetPluginRegistrationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	RegistrationId string `json:"registration_id"`
 }
 
 type GetPluginRegistrationResponseObject interface {
 	VisitGetPluginRegistrationResponse(w http.ResponseWriter) error
+}
+
+// GetPluginRegistrationResponseFunc writes a deferred response, including streams and plugin answers.
+type GetPluginRegistrationResponseFunc func(http.ResponseWriter)
+
+func (response GetPluginRegistrationResponseFunc) VisitGetPluginRegistrationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetPluginRegistration200JSONResponse PluginRegistration
@@ -7256,11 +5657,21 @@ func (response GetPluginRegistrationdefaultJSONResponse) VisitGetPluginRegistrat
 }
 
 type ActivatePluginRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	RegistrationId string `json:"registration_id"`
 }
 
 type ActivatePluginResponseObject interface {
 	VisitActivatePluginResponse(w http.ResponseWriter) error
+}
+
+// ActivatePluginResponseFunc writes a deferred response, including streams and plugin answers.
+type ActivatePluginResponseFunc func(http.ResponseWriter)
+
+func (response ActivatePluginResponseFunc) VisitActivatePluginResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ActivatePlugin200JSONResponse PipelinePlan
@@ -7295,11 +5706,21 @@ func (response ActivatePlugindefaultJSONResponse) VisitActivatePluginResponse(w 
 }
 
 type ListQuarantinedVersionsRequestObject struct {
-	Params ListQuarantinedVersionsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListQuarantinedVersionsParams
 }
 
 type ListQuarantinedVersionsResponseObject interface {
 	VisitListQuarantinedVersionsResponse(w http.ResponseWriter) error
+}
+
+// ListQuarantinedVersionsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListQuarantinedVersionsResponseFunc func(http.ResponseWriter)
+
+func (response ListQuarantinedVersionsResponseFunc) VisitListQuarantinedVersionsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListQuarantinedVersions200JSONResponse QuarantinePage
@@ -7334,11 +5755,21 @@ func (response ListQuarantinedVersionsdefaultJSONResponse) VisitListQuarantinedV
 }
 
 type ReprocessQuarantineRequestObject struct {
-	Body *ReprocessQuarantineJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *ReprocessQuarantineJSONRequestBody
 }
 
 type ReprocessQuarantineResponseObject interface {
 	VisitReprocessQuarantineResponse(w http.ResponseWriter) error
+}
+
+// ReprocessQuarantineResponseFunc writes a deferred response, including streams and plugin answers.
+type ReprocessQuarantineResponseFunc func(http.ResponseWriter)
+
+func (response ReprocessQuarantineResponseFunc) VisitReprocessQuarantineResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ReprocessQuarantine200JSONResponse QuarantineReprocessEstimate
@@ -7395,12 +5826,22 @@ func (response ReprocessQuarantinedefaultJSONResponse) VisitReprocessQuarantineR
 }
 
 type PromoteVectorSpaceRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest   *http.Request
 	VectorSpaceId string `json:"vector_space_id"`
 	Body          *PromoteVectorSpaceJSONRequestBody
 }
 
 type PromoteVectorSpaceResponseObject interface {
 	VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error
+}
+
+// PromoteVectorSpaceResponseFunc writes a deferred response, including streams and plugin answers.
+type PromoteVectorSpaceResponseFunc func(http.ResponseWriter)
+
+func (response PromoteVectorSpaceResponseFunc) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type PromoteVectorSpace200JSONResponse VectorSpacePromotion
@@ -7435,11 +5876,21 @@ func (response PromoteVectorSpacedefaultJSONResponse) VisitPromoteVectorSpaceRes
 }
 
 type ListConnectorPushStatsRequestObject struct {
-	Params ListConnectorPushStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListConnectorPushStatsParams
 }
 
 type ListConnectorPushStatsResponseObject interface {
 	VisitListConnectorPushStatsResponse(w http.ResponseWriter) error
+}
+
+// ListConnectorPushStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListConnectorPushStatsResponseFunc func(http.ResponseWriter)
+
+func (response ListConnectorPushStatsResponseFunc) VisitListConnectorPushStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListConnectorPushStats200JSONResponse ConnectorPushStatsList
@@ -7474,11 +5925,21 @@ func (response ListConnectorPushStatsdefaultJSONResponse) VisitListConnectorPush
 }
 
 type GetMatchStatsRequestObject struct {
-	Params GetMatchStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetMatchStatsParams
 }
 
 type GetMatchStatsResponseObject interface {
 	VisitGetMatchStatsResponse(w http.ResponseWriter) error
+}
+
+// GetMatchStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetMatchStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetMatchStatsResponseFunc) VisitGetMatchStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetMatchStats200JSONResponse MatchStatsList
@@ -7513,11 +5974,21 @@ func (response GetMatchStatsdefaultJSONResponse) VisitGetMatchStatsResponse(w ht
 }
 
 type GetPluginCallStatsRequestObject struct {
-	Params GetPluginCallStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetPluginCallStatsParams
 }
 
 type GetPluginCallStatsResponseObject interface {
 	VisitGetPluginCallStatsResponse(w http.ResponseWriter) error
+}
+
+// GetPluginCallStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetPluginCallStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetPluginCallStatsResponseFunc) VisitGetPluginCallStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetPluginCallStats200JSONResponse PluginCallStatsList
@@ -7552,11 +6023,21 @@ func (response GetPluginCallStatsdefaultJSONResponse) VisitGetPluginCallStatsRes
 }
 
 type GetReceivedStatsRequestObject struct {
-	Params GetReceivedStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetReceivedStatsParams
 }
 
 type GetReceivedStatsResponseObject interface {
 	VisitGetReceivedStatsResponse(w http.ResponseWriter) error
+}
+
+// GetReceivedStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetReceivedStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetReceivedStatsResponseFunc) VisitGetReceivedStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetReceivedStats200JSONResponse ReceivedStatsList
@@ -7591,11 +6072,21 @@ func (response GetReceivedStatsdefaultJSONResponse) VisitGetReceivedStatsRespons
 }
 
 type GetSearchStatsRequestObject struct {
-	Params GetSearchStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetSearchStatsParams
 }
 
 type GetSearchStatsResponseObject interface {
 	VisitGetSearchStatsResponse(w http.ResponseWriter) error
+}
+
+// GetSearchStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetSearchStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetSearchStatsResponseFunc) VisitGetSearchStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetSearchStats200JSONResponse SearchStatsList
@@ -7630,11 +6121,21 @@ func (response GetSearchStatsdefaultJSONResponse) VisitGetSearchStatsResponse(w 
 }
 
 type GetStepStatsRequestObject struct {
-	Params GetStepStatsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetStepStatsParams
 }
 
 type GetStepStatsResponseObject interface {
 	VisitGetStepStatsResponse(w http.ResponseWriter) error
+}
+
+// GetStepStatsResponseFunc writes a deferred response, including streams and plugin answers.
+type GetStepStatsResponseFunc func(http.ResponseWriter)
+
+func (response GetStepStatsResponseFunc) VisitGetStepStatsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetStepStats200JSONResponse StepStatsList
@@ -7669,11 +6170,21 @@ func (response GetStepStatsdefaultJSONResponse) VisitGetStepStatsResponse(w http
 }
 
 type GetTopQueriesRequestObject struct {
-	Params GetTopQueriesParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      GetTopQueriesParams
 }
 
 type GetTopQueriesResponseObject interface {
 	VisitGetTopQueriesResponse(w http.ResponseWriter) error
+}
+
+// GetTopQueriesResponseFunc writes a deferred response, including streams and plugin answers.
+type GetTopQueriesResponseFunc func(http.ResponseWriter)
+
+func (response GetTopQueriesResponseFunc) VisitGetTopQueriesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetTopQueries200JSONResponse TopQueryList
@@ -7708,11 +6219,21 @@ func (response GetTopQueriesdefaultJSONResponse) VisitGetTopQueriesResponse(w ht
 }
 
 type ListEvaluationBacklogRequestObject struct {
-	Params ListEvaluationBacklogParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListEvaluationBacklogParams
 }
 
 type ListEvaluationBacklogResponseObject interface {
 	VisitListEvaluationBacklogResponse(w http.ResponseWriter) error
+}
+
+// ListEvaluationBacklogResponseFunc writes a deferred response, including streams and plugin answers.
+type ListEvaluationBacklogResponseFunc func(http.ResponseWriter)
+
+func (response ListEvaluationBacklogResponseFunc) VisitListEvaluationBacklogResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListEvaluationBacklog200JSONResponse EvaluationBacklogPage
@@ -7747,11 +6268,21 @@ func (response ListEvaluationBacklogdefaultJSONResponse) VisitListEvaluationBack
 }
 
 type RetireEvaluationsRequestObject struct {
-	Body *RetireEvaluationsJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *RetireEvaluationsJSONRequestBody
 }
 
 type RetireEvaluationsResponseObject interface {
 	VisitRetireEvaluationsResponse(w http.ResponseWriter) error
+}
+
+// RetireEvaluationsResponseFunc writes a deferred response, including streams and plugin answers.
+type RetireEvaluationsResponseFunc func(http.ResponseWriter)
+
+func (response RetireEvaluationsResponseFunc) VisitRetireEvaluationsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RetireEvaluations200ResponseHeaders struct {
@@ -7796,11 +6327,21 @@ func (response RetireEvaluationsdefaultJSONResponse) VisitRetireEvaluationsRespo
 }
 
 type GetEvaluationRetirementRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	RetirementId string `json:"retirement_id"`
 }
 
 type GetEvaluationRetirementResponseObject interface {
 	VisitGetEvaluationRetirementResponse(w http.ResponseWriter) error
+}
+
+// GetEvaluationRetirementResponseFunc writes a deferred response, including streams and plugin answers.
+type GetEvaluationRetirementResponseFunc func(http.ResponseWriter)
+
+func (response GetEvaluationRetirementResponseFunc) VisitGetEvaluationRetirementResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetEvaluationRetirement200JSONResponse EvaluationRetirement
@@ -7835,11 +6376,21 @@ func (response GetEvaluationRetirementdefaultJSONResponse) VisitGetEvaluationRet
 }
 
 type MigrateSubscriptionEvaluatorsRequestObject struct {
-	Body *MigrateSubscriptionEvaluatorsJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *MigrateSubscriptionEvaluatorsJSONRequestBody
 }
 
 type MigrateSubscriptionEvaluatorsResponseObject interface {
 	VisitMigrateSubscriptionEvaluatorsResponse(w http.ResponseWriter) error
+}
+
+// MigrateSubscriptionEvaluatorsResponseFunc writes a deferred response, including streams and plugin answers.
+type MigrateSubscriptionEvaluatorsResponseFunc func(http.ResponseWriter)
+
+func (response MigrateSubscriptionEvaluatorsResponseFunc) VisitMigrateSubscriptionEvaluatorsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type MigrateSubscriptionEvaluators200JSONResponse SubscriptionEvaluatorMigration
@@ -7874,11 +6425,21 @@ func (response MigrateSubscriptionEvaluatorsdefaultJSONResponse) VisitMigrateSub
 }
 
 type GetBlobRequestObject struct {
-	BlobId string `json:"blob_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	BlobId      string `json:"blob_id"`
 }
 
 type GetBlobResponseObject interface {
 	VisitGetBlobResponse(w http.ResponseWriter) error
+}
+
+// GetBlobResponseFunc writes a deferred response, including streams and plugin answers.
+type GetBlobResponseFunc func(http.ResponseWriter)
+
+func (response GetBlobResponseFunc) VisitGetBlobResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetBlob200JSONResponse Blob
@@ -7913,11 +6474,21 @@ func (response GetBlobdefaultJSONResponse) VisitGetBlobResponse(w http.ResponseW
 }
 
 type PollChangesRequestObject struct {
-	Params PollChangesParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      PollChangesParams
 }
 
 type PollChangesResponseObject interface {
 	VisitPollChangesResponse(w http.ResponseWriter) error
+}
+
+// PollChangesResponseFunc writes a deferred response, including streams and plugin answers.
+type PollChangesResponseFunc func(http.ResponseWriter)
+
+func (response PollChangesResponseFunc) VisitPollChangesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type PollChanges200JSONResponse ChangePage
@@ -7952,11 +6523,21 @@ func (response PollChangesdefaultJSONResponse) VisitPollChangesResponse(w http.R
 }
 
 type StreamChangesRequestObject struct {
-	Params StreamChangesParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      StreamChangesParams
 }
 
 type StreamChangesResponseObject interface {
 	VisitStreamChangesResponse(w http.ResponseWriter) error
+}
+
+// StreamChangesResponseFunc writes a deferred response, including streams and plugin answers.
+type StreamChangesResponseFunc func(http.ResponseWriter)
+
+func (response StreamChangesResponseFunc) VisitStreamChangesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type StreamChanges200TexteventStreamResponse struct {
@@ -8020,10 +6601,20 @@ func (response StreamChangesdefaultJSONResponse) VisitStreamChangesResponse(w ht
 }
 
 type ListConnectorKindsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 }
 
 type ListConnectorKindsResponseObject interface {
 	VisitListConnectorKindsResponse(w http.ResponseWriter) error
+}
+
+// ListConnectorKindsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListConnectorKindsResponseFunc func(http.ResponseWriter)
+
+func (response ListConnectorKindsResponseFunc) VisitListConnectorKindsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListConnectorKinds200JSONResponse ConnectorKindCatalog
@@ -8058,11 +6649,21 @@ func (response ListConnectorKindsdefaultJSONResponse) VisitListConnectorKindsRes
 }
 
 type RelayConnectorChallengeRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 }
 
 type RelayConnectorChallengeResponseObject interface {
 	VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error
+}
+
+// RelayConnectorChallengeResponseFunc writes a deferred response, including streams and plugin answers.
+type RelayConnectorChallengeResponseFunc func(http.ResponseWriter)
+
+func (response RelayConnectorChallengeResponseFunc) VisitRelayConnectorChallengeResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RelayConnectorChallenge2XXResponse struct {
@@ -8100,11 +6701,21 @@ func (response RelayConnectorChallenge503Response) VisitRelayConnectorChallengeR
 }
 
 type RelayConnectorDeliveryRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 }
 
 type RelayConnectorDeliveryResponseObject interface {
 	VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error
+}
+
+// RelayConnectorDeliveryResponseFunc writes a deferred response, including streams and plugin answers.
+type RelayConnectorDeliveryResponseFunc func(http.ResponseWriter)
+
+func (response RelayConnectorDeliveryResponseFunc) VisitRelayConnectorDeliveryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RelayConnectorDelivery2XXResponse struct {
@@ -8142,11 +6753,21 @@ func (response RelayConnectorDelivery503Response) VisitRelayConnectorDeliveryRes
 }
 
 type ListConnectorsRequestObject struct {
-	Params ListConnectorsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListConnectorsParams
 }
 
 type ListConnectorsResponseObject interface {
 	VisitListConnectorsResponse(w http.ResponseWriter) error
+}
+
+// ListConnectorsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListConnectorsResponseFunc func(http.ResponseWriter)
+
+func (response ListConnectorsResponseFunc) VisitListConnectorsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListConnectors200JSONResponse ConnectorPage
@@ -8181,11 +6802,21 @@ func (response ListConnectorsdefaultJSONResponse) VisitListConnectorsResponse(w 
 }
 
 type CreateConnectorRequestObject struct {
-	Body *CreateConnectorJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CreateConnectorJSONRequestBody
 }
 
 type CreateConnectorResponseObject interface {
 	VisitCreateConnectorResponse(w http.ResponseWriter) error
+}
+
+// CreateConnectorResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateConnectorResponseFunc func(http.ResponseWriter)
+
+func (response CreateConnectorResponseFunc) VisitCreateConnectorResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateConnector201JSONResponse Connector
@@ -8220,11 +6851,21 @@ func (response CreateConnectordefaultJSONResponse) VisitCreateConnectorResponse(
 }
 
 type GetConnectorRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 }
 
 type GetConnectorResponseObject interface {
 	VisitGetConnectorResponse(w http.ResponseWriter) error
+}
+
+// GetConnectorResponseFunc writes a deferred response, including streams and plugin answers.
+type GetConnectorResponseFunc func(http.ResponseWriter)
+
+func (response GetConnectorResponseFunc) VisitGetConnectorResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetConnector200JSONResponse Connector
@@ -8259,6 +6900,8 @@ func (response GetConnectordefaultJSONResponse) VisitGetConnectorResponse(w http
 }
 
 type ChallengeConnectorAPIRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Path        string `json:"path"`
 	Params      ChallengeConnectorAPIParams
@@ -8266,6 +6909,14 @@ type ChallengeConnectorAPIRequestObject struct {
 
 type ChallengeConnectorAPIResponseObject interface {
 	VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error
+}
+
+// ChallengeConnectorAPIResponseFunc writes a deferred response, including streams and plugin answers.
+type ChallengeConnectorAPIResponseFunc func(http.ResponseWriter)
+
+func (response ChallengeConnectorAPIResponseFunc) VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ChallengeConnectorAPI200ResponseHeaders struct {
@@ -8339,6 +6990,8 @@ func (response ChallengeConnectorAPIdefaultJSONResponse) VisitChallengeConnector
 }
 
 type PushConnectorAPIRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Path        string `json:"path"`
 	Params      PushConnectorAPIParams
@@ -8347,6 +7000,14 @@ type PushConnectorAPIRequestObject struct {
 
 type PushConnectorAPIResponseObject interface {
 	VisitPushConnectorAPIResponse(w http.ResponseWriter) error
+}
+
+// PushConnectorAPIResponseFunc writes a deferred response, including streams and plugin answers.
+type PushConnectorAPIResponseFunc func(http.ResponseWriter)
+
+func (response PushConnectorAPIResponseFunc) VisitPushConnectorAPIResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type PushConnectorAPI202JSONResponse ConnectorPushReceipts
@@ -8413,12 +7074,22 @@ func (response PushConnectorAPIdefaultJSONResponse) VisitPushConnectorAPIRespons
 }
 
 type ReplaceConnectorCredentialRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Body        *ReplaceConnectorCredentialJSONRequestBody
 }
 
 type ReplaceConnectorCredentialResponseObject interface {
 	VisitReplaceConnectorCredentialResponse(w http.ResponseWriter) error
+}
+
+// ReplaceConnectorCredentialResponseFunc writes a deferred response, including streams and plugin answers.
+type ReplaceConnectorCredentialResponseFunc func(http.ResponseWriter)
+
+func (response ReplaceConnectorCredentialResponseFunc) VisitReplaceConnectorCredentialResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ReplaceConnectorCredential200JSONResponse Connector
@@ -8453,12 +7124,22 @@ func (response ReplaceConnectorCredentialdefaultJSONResponse) VisitReplaceConnec
 }
 
 type DisableConnectorRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Body        *DisableConnectorJSONRequestBody
 }
 
 type DisableConnectorResponseObject interface {
 	VisitDisableConnectorResponse(w http.ResponseWriter) error
+}
+
+// DisableConnectorResponseFunc writes a deferred response, including streams and plugin answers.
+type DisableConnectorResponseFunc func(http.ResponseWriter)
+
+func (response DisableConnectorResponseFunc) VisitDisableConnectorResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type DisableConnector200JSONResponse Connector
@@ -8493,12 +7174,22 @@ func (response DisableConnectordefaultJSONResponse) VisitDisableConnectorRespons
 }
 
 type RequestConnectorRunRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Body        *RequestConnectorRunJSONRequestBody
 }
 
 type RequestConnectorRunResponseObject interface {
 	VisitRequestConnectorRunResponse(w http.ResponseWriter) error
+}
+
+// RequestConnectorRunResponseFunc writes a deferred response, including streams and plugin answers.
+type RequestConnectorRunResponseFunc func(http.ResponseWriter)
+
+func (response RequestConnectorRunResponseFunc) VisitRequestConnectorRunResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RequestConnectorRun202JSONResponse ConnectorRunRequest
@@ -8533,12 +7224,22 @@ func (response RequestConnectorRundefaultJSONResponse) VisitRequestConnectorRunR
 }
 
 type ChangeConnectorScheduleRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Body        *ChangeConnectorScheduleJSONRequestBody
 }
 
 type ChangeConnectorScheduleResponseObject interface {
 	VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error
+}
+
+// ChangeConnectorScheduleResponseFunc writes a deferred response, including streams and plugin answers.
+type ChangeConnectorScheduleResponseFunc func(http.ResponseWriter)
+
+func (response ChangeConnectorScheduleResponseFunc) VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ChangeConnectorSchedule200JSONResponse Connector
@@ -8573,12 +7274,22 @@ func (response ChangeConnectorScheduledefaultJSONResponse) VisitChangeConnectorS
 }
 
 type ListConnectorTokensRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	Params      ListConnectorTokensParams
 }
 
 type ListConnectorTokensResponseObject interface {
 	VisitListConnectorTokensResponse(w http.ResponseWriter) error
+}
+
+// ListConnectorTokensResponseFunc writes a deferred response, including streams and plugin answers.
+type ListConnectorTokensResponseFunc func(http.ResponseWriter)
+
+func (response ListConnectorTokensResponseFunc) VisitListConnectorTokensResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListConnectorTokens200JSONResponse ConnectorTokenList
@@ -8613,11 +7324,21 @@ func (response ListConnectorTokensdefaultJSONResponse) VisitListConnectorTokensR
 }
 
 type CreateConnectorTokenRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 }
 
 type CreateConnectorTokenResponseObject interface {
 	VisitCreateConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+// CreateConnectorTokenResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateConnectorTokenResponseFunc func(http.ResponseWriter)
+
+func (response CreateConnectorTokenResponseFunc) VisitCreateConnectorTokenResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateConnectorToken201ResponseHeaders struct {
@@ -8662,12 +7383,22 @@ func (response CreateConnectorTokendefaultJSONResponse) VisitCreateConnectorToke
 }
 
 type RevokeConnectorTokenRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	TokenId     string `json:"token_id"`
 }
 
 type RevokeConnectorTokenResponseObject interface {
 	VisitRevokeConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+// RevokeConnectorTokenResponseFunc writes a deferred response, including streams and plugin answers.
+type RevokeConnectorTokenResponseFunc func(http.ResponseWriter)
+
+func (response RevokeConnectorTokenResponseFunc) VisitRevokeConnectorTokenResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RevokeConnectorToken200JSONResponse ConnectorToken
@@ -8702,12 +7433,22 @@ func (response RevokeConnectorTokendefaultJSONResponse) VisitRevokeConnectorToke
 }
 
 type RotateConnectorTokenRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	ConnectorId string `json:"connector_id"`
 	TokenId     string `json:"token_id"`
 }
 
 type RotateConnectorTokenResponseObject interface {
 	VisitRotateConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+// RotateConnectorTokenResponseFunc writes a deferred response, including streams and plugin answers.
+type RotateConnectorTokenResponseFunc func(http.ResponseWriter)
+
+func (response RotateConnectorTokenResponseFunc) VisitRotateConnectorTokenResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RotateConnectorToken201ResponseHeaders struct {
@@ -8752,11 +7493,21 @@ func (response RotateConnectorTokendefaultJSONResponse) VisitRotateConnectorToke
 }
 
 type ListCorporaRequestObject struct {
-	Params ListCorporaParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListCorporaParams
 }
 
 type ListCorporaResponseObject interface {
 	VisitListCorporaResponse(w http.ResponseWriter) error
+}
+
+// ListCorporaResponseFunc writes a deferred response, including streams and plugin answers.
+type ListCorporaResponseFunc func(http.ResponseWriter)
+
+func (response ListCorporaResponseFunc) VisitListCorporaResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListCorpora200JSONResponse CorpusPage
@@ -8791,11 +7542,21 @@ func (response ListCorporadefaultJSONResponse) VisitListCorporaResponse(w http.R
 }
 
 type CreateCorpusRequestObject struct {
-	Body *CreateCorpusJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CreateCorpusJSONRequestBody
 }
 
 type CreateCorpusResponseObject interface {
 	VisitCreateCorpusResponse(w http.ResponseWriter) error
+}
+
+// CreateCorpusResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateCorpusResponseFunc func(http.ResponseWriter)
+
+func (response CreateCorpusResponseFunc) VisitCreateCorpusResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateCorpus201JSONResponse Corpus
@@ -8830,11 +7591,21 @@ func (response CreateCorpusdefaultJSONResponse) VisitCreateCorpusResponse(w http
 }
 
 type GetCorpusRequestObject struct {
-	CorpusId string `json:"corpus_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
 }
 
 type GetCorpusResponseObject interface {
 	VisitGetCorpusResponse(w http.ResponseWriter) error
+}
+
+// GetCorpusResponseFunc writes a deferred response, including streams and plugin answers.
+type GetCorpusResponseFunc func(http.ResponseWriter)
+
+func (response GetCorpusResponseFunc) VisitGetCorpusResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetCorpus200JSONResponse Corpus
@@ -8869,12 +7640,22 @@ func (response GetCorpusdefaultJSONResponse) VisitGetCorpusResponse(w http.Respo
 }
 
 type RebuildCorpusProjectionRequestObject struct {
-	CorpusId string `json:"corpus_id"`
-	Body     *RebuildCorpusProjectionJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Body        *RebuildCorpusProjectionJSONRequestBody
 }
 
 type RebuildCorpusProjectionResponseObject interface {
 	VisitRebuildCorpusProjectionResponse(w http.ResponseWriter) error
+}
+
+// RebuildCorpusProjectionResponseFunc writes a deferred response, including streams and plugin answers.
+type RebuildCorpusProjectionResponseFunc func(http.ResponseWriter)
+
+func (response RebuildCorpusProjectionResponseFunc) VisitRebuildCorpusProjectionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RebuildCorpusProjection202ResponseHeaders struct {
@@ -8919,12 +7700,22 @@ func (response RebuildCorpusProjectiondefaultJSONResponse) VisitRebuildCorpusPro
 }
 
 type ConfigureRetrievalRequestObject struct {
-	CorpusId string `json:"corpus_id"`
-	Body     *ConfigureRetrievalJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Body        *ConfigureRetrievalJSONRequestBody
 }
 
 type ConfigureRetrievalResponseObject interface {
 	VisitConfigureRetrievalResponse(w http.ResponseWriter) error
+}
+
+// ConfigureRetrievalResponseFunc writes a deferred response, including streams and plugin answers.
+type ConfigureRetrievalResponseFunc func(http.ResponseWriter)
+
+func (response ConfigureRetrievalResponseFunc) VisitConfigureRetrievalResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ConfigureRetrieval202JSONResponse Operation
@@ -8959,11 +7750,21 @@ func (response ConfigureRetrievaldefaultJSONResponse) VisitConfigureRetrievalRes
 }
 
 type ListVectorSpacesRequestObject struct {
-	CorpusId string `json:"corpus_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
 }
 
 type ListVectorSpacesResponseObject interface {
 	VisitListVectorSpacesResponse(w http.ResponseWriter) error
+}
+
+// ListVectorSpacesResponseFunc writes a deferred response, including streams and plugin answers.
+type ListVectorSpacesResponseFunc func(http.ResponseWriter)
+
+func (response ListVectorSpacesResponseFunc) VisitListVectorSpacesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListVectorSpaces200JSONResponse VectorSpaceList
@@ -8998,11 +7799,21 @@ func (response ListVectorSpacesdefaultJSONResponse) VisitListVectorSpacesRespons
 }
 
 type GetDeliveryRequestObject struct {
-	DeliveryId string `json:"delivery_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	DeliveryId  string `json:"delivery_id"`
 }
 
 type GetDeliveryResponseObject interface {
 	VisitGetDeliveryResponse(w http.ResponseWriter) error
+}
+
+// GetDeliveryResponseFunc writes a deferred response, including streams and plugin answers.
+type GetDeliveryResponseFunc func(http.ResponseWriter)
+
+func (response GetDeliveryResponseFunc) VisitGetDeliveryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetDelivery200JSONResponse Delivery
@@ -9037,12 +7848,22 @@ func (response GetDeliverydefaultJSONResponse) VisitGetDeliveryResponse(w http.R
 }
 
 type ListDeliveryAttemptsRequestObject struct {
-	DeliveryId string `json:"delivery_id"`
-	Params     ListDeliveryAttemptsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	DeliveryId  string `json:"delivery_id"`
+	Params      ListDeliveryAttemptsParams
 }
 
 type ListDeliveryAttemptsResponseObject interface {
 	VisitListDeliveryAttemptsResponse(w http.ResponseWriter) error
+}
+
+// ListDeliveryAttemptsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListDeliveryAttemptsResponseFunc func(http.ResponseWriter)
+
+func (response ListDeliveryAttemptsResponseFunc) VisitListDeliveryAttemptsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListDeliveryAttempts200JSONResponse DeliveryAttemptPage
@@ -9077,11 +7898,21 @@ func (response ListDeliveryAttemptsdefaultJSONResponse) VisitListDeliveryAttempt
 }
 
 type GetReceiptRequestObject struct {
-	ReceiptId string `json:"receipt_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	ReceiptId   string `json:"receipt_id"`
 }
 
 type GetReceiptResponseObject interface {
 	VisitGetReceiptResponse(w http.ResponseWriter) error
+}
+
+// GetReceiptResponseFunc writes a deferred response, including streams and plugin answers.
+type GetReceiptResponseFunc func(http.ResponseWriter)
+
+func (response GetReceiptResponseFunc) VisitGetReceiptResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetReceipt200JSONResponse Receipt
@@ -9116,11 +7947,21 @@ func (response GetReceiptdefaultJSONResponse) VisitGetReceiptResponse(w http.Res
 }
 
 type ListMatchesRequestObject struct {
-	Params ListMatchesParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListMatchesParams
 }
 
 type ListMatchesResponseObject interface {
 	VisitListMatchesResponse(w http.ResponseWriter) error
+}
+
+// ListMatchesResponseFunc writes a deferred response, including streams and plugin answers.
+type ListMatchesResponseFunc func(http.ResponseWriter)
+
+func (response ListMatchesResponseFunc) VisitListMatchesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListMatches200JSONResponse MatchPage
@@ -9155,11 +7996,21 @@ func (response ListMatchesdefaultJSONResponse) VisitListMatchesResponse(w http.R
 }
 
 type GetMatchRequestObject struct {
-	MatchId string `json:"match_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	MatchId     string `json:"match_id"`
 }
 
 type GetMatchResponseObject interface {
 	VisitGetMatchResponse(w http.ResponseWriter) error
+}
+
+// GetMatchResponseFunc writes a deferred response, including streams and plugin answers.
+type GetMatchResponseFunc func(http.ResponseWriter)
+
+func (response GetMatchResponseFunc) VisitGetMatchResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetMatch200JSONResponse Match
@@ -9194,11 +8045,21 @@ func (response GetMatchdefaultJSONResponse) VisitGetMatchResponse(w http.Respons
 }
 
 type GetOperationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	OperationId string `json:"operation_id"`
 }
 
 type GetOperationResponseObject interface {
 	VisitGetOperationResponse(w http.ResponseWriter) error
+}
+
+// GetOperationResponseFunc writes a deferred response, including streams and plugin answers.
+type GetOperationResponseFunc func(http.ResponseWriter)
+
+func (response GetOperationResponseFunc) VisitGetOperationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetOperation200JSONResponse Operation
@@ -9233,12 +8094,22 @@ func (response GetOperationdefaultJSONResponse) VisitGetOperationResponse(w http
 }
 
 type CancelOperationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	OperationId string `json:"operation_id"`
 	Body        *CancelOperationJSONRequestBody
 }
 
 type CancelOperationResponseObject interface {
 	VisitCancelOperationResponse(w http.ResponseWriter) error
+}
+
+// CancelOperationResponseFunc writes a deferred response, including streams and plugin answers.
+type CancelOperationResponseFunc func(http.ResponseWriter)
+
+func (response CancelOperationResponseFunc) VisitCancelOperationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CancelOperation202JSONResponse Operation
@@ -9273,12 +8144,22 @@ func (response CancelOperationdefaultJSONResponse) VisitCancelOperationResponse(
 }
 
 type PauseOperationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	OperationId string `json:"operation_id"`
 	Body        *PauseOperationJSONRequestBody
 }
 
 type PauseOperationResponseObject interface {
 	VisitPauseOperationResponse(w http.ResponseWriter) error
+}
+
+// PauseOperationResponseFunc writes a deferred response, including streams and plugin answers.
+type PauseOperationResponseFunc func(http.ResponseWriter)
+
+func (response PauseOperationResponseFunc) VisitPauseOperationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type PauseOperation202JSONResponse Operation
@@ -9313,12 +8194,22 @@ func (response PauseOperationdefaultJSONResponse) VisitPauseOperationResponse(w 
 }
 
 type RerunOperationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	OperationId string `json:"operation_id"`
 	Body        *RerunOperationJSONRequestBody
 }
 
 type RerunOperationResponseObject interface {
 	VisitRerunOperationResponse(w http.ResponseWriter) error
+}
+
+// RerunOperationResponseFunc writes a deferred response, including streams and plugin answers.
+type RerunOperationResponseFunc func(http.ResponseWriter)
+
+func (response RerunOperationResponseFunc) VisitRerunOperationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RerunOperation202JSONResponse Operation
@@ -9353,12 +8244,22 @@ func (response RerunOperationdefaultJSONResponse) VisitRerunOperationResponse(w 
 }
 
 type ResumeOperationRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 	OperationId string `json:"operation_id"`
 	Body        *ResumeOperationJSONRequestBody
 }
 
 type ResumeOperationResponseObject interface {
 	VisitResumeOperationResponse(w http.ResponseWriter) error
+}
+
+// ResumeOperationResponseFunc writes a deferred response, including streams and plugin answers.
+type ResumeOperationResponseFunc func(http.ResponseWriter)
+
+func (response ResumeOperationResponseFunc) VisitResumeOperationResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ResumeOperation202JSONResponse Operation
@@ -9393,11 +8294,21 @@ func (response ResumeOperationdefaultJSONResponse) VisitResumeOperationResponse(
 }
 
 type ListRecordsRequestObject struct {
-	Params ListRecordsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListRecordsParams
 }
 
 type ListRecordsResponseObject interface {
 	VisitListRecordsResponse(w http.ResponseWriter) error
+}
+
+// ListRecordsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListRecordsResponseFunc func(http.ResponseWriter)
+
+func (response ListRecordsResponseFunc) VisitListRecordsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListRecords200JSONResponse RecordPage
@@ -9432,11 +8343,21 @@ func (response ListRecordsdefaultJSONResponse) VisitListRecordsResponse(w http.R
 }
 
 type IngestRecordRequestObject struct {
-	Body *IngestRecordJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *IngestRecordJSONRequestBody
 }
 
 type IngestRecordResponseObject interface {
 	VisitIngestRecordResponse(w http.ResponseWriter) error
+}
+
+// IngestRecordResponseFunc writes a deferred response, including streams and plugin answers.
+type IngestRecordResponseFunc func(http.ResponseWriter)
+
+func (response IngestRecordResponseFunc) VisitIngestRecordResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type IngestRecord202JSONResponse Receipt
@@ -9471,11 +8392,21 @@ func (response IngestRecorddefaultJSONResponse) VisitIngestRecordResponse(w http
 }
 
 type IngestBatchRequestObject struct {
-	Body *IngestBatchJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *IngestBatchJSONRequestBody
 }
 
 type IngestBatchResponseObject interface {
 	VisitIngestBatchResponse(w http.ResponseWriter) error
+}
+
+// IngestBatchResponseFunc writes a deferred response, including streams and plugin answers.
+type IngestBatchResponseFunc func(http.ResponseWriter)
+
+func (response IngestBatchResponseFunc) VisitIngestBatchResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type IngestBatch200JSONResponse BatchResult
@@ -9510,11 +8441,21 @@ func (response IngestBatchdefaultJSONResponse) VisitIngestBatchResponse(w http.R
 }
 
 type WithdrawRecordRequestObject struct {
-	Body *WithdrawRecordJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *WithdrawRecordJSONRequestBody
 }
 
 type WithdrawRecordResponseObject interface {
 	VisitWithdrawRecordResponse(w http.ResponseWriter) error
+}
+
+// WithdrawRecordResponseFunc writes a deferred response, including streams and plugin answers.
+type WithdrawRecordResponseFunc func(http.ResponseWriter)
+
+func (response WithdrawRecordResponseFunc) VisitWithdrawRecordResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type WithdrawRecord202JSONResponse Receipt
@@ -9549,11 +8490,21 @@ func (response WithdrawRecorddefaultJSONResponse) VisitWithdrawRecordResponse(w 
 }
 
 type GetRecordRequestObject struct {
-	RecordId string `json:"record_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	RecordId    string `json:"record_id"`
 }
 
 type GetRecordResponseObject interface {
 	VisitGetRecordResponse(w http.ResponseWriter) error
+}
+
+// GetRecordResponseFunc writes a deferred response, including streams and plugin answers.
+type GetRecordResponseFunc func(http.ResponseWriter)
+
+func (response GetRecordResponseFunc) VisitGetRecordResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetRecord200JSONResponse Record
@@ -9588,12 +8539,22 @@ func (response GetRecorddefaultJSONResponse) VisitGetRecordResponse(w http.Respo
 }
 
 type GetVersionRequestObject struct {
-	RecordId  string `json:"record_id"`
-	VersionId string `json:"version_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	RecordId    string `json:"record_id"`
+	VersionId   string `json:"version_id"`
 }
 
 type GetVersionResponseObject interface {
 	VisitGetVersionResponse(w http.ResponseWriter) error
+}
+
+// GetVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type GetVersionResponseFunc func(http.ResponseWriter)
+
+func (response GetVersionResponseFunc) VisitGetVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetVersion200JSONResponse Version
@@ -9628,11 +8589,21 @@ func (response GetVersiondefaultJSONResponse) VisitGetVersionResponse(w http.Res
 }
 
 type CreateSavedQueryRequestObject struct {
-	Body *CreateSavedQueryJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CreateSavedQueryJSONRequestBody
 }
 
 type CreateSavedQueryResponseObject interface {
 	VisitCreateSavedQueryResponse(w http.ResponseWriter) error
+}
+
+// CreateSavedQueryResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateSavedQueryResponseFunc func(http.ResponseWriter)
+
+func (response CreateSavedQueryResponseFunc) VisitCreateSavedQueryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateSavedQuery201JSONResponse SavedQuery
@@ -9667,11 +8638,21 @@ func (response CreateSavedQuerydefaultJSONResponse) VisitCreateSavedQueryRespons
 }
 
 type GetSavedQueryRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	SavedQueryId string `json:"saved_query_id"`
 }
 
 type GetSavedQueryResponseObject interface {
 	VisitGetSavedQueryResponse(w http.ResponseWriter) error
+}
+
+// GetSavedQueryResponseFunc writes a deferred response, including streams and plugin answers.
+type GetSavedQueryResponseFunc func(http.ResponseWriter)
+
+func (response GetSavedQueryResponseFunc) VisitGetSavedQueryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetSavedQuery200JSONResponse SavedQuery
@@ -9706,12 +8687,22 @@ func (response GetSavedQuerydefaultJSONResponse) VisitGetSavedQueryResponse(w ht
 }
 
 type DeleteSavedQueryRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	SavedQueryId string `json:"saved_query_id"`
 	Body         *DeleteSavedQueryJSONRequestBody
 }
 
 type DeleteSavedQueryResponseObject interface {
 	VisitDeleteSavedQueryResponse(w http.ResponseWriter) error
+}
+
+// DeleteSavedQueryResponseFunc writes a deferred response, including streams and plugin answers.
+type DeleteSavedQueryResponseFunc func(http.ResponseWriter)
+
+func (response DeleteSavedQueryResponseFunc) VisitDeleteSavedQueryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type DeleteSavedQuery200JSONResponse SavedQuery
@@ -9746,12 +8737,22 @@ func (response DeleteSavedQuerydefaultJSONResponse) VisitDeleteSavedQueryRespons
 }
 
 type RenameSavedQueryRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	SavedQueryId string `json:"saved_query_id"`
 	Body         *RenameSavedQueryJSONRequestBody
 }
 
 type RenameSavedQueryResponseObject interface {
 	VisitRenameSavedQueryResponse(w http.ResponseWriter) error
+}
+
+// RenameSavedQueryResponseFunc writes a deferred response, including streams and plugin answers.
+type RenameSavedQueryResponseFunc func(http.ResponseWriter)
+
+func (response RenameSavedQueryResponseFunc) VisitRenameSavedQueryResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RenameSavedQuery200JSONResponse SavedQuery
@@ -9786,12 +8787,22 @@ func (response RenameSavedQuerydefaultJSONResponse) VisitRenameSavedQueryRespons
 }
 
 type CreateSavedQueryVersionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	SavedQueryId string `json:"saved_query_id"`
 	Body         *CreateSavedQueryVersionJSONRequestBody
 }
 
 type CreateSavedQueryVersionResponseObject interface {
 	VisitCreateSavedQueryVersionResponse(w http.ResponseWriter) error
+}
+
+// CreateSavedQueryVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateSavedQueryVersionResponseFunc func(http.ResponseWriter)
+
+func (response CreateSavedQueryVersionResponseFunc) VisitCreateSavedQueryVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateSavedQueryVersion201JSONResponse SavedQueryVersion
@@ -9826,12 +8837,22 @@ func (response CreateSavedQueryVersiondefaultJSONResponse) VisitCreateSavedQuery
 }
 
 type GetSavedQueryVersionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest  *http.Request
 	SavedQueryId string `json:"saved_query_id"`
 	VersionId    string `json:"version_id"`
 }
 
 type GetSavedQueryVersionResponseObject interface {
 	VisitGetSavedQueryVersionResponse(w http.ResponseWriter) error
+}
+
+// GetSavedQueryVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type GetSavedQueryVersionResponseFunc func(http.ResponseWriter)
+
+func (response GetSavedQueryVersionResponseFunc) VisitGetSavedQueryVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetSavedQueryVersion200JSONResponse SavedQueryVersion
@@ -9866,11 +8887,21 @@ func (response GetSavedQueryVersiondefaultJSONResponse) VisitGetSavedQueryVersio
 }
 
 type SearchRecordsRequestObject struct {
-	Body *SearchRecordsJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *SearchRecordsJSONRequestBody
 }
 
 type SearchRecordsResponseObject interface {
 	VisitSearchRecordsResponse(w http.ResponseWriter) error
+}
+
+// SearchRecordsResponseFunc writes a deferred response, including streams and plugin answers.
+type SearchRecordsResponseFunc func(http.ResponseWriter)
+
+func (response SearchRecordsResponseFunc) VisitSearchRecordsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type SearchRecords200JSONResponse SearchResponse
@@ -9905,10 +8936,20 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 }
 
 type ListSearchProfilesRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
 }
 
 type ListSearchProfilesResponseObject interface {
 	VisitListSearchProfilesResponse(w http.ResponseWriter) error
+}
+
+// ListSearchProfilesResponseFunc writes a deferred response, including streams and plugin answers.
+type ListSearchProfilesResponseFunc func(http.ResponseWriter)
+
+func (response ListSearchProfilesResponseFunc) VisitListSearchProfilesResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListSearchProfiles200JSONResponse SearchProfileList
@@ -9943,11 +8984,21 @@ func (response ListSearchProfilesdefaultJSONResponse) VisitListSearchProfilesRes
 }
 
 type PreviewSubscriptionRequestObject struct {
-	Body *PreviewSubscriptionJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *PreviewSubscriptionJSONRequestBody
 }
 
 type PreviewSubscriptionResponseObject interface {
 	VisitPreviewSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// PreviewSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type PreviewSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response PreviewSubscriptionResponseFunc) VisitPreviewSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type PreviewSubscription200JSONResponse SubscriptionPreview
@@ -9982,11 +9033,21 @@ func (response PreviewSubscriptiondefaultJSONResponse) VisitPreviewSubscriptionR
 }
 
 type ListSubscriptionsRequestObject struct {
-	Params ListSubscriptionsParams
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListSubscriptionsParams
 }
 
 type ListSubscriptionsResponseObject interface {
 	VisitListSubscriptionsResponse(w http.ResponseWriter) error
+}
+
+// ListSubscriptionsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListSubscriptionsResponseFunc func(http.ResponseWriter)
+
+func (response ListSubscriptionsResponseFunc) VisitListSubscriptionsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ListSubscriptions200JSONResponse SubscriptionPage
@@ -10021,11 +9082,21 @@ func (response ListSubscriptionsdefaultJSONResponse) VisitListSubscriptionsRespo
 }
 
 type CreateSubscriptionRequestObject struct {
-	Body *CreateSubscriptionJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CreateSubscriptionJSONRequestBody
 }
 
 type CreateSubscriptionResponseObject interface {
 	VisitCreateSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// CreateSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response CreateSubscriptionResponseFunc) VisitCreateSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateSubscription201JSONResponse Subscription
@@ -10060,11 +9131,21 @@ func (response CreateSubscriptiondefaultJSONResponse) VisitCreateSubscriptionRes
 }
 
 type GetSubscriptionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 }
 
 type GetSubscriptionResponseObject interface {
 	VisitGetSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// GetSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type GetSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response GetSubscriptionResponseFunc) VisitGetSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetSubscription200JSONResponse Subscription
@@ -10099,12 +9180,22 @@ func (response GetSubscriptiondefaultJSONResponse) VisitGetSubscriptionResponse(
 }
 
 type DeleteSubscriptionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	Body           *DeleteSubscriptionJSONRequestBody
 }
 
 type DeleteSubscriptionResponseObject interface {
 	VisitDeleteSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// DeleteSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type DeleteSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response DeleteSubscriptionResponseFunc) VisitDeleteSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type DeleteSubscription200JSONResponse Subscription
@@ -10139,12 +9230,22 @@ func (response DeleteSubscriptiondefaultJSONResponse) VisitDeleteSubscriptionRes
 }
 
 type DisableSubscriptionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	Body           *DisableSubscriptionJSONRequestBody
 }
 
 type DisableSubscriptionResponseObject interface {
 	VisitDisableSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// DisableSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type DisableSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response DisableSubscriptionResponseFunc) VisitDisableSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type DisableSubscription200JSONResponse Subscription
@@ -10179,12 +9280,22 @@ func (response DisableSubscriptiondefaultJSONResponse) VisitDisableSubscriptionR
 }
 
 type EnableSubscriptionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	Body           *EnableSubscriptionJSONRequestBody
 }
 
 type EnableSubscriptionResponseObject interface {
 	VisitEnableSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// EnableSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type EnableSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response EnableSubscriptionResponseFunc) VisitEnableSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type EnableSubscription200JSONResponse Subscription
@@ -10219,12 +9330,22 @@ func (response EnableSubscriptiondefaultJSONResponse) VisitEnableSubscriptionRes
 }
 
 type RenameSubscriptionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	Body           *RenameSubscriptionJSONRequestBody
 }
 
 type RenameSubscriptionResponseObject interface {
 	VisitRenameSubscriptionResponse(w http.ResponseWriter) error
+}
+
+// RenameSubscriptionResponseFunc writes a deferred response, including streams and plugin answers.
+type RenameSubscriptionResponseFunc func(http.ResponseWriter)
+
+func (response RenameSubscriptionResponseFunc) VisitRenameSubscriptionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type RenameSubscription200JSONResponse Subscription
@@ -10259,12 +9380,22 @@ func (response RenameSubscriptiondefaultJSONResponse) VisitRenameSubscriptionRes
 }
 
 type CreateSubscriptionVersionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	Body           *CreateSubscriptionVersionJSONRequestBody
 }
 
 type CreateSubscriptionVersionResponseObject interface {
 	VisitCreateSubscriptionVersionResponse(w http.ResponseWriter) error
+}
+
+// CreateSubscriptionVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateSubscriptionVersionResponseFunc func(http.ResponseWriter)
+
+func (response CreateSubscriptionVersionResponseFunc) VisitCreateSubscriptionVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateSubscriptionVersion201JSONResponse SubscriptionVersion
@@ -10299,12 +9430,22 @@ func (response CreateSubscriptionVersiondefaultJSONResponse) VisitCreateSubscrip
 }
 
 type GetSubscriptionVersionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest    *http.Request
 	SubscriptionId string `json:"subscription_id"`
 	VersionId      string `json:"version_id"`
 }
 
 type GetSubscriptionVersionResponseObject interface {
 	VisitGetSubscriptionVersionResponse(w http.ResponseWriter) error
+}
+
+// GetSubscriptionVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type GetSubscriptionVersionResponseFunc func(http.ResponseWriter)
+
+func (response GetSubscriptionVersionResponseFunc) VisitGetSubscriptionVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetSubscriptionVersion200JSONResponse SubscriptionVersion
@@ -10339,11 +9480,21 @@ func (response GetSubscriptionVersiondefaultJSONResponse) VisitGetSubscriptionVe
 }
 
 type CreateUploadRequestObject struct {
-	Body *CreateUploadJSONRequestBody
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CreateUploadJSONRequestBody
 }
 
 type CreateUploadResponseObject interface {
 	VisitCreateUploadResponse(w http.ResponseWriter) error
+}
+
+// CreateUploadResponseFunc writes a deferred response, including streams and plugin answers.
+type CreateUploadResponseFunc func(http.ResponseWriter)
+
+func (response CreateUploadResponseFunc) VisitCreateUploadResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type CreateUpload201JSONResponse Upload
@@ -10378,11 +9529,21 @@ func (response CreateUploaddefaultJSONResponse) VisitCreateUploadResponse(w http
 }
 
 type GetUploadRequestObject struct {
-	UploadId string `json:"upload_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	UploadId    string `json:"upload_id"`
 }
 
 type GetUploadResponseObject interface {
 	VisitGetUploadResponse(w http.ResponseWriter) error
+}
+
+// GetUploadResponseFunc writes a deferred response, including streams and plugin answers.
+type GetUploadResponseFunc func(http.ResponseWriter)
+
+func (response GetUploadResponseFunc) VisitGetUploadResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type GetUpload200JSONResponse Upload
@@ -10417,11 +9578,21 @@ func (response GetUploaddefaultJSONResponse) VisitGetUploadResponse(w http.Respo
 }
 
 type ConfirmUploadRequestObject struct {
-	UploadId string `json:"upload_id"`
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	UploadId    string `json:"upload_id"`
 }
 
 type ConfirmUploadResponseObject interface {
 	VisitConfirmUploadResponse(w http.ResponseWriter) error
+}
+
+// ConfirmUploadResponseFunc writes a deferred response, including streams and plugin answers.
+type ConfirmUploadResponseFunc func(http.ResponseWriter)
+
+func (response ConfirmUploadResponseFunc) VisitConfirmUploadResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
 }
 
 type ConfirmUpload202JSONResponse Upload
@@ -10766,6 +9937,9 @@ type strictHandler struct {
 func (sh *strictHandler) ListActivePlugins(w http.ResponseWriter, r *http.Request) {
 	var request ListActivePluginsRequestObject
 
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListActivePlugins(ctx, request.(ListActivePluginsRequestObject))
 	}
@@ -10790,12 +9964,8 @@ func (sh *strictHandler) ListActivePlugins(w http.ResponseWriter, r *http.Reques
 func (sh *strictHandler) RequestBackfill(w http.ResponseWriter, r *http.Request) {
 	var request RequestBackfillRequestObject
 
-	var body RequestBackfillJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RequestBackfill(ctx, request.(RequestBackfillRequestObject))
@@ -10822,6 +9992,8 @@ func (sh *strictHandler) ListAdminDocuments(w http.ResponseWriter, r *http.Reque
 	var request ListAdminDocumentsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListAdminDocuments(ctx, request.(ListAdminDocumentsRequestObject))
@@ -10848,6 +10020,8 @@ func (sh *strictHandler) GetDocumentTimeline(w http.ResponseWriter, r *http.Requ
 	var request GetDocumentTimelineRequestObject
 
 	request.VersionId = versionId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetDocumentTimeline(ctx, request.(GetDocumentTimelineRequestObject))
@@ -10873,6 +10047,9 @@ func (sh *strictHandler) GetDocumentTimeline(w http.ResponseWriter, r *http.Requ
 func (sh *strictHandler) ListPluginRegistrations(w http.ResponseWriter, r *http.Request) {
 	var request ListPluginRegistrationsRequestObject
 
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListPluginRegistrations(ctx, request.(ListPluginRegistrationsRequestObject))
 	}
@@ -10897,12 +10074,8 @@ func (sh *strictHandler) ListPluginRegistrations(w http.ResponseWriter, r *http.
 func (sh *strictHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 	var request RegisterPluginRequestObject
 
-	var body RegisterPluginJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RegisterPlugin(ctx, request.(RegisterPluginRequestObject))
@@ -10928,6 +10101,9 @@ func (sh *strictHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) 
 func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Request) {
 	var request GetActivePipelinePlanRequestObject
 
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetActivePipelinePlan(ctx, request.(GetActivePipelinePlanRequestObject))
 	}
@@ -10952,12 +10128,8 @@ func (sh *strictHandler) GetActivePipelinePlan(w http.ResponseWriter, r *http.Re
 func (sh *strictHandler) RollbackPipelinePlan(w http.ResponseWriter, r *http.Request) {
 	var request RollbackPipelinePlanRequestObject
 
-	var body RollbackPipelinePlanJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RollbackPipelinePlan(ctx, request.(RollbackPipelinePlanRequestObject))
@@ -10984,6 +10156,8 @@ func (sh *strictHandler) ListPipelinePlans(w http.ResponseWriter, r *http.Reques
 	var request ListPipelinePlansRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListPipelinePlans(ctx, request.(ListPipelinePlansRequestObject))
@@ -11010,6 +10184,8 @@ func (sh *strictHandler) GetPipelinePlan(w http.ResponseWriter, r *http.Request,
 	var request GetPipelinePlanRequestObject
 
 	request.PlanId = planId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetPipelinePlan(ctx, request.(GetPipelinePlanRequestObject))
@@ -11036,6 +10212,8 @@ func (sh *strictHandler) GetPluginRegistration(w http.ResponseWriter, r *http.Re
 	var request GetPluginRegistrationRequestObject
 
 	request.RegistrationId = registrationId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetPluginRegistration(ctx, request.(GetPluginRegistrationRequestObject))
@@ -11062,6 +10240,8 @@ func (sh *strictHandler) ActivatePlugin(w http.ResponseWriter, r *http.Request, 
 	var request ActivatePluginRequestObject
 
 	request.RegistrationId = registrationId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ActivatePlugin(ctx, request.(ActivatePluginRequestObject))
@@ -11088,6 +10268,8 @@ func (sh *strictHandler) ListQuarantinedVersions(w http.ResponseWriter, r *http.
 	var request ListQuarantinedVersionsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListQuarantinedVersions(ctx, request.(ListQuarantinedVersionsRequestObject))
@@ -11113,12 +10295,8 @@ func (sh *strictHandler) ListQuarantinedVersions(w http.ResponseWriter, r *http.
 func (sh *strictHandler) ReprocessQuarantine(w http.ResponseWriter, r *http.Request) {
 	var request ReprocessQuarantineRequestObject
 
-	var body ReprocessQuarantineJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ReprocessQuarantine(ctx, request.(ReprocessQuarantineRequestObject))
@@ -11145,13 +10323,8 @@ func (sh *strictHandler) PromoteVectorSpace(w http.ResponseWriter, r *http.Reque
 	var request PromoteVectorSpaceRequestObject
 
 	request.VectorSpaceId = vectorSpaceId
-
-	var body PromoteVectorSpaceJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PromoteVectorSpace(ctx, request.(PromoteVectorSpaceRequestObject))
@@ -11178,6 +10351,8 @@ func (sh *strictHandler) ListConnectorPushStats(w http.ResponseWriter, r *http.R
 	var request ListConnectorPushStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListConnectorPushStats(ctx, request.(ListConnectorPushStatsRequestObject))
@@ -11204,6 +10379,8 @@ func (sh *strictHandler) GetMatchStats(w http.ResponseWriter, r *http.Request, p
 	var request GetMatchStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMatchStats(ctx, request.(GetMatchStatsRequestObject))
@@ -11230,6 +10407,8 @@ func (sh *strictHandler) GetPluginCallStats(w http.ResponseWriter, r *http.Reque
 	var request GetPluginCallStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetPluginCallStats(ctx, request.(GetPluginCallStatsRequestObject))
@@ -11256,6 +10435,8 @@ func (sh *strictHandler) GetReceivedStats(w http.ResponseWriter, r *http.Request
 	var request GetReceivedStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetReceivedStats(ctx, request.(GetReceivedStatsRequestObject))
@@ -11282,6 +10463,8 @@ func (sh *strictHandler) GetSearchStats(w http.ResponseWriter, r *http.Request, 
 	var request GetSearchStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetSearchStats(ctx, request.(GetSearchStatsRequestObject))
@@ -11308,6 +10491,8 @@ func (sh *strictHandler) GetStepStats(w http.ResponseWriter, r *http.Request, pa
 	var request GetStepStatsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetStepStats(ctx, request.(GetStepStatsRequestObject))
@@ -11334,6 +10519,8 @@ func (sh *strictHandler) GetTopQueries(w http.ResponseWriter, r *http.Request, p
 	var request GetTopQueriesRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetTopQueries(ctx, request.(GetTopQueriesRequestObject))
@@ -11360,6 +10547,8 @@ func (sh *strictHandler) ListEvaluationBacklog(w http.ResponseWriter, r *http.Re
 	var request ListEvaluationBacklogRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListEvaluationBacklog(ctx, request.(ListEvaluationBacklogRequestObject))
@@ -11385,12 +10574,8 @@ func (sh *strictHandler) ListEvaluationBacklog(w http.ResponseWriter, r *http.Re
 func (sh *strictHandler) RetireEvaluations(w http.ResponseWriter, r *http.Request) {
 	var request RetireEvaluationsRequestObject
 
-	var body RetireEvaluationsJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RetireEvaluations(ctx, request.(RetireEvaluationsRequestObject))
@@ -11417,6 +10602,8 @@ func (sh *strictHandler) GetEvaluationRetirement(w http.ResponseWriter, r *http.
 	var request GetEvaluationRetirementRequestObject
 
 	request.RetirementId = retirementId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetEvaluationRetirement(ctx, request.(GetEvaluationRetirementRequestObject))
@@ -11442,12 +10629,8 @@ func (sh *strictHandler) GetEvaluationRetirement(w http.ResponseWriter, r *http.
 func (sh *strictHandler) MigrateSubscriptionEvaluators(w http.ResponseWriter, r *http.Request) {
 	var request MigrateSubscriptionEvaluatorsRequestObject
 
-	var body MigrateSubscriptionEvaluatorsJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.MigrateSubscriptionEvaluators(ctx, request.(MigrateSubscriptionEvaluatorsRequestObject))
@@ -11474,6 +10657,8 @@ func (sh *strictHandler) GetBlob(w http.ResponseWriter, r *http.Request, blobId 
 	var request GetBlobRequestObject
 
 	request.BlobId = blobId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetBlob(ctx, request.(GetBlobRequestObject))
@@ -11500,6 +10685,8 @@ func (sh *strictHandler) PollChanges(w http.ResponseWriter, r *http.Request, par
 	var request PollChangesRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PollChanges(ctx, request.(PollChangesRequestObject))
@@ -11526,6 +10713,8 @@ func (sh *strictHandler) StreamChanges(w http.ResponseWriter, r *http.Request, p
 	var request StreamChangesRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.StreamChanges(ctx, request.(StreamChangesRequestObject))
@@ -11550,6 +10739,9 @@ func (sh *strictHandler) StreamChanges(w http.ResponseWriter, r *http.Request, p
 // ListConnectorKinds operation middleware
 func (sh *strictHandler) ListConnectorKinds(w http.ResponseWriter, r *http.Request) {
 	var request ListConnectorKindsRequestObject
+
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListConnectorKinds(ctx, request.(ListConnectorKindsRequestObject))
@@ -11576,6 +10768,8 @@ func (sh *strictHandler) RelayConnectorChallenge(w http.ResponseWriter, r *http.
 	var request RelayConnectorChallengeRequestObject
 
 	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RelayConnectorChallenge(ctx, request.(RelayConnectorChallengeRequestObject))
@@ -11602,6 +10796,8 @@ func (sh *strictHandler) RelayConnectorDelivery(w http.ResponseWriter, r *http.R
 	var request RelayConnectorDeliveryRequestObject
 
 	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RelayConnectorDelivery(ctx, request.(RelayConnectorDeliveryRequestObject))
@@ -11628,6 +10824,8 @@ func (sh *strictHandler) ListConnectors(w http.ResponseWriter, r *http.Request, 
 	var request ListConnectorsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListConnectors(ctx, request.(ListConnectorsRequestObject))
@@ -11653,12 +10851,8 @@ func (sh *strictHandler) ListConnectors(w http.ResponseWriter, r *http.Request, 
 func (sh *strictHandler) CreateConnector(w http.ResponseWriter, r *http.Request) {
 	var request CreateConnectorRequestObject
 
-	var body CreateConnectorJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateConnector(ctx, request.(CreateConnectorRequestObject))
@@ -11685,6 +10879,8 @@ func (sh *strictHandler) GetConnector(w http.ResponseWriter, r *http.Request, co
 	var request GetConnectorRequestObject
 
 	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetConnector(ctx, request.(GetConnectorRequestObject))
@@ -11713,6 +10909,8 @@ func (sh *strictHandler) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Re
 	request.ConnectorId = connectorId
 	request.Path = path
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ChallengeConnectorAPI(ctx, request.(ChallengeConnectorAPIRequestObject))
@@ -11741,13 +10939,8 @@ func (sh *strictHandler) PushConnectorAPI(w http.ResponseWriter, r *http.Request
 	request.ConnectorId = connectorId
 	request.Path = path
 	request.Params = params
-
-	var body PushConnectorAPIJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PushConnectorAPI(ctx, request.(PushConnectorAPIRequestObject))
@@ -11774,13 +10967,8 @@ func (sh *strictHandler) ReplaceConnectorCredential(w http.ResponseWriter, r *ht
 	var request ReplaceConnectorCredentialRequestObject
 
 	request.ConnectorId = connectorId
-
-	var body ReplaceConnectorCredentialJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ReplaceConnectorCredential(ctx, request.(ReplaceConnectorCredentialRequestObject))
@@ -11807,13 +10995,8 @@ func (sh *strictHandler) DisableConnector(w http.ResponseWriter, r *http.Request
 	var request DisableConnectorRequestObject
 
 	request.ConnectorId = connectorId
-
-	var body DisableConnectorJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DisableConnector(ctx, request.(DisableConnectorRequestObject))
@@ -11840,13 +11023,8 @@ func (sh *strictHandler) RequestConnectorRun(w http.ResponseWriter, r *http.Requ
 	var request RequestConnectorRunRequestObject
 
 	request.ConnectorId = connectorId
-
-	var body RequestConnectorRunJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RequestConnectorRun(ctx, request.(RequestConnectorRunRequestObject))
@@ -11873,13 +11051,8 @@ func (sh *strictHandler) ChangeConnectorSchedule(w http.ResponseWriter, r *http.
 	var request ChangeConnectorScheduleRequestObject
 
 	request.ConnectorId = connectorId
-
-	var body ChangeConnectorScheduleJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ChangeConnectorSchedule(ctx, request.(ChangeConnectorScheduleRequestObject))
@@ -11907,6 +11080,8 @@ func (sh *strictHandler) ListConnectorTokens(w http.ResponseWriter, r *http.Requ
 
 	request.ConnectorId = connectorId
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListConnectorTokens(ctx, request.(ListConnectorTokensRequestObject))
@@ -11933,6 +11108,8 @@ func (sh *strictHandler) CreateConnectorToken(w http.ResponseWriter, r *http.Req
 	var request CreateConnectorTokenRequestObject
 
 	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateConnectorToken(ctx, request.(CreateConnectorTokenRequestObject))
@@ -11960,6 +11137,8 @@ func (sh *strictHandler) RevokeConnectorToken(w http.ResponseWriter, r *http.Req
 
 	request.ConnectorId = connectorId
 	request.TokenId = tokenId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RevokeConnectorToken(ctx, request.(RevokeConnectorTokenRequestObject))
@@ -11987,6 +11166,8 @@ func (sh *strictHandler) RotateConnectorToken(w http.ResponseWriter, r *http.Req
 
 	request.ConnectorId = connectorId
 	request.TokenId = tokenId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RotateConnectorToken(ctx, request.(RotateConnectorTokenRequestObject))
@@ -12013,6 +11194,8 @@ func (sh *strictHandler) ListCorpora(w http.ResponseWriter, r *http.Request, par
 	var request ListCorporaRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListCorpora(ctx, request.(ListCorporaRequestObject))
@@ -12038,12 +11221,8 @@ func (sh *strictHandler) ListCorpora(w http.ResponseWriter, r *http.Request, par
 func (sh *strictHandler) CreateCorpus(w http.ResponseWriter, r *http.Request) {
 	var request CreateCorpusRequestObject
 
-	var body CreateCorpusJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateCorpus(ctx, request.(CreateCorpusRequestObject))
@@ -12070,6 +11249,8 @@ func (sh *strictHandler) GetCorpus(w http.ResponseWriter, r *http.Request, corpu
 	var request GetCorpusRequestObject
 
 	request.CorpusId = corpusId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetCorpus(ctx, request.(GetCorpusRequestObject))
@@ -12096,13 +11277,8 @@ func (sh *strictHandler) RebuildCorpusProjection(w http.ResponseWriter, r *http.
 	var request RebuildCorpusProjectionRequestObject
 
 	request.CorpusId = corpusId
-
-	var body RebuildCorpusProjectionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RebuildCorpusProjection(ctx, request.(RebuildCorpusProjectionRequestObject))
@@ -12129,13 +11305,8 @@ func (sh *strictHandler) ConfigureRetrieval(w http.ResponseWriter, r *http.Reque
 	var request ConfigureRetrievalRequestObject
 
 	request.CorpusId = corpusId
-
-	var body ConfigureRetrievalJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ConfigureRetrieval(ctx, request.(ConfigureRetrievalRequestObject))
@@ -12162,6 +11333,8 @@ func (sh *strictHandler) ListVectorSpaces(w http.ResponseWriter, r *http.Request
 	var request ListVectorSpacesRequestObject
 
 	request.CorpusId = corpusId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListVectorSpaces(ctx, request.(ListVectorSpacesRequestObject))
@@ -12188,6 +11361,8 @@ func (sh *strictHandler) GetDelivery(w http.ResponseWriter, r *http.Request, del
 	var request GetDeliveryRequestObject
 
 	request.DeliveryId = deliveryId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetDelivery(ctx, request.(GetDeliveryRequestObject))
@@ -12215,6 +11390,8 @@ func (sh *strictHandler) ListDeliveryAttempts(w http.ResponseWriter, r *http.Req
 
 	request.DeliveryId = deliveryId
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListDeliveryAttempts(ctx, request.(ListDeliveryAttemptsRequestObject))
@@ -12241,6 +11418,8 @@ func (sh *strictHandler) GetReceipt(w http.ResponseWriter, r *http.Request, rece
 	var request GetReceiptRequestObject
 
 	request.ReceiptId = receiptId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetReceipt(ctx, request.(GetReceiptRequestObject))
@@ -12267,6 +11446,8 @@ func (sh *strictHandler) ListMatches(w http.ResponseWriter, r *http.Request, par
 	var request ListMatchesRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListMatches(ctx, request.(ListMatchesRequestObject))
@@ -12293,6 +11474,8 @@ func (sh *strictHandler) GetMatch(w http.ResponseWriter, r *http.Request, matchI
 	var request GetMatchRequestObject
 
 	request.MatchId = matchId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMatch(ctx, request.(GetMatchRequestObject))
@@ -12319,6 +11502,8 @@ func (sh *strictHandler) GetOperation(w http.ResponseWriter, r *http.Request, op
 	var request GetOperationRequestObject
 
 	request.OperationId = operationId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetOperation(ctx, request.(GetOperationRequestObject))
@@ -12345,13 +11530,8 @@ func (sh *strictHandler) CancelOperation(w http.ResponseWriter, r *http.Request,
 	var request CancelOperationRequestObject
 
 	request.OperationId = operationId
-
-	var body CancelOperationJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CancelOperation(ctx, request.(CancelOperationRequestObject))
@@ -12378,13 +11558,8 @@ func (sh *strictHandler) PauseOperation(w http.ResponseWriter, r *http.Request, 
 	var request PauseOperationRequestObject
 
 	request.OperationId = operationId
-
-	var body PauseOperationJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PauseOperation(ctx, request.(PauseOperationRequestObject))
@@ -12411,13 +11586,8 @@ func (sh *strictHandler) RerunOperation(w http.ResponseWriter, r *http.Request, 
 	var request RerunOperationRequestObject
 
 	request.OperationId = operationId
-
-	var body RerunOperationJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RerunOperation(ctx, request.(RerunOperationRequestObject))
@@ -12444,13 +11614,8 @@ func (sh *strictHandler) ResumeOperation(w http.ResponseWriter, r *http.Request,
 	var request ResumeOperationRequestObject
 
 	request.OperationId = operationId
-
-	var body ResumeOperationJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ResumeOperation(ctx, request.(ResumeOperationRequestObject))
@@ -12477,6 +11642,8 @@ func (sh *strictHandler) ListRecords(w http.ResponseWriter, r *http.Request, par
 	var request ListRecordsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListRecords(ctx, request.(ListRecordsRequestObject))
@@ -12502,12 +11669,8 @@ func (sh *strictHandler) ListRecords(w http.ResponseWriter, r *http.Request, par
 func (sh *strictHandler) IngestRecord(w http.ResponseWriter, r *http.Request) {
 	var request IngestRecordRequestObject
 
-	var body IngestRecordJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.IngestRecord(ctx, request.(IngestRecordRequestObject))
@@ -12533,12 +11696,8 @@ func (sh *strictHandler) IngestRecord(w http.ResponseWriter, r *http.Request) {
 func (sh *strictHandler) IngestBatch(w http.ResponseWriter, r *http.Request) {
 	var request IngestBatchRequestObject
 
-	var body IngestBatchJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.IngestBatch(ctx, request.(IngestBatchRequestObject))
@@ -12564,12 +11723,8 @@ func (sh *strictHandler) IngestBatch(w http.ResponseWriter, r *http.Request) {
 func (sh *strictHandler) WithdrawRecord(w http.ResponseWriter, r *http.Request) {
 	var request WithdrawRecordRequestObject
 
-	var body WithdrawRecordJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.WithdrawRecord(ctx, request.(WithdrawRecordRequestObject))
@@ -12596,6 +11751,8 @@ func (sh *strictHandler) GetRecord(w http.ResponseWriter, r *http.Request, recor
 	var request GetRecordRequestObject
 
 	request.RecordId = recordId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetRecord(ctx, request.(GetRecordRequestObject))
@@ -12623,6 +11780,8 @@ func (sh *strictHandler) GetVersion(w http.ResponseWriter, r *http.Request, reco
 
 	request.RecordId = recordId
 	request.VersionId = versionId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetVersion(ctx, request.(GetVersionRequestObject))
@@ -12648,12 +11807,8 @@ func (sh *strictHandler) GetVersion(w http.ResponseWriter, r *http.Request, reco
 func (sh *strictHandler) CreateSavedQuery(w http.ResponseWriter, r *http.Request) {
 	var request CreateSavedQueryRequestObject
 
-	var body CreateSavedQueryJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateSavedQuery(ctx, request.(CreateSavedQueryRequestObject))
@@ -12680,6 +11835,8 @@ func (sh *strictHandler) GetSavedQuery(w http.ResponseWriter, r *http.Request, s
 	var request GetSavedQueryRequestObject
 
 	request.SavedQueryId = savedQueryId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetSavedQuery(ctx, request.(GetSavedQueryRequestObject))
@@ -12706,13 +11863,8 @@ func (sh *strictHandler) DeleteSavedQuery(w http.ResponseWriter, r *http.Request
 	var request DeleteSavedQueryRequestObject
 
 	request.SavedQueryId = savedQueryId
-
-	var body DeleteSavedQueryJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteSavedQuery(ctx, request.(DeleteSavedQueryRequestObject))
@@ -12739,13 +11891,8 @@ func (sh *strictHandler) RenameSavedQuery(w http.ResponseWriter, r *http.Request
 	var request RenameSavedQueryRequestObject
 
 	request.SavedQueryId = savedQueryId
-
-	var body RenameSavedQueryJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RenameSavedQuery(ctx, request.(RenameSavedQueryRequestObject))
@@ -12772,13 +11919,8 @@ func (sh *strictHandler) CreateSavedQueryVersion(w http.ResponseWriter, r *http.
 	var request CreateSavedQueryVersionRequestObject
 
 	request.SavedQueryId = savedQueryId
-
-	var body CreateSavedQueryVersionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateSavedQueryVersion(ctx, request.(CreateSavedQueryVersionRequestObject))
@@ -12806,6 +11948,8 @@ func (sh *strictHandler) GetSavedQueryVersion(w http.ResponseWriter, r *http.Req
 
 	request.SavedQueryId = savedQueryId
 	request.VersionId = versionId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetSavedQueryVersion(ctx, request.(GetSavedQueryVersionRequestObject))
@@ -12831,12 +11975,8 @@ func (sh *strictHandler) GetSavedQueryVersion(w http.ResponseWriter, r *http.Req
 func (sh *strictHandler) SearchRecords(w http.ResponseWriter, r *http.Request) {
 	var request SearchRecordsRequestObject
 
-	var body SearchRecordsJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.SearchRecords(ctx, request.(SearchRecordsRequestObject))
@@ -12862,6 +12002,9 @@ func (sh *strictHandler) SearchRecords(w http.ResponseWriter, r *http.Request) {
 func (sh *strictHandler) ListSearchProfiles(w http.ResponseWriter, r *http.Request) {
 	var request ListSearchProfilesRequestObject
 
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListSearchProfiles(ctx, request.(ListSearchProfilesRequestObject))
 	}
@@ -12886,12 +12029,8 @@ func (sh *strictHandler) ListSearchProfiles(w http.ResponseWriter, r *http.Reque
 func (sh *strictHandler) PreviewSubscription(w http.ResponseWriter, r *http.Request) {
 	var request PreviewSubscriptionRequestObject
 
-	var body PreviewSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PreviewSubscription(ctx, request.(PreviewSubscriptionRequestObject))
@@ -12918,6 +12057,8 @@ func (sh *strictHandler) ListSubscriptions(w http.ResponseWriter, r *http.Reques
 	var request ListSubscriptionsRequestObject
 
 	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListSubscriptions(ctx, request.(ListSubscriptionsRequestObject))
@@ -12943,12 +12084,8 @@ func (sh *strictHandler) ListSubscriptions(w http.ResponseWriter, r *http.Reques
 func (sh *strictHandler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var request CreateSubscriptionRequestObject
 
-	var body CreateSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateSubscription(ctx, request.(CreateSubscriptionRequestObject))
@@ -12975,6 +12112,8 @@ func (sh *strictHandler) GetSubscription(w http.ResponseWriter, r *http.Request,
 	var request GetSubscriptionRequestObject
 
 	request.SubscriptionId = subscriptionId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetSubscription(ctx, request.(GetSubscriptionRequestObject))
@@ -13001,13 +12140,8 @@ func (sh *strictHandler) DeleteSubscription(w http.ResponseWriter, r *http.Reque
 	var request DeleteSubscriptionRequestObject
 
 	request.SubscriptionId = subscriptionId
-
-	var body DeleteSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteSubscription(ctx, request.(DeleteSubscriptionRequestObject))
@@ -13034,13 +12168,8 @@ func (sh *strictHandler) DisableSubscription(w http.ResponseWriter, r *http.Requ
 	var request DisableSubscriptionRequestObject
 
 	request.SubscriptionId = subscriptionId
-
-	var body DisableSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DisableSubscription(ctx, request.(DisableSubscriptionRequestObject))
@@ -13067,13 +12196,8 @@ func (sh *strictHandler) EnableSubscription(w http.ResponseWriter, r *http.Reque
 	var request EnableSubscriptionRequestObject
 
 	request.SubscriptionId = subscriptionId
-
-	var body EnableSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.EnableSubscription(ctx, request.(EnableSubscriptionRequestObject))
@@ -13100,13 +12224,8 @@ func (sh *strictHandler) RenameSubscription(w http.ResponseWriter, r *http.Reque
 	var request RenameSubscriptionRequestObject
 
 	request.SubscriptionId = subscriptionId
-
-	var body RenameSubscriptionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RenameSubscription(ctx, request.(RenameSubscriptionRequestObject))
@@ -13133,13 +12252,8 @@ func (sh *strictHandler) CreateSubscriptionVersion(w http.ResponseWriter, r *htt
 	var request CreateSubscriptionVersionRequestObject
 
 	request.SubscriptionId = subscriptionId
-
-	var body CreateSubscriptionVersionJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateSubscriptionVersion(ctx, request.(CreateSubscriptionVersionRequestObject))
@@ -13167,6 +12281,8 @@ func (sh *strictHandler) GetSubscriptionVersion(w http.ResponseWriter, r *http.R
 
 	request.SubscriptionId = subscriptionId
 	request.VersionId = versionId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetSubscriptionVersion(ctx, request.(GetSubscriptionVersionRequestObject))
@@ -13192,12 +12308,8 @@ func (sh *strictHandler) GetSubscriptionVersion(w http.ResponseWriter, r *http.R
 func (sh *strictHandler) CreateUpload(w http.ResponseWriter, r *http.Request) {
 	var request CreateUploadRequestObject
 
-	var body CreateUploadJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.CreateUpload(ctx, request.(CreateUploadRequestObject))
@@ -13224,6 +12336,8 @@ func (sh *strictHandler) GetUpload(w http.ResponseWriter, r *http.Request, uploa
 	var request GetUploadRequestObject
 
 	request.UploadId = uploadId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetUpload(ctx, request.(GetUploadRequestObject))
@@ -13250,6 +12364,8 @@ func (sh *strictHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request, u
 	var request ConfirmUploadRequestObject
 
 	request.UploadId = uploadId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ConfirmUpload(ctx, request.(ConfirmUploadRequestObject))

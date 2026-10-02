@@ -13,26 +13,10 @@ import (
 
 const evaluatorMigrationsPath = "/v0/admin/subscriptions/evaluator-migrations"
 
-// evaluatorMigrationRoutes serves POST /v0/admin/subscriptions/evaluator-migrations
-// (plugins:admin): moving an Organization's Subscriptions to the alert-rule
-// version the active plan serves (THE-805).
-func (a *API) evaluatorMigrationRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if r.URL.Path != evaluatorMigrationsPath {
-		return false
-	}
-	switch {
-	case r.Method != "POST":
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	default:
-		a.migrateEvaluators(w, r, scope)
-	}
-	return true
-}
-
 func (a *API) migrateEvaluators(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in transport.SubscriptionEvaluatorMigrationRequest
 	m, err := a.Monitoring.MigrateEvaluator(r.Context(), scope, monitoring.EvaluatorMigrationInput{}, func() (monitoring.EvaluatorMigrationInput, error) {
-		if !decodeInto(w, r, a.evaluatorMigrationSchema, &in) {
+		if !decodeInto(w, r, a.schemas["SubscriptionEvaluatorMigrationRequest"], &in) {
 			return monitoring.EvaluatorMigrationInput{}, errResponseWritten
 		}
 		request := monitoring.EvaluatorMigrationInput{PluginID: in.PluginId, FromVersion: in.FromVersion, DryRun: in.DryRun}

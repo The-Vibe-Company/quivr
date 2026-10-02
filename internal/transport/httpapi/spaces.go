@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -20,13 +19,6 @@ type SpaceRegistry interface {
 // WithVectorSpaces serves GET /v0/corpora/{corpus_id}/vector-spaces.
 func WithVectorSpaces(registry SpaceRegistry) Option {
 	return func(a *API) { a.Spaces = registry }
-}
-
-// vectorSpaceRoute reports whether a request is GET /v0/corpora/{id}/vector-spaces
-// and returns the Corpus id.
-func vectorSpaceRoute(r *http.Request) (string, bool) {
-	id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/v0/corpora/"), "/vector-spaces")
-	return id, ok && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v0/corpora/") && id != "" && !strings.Contains(id, "/")
 }
 
 func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id string) {

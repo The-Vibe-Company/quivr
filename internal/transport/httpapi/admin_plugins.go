@@ -11,28 +11,21 @@ import (
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-// activePluginRoutes serves GET /v0/admin/active-plugins (THE-797): the
+// handleListActivePlugins serves GET /v0/admin/active-plugins (THE-797): the
 // plugins the active Pipeline Plan runs, for the operator views, behind
 // observability:read. It names each plugin version and the roles it serves,
 // and nothing that locates or configures it.
-func (a *API) activePluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if r.URL.Path != "/v0/admin/active-plugins" {
-		return false
-	}
-	if r.Method != "GET" {
-		writeError(w, publicerr.MethodNotAllowed, nil)
-		return true
-	}
+func (a *API) handleListActivePlugins(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	// The plan is the whole deployment's, so only a key for every Corpus
 	// reads it, as for the stats.
 	plan, err := a.Plugins.ActivePlugins(r.Context(), scope)
 	if errors.Is(err, registry.ErrNoPlan) {
 		send(w, 200, transport.ActivePluginList{Items: []transport.ActivePlugin{}})
-		return true
+		return
 	}
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
-		return true
+		return
 	}
 	byVersion := map[[2]string]*transport.ActivePlugin{}
 	for _, role := range plan.Roles {
@@ -54,5 +47,4 @@ func (a *API) activePluginRoutes(w http.ResponseWriter, r *http.Request, scope c
 		return out.Items[i].Version < out.Items[j].Version
 	})
 	send(w, 200, out)
-	return true
 }

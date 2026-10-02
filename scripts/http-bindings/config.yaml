@@ -1,0 +1,10 @@
+package: transport
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  user-templates:
+    strict/strict-interface.tmpl: scripts/http-bindings/strict-interface.tmpl
+    strict/strict-http.tmpl: scripts/http-bindings/strict-http.tmpl
+    stdhttp/std-http-middleware.tmpl: scripts/http-bindings/std-http-middleware.tmpl

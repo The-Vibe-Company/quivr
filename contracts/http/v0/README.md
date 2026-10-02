@@ -20,6 +20,13 @@ for generators and validators that cannot follow cross-file references; the
 generated transport is byte-identical to an inline definition. The Go server
 compiles both files together through the `contracts` package.
 
+The HTTP API implements the generated `StrictServerInterface`. The templates in
+[`scripts/http-bindings`](../../../scripts/http-bindings) defer body and query
+validation until the service authorizes the operation, preserving error precedence
+and bounded reads. Request and response validators share the `contracts.HTTP`
+schema registry. `x-quivr-route-aliases` records existing exact-path aliases;
+canonical routes and their handlers still come from the published operations.
+
 ## Selected tools and verification
 
 | Target | Pinned tool | Verified |

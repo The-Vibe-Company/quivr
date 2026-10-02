@@ -38,23 +38,23 @@ type route struct {
 }
 type checker struct {
 	routes   []route
-	compiler *jsonschema.Compiler
-	mu       sync.Mutex // Compiler and its lazy schema cache are shared across handlers.
-	schemas  map[string]*jsonschema.Schema
+	aliases  map[string]string
+	registry *contracts.HTTPRegistry
 }
 
 var load = sync.OnceValues(func() (*checker, error) {
 	var doc struct {
-		Paths map[string]map[string]yaml.Node `yaml:"paths"`
+		Aliases map[string]string               `yaml:"x-quivr-route-aliases"`
+		Paths   map[string]map[string]yaml.Node `yaml:"paths"`
 	}
 	if err := yaml.Unmarshal(contracts.OpenAPI(), &doc); err != nil {
 		return nil, err
 	}
-	compiler, err := contracts.NewCompiler()
+	registry, err := contracts.HTTP()
 	if err != nil {
 		return nil, err
 	}
-	c := &checker{compiler: compiler, schemas: map[string]*jsonschema.Schema{}}
+	c := &checker{registry: registry, aliases: doc.Aliases}
 	for path, item := range doc.Paths {
 		methods := map[string]operation{}
 		for method, node := range item {
@@ -106,6 +106,9 @@ func (c *checker) check(method, path string, status int, headers http.Header, bo
 	u, err := url.Parse(path)
 	if err != nil {
 		return err
+	}
+	if alias, ok := c.aliases[u.Path]; ok {
+		u.Path = alias
 	}
 	var chosen *route
 	for i := range c.routes {
@@ -177,15 +180,7 @@ func (c *checker) validate(ref, media, contentType string, body []byte) error {
 	if err != nil || actual != media {
 		return fmt.Errorf("expected Content-Type %s, got %q", media, contentType)
 	}
-	c.mu.Lock()
-	schema := c.schemas[ref]
-	if schema == nil {
-		schema, err = c.compiler.Compile(ref)
-		if err == nil {
-			c.schemas[ref] = schema
-		}
-	}
-	c.mu.Unlock()
+	schema, err := c.registry.Schema(ref)
 	if err != nil {
 		return err
 	}

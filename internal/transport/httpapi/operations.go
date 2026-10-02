@@ -3,7 +3,6 @@ package httpapi
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
@@ -38,42 +37,26 @@ func operationToTransport(op operations.Operation) transport.Operation {
 	return out
 }
 
-func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if rest, ok := strings.CutPrefix(r.URL.Path, "/v0/operations/"); ok {
-		if id, action, ok := strings.Cut(rest, "/"); ok && id != "" && (action == "cancel" || action == "rerun" || action == "pause" || action == "resume") {
-			a.operationAction(w, r, scope, id, action)
-			return true
-		}
+func (a *API) handleGetOperation(w http.ResponseWriter, r *http.Request, scope corpus.Scope, operationID string) {
+	if operationID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
 	}
-	if id, ok := strings.CutPrefix(r.URL.Path, "/v0/operations/"); ok && id != "" && !strings.Contains(id, "/") {
-		if r.Method != "GET" {
-			writeError(w, publicerr.MethodNotAllowed, nil)
-			return true
-		}
-		op, err := a.Operations.Read(r.Context(), scope, id)
-		switch {
-		case err != nil:
-			writeError(w, err, publicerr.StorageUnavailable)
-		default:
-			send(w, 200, operationToTransport(op))
-		}
-		return true
+	op, err := a.Operations.Read(r.Context(), scope, operationID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+		return
 	}
-	rest, ok := strings.CutPrefix(r.URL.Path, "/v0/corpora/")
-	if configured, isConfig := strings.CutSuffix(rest, "/retrieval"); ok && isConfig && configured != "" && !strings.Contains(configured, "/") {
-		a.configureRetrieval(w, r, scope, configured)
-		return true
-	}
-	corpusID, ok2 := strings.CutSuffix(rest, "/rebuilds")
-	if !ok || !ok2 || corpusID == "" || strings.Contains(corpusID, "/") {
-		return false
-	}
-	if r.Method != "POST" {
-		writeError(w, publicerr.MethodNotAllowed, nil)
-		return true
+	send(w, 200, operationToTransport(op))
+}
+
+func (a *API) handleRebuildCorpusProjection(w http.ResponseWriter, r *http.Request, scope corpus.Scope, corpusID string) {
+	if corpusID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
 	}
 	op, err := a.Operations.RequestRebuild(r.Context(), scope, corpusID, "", func() (string, string, error) {
-		raw, ok := decodeRequest(w, r, a.actionSchema)
+		raw, ok := decodeRequest(w, r, a.schemas["ActionRequest"])
 		if !ok {
 			return "", "", errResponseWritten
 		}
@@ -82,7 +65,7 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		return corpusID, key, nil
 	})
 	if errors.Is(err, errResponseWritten) {
-		return true
+		return
 	}
 	switch {
 	case err != nil:
@@ -92,19 +75,18 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		w.Header().Set("Location", "/v0/operations/"+op.ID)
 		send(w, 202, operationToTransport(op))
 	}
-	return true
 }
 
 // operationAction serves cancel, rerun, pause and resume. All are 202 with
 // the resulting Operation: cancel, pause and resume return the current state
 // (terminal outcomes unchanged), rerun the new linked Operation.
 func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id, action string) {
-	if r.Method != "POST" {
-		writeError(w, publicerr.MethodNotAllowed, nil)
+	if id == "" {
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	load := func() (string, error) {
-		raw, ok := decodeRequest(w, r, a.actionSchema)
+		raw, ok := decodeRequest(w, r, a.schemas["ActionRequest"])
 		if !ok {
 			return "", errResponseWritten
 		}
@@ -143,12 +125,12 @@ func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corp
 // Operation that builds and activates its replacement generation. The Corpus
 // keeps serving its prior effective configuration until validated cutover.
 func (a *API) configureRetrieval(w http.ResponseWriter, r *http.Request, scope corpus.Scope, corpusID string) {
-	if r.Method != "PUT" {
-		writeError(w, publicerr.MethodNotAllowed, nil)
+	if corpusID == "" {
+		writeError(w, publicerr.NotFound, nil)
 		return
 	}
 	op, err := a.Operations.ConfigureRetrieval(r.Context(), scope, corpusID, "", corpus.Retrieval{}, func() (string, string, corpus.Retrieval, error) {
-		raw, ok := decodeRequest(w, r, a.configSchema)
+		raw, ok := decodeRequest(w, r, a.schemas["ConfigUpdate"])
 		if !ok {
 			return "", "", corpus.Retrieval{}, errResponseWritten
 		}

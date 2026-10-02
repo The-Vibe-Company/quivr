@@ -1,12 +1,9 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -24,19 +21,12 @@ type matchPage struct {
 }
 
 func (a *API) encodeMatchPage(p matchPage) string {
-	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(matchPageDomain, b))
+	return a.encodePage(matchPageDomain, p)
 }
 
 func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int64, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return 0, errors.New("invalid_cursor")
-	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p matchPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(matchPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
+	if a.decodePage(matchPageDomain, token, &p) != nil || p.Version != 1 || p.After < 0 {
 		return 0, errors.New("invalid_cursor")
 	}
 	if p.Subscription != subscriptionID || p.Scope != scopeDigest(s) {
@@ -45,58 +35,51 @@ func (a *API) decodeMatchPage(token, subscriptionID string, s corpus.Scope) (int
 	return p.After, nil
 }
 
-// matchRoutes serves /v0/matches, /v0/deliveries/{id} and its attempts.
-func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	path := r.URL.Path
-	if path != "/v0/matches" && !strings.HasPrefix(path, "/v0/matches/") && !strings.HasPrefix(path, "/v0/deliveries/") {
-		return false
-	}
-	var resource, id string
-	switch {
-	case path == "/v0/matches":
-		resource = "matches"
-	case strings.HasPrefix(path, "/v0/matches/"):
-		resource, id = "match", strings.TrimPrefix(path, "/v0/matches/")
-	default:
-		resource, id = "delivery", strings.TrimPrefix(path, "/v0/deliveries/")
-		if d, ok := strings.CutSuffix(id, "/attempts"); ok {
-			resource, id = "attempts", d
-		}
-	}
-	if a.Monitoring.MatchStore == nil || (resource != "matches" && (id == "" || strings.Contains(id, "/"))) {
+func (a *API) matchesAvailable(w http.ResponseWriter) bool {
+	if a.Monitoring.MatchStore == nil {
 		writeError(w, publicerr.NotFound, nil)
-		return true
-	}
-	if r.Method != "GET" {
-		writeError(w, publicerr.MethodNotAllowed, nil)
-		return true
-	}
-	ctx := r.Context()
-	switch resource {
-	case "match":
-		m, err := a.Monitoring.Match(ctx, scope, id)
-		respondMonitoring(w, 200, matchToTransport(m), err)
-	case "delivery":
-		d, err := a.Monitoring.Delivery(ctx, scope, id)
-		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-			return true
-		}
-		out, err := deliveryToTransport(d)
-		if err != nil {
-			writeError(w, publicerr.StorageUnavailable, nil)
-			return true
-		}
-		send(w, 200, out)
-	case "attempts":
-		a.listAttempts(w, r, scope, id)
-	default:
-		a.listMatches(w, r, scope)
+		return false
 	}
 	return true
 }
 
+func (a *API) handleGetMatch(w http.ResponseWriter, r *http.Request, scope corpus.Scope, matchID string) {
+	if matchID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	if !a.matchesAvailable(w) {
+		return
+	}
+	m, err := a.Monitoring.Match(r.Context(), scope, matchID)
+	respondMonitoring(w, 200, matchToTransport(m), err)
+}
+
+func (a *API) handleGetDelivery(w http.ResponseWriter, r *http.Request, scope corpus.Scope, deliveryID string) {
+	if deliveryID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	if !a.matchesAvailable(w) {
+		return
+	}
+	d, err := a.Monitoring.Delivery(r.Context(), scope, deliveryID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+		return
+	}
+	out, err := deliveryToTransport(d)
+	if err != nil {
+		writeError(w, publicerr.StorageUnavailable, nil)
+		return
+	}
+	send(w, 200, out)
+}
+
 func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if !a.matchesAvailable(w) {
+		return
+	}
 	var limit int
 	var ok bool
 	var subscriptionID string
@@ -204,19 +187,12 @@ type attemptPage struct {
 }
 
 func (a *API) encodeAttemptPage(p attemptPage) string {
-	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(attemptPageDomain, b))
+	return a.encodePage(attemptPageDomain, p)
 }
 
 func (a *API) decodeAttemptPage(token, deliveryID string, s corpus.Scope) (int, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return 0, errors.New("invalid_cursor")
-	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p attemptPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(attemptPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 || p.After < 0 {
+	if a.decodePage(attemptPageDomain, token, &p) != nil || p.Version != 1 || p.After < 0 {
 		return 0, errors.New("invalid_cursor")
 	}
 	if p.Delivery != deliveryID || p.Scope != scopeDigest(s) {
@@ -228,6 +204,13 @@ func (a *API) decodeAttemptPage(token, deliveryID string, s corpus.Scope) (int, 
 // listAttempts pages a Delivery's append-only attempt history. It exposes
 // bounded outcome, status and error only: no signature, secret or receiver body.
 func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.Scope, deliveryID string) {
+	if deliveryID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	if !a.matchesAvailable(w) {
+		return
+	}
 	var limit int
 	var ok bool
 	attempts, err := a.Monitoring.Attempts(r.Context(), scope, "", 0, 0, func() (string, int, int, error) {

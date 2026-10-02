@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -21,72 +20,54 @@ func WithPlugins(service registry.Service) Option {
 
 const pluginsPath = "/v0/admin/plugins"
 
-// pluginRoutes serves the plugin registry, every route behind plugins:admin:
-// GET and POST /v0/admin/plugins, GET /v0/admin/plugins/plan,
-// POST /v0/admin/plugins/plan/rollback, GET /v0/admin/plugins/plans,
-// GET /v0/admin/plugins/plans/{plan_id}, GET /v0/admin/plugins/{registration_id}
-// and POST /v0/admin/plugins/{registration_id}/activate.
-func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	rest, ok := strings.CutPrefix(r.URL.Path, pluginsPath)
-	if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
-		return false
+func (a *API) handleListPluginRegistrations(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	registrations, err := a.Plugins.Registrations(r.Context(), scope)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+		return
 	}
-	rest = strings.TrimPrefix(rest, "/")
-	segments := strings.Split(rest, "/")
-	method := "GET"
-	switch {
-	case rest == "":
-		if r.Method == "POST" {
-			method = "POST"
-		}
-	case len(segments) == 2 && segments[0] == "plans" && segments[1] != "":
-	case rest == "plan/rollback":
-		method = "POST"
-	case len(segments) == 2 && segments[1] == "activate" && segments[0] != "":
-		method = "POST"
-	case len(segments) == 1:
-	default:
-		return false
+	out := transport.PluginRegistrationList{Items: make([]transport.PluginRegistration, 0, len(registrations))}
+	for _, reg := range registrations {
+		reg.Check = nil
+		out.Items = append(out.Items, registrationToTransport(reg))
 	}
-	switch {
-	case r.Method != method:
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	case rest == "" && method == "POST":
-		a.registerPlugin(w, r, scope)
-	case rest == "":
-		registrations, err := a.Plugins.Registrations(r.Context(), scope)
-		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-			return true
-		}
-		out := transport.PluginRegistrationList{Items: make([]transport.PluginRegistration, 0, len(registrations))}
-		for _, reg := range registrations {
-			reg.Check = nil
-			out.Items = append(out.Items, registrationToTransport(reg))
-		}
-		send(w, 200, out)
-	case rest == "plan":
-		plan, err := a.Plugins.ActivePlan(r.Context(), scope)
-		sendPlan(w, plan, err)
-	case rest == "plan/rollback":
-		a.rollbackPlan(w, r, scope)
-	case rest == "plans":
-		a.listPlans(w, r, scope)
-	case segments[0] == "plans":
-		plan, err := a.Plugins.PipelinePlan(r.Context(), scope, segments[1])
-		sendPlan(w, plan, err)
-	case len(segments) == 2:
-		plan, err := a.Plugins.Activate(r.Context(), scope, segments[0])
-		sendPlan(w, plan, err)
-	default:
-		reg, err := a.Plugins.Registration(r.Context(), scope, segments[0])
-		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-			return true
-		}
-		send(w, 200, registrationToTransport(reg))
+	send(w, 200, out)
+}
+
+func (a *API) handleGetActivePipelinePlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	plan, err := a.Plugins.ActivePlan(r.Context(), scope)
+	sendPlan(w, plan, err)
+}
+
+func (a *API) handleGetPipelinePlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope, planID string) {
+	if planID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
 	}
-	return true
+	plan, err := a.Plugins.PipelinePlan(r.Context(), scope, planID)
+	sendPlan(w, plan, err)
+}
+
+func (a *API) handleGetPluginRegistration(w http.ResponseWriter, r *http.Request, scope corpus.Scope, registrationID string) {
+	if registrationID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	reg, err := a.Plugins.Registration(r.Context(), scope, registrationID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+		return
+	}
+	send(w, 200, registrationToTransport(reg))
+}
+
+func (a *API) handleActivatePlugin(w http.ResponseWriter, r *http.Request, scope corpus.Scope, registrationID string) {
+	if registrationID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	plan, err := a.Plugins.Activate(r.Context(), scope, registrationID)
+	sendPlan(w, plan, err)
 }
 
 // pluginRegistrationRequest is the registration command; configuration stays
@@ -114,7 +95,7 @@ func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpu
 			writeError(w, publicerr.NotFound, nil)
 			return registry.Request{}, errResponseWritten
 		}
-		if !decodeIntoAtMost(w, r, maxPluginRegistrationBytes, a.pluginSchema, &in) {
+		if !decodeIntoAtMost(w, r, maxPluginRegistrationBytes, a.schemas["PluginRegistrationRequest"], &in) {
 			return registry.Request{}, errResponseWritten
 		}
 
@@ -142,7 +123,7 @@ type pluginRollbackRequest struct {
 func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in pluginRollbackRequest
 	plan, err := a.Plugins.Rollback(r.Context(), scope, registry.RollbackRequest{}, func() (registry.RollbackRequest, error) {
-		if !decodeInto(w, r, a.pluginRollbackSchema, &in) {
+		if !decodeInto(w, r, a.schemas["PipelinePlanRollbackRequest"], &in) {
 			return registry.RollbackRequest{}, errResponseWritten
 		}
 

@@ -1211,6 +1211,8 @@ x-public-errors:
     - ingestBatch
     - ingestRecord
     - withdrawRecord
+x-quivr-route-aliases:
+  /v0/admin/plugins/: /v0/admin/plugins
 paths:
   /v0/records:
     post:

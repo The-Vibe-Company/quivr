@@ -40,72 +40,65 @@ func blobToTransport(b uploads.BlobInfo) transport.Blob {
 	return transport.Blob{BlobId: b.ID, SizeBytes: int(b.SizeBytes), Sha256: b.SHA256, MediaType: b.MediaType}
 }
 
-func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	path := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	if len(path) >= 2 && path[0] == "v0" && path[1] == "uploads" {
-		switch {
-		case len(path) == 2 && r.Method == http.MethodPost:
-			var wire transport.UploadRequest
-			session, err := a.Uploads.CreateScoped(r.Context(), scope, uploads.Request{}, func() (uploads.Request, error) {
-				raw, ok := decodeRequest(w, r, a.uploadSchema)
-				if !ok {
-					return uploads.Request{}, errResponseWritten
-				}
-				b, err := json.Marshal(raw)
-				if err != nil {
-					writeError(w, publicerr.InvalidSchema, nil)
-					return uploads.Request{}, errResponseWritten
-				}
-				if err = json.Unmarshal(b, &wire); err != nil {
-					writeError(w, publicerr.InvalidSchema, nil)
-					return uploads.Request{}, errResponseWritten
-				}
-				req := uploads.Request{
-					Key:       wire.Sha256 + ":" + strconv.FormatInt(int64(wire.SizeBytes), 10) + ":" + wire.MediaType,
-					SizeBytes: int64(wire.SizeBytes),
-					SHA256:    wire.Sha256,
-					MediaType: wire.MediaType,
-				}
-
-				return req, nil
-			})
-			if errors.Is(err, errResponseWritten) {
-				return true
-			}
-			if err != nil {
-				writeError(w, err, publicerr.StorageUnavailable)
-			} else {
-				send(w, 201, sessionToTransport(session))
-			}
-			return true
-		case len(path) == 3 && r.Method == http.MethodGet:
-			session, err := a.Uploads.GetScoped(r.Context(), scope, path[2])
-			if err != nil {
-				writeError(w, err, publicerr.StorageUnavailable)
-			} else {
-				send(w, 200, sessionToTransport(session))
-			}
-			return true
-		case len(path) == 4 && path[3] == "confirm" && r.Method == http.MethodPost:
-			session, err := a.Uploads.ConfirmScoped(r.Context(), scope, path[2])
-			if err != nil {
-				writeError(w, err, publicerr.StorageUnavailable)
-			} else {
-				a.Commands.Accepted(telemetry.CommandUploadConfirm, 1)
-				send(w, 202, sessionToTransport(session))
-			}
-			return true
+func (a *API) handleCreateUpload(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	var wire transport.UploadRequest
+	session, err := a.Uploads.CreateScoped(r.Context(), scope, uploads.Request{}, func() (uploads.Request, error) {
+		raw, ok := decodeRequest(w, r, a.schemas["UploadRequest"])
+		if !ok {
+			return uploads.Request{}, errResponseWritten
 		}
-		return false
-	}
-	if len(path) == 3 && path[0] == "v0" && path[1] == "blobs" && r.Method == http.MethodGet {
-		blob, err := a.Uploads.BlobScoped(r.Context(), scope, path[2])
+		b, err := json.Marshal(raw)
 		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-		} else {
-			send(w, 200, blobToTransport(blob))
+			writeError(w, publicerr.InvalidSchema, nil)
+			return uploads.Request{}, errResponseWritten
 		}
-		return true
+		if err = json.Unmarshal(b, &wire); err != nil {
+			writeError(w, publicerr.InvalidSchema, nil)
+			return uploads.Request{}, errResponseWritten
+		}
+		req := uploads.Request{
+			Key:       wire.Sha256 + ":" + strconv.FormatInt(int64(wire.SizeBytes), 10) + ":" + wire.MediaType,
+			SizeBytes: int64(wire.SizeBytes),
+			SHA256:    wire.Sha256,
+			MediaType: wire.MediaType,
+		}
+
+		return req, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
-	return false
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+	} else {
+		send(w, 201, sessionToTransport(session))
+	}
+}
+
+func (a *API) handleGetUpload(w http.ResponseWriter, r *http.Request, scope corpus.Scope, uploadID string) {
+	session, err := a.Uploads.GetScoped(r.Context(), scope, uploadID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+	} else {
+		send(w, 200, sessionToTransport(session))
+	}
+}
+
+func (a *API) handleConfirmUpload(w http.ResponseWriter, r *http.Request, scope corpus.Scope, uploadID string) {
+	session, err := a.Uploads.ConfirmScoped(r.Context(), scope, uploadID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+	} else {
+		a.Commands.Accepted(telemetry.CommandUploadConfirm, 1)
+		send(w, 202, sessionToTransport(session))
+	}
+}
+
+func (a *API) handleGetBlob(w http.ResponseWriter, r *http.Request, scope corpus.Scope, blobID string) {
+	blob, err := a.Uploads.BlobScoped(r.Context(), scope, blobID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+	} else {
+		send(w, 200, blobToTransport(blob))
+	}
 }

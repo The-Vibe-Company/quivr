@@ -1,13 +1,11 @@
 package httpapi
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -29,29 +27,6 @@ const (
 	reprocessPath  = "/v0/admin/quarantine/reprocess"
 )
 
-// quarantineRoutes serves the quarantine listing and the reprocess command.
-func (a *API) quarantineRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	method := "GET"
-	switch r.URL.Path {
-	case quarantinePath:
-	case reprocessPath:
-		method = "POST"
-	default:
-		return false
-	}
-	switch {
-	case r.Method != method:
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	case a.Quarantine == nil:
-		writeError(w, publicerr.NotFound, nil)
-	case method == "GET":
-		a.listQuarantine(w, r, scope)
-	default:
-		a.requestReprocess(w, r, scope)
-	}
-	return true
-}
-
 // quarantinePage is the signed payload of a quarantine page cursor: the
 // last Version id, bound to the scope and the filters.
 type quarantinePage struct {
@@ -68,19 +43,12 @@ func quarantineBinding(scope corpus.Scope, f quarantine.Filter) string {
 }
 
 func (a *API) encodeQuarantinePage(p quarantinePage) string {
-	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(quarantinePageDomain, b))
+	return a.encodePage(quarantinePageDomain, p)
 }
 
 func (a *API) decodeQuarantinePage(token, binding string) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return "", errors.New("invalid_cursor")
-	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p quarantinePage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(quarantinePageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 {
+	if a.decodePage(quarantinePageDomain, token, &p) != nil || p.Version != 1 {
 		return "", errors.New("invalid_cursor")
 	}
 	if p.Scope != binding {
@@ -90,6 +58,10 @@ func (a *API) decodeQuarantinePage(token, binding string) (string, error) {
 }
 
 func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if a.Quarantine == nil {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
 	var limit int
 	var ok bool
 	var binding string
@@ -180,9 +152,13 @@ type reprocessRequest struct {
 }
 
 func (a *API) requestReprocess(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if a.Quarantine == nil {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
 	var in reprocessRequest
 	estimate, op, err := a.Quarantine.Request(r.Context(), scope, quarantine.Request{}, func() (quarantine.Request, error) {
-		if !decodeInto(w, r, a.reprocessSchema, &in) {
+		if !decodeInto(w, r, a.schemas["QuarantineReprocessRequest"], &in) {
 			return quarantine.Request{}, errResponseWritten
 		}
 		f := quarantine.Filter{CorpusID: in.CorpusID, Plugin: in.Plugin, Code: in.Code, After: in.QuarantinedAfter, Before: in.QuarantinedBefore}

@@ -359,6 +359,9 @@ x-public-errors:
     status_class: 422
     retryable: false
     operations: [ingestBatch, ingestRecord, withdrawRecord]
+# Existing HTTP aliases are routing metadata, not additional operations.
+x-quivr-route-aliases:
+  /v0/admin/plugins/: /v0/admin/plugins
 paths:
   /v0/records:
     post:

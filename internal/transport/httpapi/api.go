@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,7 +21,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/contracts"
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -37,49 +35,38 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr-v2/internal/transport/routing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type API struct {
+	routes         http.Handler
 	pushProxyCIDRs []string
 	Content        content.Service
 	Retrieval      retrieval.Service
 	// Spaces lists a Corpus's vector spaces; nil answers 404.
-	Spaces         SpaceRegistry
-	Uploads        uploads.Service
-	Changes        changes.Service
-	Monitoring     monitoring.Service
-	Operations     operations.Service
-	actionSchema   *jsonschema.Schema
-	configSchema   *jsonschema.Schema
-	searchSchema   *jsonschema.Schema
-	ingestSchema   *jsonschema.Schema
-	uploadSchema   *jsonschema.Schema
-	withdrawSchema *jsonschema.Schema
-	batchSchema    *jsonschema.Schema
-	Service        corpus.Service
-	Keys           map[string]corpus.Scope
-	CursorKey      []byte
-	schema         *jsonschema.Schema
-	monitoringSchemas
-	Connectors       connectors.Service
-	connectorSchema  *jsonschema.Schema
-	scheduleSchema   *jsonschema.Schema
-	credentialSchema *jsonschema.Schema
+	Spaces     SpaceRegistry
+	Uploads    uploads.Service
+	Changes    changes.Service
+	Monitoring monitoring.Service
+	Operations operations.Service
+
+	Service   corpus.Service
+	Keys      map[string]corpus.Scope
+	CursorKey []byte
+
+	schemas    map[string]*jsonschema.Schema
+	Connectors connectors.Service
+
 	// Commands counts accepted durable commands; the zero value ignores them.
 	Commands telemetry.Commands
 	// Relay serves the public webhook routes of push Connector Instances.
 	Relay *connectors.Relay
 	// Plugins serves the operator routes of the plugin registry.
-	Plugins      registry.Service
-	pluginSchema *jsonschema.Schema
-	// pluginRollbackSchema validates the plan rollback command.
-	pluginRollbackSchema *jsonschema.Schema
-	// evaluatorMigrationSchema validates the alert-rule migration command.
-	evaluatorMigrationSchema   *jsonschema.Schema
-	evaluationRetirementSchema *jsonschema.Schema
+	Plugins registry.Service
+
 	// Activity serves the operator reads of document activity.
 	Activity content.Activities
 	// Recorder counts searches; nil counts nothing.
@@ -88,101 +75,23 @@ type API struct {
 	Stats observability.Reader
 	// Backfills and Promotions serve the backfill and vector space promotion
 	// commands; nil answers 404.
-	Backfills       *backfill.Service
-	Promotions      *backfill.Promotions
-	backfillSchema  *jsonschema.Schema
-	promotionSchema *jsonschema.Schema
+	Backfills  *backfill.Service
+	Promotions *backfill.Promotions
+
 	// Quarantine serves the quarantine listing and reprocess command; nil
 	// answers 404.
-	Quarantine      *quarantine.Service
-	reprocessSchema *jsonschema.Schema
+	Quarantine *quarantine.Service
+
 	// changePoll is how often an open change stream reads the journal again.
 	changePoll time.Duration
 }
 
 func New(store corpus.Store, contents content.Service, search retrieval.Service, uploadService uploads.Service, keys map[string]corpus.Scope, cursorKey []byte, options ...Option) (http.Handler, error) {
-	// The OpenAPI document references the shared Manifest schema, so compile
-	// every contract resource together.
-	compiler, err := contracts.NewCompiler()
+	contract, err := loadContract()
 	if err != nil {
 		return nil, err
 	}
-	schema, err := compiler.Compile(contracts.HTTPSchema("CorpusRequest"))
-	if err != nil {
-		return nil, err
-	}
-	ingestSchema, err := compiler.Compile(contracts.HTTPSchema("IngestCommand"))
-	if err != nil {
-		return nil, err
-	}
-	searchSchema, err := compiler.Compile(contracts.HTTPSchema("SearchRequest"))
-	if err != nil {
-		return nil, err
-	}
-	uploadSchema, err := compiler.Compile(contracts.HTTPSchema("UploadRequest"))
-	if err != nil {
-		return nil, err
-	}
-	withdrawSchema, err := compiler.Compile(contracts.HTTPSchema("WithdrawalCommand"))
-	if err != nil {
-		return nil, err
-	}
-	batchSchema, err := compiler.Compile(contracts.HTTPSchema("BatchRequest"))
-	if err != nil {
-		return nil, err
-	}
-	configSchema, err := compiler.Compile(contracts.HTTPSchema("ConfigUpdate"))
-	if err != nil {
-		return nil, err
-	}
-	var monitored monitoringSchemas
-	for name, target := range map[string]**jsonschema.Schema{"SavedQueryCreate": &monitored.savedQuery, "SavedQueryVersionCreate": &monitored.savedQueryVersion, "SubscriptionCreate": &monitored.subscription, "SubscriptionVersionCreate": &monitored.subscriptionVersion, "ActionRequest": &monitored.action, "SubscriptionPreviewRequest": &monitored.preview, "RenameRequest": &monitored.rename} {
-		if *target, err = compiler.Compile(contracts.HTTPSchema(name)); err != nil {
-			return nil, err
-		}
-	}
-	connectorSchema, err := compiler.Compile(contracts.HTTPSchema("ConnectorCreate"))
-	if err != nil {
-		return nil, err
-	}
-	credentialSchema, err := compiler.Compile(contracts.HTTPSchema("CredentialReplace"))
-	if err != nil {
-		return nil, err
-	}
-	scheduleSchema, err := compiler.Compile(contracts.HTTPSchema("ScheduleChange"))
-	if err != nil {
-		return nil, err
-	}
-	pluginSchema, err := compiler.Compile(contracts.HTTPSchema("PluginRegistrationRequest"))
-	if err != nil {
-		return nil, err
-	}
-	pluginRollbackSchema, err := compiler.Compile(contracts.HTTPSchema("PipelinePlanRollbackRequest"))
-	if err != nil {
-		return nil, err
-	}
-	evaluatorMigrationSchema, err := compiler.Compile(contracts.HTTPSchema("SubscriptionEvaluatorMigrationRequest"))
-	if err != nil {
-		return nil, err
-	}
-	evaluationRetirementSchema, err := compiler.Compile(contracts.HTTPSchema("EvaluationRetirementRequest"))
-	if err != nil {
-		return nil, err
-	}
-	backfillSchema, err := compiler.Compile(contracts.HTTPSchema("BackfillRequest"))
-	if err != nil {
-		return nil, err
-	}
-	promotionSchema, err := compiler.Compile(contracts.HTTPSchema("VectorSpacePromotionRequest"))
-	if err != nil {
-		return nil, err
-	}
-	reprocessSchema, err := compiler.Compile(contracts.HTTPSchema("QuarantineReprocessRequest"))
-	if err != nil {
-		return nil, err
-	}
-	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, reprocessSchema: reprocessSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, evaluatorMigrationSchema: evaluatorMigrationSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
-	a.evaluationRetirementSchema = evaluationRetirementSchema
+	a := &API{schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
@@ -191,6 +100,13 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	for _, raw := range a.pushProxyCIDRs {
 		if _, err := netip.ParsePrefix(raw); err != nil {
 			return nil, errors.New("trusted push proxies require CIDRs")
+		}
+	}
+	mux := routing.New(a.routeFallback)
+	a.routes = transport.HandlerWithOptions(transport.NewStrictHandler(a, nil), transport.StdHTTPServerOptions{BaseRouter: mux})
+	for alias, target := range contract.aliases {
+		if err := mux.HandleAlias(alias, target); err != nil {
+			return nil, err
 		}
 	}
 	return http.HandlerFunc(a.servePushAudited), nil
@@ -239,12 +155,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		slog.Info("http request", "method", r.Method, "request_id", id, "status", observed.status, "duration_ms", time.Since(start).Milliseconds())
 	}()
-	if isWebhookRoute(r.URL.Path) {
-		// A source authenticates to the connector plugin, not with an API key.
-		a.relayDelivery(w, r)
-		return
-	}
-	if a.connectorAPIRoute(w, r) {
+	if isWebhookRoute(r.URL.Path) || isConnectorAPIPath(r.URL.Path) {
+		a.routes.ServeHTTP(w, r)
 		return
 	}
 	auth := r.Header.Get("Authorization")
@@ -257,15 +169,11 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, publicerr.InvalidApiKey, nil)
 		return
 	}
-	if r.URL.Path == "/v0/changes/stream" && r.Method == "GET" {
-		a.streamChanges(w, r, scope)
-		return
-	}
-	// A search answered by a retrieval plugin runs under its profile's hard
-	// bound (plugins.RetrievalProfile.Deadline) instead of the API's request
-	// deadline.
-	if r.Method == "POST" && r.URL.Path == "/v0/search" && (a.Retrieval.Ranker != nil || a.Retrieval.ProfilesRouter != nil) {
-		a.search(w, r, scope)
+	r = r.WithContext(context.WithValue(r.Context(), scopeContextKey{}, scope))
+	// Streams and routed searches own their service deadlines.
+	if r.Method == "GET" && r.URL.Path == "/v0/changes/stream" ||
+		r.Method == "POST" && r.URL.Path == "/v0/search" && (a.Retrieval.Ranker != nil || a.Retrieval.ProfilesRouter != nil) {
+		a.routes.ServeHTTP(w, r)
 		return
 	}
 	timeout := requestTimeout
@@ -277,98 +185,37 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	if isBatch {
-		// A context deadline alone cannot interrupt a blocked request-body read.
 		deadline, _ := ctx.Deadline()
 		_ = http.NewResponseController(w).SetReadDeadline(deadline)
 	}
-	if r.Method == "GET" && r.URL.Path == "/v0/changes" {
-		a.pollChanges(w, r, scope)
-		return
-	}
-	if r.Method == "POST" && r.URL.Path == "/v0/search" {
-		a.search(w, r, scope)
-		return
-	}
-	if r.Method == "GET" && r.URL.Path == "/v0/search/profiles" {
-		a.searchProfiles(w, scope)
-		return
-	}
-	if a.contentRoutes(w, r, scope) {
-		return
-	}
-	if a.uploadRoutes(w, r, scope) {
-		return
-	}
-	if a.monitoringRoutes(w, r, scope) {
-		return
-	}
-	if a.pluginRoutes(w, r, scope) {
-		return
-	}
-	if a.evaluatorMigrationRoutes(w, r, scope) {
-		return
-	}
-	if a.evaluationAdministrationRoutes(w, r, scope) {
-		return
-	}
-	if a.backfillRoutes(w, r, scope) {
-		return
-	}
-	if a.quarantineRoutes(w, r, scope) {
-		return
-	}
-	if a.adminDocumentRoutes(w, r, scope) {
-		return
-	}
-	if a.activePluginRoutes(w, r, scope) {
-		return
-	}
-	if a.statsRoutes(w, r, scope) {
-		return
-	}
-	if a.operationRoutes(w, r, scope) {
-		return
-	}
-	if a.matchRoutes(w, r, scope) {
-		return
-	}
-	if a.connectorTokenRoutes(w, r, scope) {
-		return
-	}
-	if a.connectorRoutes(w, r, scope) {
-		return
-	}
-	if id, ok := vectorSpaceRoute(r); ok {
-		a.listVectorSpaces(w, r, scope, id)
-		return
-	}
-	if r.URL.Path == "/v0/corpora" {
-		switch r.Method {
-		case "POST":
-			a.create(w, r, scope)
-		case "GET":
-			a.list(w, r, scope)
-		default:
-			writeError(w, publicerr.MethodNotAllowed, nil)
-		}
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, "/v0/corpora/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v0/corpora/"), "/") && r.Method == "GET" {
-		id := strings.TrimPrefix(r.URL.Path, "/v0/corpora/")
-		c, err := a.Service.Read(ctx, scope, id)
-		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-		} else {
-			send(w, 200, c)
-		}
-		return
-	}
-	writeError(w, publicerr.NotFound, nil)
+	a.routes.ServeHTTP(w, r)
 }
+
+// API implements every operation in the generated contract. Regeneration of a
+// missing/renamed operation fails compilation rather than leaving a dead route.
+var _ transport.StrictServerInterface = (*API)(nil)
+
+type scopeContextKey struct{}
+
+func requestScope(ctx context.Context) corpus.Scope {
+	scope, _ := ctx.Value(scopeContextKey{}).(corpus.Scope)
+	return scope
+}
+
+// Connector API authentication belongs to the declared plugin route. Malformed
+// addresses in this namespace retain their public 404 before authentication.
+func isConnectorAPIPath(path string) bool {
+	if !strings.HasPrefix(path, "/v0/connectors/") {
+		return false
+	}
+	parts := strings.SplitN(strings.TrimPrefix(path, "/v0/connectors/"), "/", 3)
+	return len(parts) >= 2 && parts[1] == "api"
+}
+
 func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	var input transport.CorpusRequest
 	c, conflict, err := a.Service.Create(r.Context(), s, corpus.CreateInput{}, func() (corpus.CreateInput, error) {
-		raw, ok := decodeRequest(w, r, a.schema)
+		raw, ok := decodeRequest(w, r, a.schemas["CorpusRequest"])
 		if !ok {
 			return corpus.CreateInput{}, errResponseWritten
 		}
@@ -432,14 +279,6 @@ const (
 	quarantinePageDomain = "quarantine-page"
 )
 
-// signCursor is the only signer for CursorKey tokens; the domain is required.
-func (a *API) signCursor(domain string, b []byte) []byte {
-	h := hmac.New(sha256.New, a.CursorKey)
-	h.Write([]byte(domain + "\x00"))
-	h.Write(b)
-	return h.Sum(nil)
-}
-
 func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	var limit int
 	var ok bool
@@ -459,15 +298,8 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 		after := ""
 		scope = scopeDigest(s)
 		if q.Has("page_cursor") {
-			parts := strings.Split(q.Get("page_cursor"), ".")
-			if len(parts) != 2 {
-				writeError(w, publicerr.InvalidCursor, nil)
-				return "", 0, errResponseWritten
-			}
-			b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-			sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 			var c cursor
-			if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(corpusPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
+			if a.decodePage(corpusPageDomain, q.Get("page_cursor"), &c) != nil || c.Scope != scope {
 				writeError(w, publicerr.InvalidCursor, nil)
 				return "", 0, errResponseWritten
 			}
@@ -486,8 +318,7 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	page := map[string]any{"items": items}
 	if len(items) > limit {
 		page["items"] = items[:limit]
-		b, _ := json.Marshal(cursor{items[limit-1].ID, scope})
-		page["next_page_cursor"] = base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(corpusPageDomain, b))
+		page["next_page_cursor"] = a.encodePage(corpusPageDomain, cursor{items[limit-1].ID, scope})
 	}
 	send(w, 200, page)
 }

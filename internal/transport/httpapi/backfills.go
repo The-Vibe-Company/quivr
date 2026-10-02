@@ -3,7 +3,6 @@ package httpapi
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
@@ -24,34 +23,6 @@ const (
 	spacesPath    = "/v0/admin/spaces/"
 )
 
-// backfillRoutes serves the backfill and promotion commands.
-func (a *API) backfillRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if r.URL.Path == backfillsPath {
-		if r.Method != "POST" {
-			writeError(w, publicerr.MethodNotAllowed, nil)
-		} else if a.Backfills == nil {
-			writeError(w, publicerr.NotFound, nil)
-		} else {
-			a.requestBackfill(w, r, scope)
-		}
-		return true
-	}
-	rest, ok := strings.CutPrefix(r.URL.Path, spacesPath)
-	space, isPromote := strings.CutSuffix(rest, "/promote")
-	if !ok || !isPromote || space == "" || strings.Contains(space, "/") {
-		return false
-	}
-	switch {
-	case r.Method != "POST":
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	case a.Promotions == nil:
-		writeError(w, publicerr.NotFound, nil)
-	default:
-		a.promoteSpace(w, r, scope, space)
-	}
-	return true
-}
-
 // backfillRequest is the backfill command.
 type backfillRequest struct {
 	IdempotencyKey string     `json:"idempotency_key"`
@@ -65,9 +36,13 @@ type backfillRequest struct {
 }
 
 func (a *API) requestBackfill(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if a.Backfills == nil {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
 	var in backfillRequest
 	estimate, op, err := a.Backfills.Request(r.Context(), scope, backfill.Request{}, func() (backfill.Request, error) {
-		if !decodeInto(w, r, a.backfillSchema, &in) {
+		if !decodeInto(w, r, a.schemas["BackfillRequest"], &in) {
 			return backfill.Request{}, errResponseWritten
 		}
 
@@ -108,9 +83,17 @@ type promotionRequest struct {
 }
 
 func (a *API) promoteSpace(w http.ResponseWriter, r *http.Request, scope corpus.Scope, space string) {
+	if a.Promotions == nil {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
+	if space == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
+	}
 	var in promotionRequest
 	p, err := a.Promotions.Promote(r.Context(), scope, "", false, func() (string, bool, error) {
-		if !decodeInto(w, r, a.promotionSchema, &in) {
+		if !decodeInto(w, r, a.schemas["VectorSpacePromotionRequest"], &in) {
 			return "", false, errResponseWritten
 		}
 

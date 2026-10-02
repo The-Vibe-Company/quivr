@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -18,33 +17,16 @@ func WithObservability(recorder *observability.Recorder, reader observability.Re
 	return func(a *API) { a.Recorder, a.Stats = recorder, reader }
 }
 
-const statsPrefix = "/v0/admin/stats/"
-
-// statsRoutes serves GET /v0/admin/stats/{plugins,searches,steps,received,
-// matches,top-queries} behind observability:read on all Corpora, always for
-// the key's own Organization.
-func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if !strings.HasPrefix(r.URL.Path, statsPrefix) {
-		return false
+// handleStats serves one GET /v0/admin/stats/... operation. The strict
+// dispatcher binds the path suffix to the series constant before calling it.
+func (a *API) handleStats(w http.ResponseWriter, r *http.Request, scope corpus.Scope, series string) {
+	err := a.Stats.Read(scope, func(reader observability.ScopedReader) error {
+		a.stats(w, r, reader, series)
+		return nil
+	})
+	if err != nil {
+		writeError(w, err, publicerr.NotFound)
 	}
-	name := strings.TrimPrefix(r.URL.Path, statsPrefix)
-	series := map[string]string{"plugins": observability.SeriesPluginCall, "searches": observability.SeriesSearch, "steps": observability.SeriesStep,
-		"received": observability.SeriesReceived, "matches": observability.SeriesMatch, "top-queries": observability.SeriesSearchQuery, "connector-pushes": observability.SeriesConnectorPush}[name]
-	switch {
-	case series == "":
-		writeError(w, publicerr.NotFound, nil)
-	case r.Method != "GET":
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	default:
-		err := a.Stats.Read(scope, func(reader observability.ScopedReader) error {
-			a.stats(w, r, reader, series)
-			return nil
-		})
-		if err != nil {
-			writeError(w, err, publicerr.NotFound)
-		}
-	}
-	return true
 }
 
 // countedLimits are the default and largest limit of the counted reads: the

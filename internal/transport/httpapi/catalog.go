@@ -1,12 +1,8 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -26,19 +22,12 @@ type recordPage struct {
 var errPageScope = errors.New("cursor_scope_changed")
 
 func (a *API) encodeRecordPage(p recordPage) string {
-	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(recordPageDomain, b))
+	return a.encodePage(recordPageDomain, p)
 }
 
 func (a *API) decodeRecordPage(token, corpusID string, s corpus.Scope) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return "", errors.New("invalid_cursor")
-	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p recordPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(recordPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 {
+	if a.decodePage(recordPageDomain, token, &p) != nil || p.Version != 1 {
 		return "", errors.New("invalid_cursor")
 	}
 	if p.Corpus != corpusID || p.Scope != scopeDigest(s) {

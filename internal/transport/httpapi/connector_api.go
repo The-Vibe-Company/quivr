@@ -15,24 +15,20 @@ import (
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.HasPrefix(r.URL.Path, "/v0/connectors/") {
-		return false
-	}
-	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/v0/connectors/"), "/", 3)
-	if len(parts) < 2 || parts[1] != "api" {
-		return false
-	}
-	if a.Relay == nil || len(parts) != 3 || parts[0] == "" || parts[2] == "" {
+// handleConnectorAPI relays a Connector API request. The generated dispatcher
+// supplies connectorID and path; keeping r.Method untouched lets the relay
+// return a plugin-declared Allow response for unsupported methods as before.
+func (a *API) handleConnectorAPI(w http.ResponseWriter, r *http.Request, connectorID, path string) {
+	if a.Relay == nil || connectorID == "" || path == "" {
 		writeError(w, publicerr.NotFound, nil)
-		return true
+		return
 	}
 	auth := connectors.APIAuth{}
 	bearer := r.Header.Get("Authorization")
 	if bearer != "" {
 		if !strings.HasPrefix(bearer, "Bearer ") {
 			writeError(w, publicerr.InvalidApiKey, nil)
-			return true
+			return
 		}
 		credential := strings.TrimPrefix(bearer, "Bearer ")
 		if scope, ok := a.Keys[credential]; ok {
@@ -41,14 +37,14 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 			auth.InstanceToken = credential
 		} else {
 			writeError(w, publicerr.InvalidApiKey, nil)
-			return true
+			return
 		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
-	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{}, func() (connectors.Relayed, error) {
+	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, connectorID, path, connectors.Relayed{}, func() (connectors.Relayed, error) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
-		if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(parts[2]) > 8192 {
+		if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(path) > 8192 {
 			writeError(w, publicerr.RequestTooLarge, nil)
 			return connectors.Relayed{}, errResponseWritten
 		}
@@ -58,7 +54,7 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		return connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body}, nil
 	})
 	if errors.Is(err, errResponseWritten) {
-		return true
+		return
 	}
 	switch {
 	case err != nil:
@@ -90,5 +86,4 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		w.WriteHeader(answer.Status)
 		_, _ = io.WriteString(w, answer.Body)
 	}
-	return true
 }

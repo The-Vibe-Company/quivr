@@ -1,12 +1,9 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -125,153 +122,177 @@ func rawJSON(v *map[string]any) json.RawMessage {
 	return b
 }
 
-func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	if r.URL.Path == "/v0/connector-kinds" {
-		a.connectorKinds(w, r, scope)
-		return true
-	}
-	if r.URL.Path != "/v0/connectors" && !strings.HasPrefix(r.URL.Path, "/v0/connectors/") {
-		return false
-	}
+func (a *API) connectorsAvailable(w http.ResponseWriter) bool {
 	if a.Connectors.Store == nil {
 		writeError(w, publicerr.NotFound, nil)
-		return true
-	}
-	path := strings.Split(strings.TrimPrefix(r.URL.Path, "/v0/connectors"), "/")
-	switch {
-	case len(path) == 1 && r.Method == "POST", len(path) == 1 && r.Method == "GET":
-	case len(path) == 2 && path[1] != "" && r.Method == "GET":
-	case len(path) == 3 && path[1] != "" && path[2] == "disable" && r.Method == "POST":
-	case len(path) == 3 && path[1] != "" && path[2] == "credential" && r.Method == "PUT":
-	case len(path) == 3 && path[1] != "" && path[2] == "schedule" && r.Method == "PUT":
-	case len(path) == 3 && path[1] != "" && path[2] == "runs" && r.Method == "POST":
-	case len(path) <= 3:
-		writeError(w, publicerr.MethodNotAllowed, nil)
-		return true
-	default:
-		writeError(w, publicerr.NotFound, nil)
-		return true
-	}
-	ctx := r.Context()
-	switch {
-	case len(path) == 1 && r.Method == "POST":
-		var body transport.ConnectorCreate
-		inst, err := a.Connectors.Create(ctx, scope, connectors.CreateInput{}, func() (connectors.CreateInput, error) {
-			if !decodeInto(w, r, a.connectorSchema, &body) {
-				return connectors.CreateInput{}, errResponseWritten
-			}
-			in := connectors.CreateInput{Key: body.IdempotencyKey, CorpusID: body.CorpusId, Namespace: body.SourceNamespace, Kind: string(body.Kind), Config: rawJSON(&body.Config)}
-			if body.PushPolicy != nil {
-				in.PushPolicy = &connectors.PushPolicy{}
-				if body.PushPolicy.RatePerSecond != nil {
-					in.PushPolicy.RatePerSecond = *body.PushPolicy.RatePerSecond
-				}
-				if body.PushPolicy.Burst != nil {
-					in.PushPolicy.Burst = *body.PushPolicy.Burst
-				}
-				if body.PushPolicy.AllowedCidrs != nil {
-					in.PushPolicy.AllowedCIDRs = *body.PushPolicy.AllowedCidrs
-				}
-			}
-			if body.Schedule != nil {
-				in.IntervalSeconds = body.Schedule.IntervalSeconds
-			}
-			if body.HealthPolicy != nil {
-				in.SilentAfterSeconds, in.CredentialWarningSeconds = body.HealthPolicy.SilentAfterSeconds, body.HealthPolicy.CredentialWarningSeconds
-			}
-			if body.Credential != nil {
-				in.Secret, in.ExpiresAt = rawJSON(body.Credential.Secret), body.Credential.ExpiresAt
-			}
-
-			return in, nil
-		})
-		if errors.Is(err, errResponseWritten) {
-			return true
-		}
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 201, a.connectorToTransport(inst))
-	case len(path) == 1:
-		a.listConnectors(w, r, scope)
-	case len(path) == 2:
-		inst, err := a.Connectors.Read(ctx, scope, path[1])
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 200, a.connectorToTransport(inst))
-	case path[2] == "disable":
-		var body transport.ActionRequest
-		inst, err := a.Connectors.Disable(ctx, scope, "", func() (string, error) {
-			if !decodeInto(w, r, a.actionSchema, &body) {
-				return "", errResponseWritten
-			}
-
-			return path[1], nil
-		})
-		if errors.Is(err, errResponseWritten) {
-			return true
-		}
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 200, a.connectorToTransport(inst))
-	case path[2] == "runs":
-		var body transport.ActionRequest
-		req, err := a.Connectors.RequestRun(ctx, scope, "", "", func() (string, string, error) {
-			if !decodeInto(w, r, a.actionSchema, &body) {
-				return "", "", errResponseWritten
-			}
-
-			return path[1], body.IdempotencyKey, nil
-		})
-		if errors.Is(err, errResponseWritten) {
-			return true
-		}
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 202, transport.ConnectorRunRequest{ConnectorId: req.ConnectorID, RunAt: req.RunAt.UTC()})
-	case path[2] == "schedule":
-		var body transport.ScheduleChange
-		inst, err := a.Connectors.ChangeSchedule(ctx, scope, "", 0, func() (string, int, error) {
-			if !decodeInto(w, r, a.scheduleSchema, &body) {
-				return "", 0, errResponseWritten
-			}
-
-			return path[1], body.IntervalSeconds, nil
-		})
-		if errors.Is(err, errResponseWritten) {
-			return true
-		}
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 200, a.connectorToTransport(inst))
-	default:
-		var body transport.CredentialReplace
-		inst, err := a.Connectors.ReplaceCredential(ctx, scope, "", connectors.CredentialInput{}, func() (string, connectors.CredentialInput, error) {
-			if !decodeInto(w, r, a.credentialSchema, &body) {
-				return "", connectors.CredentialInput{}, errResponseWritten
-			}
-
-			return path[1], connectors.CredentialInput{Key: body.IdempotencyKey, Secret: rawJSON(body.Secret), ExpiresAt: body.ExpiresAt}, nil
-		})
-		if errors.Is(err, errResponseWritten) {
-			return true
-		}
-		if err != nil {
-			writeError(w, err, publicerr.ConnectorsUnavailable)
-			return true
-		}
-		send(w, 200, a.connectorToTransport(inst))
+		return false
 	}
 	return true
+}
+
+// connectorIDRequired preserves the old family router's 405 for a matched
+// connector route whose identifier segment is empty.
+func connectorIDRequired(w http.ResponseWriter, connectorID string) bool {
+	if connectorID == "" {
+		writeError(w, publicerr.MethodNotAllowed, nil)
+		return false
+	}
+	return true
+}
+
+func (a *API) handleCreateConnector(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	var body transport.ConnectorCreate
+	inst, err := a.Connectors.Create(r.Context(), scope, connectors.CreateInput{}, func() (connectors.CreateInput, error) {
+		if !decodeInto(w, r, a.schemas["ConnectorCreate"], &body) {
+			return connectors.CreateInput{}, errResponseWritten
+		}
+		in := connectors.CreateInput{Key: body.IdempotencyKey, CorpusID: body.CorpusId, Namespace: body.SourceNamespace, Kind: string(body.Kind), Config: rawJSON(&body.Config)}
+		if body.PushPolicy != nil {
+			in.PushPolicy = &connectors.PushPolicy{}
+			if body.PushPolicy.RatePerSecond != nil {
+				in.PushPolicy.RatePerSecond = *body.PushPolicy.RatePerSecond
+			}
+			if body.PushPolicy.Burst != nil {
+				in.PushPolicy.Burst = *body.PushPolicy.Burst
+			}
+			if body.PushPolicy.AllowedCidrs != nil {
+				in.PushPolicy.AllowedCIDRs = *body.PushPolicy.AllowedCidrs
+			}
+		}
+		if body.Schedule != nil {
+			in.IntervalSeconds = body.Schedule.IntervalSeconds
+		}
+		if body.HealthPolicy != nil {
+			in.SilentAfterSeconds, in.CredentialWarningSeconds = body.HealthPolicy.SilentAfterSeconds, body.HealthPolicy.CredentialWarningSeconds
+		}
+		if body.Credential != nil {
+			in.Secret, in.ExpiresAt = rawJSON(body.Credential.Secret), body.Credential.ExpiresAt
+		}
+
+		return in, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 201, a.connectorToTransport(inst))
+}
+
+func (a *API) handleGetConnector(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	if !connectorIDRequired(w, connectorID) {
+		return
+	}
+	inst, err := a.Connectors.Read(r.Context(), scope, connectorID)
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 200, a.connectorToTransport(inst))
+}
+
+func (a *API) handleDisableConnector(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	if !connectorIDRequired(w, connectorID) {
+		return
+	}
+	var body transport.ActionRequest
+	inst, err := a.Connectors.Disable(r.Context(), scope, "", func() (string, error) {
+		if !decodeInto(w, r, a.schemas["ActionRequest"], &body) {
+			return "", errResponseWritten
+		}
+		return connectorID, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 200, a.connectorToTransport(inst))
+}
+
+func (a *API) handleRequestConnectorRun(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	if !connectorIDRequired(w, connectorID) {
+		return
+	}
+	var body transport.ActionRequest
+	req, err := a.Connectors.RequestRun(r.Context(), scope, "", "", func() (string, string, error) {
+		if !decodeInto(w, r, a.schemas["ActionRequest"], &body) {
+			return "", "", errResponseWritten
+		}
+		return connectorID, body.IdempotencyKey, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 202, transport.ConnectorRunRequest{ConnectorId: req.ConnectorID, RunAt: req.RunAt.UTC()})
+}
+
+func (a *API) handleChangeConnectorSchedule(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	if !connectorIDRequired(w, connectorID) {
+		return
+	}
+	var body transport.ScheduleChange
+	inst, err := a.Connectors.ChangeSchedule(r.Context(), scope, "", 0, func() (string, int, error) {
+		if !decodeInto(w, r, a.schemas["ScheduleChange"], &body) {
+			return "", 0, errResponseWritten
+		}
+		return connectorID, body.IntervalSeconds, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 200, a.connectorToTransport(inst))
+}
+
+func (a *API) handleReplaceConnectorCredential(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
+	if !connectorIDRequired(w, connectorID) {
+		return
+	}
+	var body transport.CredentialReplace
+	inst, err := a.Connectors.ReplaceCredential(r.Context(), scope, "", connectors.CredentialInput{}, func() (string, connectors.CredentialInput, error) {
+		if !decodeInto(w, r, a.schemas["CredentialReplace"], &body) {
+			return "", connectors.CredentialInput{}, errResponseWritten
+		}
+		return connectorID, connectors.CredentialInput{Key: body.IdempotencyKey, Secret: rawJSON(body.Secret), ExpiresAt: body.ExpiresAt}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 200, a.connectorToTransport(inst))
 }
 
 func (a *API) connectorKinds(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
@@ -319,6 +340,9 @@ func (a *API) connectorKinds(w http.ResponseWriter, r *http.Request, s corpus.Sc
 }
 
 func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
+	if !a.connectorsAvailable(w) {
+		return
+	}
 	var limit int
 	var ok bool
 	var binding string
@@ -339,15 +363,8 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 		binding = "connectors|" + scopeDigest(s) + "|" + corpusID
 		after := ""
 		if q.Has("page_cursor") {
-			parts := strings.Split(q.Get("page_cursor"), ".")
-			if len(parts) != 2 {
-				writeError(w, publicerr.InvalidCursor, nil)
-				return "", "", 0, errResponseWritten
-			}
-			b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-			sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 			var c cursor
-			if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(connectorPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != binding {
+			if a.decodePage(connectorPageDomain, q.Get("page_cursor"), &c) != nil || c.Scope != binding {
 				writeError(w, publicerr.InvalidCursor, nil)
 				return "", "", 0, errResponseWritten
 			}
@@ -366,8 +383,7 @@ func (a *API) listConnectors(w http.ResponseWriter, r *http.Request, s corpus.Sc
 	page := transport.ConnectorPage{Items: []transport.Connector{}}
 	for i, in := range items {
 		if i == limit {
-			b, _ := json.Marshal(cursor{items[limit-1].ID, binding})
-			next := base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(connectorPageDomain, b))
+			next := a.encodePage(connectorPageDomain, cursor{items[limit-1].ID, binding})
 			page.NextPageCursor = &next
 			break
 		}

@@ -1,12 +1,8 @@
 package httpapi
 
 import (
-	"crypto/hmac"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -30,19 +26,12 @@ type documentPage struct {
 }
 
 func (a *API) encodeDocumentPage(p documentPage) string {
-	b, _ := json.Marshal(p)
-	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(a.signCursor(documentPageDomain, b))
+	return a.encodePage(documentPageDomain, p)
 }
 
 func (a *API) decodeDocumentPage(token string, s corpus.Scope) (*content.ActivityCursor, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return nil, errors.New("invalid_cursor")
-	}
-	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
 	var p documentPage
-	if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(documentPageDomain, b)) || json.Unmarshal(b, &p) != nil || p.Version != 1 {
+	if a.decodePage(documentPageDomain, token, &p) != nil || p.Version != 1 {
 		return nil, errors.New("invalid_cursor")
 	}
 	if p.Scope != scopeDigest(s) {
@@ -51,44 +40,30 @@ func (a *API) decodeDocumentPage(token string, s corpus.Scope) (*content.Activit
 	return &content.ActivityCursor{AcceptedAt: p.AcceptedAt, VersionID: p.After}, nil
 }
 
-// adminDocumentRoutes serves GET /v0/admin/documents and
-// GET /v0/admin/documents/{version_id}/timeline, behind observability:read.
-func (a *API) adminDocumentRoutes(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
-	versionID, timeline := strings.CutPrefix(r.URL.Path, "/v0/admin/documents/")
-	if timeline {
-		versionID, timeline = strings.CutSuffix(versionID, "/timeline")
-		timeline = timeline && versionID != "" && !strings.Contains(versionID, "/")
+func (a *API) handleGetDocumentTimeline(w http.ResponseWriter, r *http.Request, scope corpus.Scope, versionID string) {
+	if versionID == "" {
+		writeError(w, publicerr.NotFound, nil)
+		return
 	}
-	if r.URL.Path != "/v0/admin/documents" && !timeline {
-		return false
+	activity, err := a.Activity.Version(r.Context(), scope, versionID)
+	if err != nil {
+		writeError(w, err, publicerr.StorageUnavailable)
+		return
 	}
-	switch {
-	case r.Method != "GET":
-		writeError(w, publicerr.MethodNotAllowed, nil)
-	case timeline:
-		activity, err := a.Activity.Version(r.Context(), scope, versionID)
-		if err != nil {
-			writeError(w, err, publicerr.StorageUnavailable)
-			return true
+	out := transport.DocumentTimeline{Document: documentToTransport(activity), Steps: []transport.TimelineStep{}}
+	for _, step := range content.Timeline(activity) {
+		item := transport.TimelineStep{Step: transport.TimelineStepStep(step.Step), At: step.At}
+		if step.Since != "" {
+			since, ms := step.Since, int(step.Duration.Milliseconds())
+			item.Since, item.DurationMs = &since, &ms
 		}
-		out := transport.DocumentTimeline{Document: documentToTransport(activity), Steps: []transport.TimelineStep{}}
-		for _, step := range content.Timeline(activity) {
-			item := transport.TimelineStep{Step: transport.TimelineStepStep(step.Step), At: step.At}
-			if step.Since != "" {
-				since, ms := step.Since, int(step.Duration.Milliseconds())
-				item.Since, item.DurationMs = &since, &ms
-			}
-			if step.Plugin != nil {
-				id, version := step.Plugin.ID, step.Plugin.Version
-				item.PluginId, item.PluginVersion = &id, &version
-			}
-			out.Steps = append(out.Steps, item)
+		if step.Plugin != nil {
+			id, version := step.Plugin.ID, step.Plugin.Version
+			item.PluginId, item.PluginVersion = &id, &version
 		}
-		send(w, 200, out)
-	default:
-		a.listDocuments(w, r, scope)
+		out.Steps = append(out.Steps, item)
 	}
-	return true
+	send(w, 200, out)
 }
 
 func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
