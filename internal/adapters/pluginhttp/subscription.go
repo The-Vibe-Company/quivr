@@ -2,8 +2,6 @@ package pluginhttp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,15 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 )
 
 // SubscriptionTimeoutCap bounds one subscription invocation: the deadline is
 // min(declared timeout_ms, SubscriptionTimeoutCap).
-const SubscriptionTimeoutCap = 30 * time.Second
+const SubscriptionTimeoutCap = plugins.SubscriptionTimeoutCap
 
 // Evaluator is a pinned plugin's subscription Contribution installed as a
 // monitoring evaluator. It speaks Plugin Protocol v0 over JSON-over-HTTP and
@@ -113,63 +110,32 @@ func (e Evaluator) Validate(expression, configuration map[string]any) error {
 	return monitoring.Invalid(monitoring.ErrInvalidEvaluatorConfiguration, "/evaluator"+first.Path, message)
 }
 
-type subscriptionPart struct {
-	Key     string                     `json:"key"`
-	Role    string                     `json:"role"`
-	Text    string                     `json:"text"`
-	Vectors []monitoring.SegmentVector `json:"vectors,omitempty"`
-}
-
-type subscriptionRecord struct {
-	VectorSpaceID   string                      `json:"vector_space_id,omitempty"`
-	VectorsReady    *bool                       `json:"vectors_ready,omitempty"`
-	CorpusID        string                      `json:"corpus_id"`
-	RecordID        string                      `json:"record_id"`
-	RecordVersionID string                      `json:"record_version_id"`
-	Enriched        bool                        `json:"enriched"`
-	Parts           []subscriptionPart          `json:"parts"`
-	Source          monitoring.SourceIdentity   `json:"source"`
-	AcceptedAt      string                      `json:"accepted_at"`
-	Provenance      monitoring.RecordProvenance `json:"provenance"`
-	Extensions      map[string]any              `json:"extensions,omitempty"`
-}
-
-type subscriptionEvaluation struct {
-	QueryVector   *monitoring.QueryVector      `json:"query_vector,omitempty"`
-	ID            string                       `json:"id"`
-	Expression    map[string]any               `json:"expression"`
-	Configuration map[string]any               `json:"configuration"`
-	Subscriptions []monitoring.SubscriptionRef `json:"subscriptions"`
-}
-
-type subscriptionRequest struct {
-	InvocationID   string                   `json:"invocation_id"`
-	IdempotencyKey string                   `json:"idempotency_key"`
-	Contribution   string                   `json:"contribution"`
-	OrganizationID string                   `json:"organization_id"`
-	Record         subscriptionRecord       `json:"record"`
-	Evaluations    []subscriptionEvaluation `json:"evaluations"`
-	Configuration  json.RawMessage          `json:"configuration"`
-}
-
 // SubscriptionRequest builds the Plugin API 0.2 subscription request of a
 // batch. The idempotency key is stable for the same pinned plugin, Record
 // Version and distinct evaluations, so a retry of the same batch replays the
 // same logical invocation.
 func (e Evaluator) SubscriptionRequest(b monitoring.Batch) ([]byte, error) {
-	parts := make([]subscriptionPart, 0, len(b.Article.Parts))
+	var encodeErr error
+	raw := func(value any) json.RawMessage {
+		out, err := json.Marshal(value)
+		if err != nil && encodeErr == nil {
+			encodeErr = err
+		}
+		return out
+	}
+	parts := make([]plugins.SubscriptionPart, 0, len(b.Article.Parts))
 	for _, p := range b.Article.Parts {
-		parts = append(parts, subscriptionPart{Key: p.Key, Role: p.Role, Text: p.Text})
+		parts = append(parts, plugins.SubscriptionPart{Key: p.Key, Role: p.Role, Text: p.Text})
 	}
 	meta := b.Article.Metadata
 	origin := meta.Provenance
 	if origin.Origin == "" {
 		origin.Origin = monitoring.OriginClient
 	}
-	record := subscriptionRecord{CorpusID: b.CorpusID, RecordID: b.RecordID, RecordVersionID: b.VersionID, Enriched: b.Enriched, Parts: parts,
-		Source: meta.Source, AcceptedAt: meta.AcceptedAt.UTC().Format(time.RFC3339Nano), Provenance: origin}
+	record := plugins.SubscriptionRecord{CorpusID: b.CorpusID, RecordID: b.RecordID, RecordVersionID: b.VersionID, Enriched: b.Enriched, Parts: parts,
+		Source: raw(meta.Source), AcceptedAt: meta.AcceptedAt.UTC().Format(time.RFC3339Nano), Provenance: raw(origin)}
 	if len(meta.Extensions) > 0 {
-		record.Extensions = meta.Extensions
+		record.Extensions = raw(meta.Extensions)
 	}
 	wants := e.contribution().Vectors
 	if wants != nil && (wants.Parts || wants.Query) {
@@ -180,13 +146,15 @@ func (e Evaluator) SubscriptionRequest(b monitoring.Batch) ([]byte, error) {
 			ready = vectors.Ready
 			if wants.Parts {
 				for index := range record.Parts {
-					record.Parts[index].Vectors = vectors.Parts[record.Parts[index].Key]
+					if values := vectors.Parts[record.Parts[index].Key]; len(values) > 0 {
+						record.Parts[index].Vectors = raw(values)
+					}
 				}
 			}
 		}
 	}
-	evaluations := make([]subscriptionEvaluation, 0, len(b.Items))
-	identity := []any{e.Pin.Generation(), "subscription", b.Organization, b.VersionID, b.Enriched}
+	evaluations := make([]plugins.SubscriptionEvaluation, 0, len(b.Items))
+
 	for _, item := range b.Items {
 		expression, configuration := item.Expression, item.Configuration
 		if expression == nil {
@@ -195,38 +163,36 @@ func (e Evaluator) SubscriptionRequest(b monitoring.Batch) ([]byte, error) {
 		if configuration == nil {
 			configuration = map[string]any{}
 		}
-		evaluation := subscriptionEvaluation{ID: item.ID, Expression: expression, Configuration: configuration, Subscriptions: item.Subscriptions}
+		refs := make([]plugins.SubscriptionRef, len(item.Subscriptions))
+		if item.Subscriptions == nil {
+			refs = nil
+		}
+		for i, v := range item.Subscriptions {
+			refs[i] = plugins.SubscriptionRef(v)
+		}
+		evaluation := plugins.SubscriptionEvaluation{ID: item.ID, Expression: raw(expression), Configuration: raw(configuration), Subscriptions: refs}
 		if wants != nil && wants.Query {
 			for _, vector := range item.QueryVectors {
 				if vector.SpaceID == record.VectorSpaceID {
 					copy := vector
-					evaluation.QueryVector = &copy
+					evaluation.QueryVector = raw(copy)
 					break
 				}
 			}
 		}
 		evaluations = append(evaluations, evaluation)
-		identity = append(identity, item.ID, expression, configuration)
+
 	}
-	if wants != nil {
-		identity = append(identity, record.VectorSpaceID, record.VectorsReady, evaluations)
+	if encodeErr != nil {
+		return nil, encodeErr
 	}
-	key, err := json.Marshal(identity)
-	if err != nil {
-		return nil, err
-	}
+	key := plugins.SubscriptionKey(plugins.SubscriptionKeyInput{Generation: e.Pin.Generation(), OrganizationID: b.Organization, VersionID: b.VersionID, Enriched: b.Enriched, Evaluations: evaluations, IncludeVectors: wants != nil, VectorSpaceID: record.VectorSpaceID, VectorsReady: record.VectorsReady})
 	config := e.Pin.Configuration
 	if len(config) == 0 {
 		config = json.RawMessage(`{}`)
 	}
-	return json.Marshal(subscriptionRequest{InvocationID: invocationID(), IdempotencyKey: "sk_" + content.Hash(key), Contribution: "subscription",
+	return plugins.BuildSubscriptionRequest(plugins.SubscriptionRequest{InvocationID: plugins.InvocationID(), IdempotencyKey: key, Contribution: "subscription",
 		OrganizationID: b.Organization, Record: record, Evaluations: evaluations, Configuration: config})
-}
-
-func invocationID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return "inv_" + hex.EncodeToString(b[:])
 }
 
 // Evaluate sends one batch. Unavailability (no answer, a timeout, a non-2xx
@@ -244,38 +210,16 @@ func (e Evaluator) Evaluate(ctx context.Context, b monitoring.Batch) ([]monitori
 		return nil, fmt.Errorf("%w: %d bytes", monitoring.ErrRequestTooLarge, len(request))
 	}
 	started := time.Now()
-	if err := (Client{Pin: e.Pin}).CheckDiscovery(ctx); err != nil {
-		observe(e.Pin, b.Organization, OpEvaluateSubscription, started, nil, err)
-		return nil, fmt.Errorf("%w: %v", monitoring.ErrEvaluatorUnavailable, err)
-	}
 	view, err := plugins.ViewSubscriptionRequest(request)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", monitoring.ErrEvaluationInvalid, err)
 	}
-	timeout := time.Duration(e.contribution().TimeoutMS) * time.Millisecond
-	if timeout <= 0 || timeout > SubscriptionTimeoutCap {
-		timeout = SubscriptionTimeoutCap
-	}
-	invoke, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	check := func(body []byte) []plugins.Issue { return plugins.CheckSubscriptionOutput(body, view, &e.Pin.Manifest) }
-	result, err := devhost.InvokeSubscriptionWith(invoke, e.Pin.Endpoint, request, plugins.SubscriptionMaxResponseBytes(&e.Pin.Manifest), check)
+	result, err := call.Invoke(ctx, e.Pin, call.EvaluateSubscription, call.Bytes(request), func(ctx context.Context, body []byte) []plugins.Issue {
+		return plugins.CheckSubscriptionOutput(body, view, &e.Pin.Manifest)
+	}, nil)
 	observe(e.Pin, b.Organization, OpEvaluateSubscription, started, result, err)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", monitoring.ErrEvaluatorUnavailable, err)
-	}
-	if result.Error != nil {
-		declared := &PluginError{Status: result.Status, Code: result.Error.Code, Message: result.Error.Message, Retryable: result.Error.Retryable}
-		if declared.Retryable {
-			return nil, fmt.Errorf("%w: %w: %w", monitoring.ErrEvaluation, monitoring.ErrEvaluationRetryable, declared)
-		}
-		return nil, fmt.Errorf("%w: %w", monitoring.ErrEvaluation, declared)
-	}
-	if len(result.Issues) > 0 {
-		if result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope {
-			return nil, fmt.Errorf("%w: %s", monitoring.ErrEvaluatorUnavailable, describe(result.Issues))
-		}
-		return nil, fmt.Errorf("%w: %s", monitoring.ErrEvaluationInvalid, describe(result.Issues))
+		return nil, err
 	}
 	var response struct {
 		Decisions []plugins.SubscriptionDecision `json:"decisions"`

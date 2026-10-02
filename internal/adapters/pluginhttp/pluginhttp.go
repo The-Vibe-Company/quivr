@@ -8,62 +8,19 @@ package pluginhttp
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 )
 
-// ErrUnavailable is plugin unavailability: a connection failure, a timeout, a
-// non-2xx answer without a valid error envelope or a discovery document that
-// does not match the pinned manifest. It is never a plugin decision.
-var ErrUnavailable = errors.New("plugin_unavailable")
+// Protocol errors and normalizer data belong to the plugin port.
+var ErrUnavailable = plugins.ErrUnavailable
 
-// PluginError is an error the plugin declared through the error envelope.
-type PluginError struct {
-	Status    int
-	Code      string
-	Message   string
-	Retryable bool
-}
-
-func (e *PluginError) Error() string {
-	return fmt.Sprintf("plugin error %s (HTTP %d, retryable=%t): %s", e.Code, e.Status, e.Retryable, e.Message)
-}
-
-// InvalidOutput is a 200 answer the engine refuses: schema, structural
-// Manifest rules or the response size bound.
-type InvalidOutput struct {
-	Issues []plugins.Issue
-}
-
-func (e *InvalidOutput) Error() string { return "invalid normalizer output: " + describe(e.Issues) }
-
-func describe(issues []plugins.Issue) string {
-	parts := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		parts = append(parts, strings.TrimSpace(issue.Code+" "+issue.Path+": "+issue.Message))
-	}
-	return strings.Join(parts, "; ")
-}
-
-// Warning is one bounded normalizer warning.
-type Warning struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// Response is a schema-valid normalizer answer.
-type Response struct {
-	Manifest   content.Manifest   `json:"manifest"`
-	Extensions content.Extensions `json:"extensions,omitempty"`
-	Language   string             `json:"language,omitempty"`
-	Warnings   []Warning          `json:"warnings,omitempty"`
-}
+type PluginError = plugins.PluginError
+type InvalidOutput = plugins.InvalidOutput
+type Warning = plugins.NormalizerWarning
+type Response = plugins.NormalizerResponse
 
 // Client talks to one pinned plugin.
 type Client struct {
@@ -80,17 +37,7 @@ func (c Client) CheckDiscovery(ctx context.Context) error {
 // Discover is CheckDiscovery that also returns the Plugin API version the
 // plugin serves.
 func (c Client) Discover(ctx context.Context) (string, error) {
-	if err := halted(ctx, c.Pin); err != nil {
-		return "", err
-	}
-	served, issues, err := devhost.Discover(ctx, c.Pin.Endpoint, c.Pin.Report())
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	if len(issues) > 0 {
-		return "", fmt.Errorf("%w: discovery does not match the pinned manifest: %s", ErrUnavailable, describe(issues))
-	}
-	return served, nil
+	return call.Discover(ctx, c.Pin)
 }
 
 // Normalize posts one normalizer request and judges a 200 answer with
@@ -98,40 +45,19 @@ func (c Client) Discover(ctx context.Context) (string, error) {
 // Contract Runner applies: at most plugins.MaxResponseBytes are read. ctx
 // carries the invocation deadline.
 func (c Client) Normalize(ctx context.Context, request []byte, oc plugins.OutputContext) (Response, error) {
-	if err := halted(ctx, c.Pin); err != nil {
-		return Response{}, err
-	}
-	check := func(body []byte) []plugins.Issue { return plugins.CheckNormalizerOutput(ctx, body, oc) }
 	started := time.Now()
-	result, err := devhost.InvokeNormalizerWith(ctx, c.Pin.Endpoint, request, plugins.MaxResponseBytes(oc.Manifest), check)
+	result, err := call.Invoke(ctx, c.Pin, call.Normalize, call.Bytes(request), func(ctx context.Context, body []byte) []plugins.Issue {
+		return plugins.CheckNormalizerOutput(ctx, body, oc)
+	}, nil)
 	observe(c.Pin, requestOrganization(request), OpNormalize, started, result, err)
 	if err != nil {
-		return Response{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	if result.Error != nil {
-		return Response{}, &PluginError{Status: result.Status, Code: result.Error.Code, Message: result.Error.Message, Retryable: result.Error.Retryable}
-	}
-	if len(result.Issues) > 0 {
-		if result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope {
-			return Response{}, fmt.Errorf("%w: %s", ErrUnavailable, describe(result.Issues))
-		}
-		return Response{}, &InvalidOutput{Issues: result.Issues}
+		return Response{}, err
 	}
 	var response Response
 	if err := json.Unmarshal(result.Body, &response); err != nil {
 		return Response{}, &InvalidOutput{Issues: []plugins.Issue{{Code: plugins.CodeSchema, Message: err.Error()}}}
 	}
 	return response, nil
-}
-
-// halted refuses a call that work a rollback stopped must not make: the
-// plugin has left the active plan (plugins.Stopped). It fails as
-// unavailable, so the caller stops the work with plugins.Unreachable.
-func halted(ctx context.Context, pin *plugins.Pin) error {
-	if plugins.Stopped(ctx, pin) {
-		return fmt.Errorf("%w: a rollback stopped this work, and %s@%s has left the active plan", ErrUnavailable, pin.Manifest.ID, pin.Manifest.Version)
-	}
-	return nil
 }
 
 // requestOrganization reads the organization_id of a request body built by
@@ -142,4 +68,14 @@ func requestOrganization(request []byte) string {
 	}
 	_ = json.Unmarshal(request, &r)
 	return r.OrganizationID
+}
+
+// Normalizer implements the normalization invocation port for resolved pins.
+type Normalizer struct{}
+
+func (Normalizer) CheckDiscovery(ctx context.Context, pin *plugins.Pin) error {
+	return (Client{Pin: pin}).CheckDiscovery(ctx)
+}
+func (Normalizer) Normalize(ctx context.Context, pin *plugins.Pin, request []byte, oc plugins.OutputContext) (plugins.NormalizerResponse, error) {
+	return (Client{Pin: pin}).Normalize(ctx, request, oc)
 }

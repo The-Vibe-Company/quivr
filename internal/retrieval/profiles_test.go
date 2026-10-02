@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
@@ -25,8 +26,15 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 		plugin  string
 		request plugins.SearchRequest
 	}
+	peers := map[string]*plugins.Pin{}
 	server := func(id string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v0/discovery" {
+				p := peers[id]
+				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": "0.7.0", "plugin": map[string]string{"id": p.Manifest.ID, "version": p.Manifest.Version}, "manifest_digest": p.ManifestDigest, "contributions": []string{"retrieval"}})
+				return
+			}
+
 			var q plugins.SearchRequest
 			if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
 				t.Error(err)
@@ -58,17 +66,20 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 	defer c.Close()
 	pin := func(id, version, endpoint string) *plugins.Pin {
 		t.Helper()
-		return &plugins.Pin{Endpoint: endpoint, Configuration: json.RawMessage(`{"setting":"` + id + `"}`), Manifest: plugins.Manifest{ID: id, Version: version, Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{
+		return &plugins.Pin{Endpoint: endpoint, ManifestDigest: "sha256:" + strings.Repeat("a", 64), Configuration: json.RawMessage(`{"setting":"` + id + `"}`), Manifest: plugins.Manifest{ID: id, Version: version, Compatibility: plugins.Compatibility{PluginAPI: ">=0.7.0 <0.8.0"}, Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{
 			Profiles: map[string]plugins.RetrievalProfile{"default": {MaxLatencyMS: 2000}, "deep": {MaxLatencyMS: 1000}},
 			Limits:   plugins.RetrievalLimits{MaxRounds: 3, MaxRequests: 2, MaxCandidates: 50},
 		}}}}
 	}
 	normal, careful := pin("example.normal", "1.0.0", a.URL), pin("example.careful", "1.0.0", b.URL)
+	peers["normal"], peers["careful"] = normal, careful
 	set, err := plugins.NewPinSet([]*plugins.Pin{normal, careful})
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err = plugins.NewPinSet([]*plugins.Pin{normal, pin("example.careful", "2.0.0", c.URL)})
+	upgraded := pin("example.careful", "2.0.0", c.URL)
+	peers["upgraded"] = upgraded
+	next, err = plugins.NewPinSet([]*plugins.Pin{normal, upgraded})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +129,13 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 		t.Fatalf("search after activation: %+v, %v, sent %+v", out, err, sent)
 	}
 	// A plan swap during an outer round must also preserve the dependency's pin.
+	var composing *plugins.Pin
 	nested := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": "0.12.0", "plugin": map[string]string{"id": composing.Manifest.ID, "version": composing.Manifest.Version}, "manifest_digest": composing.ManifestDigest, "contributions": []string{"retrieval"}})
+			return
+		}
+
 		var q plugins.SearchRequest
 		if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
 			t.Error(err)
@@ -134,14 +151,15 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 		}
 	}))
 	defer nested.Close()
-	composing := pin("example.composing", "1.0.0", nested.URL)
+	composing = pin("example.composing", "1.0.0", nested.URL)
 	composing.Manifest.Compatibility.PluginAPI = ">=0.12.0 <0.13.0"
 	composing.Manifest.Requires = []plugins.Requirement{{Plugin: "example.normal", Version: ">=1.0.0 <3.0.0", Profiles: []string{"default"}}}
 	oldSet, err := plugins.NewPinSet([]*plugins.Pin{normal, composing})
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err = plugins.NewPinSet([]*plugins.Pin{pin("example.normal", "2.0.0", c.URL), composing})
+	peers["upgraded"] = pin("example.normal", "2.0.0", c.URL)
+	next, err = plugins.NewPinSet([]*plugins.Pin{peers["upgraded"], composing})
 	if err != nil {
 		t.Fatal(err)
 	}

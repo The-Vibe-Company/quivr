@@ -63,7 +63,12 @@ func awaitWarm(t *testing.T, done <-chan struct{}) {
 func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 	received := make(chan map[string]any, 1)
 	release := make(chan struct{})
+	var pin *plugins.Pin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": "0.6.0", "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": []string{"ingestion"}})
+			return
+		}
 		var request map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		select {
@@ -79,7 +84,8 @@ func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 	var unblock sync.Once
 	defer unblock.Do(func() { close(release) }) // before Close, so a failing test does not hang on the handler
 	// A bound far beyond the test's deadline: only the plugin's answer can end the warm-up.
-	done := warmQueries(t.Context(), pluginhttp.Ingestor{Pin: warmPin(t, server.URL)}.Warm, time.Hour, time.Millisecond)
+	pin = warmPin(t, server.URL)
+	done := warmQueries(t.Context(), pluginhttp.Ingestor{Pin: pin}.Warm, time.Hour, time.Millisecond)
 	var request map[string]any
 	select {
 	case request = <-received:
@@ -100,7 +106,12 @@ func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 // attempts it drops are retried within the bound.
 func TestWarmUpRetriesUntilThePluginAnswers(t *testing.T) {
 	var attempts atomic.Int32
+	var pin *plugins.Pin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": "0.6.0", "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": []string{"ingestion"}})
+			return
+		}
 		if attempts.Add(1) <= 2 {
 			// Not serving yet: the connection closes without an answer.
 			conn, _, _ := w.(http.Hijacker).Hijack()
@@ -111,7 +122,8 @@ func TestWarmUpRetriesUntilThePluginAnswers(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"vector": []float64{0.6, 0.8}})
 	}))
 	defer server.Close()
-	done := warmQueries(t.Context(), pluginhttp.Ingestor{Pin: warmPin(t, server.URL)}.Warm, time.Hour, time.Millisecond)
+	pin = warmPin(t, server.URL)
+	done := warmQueries(t.Context(), pluginhttp.Ingestor{Pin: pin}.Warm, time.Hour, time.Millisecond)
 	awaitWarm(t, done)
 	if n := attempts.Load(); n != 3 {
 		t.Fatalf("%d warm-up attempts, want 3: two dropped, one answered", n)

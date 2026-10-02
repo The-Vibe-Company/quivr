@@ -95,6 +95,7 @@ func textParts(texts ...string) map[string]any {
 }
 
 type repository struct {
+	mu sync.Mutex
 	content.Repository
 	work     content.Work
 	progress []string
@@ -104,6 +105,8 @@ func (r *repository) Work(context.Context, string, string) (content.Work, bool, 
 	return r.work, false, nil
 }
 func (r *repository) Progress(_ context.Context, _, _, state, code string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.progress = append(r.progress, state+":"+code)
 	return nil
 }
@@ -180,9 +183,14 @@ func (f fixed) Normalizer(_ context.Context, mediaType string) (*plugins.Pin, pl
 	return f.pin.Normalizer(mediaType)
 }
 
-type signer struct{ keys []string }
+type signer struct {
+	mu   sync.Mutex
+	keys []string
+}
 
 func (s *signer) PresignGet(_ context.Context, key string, ttl time.Duration) (string, time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.keys = append(s.keys, key)
 	return "https://objects.test/" + key + "?signature=x", time.Now().Add(ttl), nil
 }
@@ -215,7 +223,7 @@ func setup(t *testing.T, answer func(n int) (int, any)) *fixture {
 	blob := content.VerifiedBlob{ID: "blob_md", MediaType: "text/markdown", Blob: content.Blob{Key: "org/blob", SHA256: content.Hash(input), Size: int64(len(input))}}
 	command := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus_1", Namespace: "docs", RecordKey: "guide"}, Content: content.Text{Kind: "blob", BlobID: "blob_md", MediaType: "text/markdown", BlobSHA256: blob.Blob.SHA256}, Provenance: map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}}
 	f.repo = &repository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", RecordID: "record_1", VersionID: "version_1", Command: command}}
-	f.service = normalization.Service{Content: content.Service{Repository: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Client{Pin: pin}, Pin: fixed{pin}}
+	f.service = normalization.Service{Content: content.Service{Repository: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Normalizer{}, Pin: fixed{pin}}
 	return f
 }
 
@@ -388,7 +396,7 @@ func TestUnavailablePluginNeverQuarantines(t *testing.T) {
 		"discovery digest mismatch": func(f *fixture) { f.plugin.digest = "sha256:" + strings.Repeat("0", 64) },
 		"5xx without an envelope":   func(f *fixture) { f.plugin.answer = outageAnswer },
 		"connection refused": func(f *fixture) {
-			f.service.Plugin = pluginhttp.Client{Pin: &plugins.Pin{Manifest: f.pin.Manifest, ManifestDigest: f.pin.ManifestDigest, Path: f.pin.Path, Endpoint: "http://127.0.0.1:1"}}
+			f.pin.Endpoint = "http://127.0.0.1:1"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -524,7 +532,7 @@ func optionalSetup(t *testing.T, answer func(int) (int, any)) *fixture {
 		t.Fatal(err)
 	}
 	f.service.Pin = fixed{pin}
-	f.service.Plugin = pluginhttp.Client{Pin: pin}
+	f.service.Plugin = pluginhttp.Normalizer{}
 	f.blobs.objects["org/blob"] = input
 	return f
 }
@@ -590,7 +598,7 @@ func TestFailureMessagesAreBoundedText(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := f.store.saved["version_1"].Failure.Message
-	if !utf8.ValidString(m) || strings.Contains(m, "\x00") || utf8.RuneCountInString(m) > 1000 || m == "" {
+	if !utf8.ValidString(m) || strings.Contains(m, "\x00") || utf8.RuneCountInString(m) > 1000 || !strings.HasSuffix(m, "… [truncated]") {
 		t.Fatalf("message %q", m)
 	}
 }

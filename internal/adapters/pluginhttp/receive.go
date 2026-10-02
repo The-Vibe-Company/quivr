@@ -8,12 +8,12 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 )
 
 // ReceiveTimeoutCap bounds one receive invocation: the source waits for the
 // answer, and sources give up after a few seconds.
-const ReceiveTimeoutCap = 8 * time.Second
+const ReceiveTimeoutCap = plugins.ReceiveTimeoutCap
 
 var _ connectors.Receiver = Connector{}
 
@@ -31,16 +31,12 @@ func (c Connector) Pushes() bool { return plugins.KindPushes(&c.Pin.Manifest, c.
 
 // Receive relays one delivery to the plugin's receive route and judges the
 // answer with plugins.CheckReceiveOutput, as the Contract Runner does. The
-// plugin's discovery is not checked per delivery (a delivery is answered
-// within seconds); a plugin that does not match its pin fails its pull runs.
+// plugin's discovery is checked within the delivery deadline.
 // Every failure is a typed *connectors.Error, and an answer that echoes the
 // credential is refused before anything from it is used.
 func (c Connector) Receive(ctx context.Context, r connectors.ReceiveRequest) (connectors.Delivery, error) {
-	if halted(ctx, c.Pin) != nil {
-		return connectors.Delivery{}, connectors.TransientError(CodePluginUnavailable)
-	}
 	request, err := plugins.BuildConnectorReceiveRequest(plugins.ConnectorReceiveRequest{
-		InvocationID: invocationID(), OrganizationID: r.Organization,
+		InvocationID: plugins.InvocationID(), OrganizationID: r.Organization,
 		Configuration: c.configuration(), Connector: plugins.ConnectorReceiveRef{
 			InstanceID: r.InstanceID, Kind: c.Name, Config: r.Config, CorpusID: r.CorpusID, SourceNamespace: r.Namespace},
 		Credential: r.Credential, Checkpoint: r.Checkpoint,
@@ -50,17 +46,13 @@ func (c Connector) Receive(ctx context.Context, r connectors.ReceiveRequest) (co
 	if err != nil {
 		return connectors.Delivery{}, connectors.SourceError(CodePluginInvalidResponse)
 	}
-	timeout := min(c.timeout(), ReceiveTimeoutCap)
-	invoke, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	manifest := &c.Pin.Manifest
 	started := time.Now()
-	result, err := devhost.InvokeConnectorReceive(invoke, c.Pin.Endpoint, request, plugins.ConnectorMaxResponseBytes(manifest), func(body []byte) []plugins.Issue {
-		return plugins.CheckReceiveOutput(invoke, body, manifest)
-	})
+	result, err := call.Invoke(ctx, c.Pin, call.ConnectorReceive, call.Bytes(request), func(ctx context.Context, body []byte) []plugins.Issue {
+		return plugins.CheckReceiveOutput(ctx, body, &c.Pin.Manifest)
+	}, plugins.CredentialSecrets(r.Credential))
 	observe(c.Pin, r.Organization, OpConnectorReceive, started, result, err)
-	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
-		return connectors.Delivery{}, failure
+	if err != nil {
+		return connectors.Delivery{}, err
 	}
 	var answer plugins.ConnectorDelivery
 	if err := json.Unmarshal(result.Body, &answer); err != nil {

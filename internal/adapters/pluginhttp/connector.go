@@ -3,19 +3,18 @@ package pluginhttp
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 )
 
 // ConnectorTimeoutCap bounds one connector invocation: the deadline is
 // min(declared timeout_ms, ConnectorTimeoutCap). A run fetches at most
 // connectors.DefaultMaxPages pages inside its acquisition activity.
-const ConnectorTimeoutCap = 30 * time.Second
+const ConnectorTimeoutCap = plugins.ConnectorTimeoutCap
 
 // Connector Health codes the engine reports for a plugin kind, beside the
 // codes the plugin declares in its error envelopes.
@@ -103,38 +102,6 @@ func (c Connector) Provider() string {
 	return "plugin " + c.Pin.Manifest.ID + "@" + c.Pin.Manifest.Version
 }
 
-type connectorRef struct {
-	InstanceID      string          `json:"instance_id"`
-	Kind            string          `json:"kind"`
-	CorpusID        string          `json:"corpus_id,omitempty"`
-	SourceNamespace string          `json:"source_namespace,omitempty"`
-	WebhookURL      string          `json:"webhook_url,omitempty"`
-	Config          json.RawMessage `json:"config"`
-}
-
-type fetchRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Connector      connectorRef    `json:"connector"`
-	Credential     json.RawMessage `json:"credential"`
-	Checkpoint     json.RawMessage `json:"checkpoint"`
-	Now            string          `json:"now"`
-	PageInRun      int             `json:"page_in_run"`
-	ReadsToday     int64           `json:"reads_today"`
-}
-
-type credentialRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Connector      connectorRef    `json:"connector"`
-	Credential     json.RawMessage `json:"credential"`
-	Now            string          `json:"now"`
-}
-
 func orNull(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return json.RawMessage("null")
@@ -142,8 +109,8 @@ func orNull(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-func (c Connector) ref(instanceID string, config json.RawMessage) connectorRef {
-	return connectorRef{InstanceID: instanceID, Kind: c.Name, Config: config}
+func (c Connector) ref(instanceID string, config json.RawMessage) plugins.ConnectorRef {
+	return plugins.ConnectorRef{InstanceID: instanceID, Kind: c.Name, Config: config}
 }
 
 func (c Connector) configuration() json.RawMessage {
@@ -153,76 +120,30 @@ func (c Connector) configuration() json.RawMessage {
 	return c.Pin.Configuration
 }
 
-func (c Connector) timeout() time.Duration {
-	d := time.Duration(c.Pin.Manifest.Contributions.Connector.TimeoutMS) * time.Millisecond
-	if d <= 0 || d > ConnectorTimeoutCap {
-		return ConnectorTimeoutCap
-	}
-	return d
-}
-
-// servedAPI remembers, per plugin endpoint and manifest digest, the Plugin API
-// version its discovery served at the first page of the latest run.
-var servedAPI sync.Map
-
-func (c Connector) servedKey() string { return c.Pin.Endpoint + " " + c.Pin.ManifestDigest }
-
-// served checks discovery at the first page of a run (or when no version is
-// known yet) and returns the Plugin API version the plugin serves.
-func (c Connector) served(ctx context.Context, pageInRun int) (string, error) {
-	if pageInRun > 0 {
-		if v, ok := servedAPI.Load(c.servedKey()); ok {
-			return v.(string), nil
-		}
-	}
-	v, err := (Client{Pin: c.Pin}).Discover(ctx)
-	if err != nil {
-		return "", err
-	}
-	servedAPI.Store(c.servedKey(), v)
-	return v, nil
-}
-
-// Fetch asks the plugin for one page. The first page of a run first checks
-// the discovery document against the pinned manifest. A plugin that serves
+// Fetch checks discovery against the pinned manifest before asking for each
+// page. A plugin that serves
 // Plugin API 0.3.1 or later also receives the instance's corpus_id and
 // source_namespace. The credential travels only in the request body and is
 // looked for in the answer: an answer that echoes it is refused before
 // anything from it is used.
 func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
 	started := time.Now()
-	if halted(ctx, c.Pin) != nil {
-		return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
-	}
-	served, err := c.served(ctx, r.PageInRun)
-	if err != nil {
-		observe(c.Pin, r.Organization, OpConnectorFetch, started, nil, err)
-		return connectors.Page{}, connectors.TransientError(CodePluginUnavailable)
-	}
 	checkpoint := orNull(r.Checkpoint)
-	scoped := c.ref(r.InstanceID, r.Config)
-	if plugins.ResolveAPI(served).Speaks(plugins.FeatureInstanceScope) {
-		scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
-	}
-	if c.Pushes() && plugins.ResolveAPI(served).Speaks(plugins.FeaturePush) {
-		scoped.WebhookURL = r.WebhookURL
-	}
-	request, err := json.Marshal(fetchRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
-		Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint,
-		Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
-	if err != nil {
-		return connectors.Page{}, connectors.SourceError(CodePluginInvalidResponse)
-	}
-	invoke, cancel := context.WithTimeout(ctx, c.timeout())
-	defer cancel()
-	manifest := &c.Pin.Manifest
-	check := func(body []byte) []plugins.Issue {
-		return plugins.CheckConnectorOutput(invoke, body, checkpoint, manifest)
-	}
-	result, err := devhost.InvokeConnectorFetch(invoke, c.Pin.Endpoint, request, plugins.ConnectorMaxResponseBytes(manifest), check)
+	result, err := call.Invoke(ctx, c.Pin, call.ConnectorFetch, func(ctx context.Context, served string) ([]byte, error) {
+		scoped := c.ref(r.InstanceID, r.Config)
+		if plugins.ResolveAPI(served).Speaks(plugins.FeatureInstanceScope) {
+			scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
+		}
+		if c.Pushes() && plugins.ResolveAPI(served).Speaks(plugins.FeaturePush) {
+			scoped.WebhookURL = r.WebhookURL
+		}
+		return plugins.BuildConnectorFetchRequest(plugins.ConnectorFetchRequest{InvocationID: plugins.InvocationID(), Contribution: "connector", OrganizationID: r.Organization, Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint, Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
+	}, func(ctx context.Context, body []byte) []plugins.Issue {
+		return plugins.CheckConnectorOutput(ctx, body, checkpoint, &c.Pin.Manifest)
+	}, plugins.CredentialSecrets(r.Credential))
 	observe(c.Pin, r.Organization, OpConnectorFetch, started, result, err)
-	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
-		return connectors.Page{}, failure
+	if err != nil {
+		return connectors.Page{}, err
 	}
 	var page plugins.ConnectorPage
 	if err := json.Unmarshal(result.Body, &page); err != nil {
@@ -249,84 +170,47 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 // reported expires_at is not used yet.
 func (c Connector) CheckCredential(ctx context.Context, r connectors.CredentialRequest) error {
 	started := time.Now()
-	if err := (Client{Pin: c.Pin}).CheckDiscovery(ctx); err != nil {
-		observe(c.Pin, r.Organization, OpCheckCredential, started, nil, err)
-		return connectors.TransientError(CodePluginUnavailable)
-	}
-	request, err := json.Marshal(credentialRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
-		Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: orNull(r.Credential), Now: r.Now.UTC().Format(time.RFC3339)})
-	if err != nil {
-		return connectors.SourceError(CodePluginInvalidResponse)
-	}
-	invoke, cancel := context.WithTimeout(ctx, c.timeout())
-	defer cancel()
-	result, err := devhost.InvokeCheckCredential(invoke, c.Pin.Endpoint, request)
+	result, err := call.Invoke(ctx, c.Pin, call.CheckCredential, func(context.Context, string) ([]byte, error) {
+		return plugins.BuildConnectorCredentialRequest(plugins.ConnectorCredentialRequest{InvocationID: plugins.InvocationID(), Contribution: "connector", OrganizationID: r.Organization, Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: orNull(r.Credential), Now: r.Now.UTC().Format(time.RFC3339)})
+	}, nil, plugins.CredentialSecrets(r.Credential))
 	observe(c.Pin, r.Organization, OpCheckCredential, started, result, err)
-	return judge(result, err, plugins.CredentialSecrets(r.Credential))
+	return err
 }
 
 // MaxAttachmentBytes is the plugin's effective attachments.max_bytes; 0 when
 // its manifest declares no attachments.
 func (c Connector) MaxAttachmentBytes() int64 { return plugins.AttachmentMaxBytes(&c.Pin.Manifest) }
 
-func (c Connector) attachmentTimeout() time.Duration {
-	return time.Duration(plugins.AttachmentTimeoutMS(&c.Pin.Manifest)) * time.Millisecond
-}
-
-type attachmentItem struct {
-	RecordKey  string             `json:"record_key"`
-	Revision   string             `json:"revision,omitempty"`
-	Extensions content.Extensions `json:"extensions,omitempty"`
-}
-
-type attachmentGrant struct {
-	URL       string            `json:"url"`
-	Method    string            `json:"method"`
-	Headers   map[string]string `json:"headers"`
-	SizeBytes int64             `json:"size_bytes"`
-	SHA256    string            `json:"sha256"`
-	MediaType string            `json:"media_type"`
-	ExpiresAt string            `json:"expires_at"`
-}
-
-type attachmentRequest struct {
-	credentialRequest
-	Item       attachmentItem              `json:"item"`
-	Attachment plugins.ConnectorAttachment `json:"attachment"`
-	Grant      *attachmentGrant            `json:"grant,omitempty"`
-}
-
-func (c Connector) attachmentRequest(r connectors.AttachmentRequest, grant *attachmentGrant) ([]byte, error) {
+func (c Connector) attachmentRequest(r connectors.AttachmentRequest, grant *plugins.ConnectorAttachmentGrant) ([]byte, error) {
 	at := r.Attachment
-	return json.Marshal(attachmentRequest{
-		credentialRequest: credentialRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
-			Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: orNull(r.Credential), Now: r.Now.UTC().Format(time.RFC3339)},
-		Item: attachmentItem{RecordKey: r.RecordKey, Revision: r.Revision, Extensions: r.Extensions},
-		Attachment: plugins.ConnectorAttachment{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, MediaType: at.MediaType, SizeBytes: at.SizeBytes,
-			SHA256: at.SHA256, Extensions: at.Extensions, Ref: at.Ref},
-		Grant: grant})
+	var extensions json.RawMessage
+	if len(r.Extensions) > 0 {
+		var err error
+		extensions, err = json.Marshal(r.Extensions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return plugins.BuildConnectorAttachmentRequest(plugins.ConnectorAttachmentRequest{
+		InvocationID: plugins.InvocationID(), OrganizationID: r.Organization, Configuration: c.configuration(), Connector: c.ref(r.InstanceID, r.Config), Credential: r.Credential, Now: r.Now.UTC().Format(time.RFC3339),
+		Item:       plugins.ConnectorAttachmentItem{RecordKey: r.RecordKey, Revision: r.Revision, Extensions: extensions},
+		Attachment: plugins.ConnectorAttachment{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, MediaType: at.MediaType, SizeBytes: at.SizeBytes, SHA256: at.SHA256, Extensions: at.Extensions, Ref: at.Ref}, Grant: grant})
 }
 
 // DescribeAttachment asks the plugin for the exact size and SHA-256 of one
 // attachment, or a skip, judged by plugins.CheckAttachmentAnswer.
 func (c Connector) DescribeAttachment(ctx context.Context, r connectors.AttachmentRequest) (connectors.AttachmentDescription, error) {
-	if halted(ctx, c.Pin) != nil {
-		return connectors.AttachmentDescription{}, connectors.TransientError(CodePluginUnavailable)
-	}
 	request, err := c.attachmentRequest(r, nil)
 	if err != nil {
 		return connectors.AttachmentDescription{}, connectors.SourceError(CodePluginInvalidResponse)
 	}
-	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
-	defer cancel()
-	manifest := &c.Pin.Manifest
 	started := time.Now()
-	result, err := devhost.InvokeDescribeAttachment(invoke, c.Pin.Endpoint, request, func(body []byte) []plugins.Issue {
-		return plugins.CheckAttachmentAnswer(invoke, body, manifest)
-	})
+	result, err := call.Invoke(ctx, c.Pin, call.DescribeAttachment, call.Bytes(request), func(ctx context.Context, body []byte) []plugins.Issue {
+		return plugins.CheckAttachmentAnswer(ctx, body, &c.Pin.Manifest)
+	}, plugins.CredentialSecrets(r.Credential))
 	observe(c.Pin, r.Organization, OpDescribeAttachment, started, result, err)
-	if failure := judge(result, err, plugins.CredentialSecrets(r.Credential)); failure != nil {
-		return connectors.AttachmentDescription{}, failure
+	if err != nil {
+		return connectors.AttachmentDescription{}, err
 	}
 	var answer plugins.AttachmentAnswer
 	if err := json.Unmarshal(result.Body, &answer); err != nil {
@@ -339,10 +223,7 @@ func (c Connector) DescribeAttachment(ctx context.Context, r connectors.Attachme
 // grant URL and headers are secrets like the credential: an answer that
 // echoes them is refused.
 func (c Connector) UploadAttachment(ctx context.Context, r connectors.AttachmentRequest, g connectors.UploadGrant) error {
-	if halted(ctx, c.Pin) != nil {
-		return connectors.TransientError(CodePluginUnavailable)
-	}
-	grant := &attachmentGrant{URL: g.URL, Method: "PUT", Headers: g.Headers, SizeBytes: g.SizeBytes, SHA256: g.SHA256, MediaType: g.MediaType, ExpiresAt: g.ExpiresAt.UTC().Format(time.RFC3339)}
+	grant := &plugins.ConnectorAttachmentGrant{URL: g.URL, Method: "PUT", Headers: g.Headers, SizeBytes: g.SizeBytes, SHA256: g.SHA256, MediaType: g.MediaType, ExpiresAt: g.ExpiresAt.UTC().Format(time.RFC3339)}
 	if grant.Headers == nil {
 		grant.Headers = map[string]string{}
 	}
@@ -350,12 +231,10 @@ func (c Connector) UploadAttachment(ctx context.Context, r connectors.Attachment
 	if err != nil {
 		return connectors.SourceError(CodePluginInvalidResponse)
 	}
-	invoke, cancel := context.WithTimeout(ctx, c.attachmentTimeout())
-	defer cancel()
 	started := time.Now()
-	result, err := devhost.InvokeUploadAttachment(invoke, c.Pin.Endpoint, request)
+	result, err := call.Invoke(ctx, c.Pin, call.UploadAttachment, call.Bytes(request), nil, grantSecrets(r.Credential, g))
 	observe(c.Pin, r.Organization, OpUploadAttachment, started, result, err)
-	return judge(result, err, grantSecrets(r.Credential, g))
+	return err
 }
 
 // grantSecrets are the strings an upload_attachment answer must not echo:
@@ -368,35 +247,6 @@ func grantSecrets(credential json.RawMessage, g connectors.UploadGrant) []string
 		}
 	}
 	return secrets
-}
-
-// judge maps one invocation to nil (a valid 200 answer) or a typed failure.
-// Nothing the plugin wrote (a message, an invalid output) is logged or kept:
-// only its declared class and code reach Connector Health. An answer that
-// contains one of the secrets (credential values, a grant) is refused.
-func judge(result *devhost.Result, err error, secrets []string) error {
-	if err != nil || result == nil {
-		return connectors.TransientError(CodePluginUnavailable)
-	}
-	if plugins.ContainsSecret(result.Body, secrets) {
-		return connectors.SourceError(CodeCredentialLeak)
-	}
-	if e := result.Error; e != nil {
-		if len(plugins.ConnectorErrorIssues(e.Class, e.Retryable)) > 0 {
-			return connectors.SourceError(CodePluginInvalidError)
-		}
-		return &connectors.Error{Class: connectors.ErrorClass(e.Class), Code: e.Code, RetryAfter: time.Duration(e.RetryAfterSeconds) * time.Second}
-	}
-	if len(result.Issues) > 0 {
-		if result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope {
-			return connectors.TransientError(CodePluginUnavailable)
-		}
-		if result.Issues[0].Code == plugins.CodeAttachmentsUnsupported {
-			return connectors.SourceError(CodeAttachmentsUnsupported)
-		}
-		return connectors.SourceError(CodePluginInvalidResponse)
-	}
-	return nil
 }
 
 // mapItem turns a checked item into the Acquirer's item.

@@ -55,35 +55,9 @@ type ingestionFixture struct {
 	} `json:"ingestion"`
 }
 
-type ingestionVersion struct {
-	CorpusID        string `json:"corpus_id"`
-	RecordID        string `json:"record_id"`
-	RecordVersionID string `json:"record_version_id"`
-}
-
-type segmentAndEmbedRequest struct {
-	InvocationID   string                  `json:"invocation_id"`
-	IdempotencyKey string                  `json:"idempotency_key"`
-	Contribution   string                  `json:"contribution"`
-	OrganizationID string                  `json:"organization_id"`
-	Configuration  json.RawMessage         `json:"configuration"`
-	Version        ingestionVersion        `json:"version"`
-	Language       string                  `json:"language,omitempty"`
-	Parts          []plugins.IngestionPart `json:"parts"`
-	Spaces         []string                `json:"spaces"`
-}
-
-type embedQueryRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Space          string          `json:"space"`
-	Query          struct {
-		Modality string `json:"modality"`
-		Text     string `json:"text"`
-	} `json:"query"`
-}
+type ingestionVersion = plugins.IngestionVersion
+type segmentAndEmbedRequest = plugins.SegmentAndEmbedRequest
+type embedQueryRequest = plugins.EmbedQueryRequest
 
 // IngestionRun is the development segment_and_embed request of one ingestion
 // fixture, the spaces it asks for and the queries to encode in each.
@@ -159,7 +133,7 @@ func BuildIngestionRun(raw []byte, m *plugins.Manifest) (*IngestionRun, []plugin
 	sum := sha256.Sum256(raw)
 	digest := hex.EncodeToString(sum[:])
 	short := digest[:16]
-	body, err := json.Marshal(segmentAndEmbedRequest{
+	body, err := plugins.BuildSegmentAndEmbedRequest(segmentAndEmbedRequest{
 		InvocationID: "dev-invocation-" + short, IdempotencyKey: "dev:" + digest, Contribution: "ingestion",
 		OrganizationID: "dev-organization", Configuration: config,
 		Version:  ingestionVersion{CorpusID: "dev-corpus", RecordID: "dev-record-" + short, RecordVersionID: "dev-version-" + short},
@@ -204,7 +178,7 @@ func (r *IngestionRun) QueryRequest(space, text, suffix string) []byte {
 		OrganizationID: "dev-organization", Configuration: r.config, Space: space}
 	request.Query.Modality = "text"
 	request.Query.Text = text
-	body, _ := json.Marshal(request)
+	body, _ := plugins.BuildEmbedQueryRequest(request)
 	return body
 }
 

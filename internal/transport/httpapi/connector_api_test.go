@@ -31,7 +31,12 @@ func TestConnectorAPIRequiresScopedPushPermissionAndReturnsReceipts(t *testing.T
 		Request devhost.RelayedRequest `json:"request"`
 	}
 	answer := &plugins.ConnectorDelivery{Verdict: "accepted", Response: plugins.ReceiveAnswer{Status: 204, Body: "plugin answer"}, Items: []plugins.ConnectorItem{{RecordKey: "event-7", Revision: "7", Content: json.RawMessage(`{"kind":"text","text":"Pushed event"}`)}}}
+	var pin *plugins.Pin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+			return
+		}
 		if r.URL.Path != "/v0/contributions/connector/receive" {
 			http.NotFound(w, r)
 			return
@@ -67,7 +72,8 @@ contributions:
             - {name: challenge, method: GET, path: challenge, auth: quivr_key}
             - {name: status, method: GET, path: events/status, auth: quivr_key}
 `)
-	pin, err := plugins.LoadPinManifest(manifest, "test plugin", plugins.PinConfig{Endpoint: server.URL})
+	var err error
+	pin, err = plugins.LoadPinManifest(manifest, "test plugin", plugins.PinConfig{Endpoint: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

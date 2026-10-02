@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sort"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -87,23 +86,6 @@ func (i Ingestor) VectorSpace(key string) (content.VectorSpace, bool) {
 	return content.VectorSpace{ID: key, Manifest: plugins.SpaceManifest(i.Pin.Manifest.ID, id, space), Dimensions: space.Dimensions}, true
 }
 
-type ingestionVersion struct {
-	CorpusID        string `json:"corpus_id"`
-	RecordID        string `json:"record_id"`
-	RecordVersionID string `json:"record_version_id"`
-}
-
-type segmentAndEmbedRequest struct {
-	InvocationID   string                  `json:"invocation_id"`
-	IdempotencyKey string                  `json:"idempotency_key"`
-	Contribution   string                  `json:"contribution"`
-	OrganizationID string                  `json:"organization_id"`
-	Configuration  json.RawMessage         `json:"configuration"`
-	Version        ingestionVersion        `json:"version"`
-	Parts          []plugins.IngestionPart `json:"parts"`
-	Spaces         []string                `json:"spaces"`
-}
-
 // refused is content.ErrIngestionRefused for the reason message states, which
 // a Version quarantined for it shows with the plugin's name and version.
 func (i Ingestor) refused(format string, args ...any) error {
@@ -118,9 +100,6 @@ func (i Ingestor) refused(format string, args ...any) error {
 // refuse is content.ErrIngestionRefused.
 func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, keys []string) ([]processing.PluginSegment, error) {
 	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
-		return nil, err
-	}
-	if err := halted(ctx, i.Pin); err != nil {
 		return nil, err
 	}
 	ids := make([]string, 0, len(keys))
@@ -146,29 +125,21 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 	case len(parts) > 256:
 		return nil, i.refused("the Version has %d text Parts; segment_and_embed takes at most 256", len(parts))
 	}
-	identity := append([]string{i.Pin.Generation(), "segment_and_embed", org, v.ID}, ids...)
-	request := segmentAndEmbedRequest{InvocationID: invocationID(), IdempotencyKey: content.StableID("ingestion", identity...), Contribution: "ingestion",
-		OrganizationID: org, Configuration: i.Pin.Configuration, Version: ingestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, Spaces: ids}
-	body, err := json.Marshal(request)
+
+	request := plugins.SegmentAndEmbedRequest{InvocationID: plugins.InvocationID(), IdempotencyKey: plugins.IngestionKey(i.Pin.Generation(), org, v.ID, ids), Contribution: "ingestion",
+		OrganizationID: org, Configuration: i.Pin.Configuration, Version: plugins.IngestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, Spaces: ids}
+	body, err := plugins.BuildSegmentAndEmbedRequest(request)
 	if err != nil {
 		return nil, err
 	}
 	view := plugins.IngestionRequestView{Parts: parts, Spaces: ids}
 	m := &i.Pin.Manifest
-	callCtx, cancel := context.WithTimeout(ctx, min(time.Duration(i.contribution().TimeoutMS)*time.Millisecond, processing.SegmentAndEmbedTimeoutCap))
-	defer cancel()
 	started := time.Now()
-	result, err := devhost.InvokeSegmentAndEmbed(callCtx, i.Pin.Endpoint, body, plugins.IngestionMaxResponseBytes(m), func(b []byte) []plugins.Issue {
+	result, err := call.Invoke(ctx, i.Pin, call.SegmentAndEmbed, call.Bytes(body), func(ctx context.Context, b []byte) []plugins.Issue {
 		return plugins.CheckSegmentAndEmbedOutput(b, view, m)
-	})
+	}, nil)
 	observe(i.Pin, org, OpSegmentAndEmbed, started, result, err)
-	if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("%w: %w: %v", ErrUnavailable, processing.ErrPluginDeadline, err)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	if err := i.judge(result); err != nil {
 		return nil, err
 	}
 	answer, err := plugins.DecodeSegmentAndEmbed(result.Body)
@@ -199,54 +170,9 @@ func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, e
 	return plugins.Unreachable(ctx, i.Pin, "ingestion")
 }
 
-// judge maps an invocation result: unavailability and retryable errors are
-// retried, terminal errors and refused output are content.ErrIngestionRefused,
-// whose reason names the plugin's code and message, each cut to
-// maxRefusalMessage code points.
-func (i Ingestor) judge(result *devhost.Result) error {
-	m := &i.Pin.Manifest
-	switch {
-	case result.Error != nil && result.Error.Retryable:
-		return &PluginError{Status: result.Status, Code: result.Error.Code, Message: result.Error.Message, Retryable: true}
-	case result.Error != nil:
-		return i.refused("%s@%s refused it (%s): %s", m.ID, m.Version, bounded(result.Error.Code, maxRefusalMessage), bounded(result.Error.Message, maxRefusalMessage))
-	case len(result.Issues) > 0 && (result.Status != 200 || result.Issues[0].Code == devhost.CodeInvalidErrorEnvelope):
-		return fmt.Errorf("%w: %s", ErrUnavailable, describe(result.Issues))
-	case len(result.Issues) > 0:
-		return i.refused("%s@%s gave an answer the engine refuses: %s", m.ID, m.Version, bounded(describe(result.Issues), maxRefusalMessage))
-	}
-	return nil
-}
-
 // QueryTooLongCode is the error envelope code with which a plugin refuses a
 // query over the length its space accepts; its message names the limit.
 const QueryTooLongCode = "query_too_long"
-
-// maxRefusalMessage bounds, in code points, a plugin message a search error
-// passes on to the API client.
-const maxRefusalMessage = 256
-
-// bounded cuts s to at most n code points.
-func bounded(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n])
-	}
-	return s
-}
-
-type embedQueryRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Space          string          `json:"space"`
-	Query          embedQuery      `json:"query"`
-}
-
-type embedQuery struct {
-	Modality string `json:"modality"`
-	Text     string `json:"text"`
-}
 
 // EncodeQuery asks the plugin that owns a space for a query's vector. A
 // terminal refusal with code query_too_long is retrieval.ErrQueryTooLong
@@ -259,42 +185,28 @@ func (i Ingestor) EncodeQuery(ctx context.Context, org, key, text string) ([]flo
 		return nil, fmt.Errorf("%w: space %s is not declared by the pinned ingestion plugin", ErrUnavailable, key)
 	}
 	started := time.Now()
-	result, err := i.embedQuery(ctx, invocationID(), org, id, text)
+	result, err := i.embedQuery(ctx, plugins.InvocationID(), org, id, text)
 	observe(i.Pin, org, OpEmbedQuery, started, result, err)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	if err := i.judge(result); err != nil {
-		if errors.Is(err, content.ErrIngestionRefused) && result.Error != nil {
-			if result.Error.Code == QueryTooLongCode {
-				return nil, publicerr.WithDetail(retrieval.ErrQueryTooLong, "%s", bounded(result.Error.Message, maxRefusalMessage))
-			}
-			return nil, content.ErrInvalid
-		}
-		slog.Warn("embed_query failed", "component", "search", "plugin", i.Pin.Manifest.ID, "space", key, "error", err.Error())
 		return nil, err
 	}
 	var answer struct {
 		Vector []float64 `json:"vector"`
 	}
 	if err := json.Unmarshal(result.Body, &answer); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, err
 	}
 	return plugins.Float32s(answer.Vector), nil
 }
 
 // embedQuery posts one embed_query within the contribution's query_timeout_ms.
 func (i Ingestor) embedQuery(ctx context.Context, invocation, org, space, text string) (*devhost.Result, error) {
-	body, err := json.Marshal(embedQueryRequest{InvocationID: invocation, Contribution: "ingestion", OrganizationID: org, Configuration: i.Pin.Configuration, Space: space, Query: embedQuery{Modality: "text", Text: text}})
+	body, err := plugins.BuildEmbedQueryRequest(plugins.EmbedQueryRequest{InvocationID: invocation, Contribution: "ingestion", OrganizationID: org, Configuration: i.Pin.Configuration, Space: space, Query: plugins.EmbedQuery{Modality: "text", Text: text}})
 	if err != nil {
 		return nil, err
 	}
 	m := &i.Pin.Manifest
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(i.contribution().QueryTimeoutMS)*time.Millisecond)
-	defer cancel()
-	return devhost.InvokeEmbedQuery(ctx, i.Pin.Endpoint, body, func(b []byte) []plugins.Issue {
-		return plugins.CheckEmbedQueryOutput(b, space, m)
-	})
+	return call.Invoke(ctx, i.Pin, call.EmbedQuery, call.Bytes(body), func(ctx context.Context, b []byte) []plugins.Issue { return plugins.CheckEmbedQueryOutput(b, space, m) }, nil)
 }
 
 // WarmUpOrganization is the organization_id of a warm-up embed_query: it
@@ -310,7 +222,7 @@ const WarmUpOrganization = "engine.warm-up"
 // Organization, so they are not observed.
 func (i Ingestor) Warm(ctx context.Context) error {
 	for _, space := range i.Pin.EnabledSpaces() {
-		if _, err := i.embedQuery(ctx, "warm-up-"+invocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil {
+		if result, err := i.embedQuery(ctx, "warm-up-"+plugins.InvocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil && result == nil {
 			return fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 	}

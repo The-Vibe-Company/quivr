@@ -48,7 +48,12 @@ func TestConnectorPushProtectionAcrossReplicas(t *testing.T) {
 	}
 	var calls atomic.Int64
 	var refuse atomic.Bool
+	var pin *plugins.Pin
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+			return
+		}
 		n := calls.Add(1)
 		if refuse.Load() {
 			w.Header().Set("Content-Type", "application/json")
@@ -59,7 +64,7 @@ func TestConnectorPushProtectionAcrossReplicas(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(plugins.ConnectorDelivery{Verdict: "accepted", Response: plugins.ReceiveAnswer{Status: 204}, Items: []plugins.ConnectorItem{{RecordKey: fmt.Sprint(n), Revision: "1", Content: json.RawMessage(`{"kind":"text","text":"An incoming event"}`)}}})
 	}))
 	defer remote.Close()
-	pin, err := plugins.LoadPinManifest([]byte(`id: example-push
+	pin, err = plugins.LoadPinManifest([]byte(`id: example-push
 version: 1.0.0
 compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.12.0 <0.13.0"}
 contributions:

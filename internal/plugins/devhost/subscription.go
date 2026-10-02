@@ -58,55 +58,19 @@ type subscriptionFixture struct {
 	} `json:"evaluations"`
 }
 
-type subscriptionPart struct {
-	Vectors json.RawMessage `json:"vectors,omitempty"`
-	Key     string          `json:"key"`
-	Role    string          `json:"role"`
-	Text    string          `json:"text"`
-}
+type subscriptionPart = plugins.SubscriptionPart
 
-type subscriptionRef struct {
-	SubscriptionID        string `json:"subscription_id"`
-	SubscriptionVersionID string `json:"subscription_version_id"`
-	SavedQueryID          string `json:"saved_query_id"`
-	SavedQueryVersionID   string `json:"saved_query_version_id"`
-}
+type subscriptionRef = plugins.SubscriptionRef
 
-type subscriptionEvaluation struct {
-	QueryVector   json.RawMessage   `json:"query_vector,omitempty"`
-	ID            string            `json:"id"`
-	Expression    json.RawMessage   `json:"expression"`
-	Configuration json.RawMessage   `json:"configuration"`
-	Subscriptions []subscriptionRef `json:"subscriptions"`
-}
+type subscriptionEvaluation = plugins.SubscriptionEvaluation
 
-type subscriptionRecord struct {
-	VectorSpaceID   string             `json:"vector_space_id,omitempty"`
-	VectorsReady    *bool              `json:"vectors_ready,omitempty"`
-	CorpusID        string             `json:"corpus_id"`
-	RecordID        string             `json:"record_id"`
-	RecordVersionID string             `json:"record_version_id"`
-	Enriched        bool               `json:"enriched"`
-	Parts           []subscriptionPart `json:"parts"`
-	Source          json.RawMessage    `json:"source"`
-	AcceptedAt      string             `json:"accepted_at"`
-	Provenance      json.RawMessage    `json:"provenance"`
-	Extensions      json.RawMessage    `json:"extensions,omitempty"`
-}
+type subscriptionRecord = plugins.SubscriptionRecord
 
 // DevAcceptedAt is the acceptance time of a subscription fixture that does
 // not set one.
 const DevAcceptedAt = "2026-01-01T00:00:00Z"
 
-type subscriptionRequest struct {
-	InvocationID   string                   `json:"invocation_id"`
-	IdempotencyKey string                   `json:"idempotency_key"`
-	Contribution   string                   `json:"contribution"`
-	OrganizationID string                   `json:"organization_id"`
-	Record         subscriptionRecord       `json:"record"`
-	Evaluations    []subscriptionEvaluation `json:"evaluations"`
-	Configuration  json.RawMessage          `json:"configuration"`
-}
+type subscriptionRequest = plugins.SubscriptionRequest
 
 // BuildSubscriptionRequests turns a subscription fixture into development
 // subscription requests. Evaluations are numbered e1, e2, ... in fixture
@@ -232,7 +196,7 @@ func BuildSubscriptionRequests(path string, m *plugins.Manifest) ([]Subscription
 			Evaluations:    chunk,
 			Configuration:  config,
 		}
-		body, err := json.Marshal(request)
+		body, err := plugins.BuildSubscriptionRequest(request)
 		if err != nil {
 			return nil, nil, err
 		}

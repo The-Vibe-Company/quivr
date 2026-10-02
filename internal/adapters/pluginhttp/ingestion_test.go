@@ -49,7 +49,11 @@ func TestEncodeQueryPassesOnTheLimitAPluginNames(t *testing.T) {
 		{code: "unsupported_query", err: content.ErrInvalid},
 	} {
 		t.Run(c.code, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			var pin *plugins.Pin
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r, pin) {
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(422)
 				_ = json.NewEncoder(w).Encode(map[string]any{"code": c.code, "message": "query exceeds 128 tokens", "retryable": false})
@@ -59,7 +63,8 @@ func TestEncodeQueryPassesOnTheLimitAPluginNames(t *testing.T) {
 			if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
+			var err error
+			pin, err = plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +96,11 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": "unsupported_query", "message": "no", "retryable": false})
 		},
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var pin *plugins.Pin
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r, pin) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		answers[0](w)
 		answers = answers[1:]
@@ -100,7 +109,8 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
+	var err error
+	pin, err = plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +141,11 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 // the work calls it.
 func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var pin *plugins.Pin
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r, pin) {
+			return
+		}
 		calls++
 		w.WriteHeader(503)
 	}))
@@ -140,7 +154,8 @@ func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
+	var err error
+	pin, err = plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +204,11 @@ func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 // A segment_and_embed call that reaches the plugin's deadline is told apart
 // from an outage: enrichment counts deadlines toward a bound, never outages.
 func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
-	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	var pin *plugins.Pin
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r, pin) {
+			return
+		}
 		_, _ = io.Copy(io.Discard, r.Body) // the server notices the caller leave once the body is read
 		<-r.Context().Done()
 	}))
@@ -205,7 +224,8 @@ func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
 		name, endpoint string
 		deadline       bool
 	}{{"hanging plugin", hang.URL, true}, {"plugin down", down.URL, false}} {
-		pin, err := plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: c.endpoint})
+		var err error
+		pin, err = plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: c.endpoint})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +244,11 @@ func TestLiveIngestionRoutesSourceAndQueryToPinnedOwners(t *testing.T) {
 	var calls, bound []string
 	makePin := func(id string, vector []float32) *plugins.Pin {
 		t.Helper()
+		var pin *plugins.Pin
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveDiscovery(w, r, pin) {
+				return
+			}
 			calls = append(calls, id+r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			if strings.HasSuffix(r.URL.Path, "embed_query") {
@@ -234,7 +258,8 @@ func TestLiveIngestionRoutesSourceAndQueryToPinnedOwners(t *testing.T) {
 			}
 		}))
 		t.Cleanup(server.Close)
-		pin, err := plugins.LoadPinManifest([]byte(strings.ReplaceAll(embedderManifest, "acme.embedder", id)), id, plugins.PinConfig{Endpoint: server.URL})
+		var err error
+		pin, err = plugins.LoadPinManifest([]byte(strings.ReplaceAll(embedderManifest, "acme.embedder", id)), id, plugins.PinConfig{Endpoint: server.URL})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,4 +337,15 @@ func (r retainedIngestionOwner) IngestionSpaceOwner(_ context.Context, space str
 		}
 	}
 	return nil, nil
+}
+
+// serveDiscovery gives HTTP peers the pin's discovery contract. Contribution
+// assertions still observe only POST requests.
+func serveDiscovery(w http.ResponseWriter, r *http.Request, pin *plugins.Pin) bool {
+	if r.URL.Path != "/v0/discovery" {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+	return true
 }

@@ -338,39 +338,10 @@ type fixture struct {
 	Provenance    json.RawMessage `json:"provenance,omitempty"`
 }
 
-type sourceIdentity struct {
-	CorpusID  string `json:"corpus_id"`
-	Namespace string `json:"namespace"`
-	RecordKey string `json:"record_key"`
-}
-
-type fileReference struct {
-	Kind string `json:"kind"`
-	URL  string `json:"url"`
-}
-
-type inputBlob struct {
-	BlobID    string        `json:"blob_id"`
-	MediaType string        `json:"media_type"`
-	SizeBytes int           `json:"size_bytes"`
-	SHA256    string        `json:"sha256"`
-	Reference fileReference `json:"reference"`
-}
-
-type normalizerRequest struct {
-	InvocationID    string          `json:"invocation_id"`
-	IdempotencyKey  string          `json:"idempotency_key"`
-	Contribution    string          `json:"contribution"`
-	OrganizationID  string          `json:"organization_id"`
-	CorpusID        string          `json:"corpus_id"`
-	RecordID        string          `json:"record_id"`
-	RecordVersionID string          `json:"record_version_id"`
-	Source          json.RawMessage `json:"source"`
-	Input           inputBlob       `json:"input"`
-	Extensions      json.RawMessage `json:"extensions,omitempty"`
-	Provenance      json.RawMessage `json:"provenance,omitempty"`
-	Configuration   json.RawMessage `json:"configuration"`
-}
+type sourceIdentity = plugins.NormalizerSource
+type fileReference = plugins.NormalizerReference
+type inputBlob = plugins.NormalizerInput
+type normalizerRequest = plugins.NormalizerRequest
 
 // FileURL returns the absolute file:// URL of path.
 func FileURL(path string) (string, error) {
@@ -425,14 +396,11 @@ func BuildFixtureRequest(path string, m *plugins.Manifest) ([]byte, []plugins.Is
 	if issues := plugins.ValidateConfiguration(m, config); len(issues) > 0 {
 		return nil, issues, nil
 	}
-	source := f.Source
+	source := sourceIdentity{CorpusID: "dev-corpus", Namespace: "dev", RecordKey: f.Input.Path}
 	corpusID := "dev-corpus"
-	if len(source) == 0 {
-		source, _ = json.Marshal(sourceIdentity{CorpusID: corpusID, Namespace: "dev", RecordKey: f.Input.Path})
-	} else {
-		var s sourceIdentity
-		_ = json.Unmarshal(source, &s)
-		corpusID = s.CorpusID
+	if len(f.Source) > 0 {
+		_ = json.Unmarshal(f.Source, &source)
+		corpusID = source.CorpusID
 	}
 	fileURL, err := FileURL(inputPath)
 	if err != nil {
@@ -448,14 +416,14 @@ func BuildFixtureRequest(path string, m *plugins.Manifest) ([]byte, []plugins.Is
 		RecordVersionID: "dev-version-" + short,
 		Source:          source,
 		Input: inputBlob{
-			BlobID: "dev-blob-" + short, MediaType: f.Input.MediaType, SizeBytes: len(data), SHA256: digest,
+			BlobID: "dev-blob-" + short, MediaType: f.Input.MediaType, SizeBytes: int64(len(data)), SHA256: digest,
 			Reference: fileReference{Kind: "file", URL: fileURL},
 		},
 		Extensions:    f.Extensions,
 		Provenance:    f.Provenance,
 		Configuration: config,
 	}
-	body, err := json.Marshal(request)
+	body, err := plugins.BuildNormalizerRequest(request)
 	if err != nil {
 		return nil, nil, err
 	}

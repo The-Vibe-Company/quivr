@@ -110,7 +110,7 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: pin}, Pin: liveOf(t, pin)}
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: staticSigner{}, Plugin: pluginhttp.Normalizer{}, Pin: liveOf(t, pin)}
 
 	// Publication before normalization waits; it never publishes the source Blob Part.
 	if err := contents.Materialize(ctx, org, receipt.ID); err == nil {

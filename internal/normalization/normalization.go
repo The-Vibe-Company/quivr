@@ -15,8 +15,6 @@ package normalization
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
@@ -35,7 +32,7 @@ const Contribution = "normalizer"
 // Engine bounds applied on top of the plugin's declared limits.
 const (
 	// TimeoutCap bounds one invocation: the deadline is min(declared timeout, TimeoutCap).
-	TimeoutCap = 2 * time.Minute
+	TimeoutCap = plugins.NormalizerTimeoutCap
 	// MaxAttemptsCap bounds the declared retry.max_attempts: the number of
 	// invocations of one Version that may end in a retryable error or a
 	// timeout before it is quarantined.
@@ -85,8 +82,8 @@ type Signer interface {
 
 // Plugin is the protocol client of the pinned plugin.
 type Plugin interface {
-	CheckDiscovery(ctx context.Context) error
-	Normalize(ctx context.Context, request []byte, oc plugins.OutputContext) (pluginhttp.Response, error)
+	CheckDiscovery(ctx context.Context, pin *plugins.Pin) error
+	Normalize(ctx context.Context, pin *plugins.Pin, request []byte, oc plugins.OutputContext) (plugins.NormalizerResponse, error)
 }
 
 // Service runs one normalization per accepted routed Blob Version.
@@ -94,8 +91,7 @@ type Service struct {
 	Content content.Service
 	Store   Store
 	Signer  Signer
-	// Plugin, when set, is the protocol client for every resolved pin
-	// (tests); nil talks to each resolved pin with pluginhttp.
+	// Plugin is the invocation port wired by the application for resolved pins.
 	Plugin Plugin
 	// Pin routes a media type to its normalizer in the plan the work is
 	// pinned to (plugins.Live); nil routes none.
@@ -108,25 +104,11 @@ type Router interface {
 	Normalizer(ctx context.Context, mediaType string) (*plugins.Pin, plugins.RouteConfig, bool)
 }
 
-func (s Service) client(pin *plugins.Pin) Plugin {
-	if s.Plugin != nil {
-		return s.Plugin
-	}
-	return pluginhttp.Client{Pin: pin}
-}
-
 // IdempotencyKey is the stable key of one logical invocation: the Plugin
 // Generation placeholder, the Contribution, the Organization, the Record
 // Version and the input checksum.
 func IdempotencyKey(generation, contribution, org, versionID, inputSHA256 string) string {
-	b, _ := json.Marshal([]string{generation, contribution, org, versionID, inputSHA256})
-	return "nk_" + content.Hash(b)
-}
-
-func invocationID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return "inv_" + hex.EncodeToString(b[:])
+	return plugins.NormalizerKey(generation, contribution, org, versionID, inputSHA256)
 }
 
 // MaxAttempts is the retry budget of a normalizer: its declared
@@ -195,10 +177,10 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 	if !routed {
 		return nil
 	}
-	plugin := s.client(pin)
+	plugin := s.Plugin
 	normalizer := pin.Manifest.Contributions.Normalizer
 	inv := invocation{org: org, receiptID: receiptID, work: work, optional: route.Mode == plugins.RouteOptional, budget: MaxAttempts(normalizer),
-		provenance: content.Normalization{PluginID: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, PluginAPI: pin.PluginAPI(), Contribution: Contribution, InvocationID: invocationID(),
+		provenance: content.Normalization{PluginID: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, PluginAPI: pin.PluginAPI(), Contribution: Contribution, InvocationID: plugins.InvocationID(),
 			IdempotencyKey: IdempotencyKey(pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
 	input, err := s.Content.BlobSource.VerifiedBlob(ctx, org, c.Content.BlobID)
 	if errors.Is(err, content.ErrUnverifiedBlob) || (err == nil && (input.Blob.SHA256 != c.Content.BlobSHA256 || input.MediaType != c.Content.MediaType)) {
@@ -207,7 +189,7 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 	if err != nil {
 		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", err)
 	}
-	if err := plugin.CheckDiscovery(ctx); err != nil {
+	if err := plugin.CheckDiscovery(ctx, pin); err != nil {
 		return s.unavailable(ctx, inv, pin, err)
 	}
 	// Running only once the plugin answers: an outage keeps the receipt's
@@ -215,10 +197,7 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 	if err := s.Content.Repository.Progress(ctx, org, receiptID, "running", ""); err != nil {
 		return err
 	}
-	timeout := time.Duration(normalizer.TimeoutMS) * time.Millisecond
-	if timeout <= 0 || timeout > TimeoutCap {
-		timeout = TimeoutCap
-	}
+	timeout := plugins.InvocationTimeout(pin, "normalize")
 	signed, expires, err := s.Signer.PresignGet(ctx, input.Blob.Key, timeout+referenceMargin)
 	if err != nil {
 		return s.retry(ctx, org, receiptID, "blob_reference_unavailable", err)
@@ -239,15 +218,12 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 			}
 			return plugins.VerifiedBlob{ID: v.ID, MediaType: v.MediaType, SHA256: v.Blob.SHA256}, err
 		}}
-	invoke, cancel := context.WithTimeout(ctx, timeout)
-	response, err := plugin.Normalize(invoke, request, oc)
-	timedOut := errors.Is(invoke.Err(), context.DeadlineExceeded) && ctx.Err() == nil
-	cancel()
+	response, err := plugin.Normalize(ctx, pin, request, oc)
 	if outage != nil {
 		return s.retry(ctx, org, receiptID, "blob_verification_unavailable", outage)
 	}
-	var declared *pluginhttp.PluginError
-	var invalid *pluginhttp.InvalidOutput
+	var declared *plugins.PluginError
+	var invalid *plugins.InvalidOutput
 	switch {
 	case errors.As(err, &declared) && declared.Retryable:
 		return s.counted(ctx, inv, CodeRetriesExhausted, fmt.Sprintf("The normalizer kept answering the retryable error %s: %s", declared.Code, declared.Message))
@@ -255,7 +231,7 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 		return s.fail(ctx, inv, CodeFailed, fmt.Sprintf("The normalizer refused the input with %s: %s", declared.Code, declared.Message), false)
 	case errors.As(err, &invalid):
 		return s.fail(ctx, inv, CodeInvalidOutput, invalid.Error(), false)
-	case err != nil && timedOut:
+	case errors.Is(err, plugins.ErrCallDeadline):
 		return s.counted(ctx, inv, CodeTimeout, fmt.Sprintf("The normalizer did not answer within %s.", timeout))
 	case err != nil:
 		return s.unavailable(ctx, inv, pin, err)
@@ -318,10 +294,7 @@ const maxMessageRunes = 1000
 // error text, storable and publishable: valid UTF-8 without NUL, at most
 // maxMessageRunes characters, never empty.
 func boundedMessage(message string) string {
-	message = strings.ReplaceAll(strings.ToValidUTF8(message, "�"), "\x00", "")
-	if runes := []rune(message); len(runes) > maxMessageRunes {
-		message = string(runes[:maxMessageRunes])
-	}
+	message = plugins.BoundedDiagnostic(message, maxMessageRunes)
 	if strings.TrimSpace(message) == "" {
 		message = "The normalizer failed."
 	}
@@ -399,41 +372,6 @@ func (s Service) fail(ctx context.Context, inv invocation, code, message string,
 	return nil
 }
 
-type source struct {
-	CorpusID  string `json:"corpus_id"`
-	Namespace string `json:"namespace"`
-	RecordKey string `json:"record_key"`
-}
-
-type reference struct {
-	Kind      string `json:"kind"`
-	URL       string `json:"url"`
-	ExpiresAt string `json:"expires_at"`
-}
-
-type inputBlob struct {
-	BlobID    string    `json:"blob_id"`
-	MediaType string    `json:"media_type"`
-	SizeBytes int64     `json:"size_bytes"`
-	SHA256    string    `json:"sha256"`
-	Reference reference `json:"reference"`
-}
-
-type request struct {
-	InvocationID    string             `json:"invocation_id"`
-	IdempotencyKey  string             `json:"idempotency_key"`
-	Contribution    string             `json:"contribution"`
-	OrganizationID  string             `json:"organization_id"`
-	CorpusID        string             `json:"corpus_id"`
-	RecordID        string             `json:"record_id"`
-	RecordVersionID string             `json:"record_version_id"`
-	Source          source             `json:"source"`
-	Input           inputBlob          `json:"input"`
-	Extensions      content.Extensions `json:"extensions,omitempty"`
-	Provenance      map[string]any     `json:"provenance,omitempty"`
-	Configuration   json.RawMessage    `json:"configuration"`
-}
-
 // buildRequest builds the immutable invocation context and checks it against
 // the Plugin Protocol request schema. The body is never inline.
 func buildRequest(work content.Work, input content.VerifiedBlob, p content.Normalization, signed string, expires time.Time, configuration json.RawMessage) ([]byte, error) {
@@ -444,13 +382,28 @@ func buildRequest(work content.Work, input content.VerifiedBlob, p content.Norma
 			submitted[key] = v
 		}
 	}
-	body, err := json.Marshal(request{
+	var extensions, provenance json.RawMessage
+	if len(c.Extensions) > 0 {
+		var err error
+		extensions, err = json.Marshal(c.Extensions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(submitted) > 0 {
+		var err error
+		provenance, err = json.Marshal(submitted)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, err := plugins.BuildNormalizerRequest(plugins.NormalizerRequest{
 		InvocationID: p.InvocationID, IdempotencyKey: p.IdempotencyKey, Contribution: Contribution,
 		OrganizationID: work.Organization, CorpusID: c.Source.CorpusID, RecordID: work.RecordID, RecordVersionID: work.VersionID,
-		Source: source{CorpusID: c.Source.CorpusID, Namespace: c.Source.Namespace, RecordKey: c.Source.RecordKey},
-		Input: inputBlob{BlobID: input.ID, MediaType: input.MediaType, SizeBytes: input.Blob.Size, SHA256: input.Blob.SHA256,
-			Reference: reference{Kind: "signed_url", URL: signed, ExpiresAt: expires.UTC().Format(time.RFC3339)}},
-		Extensions: c.Extensions, Provenance: submitted, Configuration: configuration,
+		Source: plugins.NormalizerSource{CorpusID: c.Source.CorpusID, Namespace: c.Source.Namespace, RecordKey: c.Source.RecordKey},
+		Input: plugins.NormalizerInput{BlobID: input.ID, MediaType: input.MediaType, SizeBytes: input.Blob.Size, SHA256: input.Blob.SHA256,
+			Reference: plugins.NormalizerReference{Kind: "signed_url", URL: signed, ExpiresAt: expires.UTC().Format(time.RFC3339)}},
+		Extensions: extensions, Provenance: provenance, Configuration: configuration,
 	})
 	if err != nil {
 		return nil, err

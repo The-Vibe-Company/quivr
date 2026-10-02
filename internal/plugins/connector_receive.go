@@ -41,6 +41,7 @@ type ConnectorReceiveRequest struct {
 // same request shape for production deliveries and fixture replays.
 func BuildConnectorReceiveRequest(r ConnectorReceiveRequest) ([]byte, error) {
 	r.Contribution = "connector"
+	r.Configuration = defaultConfiguration(r.Configuration)
 	if len(r.Credential) == 0 {
 		r.Credential = json.RawMessage("null")
 	}

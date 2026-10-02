@@ -124,37 +124,9 @@ type connectorFixture struct {
 	Receive       []ConnectorReceiveCase `json:"receive,omitempty"`
 }
 
-type connectorRef struct {
-	InstanceID      string          `json:"instance_id"`
-	Kind            string          `json:"kind"`
-	CorpusID        string          `json:"corpus_id,omitempty"`
-	SourceNamespace string          `json:"source_namespace,omitempty"`
-	WebhookURL      string          `json:"webhook_url,omitempty"`
-	Config          json.RawMessage `json:"config"`
-}
-
-type connectorFetchRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Connector      connectorRef    `json:"connector"`
-	Credential     json.RawMessage `json:"credential"`
-	Checkpoint     json.RawMessage `json:"checkpoint"`
-	Now            string          `json:"now"`
-	PageInRun      int             `json:"page_in_run"`
-	ReadsToday     int64           `json:"reads_today"`
-}
-
-type connectorCredentialRequest struct {
-	InvocationID   string          `json:"invocation_id"`
-	Contribution   string          `json:"contribution"`
-	OrganizationID string          `json:"organization_id"`
-	Configuration  json.RawMessage `json:"configuration"`
-	Connector      connectorRef    `json:"connector"`
-	Credential     json.RawMessage `json:"credential"`
-	Now            string          `json:"now"`
-}
+type connectorRef = plugins.ConnectorRef
+type connectorFetchRequest = plugins.ConnectorFetchRequest
+type connectorCredentialRequest = plugins.ConnectorCredentialRequest
 
 // BuildConnectorRun reads a connector fixture and validates it: the fixture
 // schema, the plugin configuration, and the Connector Instance configuration
@@ -241,7 +213,7 @@ func (r *ConnectorRun) scopedRef(kind string) connectorRef {
 // FetchRequest builds the fetch request of one page of the run. suffix makes
 // the invocation id unique per attempt.
 func (r *ConnectorRun) FetchRequest(checkpoint json.RawMessage, page int, readsToday int64, suffix string) []byte {
-	body, _ := json.Marshal(connectorFetchRequest{
+	body, _ := plugins.BuildConnectorFetchRequest(connectorFetchRequest{
 		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
 		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.scopedRef(r.Kind),
 		Credential: r.Credential, Checkpoint: checkpoint, Now: r.Now, PageInRun: page, ReadsToday: readsToday,
@@ -251,7 +223,7 @@ func (r *ConnectorRun) FetchRequest(checkpoint json.RawMessage, page int, readsT
 
 // CheckCredentialRequest builds the check_credential request of the run.
 func (r *ConnectorRun) CheckCredentialRequest(suffix string) []byte {
-	body, _ := json.Marshal(connectorCredentialRequest{
+	body, _ := plugins.BuildConnectorCredentialRequest(connectorCredentialRequest{
 		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
 		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.ref(r.Kind),
 		Credential: r.Credential, Now: r.Now,
@@ -312,38 +284,19 @@ func InvokeCheckCredential(ctx context.Context, baseURL string, request []byte) 
 }
 
 // AttachmentItem is the item an attachment request names.
-type AttachmentItem struct {
-	RecordKey  string          `json:"record_key"`
-	Revision   string          `json:"revision,omitempty"`
-	Extensions json.RawMessage `json:"extensions,omitempty"`
-}
+type AttachmentItem = plugins.ConnectorAttachmentItem
 
 // AttachmentGrant is the presigned PUT of an upload_attachment request.
-type AttachmentGrant struct {
-	URL       string            `json:"url"`
-	Method    string            `json:"method"`
-	Headers   map[string]string `json:"headers"`
-	SizeBytes int64             `json:"size_bytes"`
-	SHA256    string            `json:"sha256"`
-	MediaType string            `json:"media_type"`
-	ExpiresAt string            `json:"expires_at"`
-}
-
-type attachmentRequest struct {
-	connectorCredentialRequest
-	Item       AttachmentItem              `json:"item"`
-	Attachment plugins.ConnectorAttachment `json:"attachment"`
-	Grant      *AttachmentGrant            `json:"grant,omitempty"`
-}
+type AttachmentGrant = plugins.ConnectorAttachmentGrant
+type attachmentRequest = plugins.ConnectorAttachmentRequest
 
 // AttachmentRequest builds a describe_attachment request (grant nil) or an
 // upload_attachment request of the run.
 func (r *ConnectorRun) AttachmentRequest(item AttachmentItem, at plugins.ConnectorAttachment, grant *AttachmentGrant, suffix string) []byte {
-	body, _ := json.Marshal(attachmentRequest{connectorCredentialRequest: connectorCredentialRequest{
+	body, _ := plugins.BuildConnectorAttachmentRequest(attachmentRequest{
 		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
 		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: r.ref(r.Kind),
-		Credential: r.Credential, Now: r.Now,
-	}, Item: item, Attachment: at, Grant: grant})
+		Credential: r.Credential, Now: r.Now, Item: item, Attachment: at, Grant: grant})
 	return body
 }
 

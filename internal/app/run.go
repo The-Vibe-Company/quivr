@@ -547,7 +547,7 @@ func Run(command string) error {
 	// them at most 10 s old.
 	search := retrieval.Service{Embedder: embedding, Routing: store, Registry: store, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: projection, Content: contents}
 	// External normalization runs in the worker only, before publication.
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: live}
+	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
 	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Routing: store}
 	// The plan's ingestion plugin segments and embeds every Version, encodes

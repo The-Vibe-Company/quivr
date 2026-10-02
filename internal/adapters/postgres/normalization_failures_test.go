@@ -82,7 +82,7 @@ func newPluginWorld(t *testing.T, ctx context.Context, name string) *pluginWorld
 	w.sources = blobSources{}
 	live := liveOf(t, w.pin)
 	w.contents = content.Service{Repository: w.store, Catalog: w.store, Blobs: w.objects, BlobSource: w.sources, Relations: w.store, Routes: live, Normalizations: w.store, Supersession: w.store}
-	w.service = normalization.Service{Content: w.contents, Store: w.store, Signer: staticSigner{}, Plugin: pluginhttp.Client{Pin: w.pin}, Pin: live}
+	w.service = normalization.Service{Content: w.contents, Store: w.store, Signer: staticSigner{}, Plugin: pluginhttp.Normalizer{}, Pin: live}
 	t.Cleanup(func() {
 		if w.proc != nil {
 			_ = w.proc.Stop(time.Second)

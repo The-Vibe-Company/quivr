@@ -3,13 +3,10 @@ package pluginhttp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -39,21 +36,10 @@ func (r Retriever) Round(ctx context.Context, request plugins.SearchRequest) ([]
 		return nil, err
 	}
 	started := time.Now()
-	result, err := devhost.InvokeSearch(ctx, r.Pin.Endpoint, body, plugins.RetrievalMaxResponseBytes(&r.Pin.Manifest), func([]byte) []plugins.Issue { return nil })
+	result, err := call.Invoke(ctx, r.Pin, call.SearchRound, call.Bytes(body), nil, nil)
 	observe(r.Pin, request.OrganizationID, OpSearchRound, started, result, err)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	switch {
-	case result.Error != nil && !result.Error.Retryable:
-		slog.Info("retrieval plugin refused a search", "component", "search", "plugin", r.Pin.Manifest.ID, "code", result.Error.Code, "status", result.Status)
-		return nil, fmt.Errorf("%w: %s: %s", content.ErrInvalid, result.Error.Code, result.Error.Message)
-	case result.Error != nil:
-		return nil, &PluginError{Status: result.Status, Code: result.Error.Code, Message: result.Error.Message, Retryable: true}
-	case len(result.Issues) > 0 && result.Issues[0].Code == devhost.CodeResponseTooLarge:
-		return nil, fmt.Errorf("%w: %s", retrieval.ErrPluginInvalid, describe(result.Issues))
-	case len(result.Issues) > 0:
-		return nil, fmt.Errorf("%w: %s", ErrUnavailable, describe(result.Issues))
+		return nil, err
 	}
 	return result.Body, nil
 }

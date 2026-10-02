@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
 type Indexer interface {
@@ -54,13 +55,13 @@ var ErrSpaceUnowned = errors.New("served space has no pinned owner")
 // ErrPluginDeadline reports a plugin call the engine ended at its deadline:
 // the plugin answered nothing within the timeout_ms it declares (at most
 // SegmentAndEmbedTimeoutCap).
-var ErrPluginDeadline = errors.New("plugin call reached its deadline")
+var ErrPluginDeadline = plugins.ErrCallDeadline
 
 // Engine bounds on the enrichment of one Version through the ingestion plugin.
 const (
 	// SegmentAndEmbedTimeoutCap bounds one segment_and_embed call, whatever
 	// timeout_ms the plugin declares (the manifest schema's maximum).
-	SegmentAndEmbedTimeoutCap = 5 * time.Minute
+	SegmentAndEmbedTimeoutCap = plugins.SegmentAndEmbedTimeoutCap
 	// EnrichmentTimeoutBudget is how many calls for one Version may end at
 	// their deadline before its enrichment stops as blocked
 	// (content.CodeEnrichmentTimeout). An unavailable plugin never counts.

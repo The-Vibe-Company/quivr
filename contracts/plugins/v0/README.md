@@ -130,6 +130,12 @@ version.
 - **Manifest digest.** `manifest_digest` is `sha256:` followed by the lowercase
   hex SHA-256 of the exact bytes of the `quivr-plugin.yaml` the plugin was built
   from. `quivr plugin inspect` prints the same value.
+- **Invocation checks.** Before every engine call, discovery must match the
+  installed manifest, including query encoding, receive and attachment calls.
+  Discovery and the invocation share the per-call deadline. Cancellation
+  prevents further calls; a rollback stop refuses pins that left the active plan.
+- **Stored diagnostics.** Normalizer failure messages are capped at 1,000 Unicode
+  characters. A shortened message ends with `… [truncated]` within that bound.
 - **Future Contributions** use `/v0/contributions/<name>`, with one sub-route
   per operation when a Contribution has several (`connector/fetch`).
 

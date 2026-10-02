@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
@@ -18,7 +17,7 @@ type savedQueryEncoder struct {
 func (e savedQueryEncoder) EncodeSavedQuery(ctx context.Context, org string, definition monitoring.Definition) ([]monitoring.QueryVector, error) {
 	texts := map[string]bool{}
 	for _, evaluator := range e.evaluators.Load().Served {
-		if port, ok := evaluator.(pluginhttp.Evaluator); ok {
+		if port, ok := evaluator.(interface{ QueryText(map[string]any) string }); ok {
 			if text := port.QueryText(definition.Expression); text != "" {
 				texts[text] = true
 			}

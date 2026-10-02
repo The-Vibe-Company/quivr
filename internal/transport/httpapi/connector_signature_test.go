@@ -73,7 +73,12 @@ func (s *replayMemory) ReleaseReplay(_ context.Context, org, id, token string) e
 func TestSignatureRoutesRefuseStaleAndReplayedPushesBeforeReceive(t *testing.T) {
 	calls := 0
 	verdict := "accepted"
+	var pin *plugins.Pin
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+			return
+		}
 		calls++
 		var req struct {
 			Route   string `json:"route"`
@@ -116,7 +121,8 @@ contributions:
             - {name: challenge, method: GET, path: receive, auth: signature, signature: {header: X-Signature, window_seconds: 300}}
             - {name: timed, method: POST, path: timed, auth: signature, signature: {header: X-Signature, timestamp_header: X-Timestamp, window_seconds: 300}, request_schema: {type: object}}
 `)
-	pin, err := plugins.LoadPinManifest(manifest, "signed test plugin", plugins.PinConfig{Endpoint: source.URL})
+	var err error
+	pin, err = plugins.LoadPinManifest(manifest, "signed test plugin", plugins.PinConfig{Endpoint: source.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

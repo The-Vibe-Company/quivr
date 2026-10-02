@@ -60,7 +60,7 @@ func observe(pin *plugins.Pin, org, operation string, started time.Time, result 
 	}
 	call := Call{Organization: org, PluginID: pin.Manifest.ID, Version: pin.Manifest.Version, Operation: operation, Duration: time.Since(started)}
 	switch {
-	case err != nil || result == nil:
+	case result == nil:
 		call.ErrorCode = callUnavailable
 	case result.Error != nil && declaredCode.MatchString(result.Error.Code):
 		call.ErrorCode = result.Error.Code
