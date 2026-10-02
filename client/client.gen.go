@@ -1496,6 +1496,33 @@ type ConnectorSchedule struct {
 	IntervalSeconds *int `json:"interval_seconds,omitempty"`
 }
 
+// ConnectorToken defines model for ConnectorToken.
+type ConnectorToken struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Prefix Display prefix only; cannot authenticate.
+	Prefix    string     `json:"prefix"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	RotatedAt *time.Time `json:"rotated_at,omitempty"`
+	TokenId   string     `json:"token_id"`
+
+	// ValidUntil Exclusive expiry of an old token after rotation; absent for an unrotated token.
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// ConnectorTokenCreated defines model for ConnectorTokenCreated.
+type ConnectorTokenCreated struct {
+	// Secret One-time bearer secret; never persisted or returned by metadata reads.
+	Secret string         `json:"secret"`
+	Token  ConnectorToken `json:"token"`
+}
+
+// ConnectorTokenList defines model for ConnectorTokenList.
+type ConnectorTokenList struct {
+	Items     []ConnectorToken `json:"items"`
+	NextAfter *string          `json:"next_after,omitempty"`
+}
+
 // ConnectorUsage Per-UTC-day source read counters, present only for kinds that report reads.
 type ConnectorUsage struct {
 	// Day Current UTC calendar day (YYYY-MM-DD).
@@ -3130,6 +3157,12 @@ type ListConnectorsParams struct {
 // PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
 type PushConnectorAPIJSONBody = interface{}
 
+// ListConnectorTokensParams defines parameters for ListConnectorTokens.
+type ListConnectorTokensParams struct {
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -3783,14 +3816,14 @@ type ClientInterface interface {
 
 	// ChallengeConnectorAPI Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response.
 	//
 	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
 	ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PushConnectorAPIWithBody Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -3799,7 +3832,7 @@ type ClientInterface interface {
 
 	// PushConnectorAPI Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -3853,6 +3886,34 @@ type ClientInterface interface {
 	//
 	// Set the polling interval of an enabled instance. Setting the current value commits nothing, so repeating the request is harmless. A shorter interval pulls the next scheduled run in; a longer one applies after the run already scheduled. A disabled instance is 409 connector_disabled; an interval below the deployment floor (30 s by default) or above 24 h is 422 invalid_interval with field /interval_seconds. Commits connector.schedule_changed only when the interval changes.
 	ChangeConnectorSchedule(ctx context.Context, connectorId string, body ChangeConnectorScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListConnectorTokens List push token metadata
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Returns metadata only, including expired or revoked tokens, never secrets or hashes. Pages are ordered by token_id; next_after is the next page's after value. Disabled instances remain readable.
+	//
+	// Corresponds with GET /v0/connectors/{connector_id}/tokens (the `ListConnectorTokens` operationId).
+	ListConnectorTokens(ctx context.Context, connectorId string, params *ListConnectorTokensParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateConnectorToken Issue a source-scoped push token
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Issue a random bearer token for this instance's instance_token routes only (Plugin API 0.12). The secret is shown once in this response with Cache-Control no-store; only its SHA-256 hash and display metadata are stored. Issuance is not replayable. If the response is lost, list tokens, revoke the lost token and issue another. Disabled instances refuse issuance with 409 connector_disabled. No request body is needed.
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/tokens (the `CreateConnectorToken` operationId).
+	CreateConnectorToken(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RevokeConnectorToken Revoke a push token immediately
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Revoke this token, even during rotation overlap or after the instance is disabled. Every authentication checks durable validity without a cache, so new authentications after the commit fail immediately; already admitted deliveries may finish. Revocation is idempotent and returns metadata only. Revoking an old token does not revoke its replacement; revoke each token_id that should lose access. No request body is needed.
+	//
+	// Corresponds with DELETE /v0/connectors/{connector_id}/tokens/{token_id} (the `RevokeConnectorToken` operationId).
+	RevokeConnectorToken(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateConnectorToken Replace a push token with five minutes of overlap
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Atomically issue a new token and mark this token rotated, valid for exactly five more minutes. The replacement has a new token_id and its secret is shown once with Cache-Control no-store. A revoked or already-rotated token is 409 token_inactive; repeating rotation cannot extend the overlap or reveal a secret again. Disabled instances are 409 connector_disabled. Revocation can cut the overlap short. No request body is needed; a lost response requires fresh issuance.
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate (the `RotateConnectorToken` operationId).
+	RotateConnectorToken(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListCorpora performs a GET /v0/corpora (the `ListCorpora` operationId) request.
 	//
@@ -4879,7 +4940,7 @@ func (c *Client) GetConnector(ctx context.Context, connectorId string, reqEditor
 
 // ChallengeConnectorAPI Answer a declared source challenge
 //
-// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response.
 //
 // Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
 func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -4896,7 +4957,7 @@ func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, 
 
 // PushConnectorAPIWithBody Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes any type of body and a specified content type.
 //
@@ -4915,7 +4976,7 @@ func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId strin
 
 // PushConnectorAPI Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -5050,6 +5111,74 @@ func (c *Client) ChangeConnectorScheduleWithBody(ctx context.Context, connectorI
 // Set the polling interval of an enabled instance. Setting the current value commits nothing, so repeating the request is harmless. A shorter interval pulls the next scheduled run in; a longer one applies after the run already scheduled. A disabled instance is 409 connector_disabled; an interval below the deployment floor (30 s by default) or above 24 h is 422 invalid_interval with field /interval_seconds. Commits connector.schedule_changed only when the interval changes.
 func (c *Client) ChangeConnectorSchedule(ctx context.Context, connectorId string, body ChangeConnectorScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewChangeConnectorScheduleRequest(c.Server, connectorId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListConnectorTokens List push token metadata
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Returns metadata only, including expired or revoked tokens, never secrets or hashes. Pages are ordered by token_id; next_after is the next page's after value. Disabled instances remain readable.
+//
+// Corresponds with GET /v0/connectors/{connector_id}/tokens (the `ListConnectorTokens` operationId).
+func (c *Client) ListConnectorTokens(ctx context.Context, connectorId string, params *ListConnectorTokensParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListConnectorTokensRequest(c.Server, connectorId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateConnectorToken Issue a source-scoped push token
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Issue a random bearer token for this instance's instance_token routes only (Plugin API 0.12). The secret is shown once in this response with Cache-Control no-store; only its SHA-256 hash and display metadata are stored. Issuance is not replayable. If the response is lost, list tokens, revoke the lost token and issue another. Disabled instances refuse issuance with 409 connector_disabled. No request body is needed.
+//
+// Corresponds with POST /v0/connectors/{connector_id}/tokens (the `CreateConnectorToken` operationId).
+func (c *Client) CreateConnectorToken(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateConnectorTokenRequest(c.Server, connectorId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RevokeConnectorToken Revoke a push token immediately
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Revoke this token, even during rotation overlap or after the instance is disabled. Every authentication checks durable validity without a cache, so new authentications after the commit fail immediately; already admitted deliveries may finish. Revocation is idempotent and returns metadata only. Revoking an old token does not revoke its replacement; revoke each token_id that should lose access. No request body is needed.
+//
+// Corresponds with DELETE /v0/connectors/{connector_id}/tokens/{token_id} (the `RevokeConnectorToken` operationId).
+func (c *Client) RevokeConnectorToken(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokeConnectorTokenRequest(c.Server, connectorId, tokenId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RotateConnectorToken Replace a push token with five minutes of overlap
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Atomically issue a new token and mark this token rotated, valid for exactly five more minutes. The replacement has a new token_id and its secret is shown once with Cache-Control no-store. A revoked or already-rotated token is 409 token_inactive; repeating rotation cannot extend the overlap or reveal a secret again. Disabled instances are 409 connector_disabled. Revocation can cut the overlap short. No request body is needed; a lost response requires fresh issuance.
+//
+// Corresponds with POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate (the `RotateConnectorToken` operationId).
+func (c *Client) RotateConnectorToken(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateConnectorTokenRequest(c.Server, connectorId, tokenId)
 	if err != nil {
 		return nil, err
 	}
@@ -8009,6 +8138,195 @@ func NewChangeConnectorScheduleRequestWithBody(server string, connectorId string
 	return req, nil
 }
 
+// NewListConnectorTokensRequest constructs an http.Request for the ListConnectorTokens method
+func NewListConnectorTokensRequest(server string, connectorId string, params *ListConnectorTokensParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/tokens", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "after", *params.After, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateConnectorTokenRequest constructs an http.Request for the CreateConnectorToken method
+func NewCreateConnectorTokenRequest(server string, connectorId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/tokens", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRevokeConnectorTokenRequest constructs an http.Request for the RevokeConnectorToken method
+func NewRevokeConnectorTokenRequest(server string, connectorId string, tokenId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "token_id", tokenId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/tokens/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRotateConnectorTokenRequest constructs an http.Request for the RotateConnectorToken method
+func NewRotateConnectorTokenRequest(server string, connectorId string, tokenId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "token_id", tokenId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/tokens/%s/rotate", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListCorporaRequest constructs an http.Request for the ListCorpora method
 func NewListCorporaRequest(server string, params *ListCorporaParams) (*http.Request, error) {
 	var err error
@@ -10252,7 +10570,7 @@ type ClientWithResponsesInterface interface {
 
 	// ChallengeConnectorAPIWithResponse Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -10261,7 +10579,7 @@ type ClientWithResponsesInterface interface {
 
 	// PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -10270,7 +10588,7 @@ type ClientWithResponsesInterface interface {
 
 	// PushConnectorAPIWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -10332,6 +10650,42 @@ type ClientWithResponsesInterface interface {
 	//
 	// Set the polling interval of an enabled instance. Setting the current value commits nothing, so repeating the request is harmless. A shorter interval pulls the next scheduled run in; a longer one applies after the run already scheduled. A disabled instance is 409 connector_disabled; an interval below the deployment floor (30 s by default) or above 24 h is 422 invalid_interval with field /interval_seconds. Commits connector.schedule_changed only when the interval changes.
 	ChangeConnectorScheduleWithResponse(ctx context.Context, connectorId string, body ChangeConnectorScheduleJSONRequestBody, reqEditors ...RequestEditorFn) (*ChangeConnectorScheduleResponse, error)
+
+	// ListConnectorTokensWithResponse List push token metadata
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Returns metadata only, including expired or revoked tokens, never secrets or hashes. Pages are ordered by token_id; next_after is the next page's after value. Disabled instances remain readable.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v0/connectors/{connector_id}/tokens (the `ListConnectorTokens` operationId).
+	ListConnectorTokensWithResponse(ctx context.Context, connectorId string, params *ListConnectorTokensParams, reqEditors ...RequestEditorFn) (*ListConnectorTokensResponse, error)
+
+	// CreateConnectorTokenWithResponse Issue a source-scoped push token
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Issue a random bearer token for this instance's instance_token routes only (Plugin API 0.12). The secret is shown once in this response with Cache-Control no-store; only its SHA-256 hash and display metadata are stored. Issuance is not replayable. If the response is lost, list tokens, revoke the lost token and issue another. Disabled instances refuse issuance with 409 connector_disabled. No request body is needed.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/tokens (the `CreateConnectorToken` operationId).
+	CreateConnectorTokenWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*CreateConnectorTokenResponse, error)
+
+	// RevokeConnectorTokenWithResponse Revoke a push token immediately
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Revoke this token, even during rotation overlap or after the instance is disabled. Every authentication checks durable validity without a cache, so new authentications after the commit fail immediately; already admitted deliveries may finish. Revocation is idempotent and returns metadata only. Revoking an old token does not revoke its replacement; revoke each token_id that should lose access. No request body is needed.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /v0/connectors/{connector_id}/tokens/{token_id} (the `RevokeConnectorToken` operationId).
+	RevokeConnectorTokenWithResponse(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*RevokeConnectorTokenResponse, error)
+
+	// RotateConnectorTokenWithResponse Replace a push token with five minutes of overlap
+	//
+	// Requires connectors:admin on the instance's Organization and Corpus. Atomically issue a new token and mark this token rotated, valid for exactly five more minutes. The replacement has a new token_id and its secret is shown once with Cache-Control no-store. A revoked or already-rotated token is 409 token_inactive; repeating rotation cannot extend the overlap or reveal a secret again. Disabled instances are 409 connector_disabled. Revocation can cut the overlap short. No request body is needed; a lost response requires fresh issuance.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate (the `RotateConnectorToken` operationId).
+	RotateConnectorTokenWithResponse(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*RotateConnectorTokenResponse, error)
 
 	// ListCorporaWithResponse performs a GET /v0/corpora (the `ListCorpora` operationId) request.
 	//
@@ -12717,6 +13071,212 @@ func (r ChangeConnectorScheduleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ChangeConnectorScheduleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListConnectorTokensResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ConnectorTokenList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListConnectorTokensResponse) GetJSON200() *ConnectorTokenList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListConnectorTokensResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListConnectorTokensResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListConnectorTokensResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListConnectorTokensResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListConnectorTokensResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateConnectorTokenResponse201Headers the declared response headers of an HTTP 201 response for CreateConnectorToken
+type CreateConnectorTokenResponse201Headers struct {
+	CacheControl *string
+}
+
+type CreateConnectorTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ConnectorTokenCreated
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *CreateConnectorTokenResponse201Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateConnectorTokenResponse) GetJSON201() *ConnectorTokenCreated {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateConnectorTokenResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateConnectorTokenResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateConnectorTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateConnectorTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateConnectorTokenResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RevokeConnectorTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ConnectorToken
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RevokeConnectorTokenResponse) GetJSON200() *ConnectorToken {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RevokeConnectorTokenResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RevokeConnectorTokenResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokeConnectorTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokeConnectorTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevokeConnectorTokenResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// RotateConnectorTokenResponse201Headers the declared response headers of an HTTP 201 response for RotateConnectorToken
+type RotateConnectorTokenResponse201Headers struct {
+	CacheControl *string
+}
+
+type RotateConnectorTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ConnectorTokenCreated
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *RotateConnectorTokenResponse201Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r RotateConnectorTokenResponse) GetJSON201() *ConnectorTokenCreated {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RotateConnectorTokenResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RotateConnectorTokenResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateConnectorTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateConnectorTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RotateConnectorTokenResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -15342,7 +15902,7 @@ func (c *ClientWithResponses) GetConnectorWithResponse(ctx context.Context, conn
 
 // ChallengeConnectorAPIWithResponse Answer a declared source challenge
 //
-// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -15357,7 +15917,7 @@ func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Cont
 
 // PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -15372,7 +15932,7 @@ func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.C
 
 // PushConnectorAPIWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -15487,6 +16047,66 @@ func (c *ClientWithResponses) ChangeConnectorScheduleWithResponse(ctx context.Co
 		return nil, err
 	}
 	return ParseChangeConnectorScheduleResponse(rsp)
+}
+
+// ListConnectorTokensWithResponse List push token metadata
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Returns metadata only, including expired or revoked tokens, never secrets or hashes. Pages are ordered by token_id; next_after is the next page's after value. Disabled instances remain readable.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v0/connectors/{connector_id}/tokens (the `ListConnectorTokens` operationId).
+func (c *ClientWithResponses) ListConnectorTokensWithResponse(ctx context.Context, connectorId string, params *ListConnectorTokensParams, reqEditors ...RequestEditorFn) (*ListConnectorTokensResponse, error) {
+	rsp, err := c.ListConnectorTokens(ctx, connectorId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListConnectorTokensResponse(rsp)
+}
+
+// CreateConnectorTokenWithResponse Issue a source-scoped push token
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Issue a random bearer token for this instance's instance_token routes only (Plugin API 0.12). The secret is shown once in this response with Cache-Control no-store; only its SHA-256 hash and display metadata are stored. Issuance is not replayable. If the response is lost, list tokens, revoke the lost token and issue another. Disabled instances refuse issuance with 409 connector_disabled. No request body is needed.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v0/connectors/{connector_id}/tokens (the `CreateConnectorToken` operationId).
+func (c *ClientWithResponses) CreateConnectorTokenWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*CreateConnectorTokenResponse, error) {
+	rsp, err := c.CreateConnectorToken(ctx, connectorId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateConnectorTokenResponse(rsp)
+}
+
+// RevokeConnectorTokenWithResponse Revoke a push token immediately
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Revoke this token, even during rotation overlap or after the instance is disabled. Every authentication checks durable validity without a cache, so new authentications after the commit fail immediately; already admitted deliveries may finish. Revocation is idempotent and returns metadata only. Revoking an old token does not revoke its replacement; revoke each token_id that should lose access. No request body is needed.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /v0/connectors/{connector_id}/tokens/{token_id} (the `RevokeConnectorToken` operationId).
+func (c *ClientWithResponses) RevokeConnectorTokenWithResponse(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*RevokeConnectorTokenResponse, error) {
+	rsp, err := c.RevokeConnectorToken(ctx, connectorId, tokenId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokeConnectorTokenResponse(rsp)
+}
+
+// RotateConnectorTokenWithResponse Replace a push token with five minutes of overlap
+//
+// Requires connectors:admin on the instance's Organization and Corpus. Atomically issue a new token and mark this token rotated, valid for exactly five more minutes. The replacement has a new token_id and its secret is shown once with Cache-Control no-store. A revoked or already-rotated token is 409 token_inactive; repeating rotation cannot extend the overlap or reveal a secret again. Disabled instances are 409 connector_disabled. Revocation can cut the overlap short. No request body is needed; a lost response requires fresh issuance.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate (the `RotateConnectorToken` operationId).
+func (c *ClientWithResponses) RotateConnectorTokenWithResponse(ctx context.Context, connectorId string, tokenId string, reqEditors ...RequestEditorFn) (*RotateConnectorTokenResponse, error) {
+	rsp, err := c.RotateConnectorToken(ctx, connectorId, tokenId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateConnectorTokenResponse(rsp)
 }
 
 // ListCorporaWithResponse performs a GET /v0/corpora (the `ListCorpora` operationId) request.
@@ -17699,6 +18319,164 @@ func ParseChangeConnectorScheduleResponse(rsp *http.Response) (*ChangeConnectorS
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseListConnectorTokensResponse parses an HTTP response from a ListConnectorTokensWithResponse call
+func ParseListConnectorTokensResponse(rsp *http.Response) (*ListConnectorTokensResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListConnectorTokensResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConnectorTokenList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateConnectorTokenResponse parses an HTTP response from a CreateConnectorTokenWithResponse call
+func ParseCreateConnectorTokenResponse(rsp *http.Response) (*CreateConnectorTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateConnectorTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ConnectorTokenCreated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 201:
+		var headers CreateConnectorTokenResponse201Headers
+		if values := rsp.Header.Values("Cache-Control"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Cache-Control", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.CacheControl = &value
+		}
+		response.Headers201 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseRevokeConnectorTokenResponse parses an HTTP response from a RevokeConnectorTokenWithResponse call
+func ParseRevokeConnectorTokenResponse(rsp *http.Response) (*RevokeConnectorTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokeConnectorTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConnectorToken
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateConnectorTokenResponse parses an HTTP response from a RotateConnectorTokenWithResponse call
+func ParseRotateConnectorTokenResponse(rsp *http.Response) (*RotateConnectorTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateConnectorTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ConnectorTokenCreated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 201:
+		var headers RotateConnectorTokenResponse201Headers
+		if values := rsp.Header.Values("Cache-Control"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Cache-Control", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.CacheControl = &value
+		}
+		response.Headers201 = &headers
 	}
 
 	return response, nil

@@ -248,13 +248,13 @@ class ConnectorAPIRoute(Model):
     name: str
     method: Literal["GET", "POST"]
     path: str
-    auth: Literal["quivr_key"] = "quivr_key"
+    auth: Literal["quivr_key", "instance_token"] = "quivr_key"
     request_schema: Any | None = None
 
 
 @dataclass(kw_only=True)
 class ConnectorAPI(Model):
-    "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Requires push mode."
+    "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Since 0.12, instance_token accepts only an instance-scoped bearer token. Requires push mode."
 
     routes: list[ConnectorAPIRoute]
 

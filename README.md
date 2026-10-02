@@ -162,7 +162,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
   Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval,
   `POST /v0/connectors/{id}/runs` checks a source again now, and validation errors name the offending field as a JSON Pointer.
-- **Secure source API routes** (Plugin API 0.11): connector plugins declare POST push and GET challenge routes at `/v0/connectors/{id}/api/<path>`. The engine requires a collection-scoped `connector:push` key before calling the plugin; pushes return `202` with ingestion Receipts. [Author guide](https://docs.quivr.thevibecompany.co/plugins/write-a-connector#receive-data-through-a-quivr-key).
+- **Secure source API routes** (Plugin API 0.11, instance tokens since 0.12): connector plugins declare POST push and GET challenge routes at `/v0/connectors/{id}/api/<path>`. The engine checks a collection-scoped `connector:push` key or the declared instance's token before calling the plugin; pushes return `202` with ingestion Receipts. Operators with `connectors:admin` issue one-time tokens, rotate with five minutes of overlap and revoke immediately. [Author guide](https://docs.quivr.thevibecompany.co/plugins/write-a-connector#receive-data-through-a-quivr-key).
 - **Sources page in the web app** (`quivr-search`, **Sources** tab): paste a site
   or feed address and the web app finds its RSS or Atom feed (refusing private
   addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.

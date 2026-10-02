@@ -25,6 +25,7 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 		{plugins.FeatureInputPrice, "0.8.0", "0.9.0"},
 		{plugins.FeatureSubscriptionVectors, "0.9.0", "0.10.0"},
 		{plugins.FeatureConnectorAPI, "0.10.0", "0.11.0"},
+		{plugins.FeatureInstanceToken, "0.11.0", "0.12.0"},
 	} {
 		t.Run(string(tc.feature), func(t *testing.T) {
 			if got := plugins.FeatureSince(tc.feature); got != tc.since {

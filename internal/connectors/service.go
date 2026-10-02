@@ -116,6 +116,7 @@ type Store interface {
 // Service authorizes and validates Connector Instance commands.
 type Service struct {
 	Store       Store
+	Tokens      TokenStore
 	Registry    *Registry
 	Sealer      Sealer
 	MinInterval time.Duration

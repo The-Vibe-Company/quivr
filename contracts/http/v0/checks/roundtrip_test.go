@@ -70,6 +70,12 @@ func TestContractRoundTrips(t *testing.T) {
 				target = &ChangeEvent{}
 			case "ConnectorCreate":
 				target = &ConnectorCreate{}
+			case "ConnectorToken":
+				target = &ConnectorToken{}
+			case "ConnectorTokenCreated":
+				target = &ConnectorTokenCreated{}
+			case "ConnectorTokenList":
+				target = &ConnectorTokenList{}
 			case "Connector":
 				target = &Connector{}
 			case "ConnectorKindCatalog":

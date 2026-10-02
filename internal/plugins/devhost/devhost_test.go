@@ -311,10 +311,10 @@ func TestWatcherDetectsSourceChanges(t *testing.T) {
 // A wide compatibility range cannot make an older discovery version support
 // fields needed by declared routes. This belongs to the discovery boundary,
 // separately from validating which versions the manifest range admits.
-func TestDiscoveryRequiresPluginAPI011ForDeclaredRoutes(t *testing.T) {
+func TestDiscoveryRequiresProtocolForDeclaredRouteAuthentication(t *testing.T) {
 	raw := []byte(`id: source
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.5.0 <0.12.0"}
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.5.0 <0.13.0"}
 contributions:
   connector:
     kinds:
@@ -325,27 +325,29 @@ contributions:
         api:
           routes: [{name: push, method: POST, path: events, auth: quivr_key}]
 `)
-	report := plugins.Validate(raw)
-	if !report.Valid {
-		t.Fatal(report.Errors)
-	}
-	for _, version := range []string{"0.10.0", "0.11.0"} {
-		t.Run(version, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": version, "plugin": map[string]string{"id": "source", "version": "1.0.0"}, "manifest_digest": report.ManifestDigest, "contributions": []string{"connector"}})
-			}))
-			defer server.Close()
-			issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if version == "0.11.0" {
-				if len(issues) != 0 {
-					t.Fatal(issues)
+	for _, auth := range []string{"quivr_key", "instance_token"} {
+		report := plugins.Validate([]byte(strings.ReplaceAll(string(raw), "auth: quivr_key", "auth: "+auth)))
+		if !report.Valid {
+			t.Fatal(report.Errors)
+		}
+		for _, version := range []string{"0.10.0", "0.11.0", "0.12.0"} {
+			t.Run(auth+"/"+version, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": version, "plugin": map[string]string{"id": "source", "version": "1.0.0"}, "manifest_digest": report.ManifestDigest, "contributions": []string{"connector"}})
+				}))
+				defer server.Close()
+				issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
+				if err != nil {
+					t.Fatal(err)
 				}
-			} else if len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != "/plugin_api" {
-				t.Fatalf("old protocol accepted routes: %+v", issues)
-			}
-		})
+				if version == "0.12.0" || (version == "0.11.0" && auth == "quivr_key") {
+					if len(issues) != 0 {
+						t.Fatal(issues)
+					}
+				} else if len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != "/plugin_api" {
+					t.Fatalf("old protocol accepted routes: %+v", issues)
+				}
+			})
+		}
 	}
 }

@@ -292,6 +292,13 @@ func loadManifest(path string) (*loadedManifest, error) {
 		if kind.API != nil && (!kind.Pushes() || !features.speaks("connector_api")) {
 			return nil, fmt.Errorf("%s: kind %s API routes require push and Plugin API %s", path, name, FeatureSince["connector_api"])
 		}
+		if kind.API != nil {
+			for _, route := range kind.API.Routes {
+				if route.Auth == "instance_token" && !features.speaks("instance_token") {
+					return nil, fmt.Errorf("%s: kind %s instance_token requires Plugin API %s", path, name, FeatureSince["instance_token"])
+				}
+			}
+		}
 		if kind.Pushes() && !features.speaks("push") {
 			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API %s", path, name, FeatureSince["push"])
 		}

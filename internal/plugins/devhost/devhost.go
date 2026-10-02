@@ -292,6 +292,14 @@ func Discover(ctx context.Context, baseURL string, report plugins.Report) (strin
 						mismatch("/plugin_api", "discovery implements Plugin API %s, but declared connector API routes need %s or later", doc.PluginAPI, plugins.FeatureSince(plugins.FeatureConnectorAPI))
 						break
 					}
+					if kind.API != nil {
+						for _, route := range kind.API.Routes {
+							if route.Auth == "instance_token" && !api.Speaks(plugins.FeatureInstanceToken) {
+								mismatch("/plugin_api", "discovery implements Plugin API %s, but instance_token needs %s or later", doc.PluginAPI, plugins.FeatureSince(plugins.FeatureInstanceToken))
+								break
+							}
+						}
+					}
 				}
 			}
 			for _, name := range m.Contributions.Names() {

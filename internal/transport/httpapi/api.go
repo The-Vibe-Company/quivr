@@ -253,6 +253,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		a.relayDelivery(w, r)
 		return
 	}
+	if a.connectorAPIRoute(w, r) {
+		return
+	}
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		failure(w, 401, "invalid_api_key")
@@ -261,9 +264,6 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	scope, ok := a.Keys[strings.TrimPrefix(auth, "Bearer ")]
 	if !ok {
 		failure(w, 401, "invalid_api_key")
-		return
-	}
-	if a.connectorAPIRoute(w, r, scope) {
 		return
 	}
 	if r.URL.Path == "/v0/changes/stream" && r.Method == "GET" {
@@ -339,6 +339,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.matchRoutes(w, r, scope) {
+		return
+	}
+	if a.connectorTokenRoutes(w, r, scope) {
 		return
 	}
 	if a.connectorRoutes(w, r, scope) {

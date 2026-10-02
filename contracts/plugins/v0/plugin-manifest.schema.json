@@ -695,7 +695,7 @@
       "required": [
         "routes"
       ],
-      "description": "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Requires push mode.",
+      "description": "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Since 0.12, instance_token accepts only an instance-scoped bearer token. Requires push mode.",
       "properties": {
         "routes": {
           "type": "array",
@@ -734,7 +734,8 @@
           "description": "Relative path, without leading or trailing slash. A {name} template matches one nonempty segment. Literal routes take precedence; ambiguous templates are invalid."
         },
         "auth": {
-          "const": "quivr_key"
+          "enum": ["quivr_key", "instance_token"],
+          "default": "quivr_key"
         },
         "request_schema": {
           "type": [

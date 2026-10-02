@@ -241,9 +241,21 @@ wrong method is `405` with `Allow`. Bodies are limited to 1 MiB. Rejected items
 return `422 item_rejected`; retrying unchanged revisions replays items that
 were already accepted. Transient failures return `503` with `Retry-After`.
 
-Quivr strips the bearer key and cookies before relaying the request. Only
-`quivr_key` auth is available here. The existing public webhook address stays
+Quivr strips the bearer key and cookies before relaying the request. The existing public webhook address stays
 available with its existing plugin-owned authentication.
+
+## Receive data through an instance token
+
+For a third-party sender, declare `auth: instance_token` on the route and use a
+Plugin API range admitting `0.12.0`. The same `Receiver.Receive` handler and
+route/body fields apply. Quivr authenticates the token before calling your
+plugin; do not pass it to the handler or store it in the plugin configuration.
+
+An operator issues and manages tokens under `/v0/connectors/<instance_id>/tokens`
+with `connectors:admin`. Each token works only on that instance's token routes.
+Quivr keys cannot authorize those routes, and instance tokens cannot authorize
+Quivr-key routes or normal API reads. The [operator guide](/guides/connectors#give-a-third-party-a-push-token)
+explains one-time issuance, five-minute rotation overlap and immediate revocation.
 
 ## Go further
 

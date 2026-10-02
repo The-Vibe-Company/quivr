@@ -23,7 +23,7 @@
                 "name": "push",
                 "method": "POST",
                 "path": "events/{category}",
-                "auth": "unknown",
+                "auth": "instance_token",
                 "request_schema": {
                   "type": "object",
                   "required": [
@@ -40,7 +40,7 @@
                 "name": "challenge",
                 "method": "GET",
                 "path": "challenge",
-                "auth": "quivr_key"
+                "auth": "instance_token"
               }
             ]
           }

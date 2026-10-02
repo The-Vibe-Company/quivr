@@ -13,8 +13,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// APIRoute is a named ingress route provided by a push kind. Only quivr_key
-// authentication is supported; authorization belongs to the engine.
+// APIRoute is a named ingress route provided by a push kind. Authentication
+// and authorization belong to the engine.
 type APIRoute struct {
 	Name          string          `json:"name"`
 	Method        string          `json:"method"`
@@ -58,8 +58,8 @@ func compileRoutes(routes []APIRoute) ([]apiRoute, error) {
 			return nil, fmt.Errorf("invalid or repeated route name %q", route.Name)
 		}
 		names[route.Name] = true
-		if (route.Method != "GET" && route.Method != "POST") || route.Auth != "quivr_key" || len(route.Path) > 1024 || !routePath.MatchString(route.Path) {
-			return nil, fmt.Errorf("route %q requires GET/POST, a safe relative path and quivr_key auth", route.Name)
+		if (route.Method != "GET" && route.Method != "POST") || (route.Auth != "quivr_key" && route.Auth != "instance_token") || len(route.Path) > 1024 || !routePath.MatchString(route.Path) {
+			return nil, fmt.Errorf("route %q requires GET/POST, a safe relative path and quivr_key or instance_token auth", route.Name)
 		}
 		params := map[string]bool{}
 		for _, segment := range strings.Split(route.Path, "/") {
@@ -174,7 +174,30 @@ var (
 // credential or calling the plugin. The resolved target and provider remain
 // fixed for this delivery, even if the active registry changes concurrently.
 func (r Relay) DeliverAPI(ctx context.Context, scope corpus.Scope, id, path string, req Relayed) (RelayAnswer, error) {
-	if !scope.Allows(corpus.ActionConnectorPush) {
+	return r.DeliverAPIWithAuth(ctx, APIAuth{Scope: &scope}, id, path, req)
+}
+
+// APIAuth carries exactly one credential. A recognized key is never tried as
+// an instance token. Credentials are not part of the relayed plugin request.
+type APIAuth struct {
+	Scope         *corpus.Scope
+	InstanceToken string
+}
+
+type TokenAuthenticator interface {
+	AuthenticateToken(context.Context, string, string, string) error
+}
+
+// DeliverAPIWithAuth keeps the resolved target and route fixed through auth,
+// validation and delivery. No plugin call precedes engine authentication.
+func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path string, req Relayed) (RelayAnswer, error) {
+	if auth.Scope != nil && auth.InstanceToken != "" {
+		return RelayAnswer{}, ErrInvalidInstanceToken
+	}
+	if auth.Scope == nil && auth.InstanceToken == "" {
+		return RelayAnswer{}, ErrInvalidInstanceToken
+	}
+	if auth.Scope != nil && !auth.Scope.Allows(corpus.ActionConnectorPush) {
 		return RelayAnswer{}, corpus.ErrForbidden
 	}
 	target, err := r.Store.LoadDelivery(ctx, id)
@@ -184,7 +207,7 @@ func (r Relay) DeliverAPI(ctx context.Context, scope corpus.Scope, id, path stri
 	if err != nil {
 		return unavailable("storage_unavailable"), nil
 	}
-	if !target.Enabled || target.Organization != scope.Organization || !scope.Contains(target.CorpusID) {
+	if !target.Enabled || (auth.Scope != nil && (target.Organization != auth.Scope.Organization || !auth.Scope.Contains(target.CorpusID))) {
 		return RelayAnswer{}, corpus.ErrNotFound
 	}
 	entry, ok := r.Registry.current()[target.Kind]
@@ -198,6 +221,24 @@ func (r Relay) DeliverAPI(ctx context.Context, scope corpus.Scope, id, path stri
 			return RelayAnswer{Status: 405, Allow: allow}, nil
 		}
 		return RelayAnswer{}, corpus.ErrNotFound
+	}
+	switch route.Auth {
+	case "quivr_key":
+		if auth.Scope == nil {
+			return RelayAnswer{}, ErrInvalidInstanceToken
+		}
+	case "instance_token":
+		if auth.Scope != nil {
+			return RelayAnswer{}, ErrInvalidInstanceToken
+		}
+		if r.Tokens == nil {
+			return RelayAnswer{}, ErrTokensUnavailable
+		}
+		if err := r.Tokens.AuthenticateToken(ctx, target.Organization, target.ID, auth.InstanceToken); err != nil {
+			return RelayAnswer{}, err
+		}
+	default:
+		return RelayAnswer{}, corpus.ErrForbidden
 	}
 	body := json.RawMessage(req.Body)
 	if len(body) == 0 && req.Method == "GET" {

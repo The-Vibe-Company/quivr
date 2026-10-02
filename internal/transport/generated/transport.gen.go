@@ -1496,6 +1496,33 @@ type ConnectorSchedule struct {
 	IntervalSeconds *int `json:"interval_seconds,omitempty"`
 }
 
+// ConnectorToken defines model for ConnectorToken.
+type ConnectorToken struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Prefix Display prefix only; cannot authenticate.
+	Prefix    string     `json:"prefix"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	RotatedAt *time.Time `json:"rotated_at,omitempty"`
+	TokenId   string     `json:"token_id"`
+
+	// ValidUntil Exclusive expiry of an old token after rotation; absent for an unrotated token.
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// ConnectorTokenCreated defines model for ConnectorTokenCreated.
+type ConnectorTokenCreated struct {
+	// Secret One-time bearer secret; never persisted or returned by metadata reads.
+	Secret string         `json:"secret"`
+	Token  ConnectorToken `json:"token"`
+}
+
+// ConnectorTokenList defines model for ConnectorTokenList.
+type ConnectorTokenList struct {
+	Items     []ConnectorToken `json:"items"`
+	NextAfter *string          `json:"next_after,omitempty"`
+}
+
 // ConnectorUsage Per-UTC-day source read counters, present only for kinds that report reads.
 type ConnectorUsage struct {
 	// Day Current UTC calendar day (YYYY-MM-DD).
@@ -3130,6 +3157,12 @@ type ListConnectorsParams struct {
 // PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
 type PushConnectorAPIJSONBody = interface{}
 
+// ListConnectorTokensParams defines parameters for ListConnectorTokens.
+type ListConnectorTokensParams struct {
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -3603,6 +3636,18 @@ type ServerInterface interface {
 
 	// (PUT /v0/connectors/{connector_id}/schedule)
 	ChangeConnectorSchedule(w http.ResponseWriter, r *http.Request, connectorId string)
+	// ListConnectorTokens List push token metadata
+	// (GET /v0/connectors/{connector_id}/tokens)
+	ListConnectorTokens(w http.ResponseWriter, r *http.Request, connectorId string, params ListConnectorTokensParams)
+	// CreateConnectorToken Issue a source-scoped push token
+	// (POST /v0/connectors/{connector_id}/tokens)
+	CreateConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string)
+	// RevokeConnectorToken Revoke a push token immediately
+	// (DELETE /v0/connectors/{connector_id}/tokens/{token_id})
+	RevokeConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string, tokenId string)
+	// RotateConnectorToken Replace a push token with five minutes of overlap
+	// (POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate)
+	RotateConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string, tokenId string)
 
 	// (GET /v0/corpora)
 	ListCorpora(w http.ResponseWriter, r *http.Request, params ListCorporaParams)
@@ -4976,6 +5021,157 @@ func (siw *ServerInterfaceWrapper) ChangeConnectorSchedule(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// ListConnectorTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListConnectorTokens(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConnectorTokensParams
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnectorTokens(w, r, connectorId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateConnectorToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateConnectorToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateConnectorToken(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeConnectorToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokeConnectorToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "token_id" -------------
+	var tokenId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token_id", r.PathValue("token_id"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeConnectorToken(w, r, connectorId, tokenId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateConnectorToken operation middleware
+func (siw *ServerInterfaceWrapper) RotateConnectorToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "token_id" -------------
+	var tokenId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token_id", r.PathValue("token_id"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateConnectorToken(w, r, connectorId, tokenId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListCorpora operation middleware
 func (siw *ServerInterfaceWrapper) ListCorpora(w http.ResponseWriter, r *http.Request) {
 
@@ -6313,6 +6509,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}/attempts", wrapper.ListDeliveryAttempts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors", wrapper.ListConnectors)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors", wrapper.CreateConnector)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}/tokens", wrapper.ListConnectorTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/tokens", wrapper.CreateConnectorToken)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/tokens/{token_id}/rotate", wrapper.RotateConnectorToken)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v0/connectors/{connector_id}/tokens/{token_id}", wrapper.RevokeConnectorToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}/api/{path}", wrapper.ChallengeConnectorAPI)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/api/{path}", wrapper.PushConnectorAPI)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorChallenge)
@@ -8031,6 +8231,185 @@ type ChangeConnectorScheduledefaultJSONResponse struct {
 }
 
 func (response ChangeConnectorScheduledefaultJSONResponse) VisitChangeConnectorScheduleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorTokensRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Params      ListConnectorTokensParams
+}
+
+type ListConnectorTokensResponseObject interface {
+	VisitListConnectorTokensResponse(w http.ResponseWriter) error
+}
+
+type ListConnectorTokens200JSONResponse ConnectorTokenList
+
+func (response ListConnectorTokens200JSONResponse) VisitListConnectorTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorTokensdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConnectorTokensdefaultJSONResponse) VisitListConnectorTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConnectorTokenRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+}
+
+type CreateConnectorTokenResponseObject interface {
+	VisitCreateConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateConnectorToken201ResponseHeaders struct {
+	CacheControl *string
+}
+
+type CreateConnectorToken201JSONResponse struct {
+	Body    ConnectorTokenCreated
+	Headers CreateConnectorToken201ResponseHeaders
+}
+
+func (response CreateConnectorToken201JSONResponse) VisitCreateConnectorTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateConnectorTokendefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateConnectorTokendefaultJSONResponse) VisitCreateConnectorTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeConnectorTokenRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	TokenId     string `json:"token_id"`
+}
+
+type RevokeConnectorTokenResponseObject interface {
+	VisitRevokeConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+type RevokeConnectorToken200JSONResponse ConnectorToken
+
+func (response RevokeConnectorToken200JSONResponse) VisitRevokeConnectorTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeConnectorTokendefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RevokeConnectorTokendefaultJSONResponse) VisitRevokeConnectorTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateConnectorTokenRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	TokenId     string `json:"token_id"`
+}
+
+type RotateConnectorTokenResponseObject interface {
+	VisitRotateConnectorTokenResponse(w http.ResponseWriter) error
+}
+
+type RotateConnectorToken201ResponseHeaders struct {
+	CacheControl *string
+}
+
+type RotateConnectorToken201JSONResponse struct {
+	Body    ConnectorTokenCreated
+	Headers RotateConnectorToken201ResponseHeaders
+}
+
+func (response RotateConnectorToken201JSONResponse) VisitRotateConnectorTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateConnectorTokendefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RotateConnectorTokendefaultJSONResponse) VisitRotateConnectorTokenResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -9868,6 +10247,18 @@ type StrictServerInterface interface {
 
 	// (PUT /v0/connectors/{connector_id}/schedule)
 	ChangeConnectorSchedule(ctx context.Context, request ChangeConnectorScheduleRequestObject) (ChangeConnectorScheduleResponseObject, error)
+	// ListConnectorTokens List push token metadata
+	// (GET /v0/connectors/{connector_id}/tokens)
+	ListConnectorTokens(ctx context.Context, request ListConnectorTokensRequestObject) (ListConnectorTokensResponseObject, error)
+	// CreateConnectorToken Issue a source-scoped push token
+	// (POST /v0/connectors/{connector_id}/tokens)
+	CreateConnectorToken(ctx context.Context, request CreateConnectorTokenRequestObject) (CreateConnectorTokenResponseObject, error)
+	// RevokeConnectorToken Revoke a push token immediately
+	// (DELETE /v0/connectors/{connector_id}/tokens/{token_id})
+	RevokeConnectorToken(ctx context.Context, request RevokeConnectorTokenRequestObject) (RevokeConnectorTokenResponseObject, error)
+	// RotateConnectorToken Replace a push token with five minutes of overlap
+	// (POST /v0/connectors/{connector_id}/tokens/{token_id}/rotate)
+	RotateConnectorToken(ctx context.Context, request RotateConnectorTokenRequestObject) (RotateConnectorTokenResponseObject, error)
 
 	// (GET /v0/corpora)
 	ListCorpora(ctx context.Context, request ListCorporaRequestObject) (ListCorporaResponseObject, error)
@@ -11142,6 +11533,113 @@ func (sh *strictHandler) ChangeConnectorSchedule(w http.ResponseWriter, r *http.
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ChangeConnectorScheduleResponseObject); ok {
 		if err := validResponse.VisitChangeConnectorScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConnectorTokens operation middleware
+func (sh *strictHandler) ListConnectorTokens(w http.ResponseWriter, r *http.Request, connectorId string, params ListConnectorTokensParams) {
+	var request ListConnectorTokensRequestObject
+
+	request.ConnectorId = connectorId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnectorTokens(ctx, request.(ListConnectorTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnectorTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectorTokensResponseObject); ok {
+		if err := validResponse.VisitListConnectorTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateConnectorToken operation middleware
+func (sh *strictHandler) CreateConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request CreateConnectorTokenRequestObject
+
+	request.ConnectorId = connectorId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateConnectorToken(ctx, request.(CreateConnectorTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateConnectorToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateConnectorTokenResponseObject); ok {
+		if err := validResponse.VisitCreateConnectorTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeConnectorToken operation middleware
+func (sh *strictHandler) RevokeConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string, tokenId string) {
+	var request RevokeConnectorTokenRequestObject
+
+	request.ConnectorId = connectorId
+	request.TokenId = tokenId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeConnectorToken(ctx, request.(RevokeConnectorTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeConnectorToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeConnectorTokenResponseObject); ok {
+		if err := validResponse.VisitRevokeConnectorTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateConnectorToken operation middleware
+func (sh *strictHandler) RotateConnectorToken(w http.ResponseWriter, r *http.Request, connectorId string, tokenId string) {
+	var request RotateConnectorTokenRequestObject
+
+	request.ConnectorId = connectorId
+	request.TokenId = tokenId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateConnectorToken(ctx, request.(RotateConnectorTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateConnectorToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateConnectorTokenResponseObject); ok {
+		if err := validResponse.VisitRotateConnectorTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

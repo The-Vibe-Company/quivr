@@ -1540,6 +1540,130 @@ paths:
           minimum: 1
           maximum: 100
           default: 100
+  /v0/connectors/{connector_id}/tokens:
+    parameters:
+    - name: connector_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    post:
+      operationId: createConnectorToken
+      summary: Issue a source-scoped push token
+      description: >-
+        Requires connectors:admin on the instance's Organization and Corpus. Issue a random
+        bearer token for this instance's instance_token routes only (Plugin API 0.12).
+        The secret is shown once in this response with Cache-Control no-store; only its SHA-256
+        hash and display metadata are stored. Issuance is not replayable. If the response is
+        lost, list tokens, revoke the lost token and issue another. Disabled instances refuse
+        issuance with 409 connector_disabled. No request body is needed.
+      x-required-permissions: [connectors:admin]
+      responses:
+        '201':
+          description: New token with its one-time bearer secret.
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectorTokenCreated'}
+        default:
+          description: JSON Error envelope; 401 unauthenticated, 403 without admin permission, 404 out of scope, 409 disabled, 503 unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      operationId: listConnectorTokens
+      summary: List push token metadata
+      description: >-
+        Requires connectors:admin on the instance's Organization and Corpus. Returns metadata
+        only, including expired or revoked tokens, never secrets or hashes. Pages are ordered
+        by token_id; next_after is the next page's after value. Disabled instances remain readable.
+      x-required-permissions: [connectors:admin]
+      parameters:
+      - name: after
+        in: query
+        schema: {type: string, maxLength: 128}
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        '200':
+          description: Token metadata page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectorTokenList'}
+        default:
+          description: JSON Error envelope; 401 unauthenticated, 403 without admin permission, 404 out of scope, 422 invalid pagination, 503 unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /v0/connectors/{connector_id}/tokens/{token_id}/rotate:
+    parameters:
+    - name: connector_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    - name: token_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    post:
+      operationId: rotateConnectorToken
+      summary: Replace a push token with five minutes of overlap
+      description: >-
+        Requires connectors:admin on the instance's Organization and Corpus. Atomically issue a
+        new token and mark this token rotated, valid for exactly five more minutes. The replacement
+        has a new token_id and its secret is shown once with Cache-Control no-store. A revoked or
+        already-rotated token is 409 token_inactive; repeating rotation cannot extend the overlap
+        or reveal a secret again. Disabled instances are 409 connector_disabled. Revocation can
+        cut the overlap short. No request body is needed; a lost response requires fresh issuance.
+      x-required-permissions: [connectors:admin]
+      responses:
+        '201':
+          description: Replacement token with its one-time bearer secret.
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectorTokenCreated'}
+        default:
+          description: JSON Error envelope; 401 unauthenticated, 403 without admin permission, 404 unknown or foreign token, 409 inactive or disabled, 503 unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /v0/connectors/{connector_id}/tokens/{token_id}:
+    parameters:
+    - name: connector_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    - name: token_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    delete:
+      operationId: revokeConnectorToken
+      summary: Revoke a push token immediately
+      description: >-
+        Requires connectors:admin on the instance's Organization and Corpus. Revoke this token,
+        even during rotation overlap or after the instance is disabled. Every authentication
+        checks durable validity without a cache, so new authentications after the commit fail
+        immediately; already admitted deliveries may finish. Revocation is idempotent and
+        returns metadata only. Revoking an old token does not revoke its replacement; revoke
+        each token_id that should lose access. No request body is needed.
+      x-required-permissions: [connectors:admin]
+      responses:
+        '200':
+          description: Revoked token metadata, never a secret.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectorToken'}
+        default:
+          description: JSON Error envelope; 401 unauthenticated, 403 without admin permission, 404 unknown or foreign token, 503 unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /v0/connectors/{connector_id}/api/{path}:
     parameters:
     - name: connector_id
@@ -1553,12 +1677,18 @@ paths:
       schema: {type: string, maxLength: 8192}
     post:
       operationId: pushConnectorAPI
+      security:
+      - ApiKey: []
+      - InstanceToken: []
       x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [4XX]}
       summary: Push data to a declared source route
       description: >-
         Resolve a named POST route from the instance kind's manifest (Plugin API 0.11).
         Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization,
-        checked before any plugin call. Missing or invalid key is 401; missing action 403;
+        for auth quivr_key. For auth instance_token (since Plugin API 0.12), requires this
+        instance's bearer token; Quivr keys and other instances' tokens are refused. Both modes
+        authenticate before any plugin call. Invalid instance tokens are 401 invalid_instance_token.
+        Missing or invalid key is 401; missing action 403;
         out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405
         with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is
         400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without
@@ -1597,6 +1727,9 @@ paths:
               schema: {type: string, enum: [plugin]}
     get:
       operationId: challengeConnectorAPI
+      security:
+      - ApiKey: []
+      - InstanceToken: []
       x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [2XX, 4XX]}
       summary: Answer a declared source challenge
       description: >-
@@ -1609,9 +1742,10 @@ paths:
         JSON or text challenges and statuses that overlap engine errors. Engine-generated failures
         have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless
         challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods
-        return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer
+        return 405 with Allow. Authentication follows the declared auth mode: quivr_key or
+        instance_token; credentials for one mode cannot authenticate the other.
+        A 204 challenge must have an empty response body; a plugin answer
         combining 204 with a nonempty body returns 500 plugin_invalid_response.
-        Only quivr_key authentication is supported in this version.
       x-required-permissions: [connector:push]
       responses:
         '200':
@@ -2974,12 +3108,43 @@ paths:
           minLength: 1
 components:
   securitySchemes:
+    InstanceToken:
+      type: http
+      scheme: bearer
+      description: Source-scoped token accepted only by its instance's declared instance_token routes. Never grants normal API or token management access.
     ApiKey:
       type: http
       scheme: bearer
       description: API key, not necessarily a JWT. Server derives Organization, permitted actions and
         Corpus scope; every resource access is authorized.
   schemas:
+    ConnectorToken:
+      type: object
+      additionalProperties: false
+      required: [token_id, prefix, created_at]
+      properties:
+        token_id: {type: string}
+        prefix: {type: string, description: Display prefix only; cannot authenticate.}
+        created_at: {type: string, format: date-time}
+        rotated_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        valid_until: {type: string, format: date-time, description: Exclusive expiry of an old token after rotation; absent for an unrotated token.}
+    ConnectorTokenCreated:
+      type: object
+      additionalProperties: false
+      required: [token, secret]
+      properties:
+        token: {$ref: '#/components/schemas/ConnectorToken'}
+        secret: {type: string, description: One-time bearer secret; never persisted or returned by metadata reads.}
+    ConnectorTokenList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ConnectorToken'}
+        next_after: {type: string}
     ConnectorPushReceipts:
       type: object
       additionalProperties: false

@@ -2017,6 +2017,24 @@
       "description": "Plugin API 0.10 optional canonical Part segment vectors and immutable query vectors identify their common space."
     },
     {
+      "file": "manifests/valid/connector-instance-token.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.12 routes authenticate an instance token."
+    },
+    {
+      "file": "manifests/invalid/connector-instance-token-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Instance token routes require Plugin API 0.12 or later."
+    },
+    {
       "file": "manifests/valid/connector-api.json",
       "schema": "plugin-manifest.schema.json",
       "valid": true,

@@ -15,7 +15,7 @@ import (
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
 
-func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request, scope corpus.Scope) bool {
+func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/v0/connectors/") {
 		return false
 	}
@@ -27,8 +27,23 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request, scope co
 		failure(w, 404, "not_found")
 		return true
 	}
-	if !scope.Allows(corpus.ActionConnectorPush) {
-		failure(w, 403, "forbidden")
+	bearer := r.Header.Get("Authorization")
+	if !strings.HasPrefix(bearer, "Bearer ") {
+		failure(w, 401, "invalid_api_key")
+		return true
+	}
+	credential := strings.TrimPrefix(bearer, "Bearer ")
+	auth := connectors.APIAuth{}
+	if scope, ok := a.Keys[credential]; ok {
+		auth.Scope = &scope
+		if !scope.Allows(corpus.ActionConnectorPush) {
+			failure(w, 403, "forbidden")
+			return true
+		}
+	} else if strings.HasPrefix(credential, "qit_") {
+		auth.InstanceToken = credential
+	} else {
+		failure(w, 401, "invalid_api_key")
 		return true
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
@@ -40,8 +55,10 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request, scope co
 	delete(headers, "authorization")
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
-	answer, err := a.Relay.DeliverAPI(ctx, scope, parts[0], parts[2], connectors.Relayed{Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
+	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
 	switch {
+	case errors.Is(err, connectors.ErrInvalidInstanceToken):
+		failure(w, 401, "invalid_instance_token")
 	case errors.Is(err, corpus.ErrForbidden):
 		failure(w, 403, "forbidden")
 	case errors.Is(err, corpus.ErrNotFound):

@@ -200,6 +200,7 @@ const RetryDelivery = 30 * time.Second
 // source according to the kind's verdict.
 type Relay struct {
 	Store    PushStore
+	Tokens   TokenAuthenticator
 	Registry *Registry
 	Sealer   Sealer
 	Ingest   Ingestor

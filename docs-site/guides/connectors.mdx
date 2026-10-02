@@ -85,6 +85,22 @@ curl -s -X PUT "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/credential" -H "Autho
 
 Secrets are encrypted at rest and never returned or logged: reads show only the credential's version, deposit date and expiry. The new version applies from the next run. Set `expires_at` whenever the provider's secret expires, so health warns you in time.
 
+## Give a third party a push token
+
+Use an instance token when a third party should push to one source without holding a Quivr API key. The source plugin must declare the route with `auth: instance_token` and a Plugin API range admitting `0.12.0`. Token routes and Quivr-key routes each accept only their declared credential type.
+
+1. Give your operator key `connectors:admin` on the instance's Organization and Corpus in the [API key configuration](/reference/configuration#api-keys). `connectors:write`, `connectors:read` and `connector:push` do not grant token administration.
+2. Create a token with `POST /v0/connectors/<connector_id>/tokens` for the enabled instance. Copy the response's `secret` to the third party through your secret-delivery channel and keep its `token.token_id` for administration. Quivr shows the secret once, stores only its hash, and marks the response `Cache-Control: no-store`.
+3. The third party sends `Authorization: Bearer <secret>` to that instance's declared `/v0/connectors/<connector_id>/api/<path>` route. It cannot call other instances, Quivr-key routes, token administration or normal API reads. Quivr strips the bearer secret before invoking the plugin. A push returns `202` with Receipts; use a separate Quivr key with `content:read` to read their status.
+
+| Task | Operation | What happens |
+| --- | --- | --- |
+| Find issued tokens | `GET /v0/connectors/{id}/tokens` | Returns display prefixes, IDs and lifecycle timestamps, including revoked and expired tokens. Never returns secrets or hashes |
+| Replace a token | `POST /v0/connectors/{id}/tokens/{token_id}/rotate` | Returns a new token ID and one-time secret. Give the replacement to the sender; the old token works for exactly five more minutes, until `valid_until` |
+| End access | `DELETE /v0/connectors/{id}/tokens/{token_id}` | Refuses new authentications immediately after the commit, including during overlap. Already admitted deliveries may finish |
+
+A revoked or already-rotated token cannot rotate again (`409 token_inactive`), so a retry cannot extend the overlap or recover a secret. If an issuance response is lost, list tokens, revoke the token whose secret you lost, and create another. Revoking an old token leaves its replacement valid; revoke each token ID that should lose access. Disabled instances reject issuance and rotation, but their tokens remain listable and revocable.
+
 ## Disable an instance
 
 ```bash

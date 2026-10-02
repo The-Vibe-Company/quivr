@@ -26,7 +26,7 @@ func connectorFailure(w http.ResponseWriter, err error) {
 		failure(w, 403, "forbidden")
 	case errors.Is(err, corpus.ErrNotFound):
 		failure(w, 404, "not_found")
-	case errors.Is(err, connectors.ErrConflict), errors.Is(err, connectors.ErrNamespaceInUse), errors.Is(err, connectors.ErrDisabled):
+	case errors.Is(err, connectors.ErrConflict), errors.Is(err, connectors.ErrNamespaceInUse), errors.Is(err, connectors.ErrDisabled), errors.Is(err, connectors.ErrTokenInactive):
 		failure(w, 409, publicCode(err, "idempotency_conflict"))
 	case errors.Is(err, connectors.ErrCredentialsUnavailable):
 		// The deployment has no credential_key: retrying cannot succeed until

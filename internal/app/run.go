@@ -603,7 +603,7 @@ func Run(command string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{ContentStore: store}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Moves: store, Evaluations: store, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: store}}), httpapi.WithOperations(operations.Service{Store: store}),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
@@ -615,7 +615,7 @@ func Run(command string) error {
 			// Searches are counted, and the rollups read back (observability:read).
 			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
-			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents}))
+			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}

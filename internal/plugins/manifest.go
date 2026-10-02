@@ -712,6 +712,16 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 			if _, admitted := admitsFeature(r, FeatureConnectorAPI); !admitted {
 				issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/connector/kinds/" + pointerToken(name) + "/api", Message: fmt.Sprintf("connector API routes require a plugin_api range admitting %s or later", FeatureSince(FeatureConnectorAPI))})
 			}
+			api, _ := kind["api"].(map[string]any)
+			routes, _ := api["routes"].([]any)
+			for i, value := range routes {
+				route, _ := value.(map[string]any)
+				if route["auth"] == "instance_token" {
+					if _, admitted := admitsFeature(r, FeatureInstanceToken); !admitted {
+						issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: fmt.Sprintf("/contributions/connector/kinds/%s/api/routes/%d/auth", pointerToken(name), i), Message: "instance_token requires a plugin_api range admitting " + FeatureSince(FeatureInstanceToken) + " or later"})
+					}
+				}
+			}
 		}
 		if !declaresMode(kind, "push") {
 			continue

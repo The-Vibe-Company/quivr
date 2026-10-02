@@ -1552,5 +1552,51 @@
         }
       ]
     }
+  },
+  {
+    "name": "connector_token_issued",
+    "schema": "ConnectorTokenCreated",
+    "value": {
+      "token": {
+        "token_id": "token_example_active",
+        "prefix": "qit_example",
+        "created_at": "2026-10-01T10:00:00Z"
+      },
+      "secret": "illustrative-secret-shown-once"
+    }
+  },
+  {
+    "name": "connector_token_page",
+    "schema": "ConnectorTokenList",
+    "value": {
+      "items": [
+        {
+          "token_id": "token_example_active",
+          "prefix": "qit_example",
+          "created_at": "2026-10-01T10:00:00Z"
+        },
+        {
+          "token_id": "token_example_rotated",
+          "prefix": "qit_example",
+          "created_at": "2026-10-01T10:00:00Z",
+          "rotated_at": "2026-10-02T10:00:00Z",
+          "valid_until": "2026-10-02T10:05:00Z",
+          "revoked_at": "2026-10-02T10:02:00Z"
+        }
+      ],
+      "next_after": "token_example_rotated"
+    }
+  },
+  {
+    "name": "connector_token_revoked",
+    "schema": "ConnectorToken",
+    "value": {
+      "token_id": "token_example_rotated",
+      "prefix": "qit_example",
+      "created_at": "2026-10-01T10:00:00Z",
+      "rotated_at": "2026-10-02T10:00:00Z",
+      "valid_until": "2026-10-02T10:05:00Z",
+      "revoked_at": "2026-10-02T10:02:00Z"
+    }
   }
 ]
