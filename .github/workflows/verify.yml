@@ -221,7 +221,7 @@ jobs:
             .scratch/quivr-verify-*/m365-restart.json
             .scratch/quivr-verify-*/*-before-lifecycle.log
             .scratch/quivr-verify-*/acceptance.log
-            .scratch/quivr-verify-*/adapters.log
+            .scratch/quivr-verify-*/adapters*.log
             .scratch/quivr-verify-*/api*.log*
             .scratch/quivr-verify-*/worker*.log*
             .scratch/quivr-verify-*/migrate*.log*

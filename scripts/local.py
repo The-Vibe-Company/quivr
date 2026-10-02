@@ -468,7 +468,10 @@ def persistence(stack):
 
 def adapters(stack):
     stack.stop_processes()
-    stack.go_test(['-count=1','./internal/adapters/...','./internal/processing/...'],{**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')},'adapters')
+    env={**os.environ,'QUIVR_ADAPTER_CONFIG':str(stack.directory/'config.json')}
+    stack.go_test(['-count=1','./internal/adapters/weaviate/...','./internal/adapters/tei/...','./internal/adapters/s3/...','./internal/processing/...'],env,'adapters')
+    # adapter-postgres owns the database-only tests; this one also needs TEI and S3.
+    stack.go_test(['-count=1','-run','^TestDurableEmbeddingConflictAndAtomicEnrichment$','./internal/adapters/postgres/...'],env,'adapters-postgres')
     stack.start_processes()
 
 def delivery_restart(stack):
