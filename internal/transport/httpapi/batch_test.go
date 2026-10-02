@@ -1,15 +1,20 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/contracts"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -36,11 +41,30 @@ type acceptancePort struct {
 	failures    map[string]error
 	cancelAfter int
 	cancel      context.CancelFunc
+	delay       time.Duration
+	delays      map[string]time.Duration
 }
 
 func (p *acceptancePort) Accept(ctx context.Context, _ corpus.Scope, c content.Command) (content.Receipt, error) {
 	if err := ctx.Err(); err != nil {
 		return content.Receipt{}, err
+	}
+	delay := p.delay
+	if d, ok := p.delays[c.Key]; ok {
+		delay = d
+	}
+	if delay > 0 {
+		// Used only inside synctest: dependency latency advances virtual time.
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return content.Receipt{}, ctx.Err()
+		case <-timer.C:
+		}
+		if err := ctx.Err(); err != nil {
+			return content.Receipt{}, err
+		}
 	}
 	if err := p.failures[c.Key]; err != nil {
 		return content.Receipt{}, err
@@ -207,6 +231,128 @@ func TestBatchReturnsIndependentOutcomePerEntry(t *testing.T) {
 	if len(port.accepted) != 2 || port.accepted[0] != "batch-a" || port.accepted[1] != "batch-c" {
 		t.Fatalf("acceptance attempts: %v", port.accepted)
 	}
+}
+
+func TestBatchAcceptanceBudgets(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		count       int
+		delay       time.Duration
+		slowFirst   bool
+		invalidLast bool
+		accepted    int
+		elapsed     time.Duration
+	}{
+		{name: "100 entries exceed the single request budget", count: 100, delay: 60 * time.Millisecond, accepted: 100, elapsed: 6 * time.Second},
+		{name: "an entry timeout leaves its peer a fresh budget", count: 2, delay: 60 * time.Millisecond, slowFirst: true, accepted: 1, elapsed: 5*time.Second + 60*time.Millisecond},
+		{name: "the batch cap leaves unfinished entries retryable", count: 100, delay: 750 * time.Millisecond, invalidLast: true, accepted: 10, elapsed: 8 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			port := &acceptancePort{delay: tc.delay}
+			if tc.slowFirst {
+				port.delays = map[string]time.Duration{"budget-0": 6 * time.Second}
+			}
+			handler := newAPI(t, port)
+			batch := make([]any, tc.count)
+			for i := range batch {
+				key := fmt.Sprintf("budget-%d", i)
+				batch[i] = inline(key, key, "Text")
+			}
+			if tc.invalidLast {
+				// Once the cap expires, even an unvalidated entry is left retryable.
+				batch[len(batch)-1] = 42
+			}
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				status, body := postJSON(t, handler, "/v0/records/batch", adminKey, map[string]any{"items": batch})
+				if status != 200 {
+					t.Fatalf("batch got %d: %v", status, body)
+				}
+				outcomes := entries(t, body)
+				if len(outcomes) != tc.count {
+					t.Fatalf("got %d outcomes, want %d", len(outcomes), tc.count)
+				}
+				for i, item := range outcomes {
+					accepted := i < tc.accepted
+					if tc.slowFirst {
+						accepted = i > 0
+					}
+					if accepted {
+						if item["receipt"] == nil || item["error"] != nil {
+							t.Fatalf("entry %d: want receipt, got %v", i, item)
+						}
+					} else if e := entryError(t, item); e["code"] != "content_unavailable" || e["retryable"] != true {
+						t.Fatalf("entry %d: want retryable content_unavailable, got %v", i, e)
+					}
+				}
+				if elapsed := time.Since(start); elapsed != tc.elapsed {
+					t.Fatalf("batch took %s of virtual time, want %s", elapsed, tc.elapsed)
+				}
+				if len(port.accepted) != tc.accepted {
+					t.Fatalf("accepted %d commands, want %d", len(port.accepted), tc.accepted)
+				}
+			})
+		})
+	}
+}
+
+// pipeListener lets the real HTTP server run entirely inside a synctest bubble.
+type pipeListener struct {
+	conn net.Conn
+	done chan struct{}
+	once sync.Once
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	if l.conn != nil {
+		conn := l.conn
+		l.conn = nil
+		return conn, nil
+	}
+	<-l.done
+	return nil, net.ErrClosed
+}
+func (l *pipeListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+func (*pipeListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+func TestBatchDeadlineInterruptsEnvelopeRead(t *testing.T) {
+	port := &acceptancePort{}
+	handler := newAPI(t, port)
+	synctest.Test(t, func(t *testing.T) {
+		serverConn, clientConn := net.Pipe()
+		defer clientConn.Close()
+		server := &http.Server{Handler: handler, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+		listener := &pipeListener{conn: serverConn, done: make(chan struct{})}
+		defer server.Close()
+		go func() { _ = server.Serve(listener) }()
+		start := time.Now()
+		// Advertise more bytes than are sent, then stall before finishing JSON.
+		_, err := fmt.Fprintf(clientConn, "POST /v0/records/batch HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{", adminKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
+		if err != nil {
+			t.Fatalf("want retryable response at batch deadline, got %v", err)
+		}
+		defer response.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != 503 || body["code"] != "content_unavailable" || body["retryable"] != true {
+			t.Fatalf("stalled envelope: got %d %v, want retryable content_unavailable", response.StatusCode, body)
+		}
+		if elapsed := time.Since(start); elapsed != 8*time.Second {
+			t.Fatalf("stalled envelope took %s of virtual time, want 8s", elapsed)
+		}
+		if len(port.accepted) != 0 {
+			t.Fatalf("incomplete envelope reached acceptance: %v", port.accepted)
+		}
+	})
 }
 
 func TestBatchEnvelopeIsBoundedAndRejectedWhole(t *testing.T) {

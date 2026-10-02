@@ -74,9 +74,14 @@ func (a *API) ingestCommand(ctx context.Context, scope corpus.Scope, raw any) (c
 // entry is held to the single-request bound on its raw bytes, so the same entry
 // submitted alone is never refused for size.
 func (a *API) batchEntry(ctx context.Context, scope corpus.Scope, index int, entry any, size int) transport.BatchItem {
+	// Each entry gets a fresh budget, bounded by the batch and caller deadlines.
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	item := transport.BatchItem{Index: index}
 	receipt, status, code := content.Receipt{}, 413, "entry_too_large"
-	if size <= maxRequestBytes {
+	if err := ctx.Err(); err != nil {
+		status, code = contentFailure(err)
+	} else if size <= maxRequestBytes {
 		receipt, status, code = a.ingestCommand(ctx, scope, entry)
 	}
 	if code != "" {

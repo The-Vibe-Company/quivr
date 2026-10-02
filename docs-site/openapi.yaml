@@ -93,7 +93,12 @@ paths:
         structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields.
         Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes
         are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single
-        submission. Same ingestion family/key as single submission. Reuse entry keys after unknown transport outcomes.'
+        submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded
+        by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an
+        earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline,
+        returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope
+        cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse
+        entry keys after unknown transport outcomes.'
       responses:
         '200':
           description: Successful response

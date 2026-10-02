@@ -193,6 +193,9 @@ const (
 	// maxBatchBytes and maxBatchEntries bound one ingestion batch envelope.
 	maxBatchBytes   = 10 << 20
 	maxBatchEntries = 100
+	requestTimeout  = 5 * time.Second
+	// Leave response headroom within the server's 10-second write timeout.
+	batchTimeout = 8 * time.Second
 )
 
 func send(w http.ResponseWriter, status int, v any) {
@@ -274,9 +277,19 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		a.search(w, r, scope)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	timeout := requestTimeout
+	isBatch := r.Method == "POST" && r.URL.Path == "/v0/records/batch"
+	if isBatch {
+		timeout = batchTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if isBatch {
+		// A context deadline alone cannot interrupt a blocked request-body read.
+		deadline, _ := ctx.Deadline()
+		_ = http.NewResponseController(w).SetReadDeadline(deadline)
+	}
 	if r.Method == "GET" && r.URL.Path == "/v0/changes" {
 		a.pollChanges(w, r, scope)
 		return
@@ -529,8 +542,13 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
 		var large *http.MaxBytesError
+		deadline, hasDeadline := r.Context().Deadline()
 		if errors.As(err, &large) {
 			failure(w, 413, "request_too_large")
+		} else if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
+			(r.Context().Err() != nil || hasDeadline && !time.Now().Before(deadline)) {
+			// The connection's read deadline may fire before the context timer.
+			failure(w, 503, "content_unavailable")
 		} else {
 			failure(w, 400, "malformed_json")
 		}
