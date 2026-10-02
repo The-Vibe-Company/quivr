@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,8 +58,53 @@ func newFakeX(t *testing.T) (*fakeX, *httptest.Server) {
 	return f, srv
 }
 
+func TestFakeXKeepsEditedPostsAvailableByEarlierIDs(t *testing.T) {
+	f := &fakeX{posts: map[string]map[string]any{}}
+	f.post("100", "Original", 0, nil, nil)
+	for _, history := range [][]string{{"100", "101"}, {"100", "101", "102"}} {
+		latest := history[len(history)-1]
+		f.post(latest, "Edited", 1, history, nil)
+		for _, path := range []string{
+			"/2/tweets?ids=" + strings.Join(history, ","),
+			"/2/lists/77/tweets?expansions=author_id&tweet.fields=edit_history_tweet_ids",
+		} {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer "+testToken)
+			rec := httptest.NewRecorder()
+			f.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: HTTP %d, body %s", path, rec.Code, rec.Body)
+			}
+			var body struct {
+				Data []struct {
+					ID      string   `json:"id"`
+					History []string `json:"edit_history_tweet_ids"`
+				} `json:"data"`
+				Errors []json.RawMessage `json:"errors"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			wantIDs := history
+			if strings.HasPrefix(path, "/2/lists/") {
+				wantIDs = []string{latest}
+			}
+			var gotIDs []string
+			for _, p := range body.Data {
+				gotIDs = append(gotIDs, p.ID)
+				if !slices.Equal(p.History, history) {
+					t.Fatalf("%s: post %s history %v, want %v", path, p.ID, p.History, history)
+				}
+			}
+			if len(body.Errors) != 0 || !slices.Equal(gotIDs, wantIDs) {
+				t.Fatalf("%s: IDs %v, errors %s; want IDs %v without errors", path, gotIDs, body.Errors, wantIDs)
+			}
+		}
+	}
+}
+
 // post publishes a post created at seconds after base; a post with an edit
-// history replaces its earlier versions in timelines.
+// history replaces its earlier versions in timelines but keeps them for lookup.
 func (f *fakeX) post(id, text string, at int64, history []string, extra map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -70,7 +116,9 @@ func (f *fakeX) post(id, text string, at int64, history []string, extra map[stri
 		p[k] = v
 	}
 	for _, old := range history[:len(history)-1] {
-		delete(f.posts, old)
+		if earlier := f.posts[old]; earlier != nil {
+			earlier["edit_history_tweet_ids"] = history
+		}
 	}
 	f.posts[id] = p
 }
@@ -112,7 +160,8 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var list []map[string]any
 		for id, p := range f.posts {
-			if !f.deleted[id] && !f.protected[id] {
+			history := p["edit_history_tweet_ids"].([]string)
+			if !f.deleted[id] && !f.protected[id] && id == history[len(history)-1] {
 				list = append(list, p)
 			}
 		}
