@@ -95,6 +95,7 @@ excluded = [
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run Python plugins" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
 "tests/fakes/README.md" = { audience = "contributor", kind = "guide", summary = "run shared provider fakes for Go and Python tests" }
+"tests/fakes/graph/fixtures/README.md" = { audience = "contributor", kind = "concept", summary = "the sanitized official examples used by the Graph fake" }
 "tests/fakes/x/fixtures/README.md" = { audience = "contributor", kind = "concept", summary = "the sanitized official examples used by the X fake" }
 "third_party/README.md" = { audience = "contributor", kind = "index", summary = "dependency notices and inventory" }
 
@@ -120,4 +121,4 @@ excluded = [
 "sdks/go/README.md" = 191
 "sdks/python/README.md" = 140
 "tests/acceptance/README.md" = 50
-"tests/fakes/README.md" = 50
+"tests/fakes/README.md" = 60

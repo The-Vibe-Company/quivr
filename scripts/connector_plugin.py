@@ -48,7 +48,7 @@ FIRST_PARTY = [
     # allow_short_recheck (loopback endpoints only) lets tests recheck deletions every second.
     {'id': 'x-list', 'configuration': lambda stack: {'api_endpoint': f"http://127.0.0.1:{stack.state['fake_x_port']}",
                                                       'allow_short_recheck': True}},
-    # Microsoft 365 mail, pinned to the local fake Graph (scripts/fake_graph.py), never to Microsoft.
+    # Microsoft 365 mail, pinned to the local fake Graph (tests/fakes/cmd/graph), never to Microsoft.
     {'id': 'm365-mail', 'configuration': lambda stack: {'login_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}",
                                                          'graph_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}/v1.0"}},
     # Token windows and E5 embeddings through the stack's TEI and the pinned tokenizer. The api and

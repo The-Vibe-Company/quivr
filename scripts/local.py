@@ -238,8 +238,8 @@ class Stack:
         (self.directory/'readiness.json').write_text(json.dumps(self.readiness,indent=2))
     def start_fake_graph(self):
         if getattr(self,'fake_graph',None) is None:
-            from fake_graph import FakeGraph
-            self.fake_graph=FakeGraph(self.state['graph_port'])
+            from fake_api import Fake
+            self.fake_graph=Fake('graph', self.state['graph_port'])
     def start_processes(self,keyless=False):
         self.start_fake_graph()
         for command,config in [('api','keyless.json' if keyless else 'config.json'),('worker','keyless-worker.json' if keyless else 'worker.json')]:self.spawn(command,config)
@@ -440,6 +440,7 @@ class Stack:
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
         if hasattr(self,"fake_x"): self.fake_x.close()
+        if hasattr(self,"fake_graph"): self.fake_graph.close()
         normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)

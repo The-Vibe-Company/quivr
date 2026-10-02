@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// m365_mail acceptance runs against scripts/fake_graph.py (started by
+// m365_mail acceptance runs against tests/fakes/cmd/graph (started by
 // scripts/local.py), never against Microsoft. Each test owns its mailbox and
 // application, so the fake's state cannot leak between tests.
 

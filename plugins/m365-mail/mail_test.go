@@ -100,8 +100,8 @@ func TestABackfillOlderThanSevenDaysIsRefusedAtTheFirstPoll(t *testing.T) {
 	g := newFakeGraph(t)
 	old := `{"tenant_id":"t","mailbox":"m","backfill_since":"2026-09-20T00:00:00Z"}`
 	_, err := fetchWith(t, g, g.connector(), old, secretJSON, nil)
-	if e := typed(t, err); e.Class != quivrplugin.ClassSource || e.Code != "invalid_config" || g.tokens != 0 {
-		t.Fatalf("%+v (tokens %d)", e, g.tokens)
+	if e := typed(t, err); e.Class != quivrplugin.ClassSource || e.Code != "invalid_config" || g.observations().Tokens != 0 {
+		t.Fatalf("%+v (tokens %d)", e, g.observations().Tokens)
 	}
 	// A later poll keeps collecting from its checkpoint.
 	if _, err := fetchWith(t, g, g.connector(), old, secretJSON, json.RawMessage(`{"since":"2026-09-20T00:00:00Z"}`)); err != nil {
@@ -128,7 +128,7 @@ func TestAccessFailuresAreTypedAccessErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			g := newFakeGraph(t)
-			g.tokenErr = tc.tokenErr
+			g.app(map[string]any{"secret": "test-secret-not-real", "token_error": tc.tokenErr})
 			if tc.fragment != "" {
 				g.failNext(tc.fragment, tc.f)
 			}
@@ -171,16 +171,16 @@ func TestAnAccessTokenIsCachedRenewedOnceAndPerSecret(t *testing.T) {
 	if _, err := fetch(t, g, c, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fetch(t, g, c, nil); err != nil || g.tokens != 1 {
-		t.Fatalf("err %v tokens %d; the token must be cached", err, g.tokens)
+	if _, err := fetch(t, g, c, nil); err != nil || g.observations().Tokens != 1 {
+		t.Fatalf("err %v tokens %d; the token must be cached", err, g.observations().Tokens)
 	}
 	g.failNext("/messages/delta", failure{status: 401, code: "InvalidAuthenticationToken"})
-	if _, err := fetch(t, g, c, nil); err != nil || g.tokens != 2 {
-		t.Fatalf("err %v tokens %d; a refused token is renewed once", err, g.tokens)
+	if _, err := fetch(t, g, c, nil); err != nil || g.observations().Tokens != 2 {
+		t.Fatalf("err %v tokens %d; a refused token is renewed once", err, g.observations().Tokens)
 	}
-	g.secret = "rotated-secret-not-real"
-	if _, err := fetchWith(t, g, c, cfgJSON, `{"client_id":"11111111-1111-1111-1111-111111111111","client_secret":"rotated-secret-not-real"}`, nil); err != nil || g.tokens != 3 {
-		t.Fatalf("err %v tokens %d; a rotated secret gets its own token", err, g.tokens)
+	g.app(map[string]any{"secret": "rotated-secret-not-real"})
+	if _, err := fetchWith(t, g, c, cfgJSON, `{"client_id":"11111111-1111-1111-1111-111111111111","client_secret":"rotated-secret-not-real"}`, nil); err != nil || g.observations().Tokens != 3 {
+		t.Fatalf("err %v tokens %d; a rotated secret gets its own token", err, g.observations().Tokens)
 	}
 }
 
@@ -189,11 +189,10 @@ func TestCheckCredentialAsksForAToken(t *testing.T) {
 	c := g.connector()
 	var r quivrplugin.CredentialRequest
 	request(t, &r, g, cfgJSON, secretJSON, nil, nil)
-	if _, err := c.CheckCredential(context.Background(), &r); err != nil || g.tokens != 1 {
-		t.Fatalf("err %v tokens %d", err, g.tokens)
+	if _, err := c.CheckCredential(context.Background(), &r); err != nil || g.observations().Tokens != 1 {
+		t.Fatalf("err %v tokens %d", err, g.observations().Tokens)
 	}
-	g.tokenErr = "7000222"
-	g.tokens = 0
+	g.app(map[string]any{"token_error": "7000222"})
 	c = g.connector()
 	if _, err := c.CheckCredential(context.Background(), &r); typed(t, err).Code != "secret_expired" {
 		t.Fatalf("%v", err)
@@ -209,13 +208,15 @@ func TestCertificateCredentialSignsAVerifiableAssertion(t *testing.T) {
 		"certificate_pem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
 		"private_key_pem": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))})
 	g := newFakeGraph(t)
+	g.app(map[string]any{"certificate": true})
 	if _, err := fetchWith(t, g, g.connector(), cfgJSON, string(cred), nil); err != nil {
 		t.Fatal(err)
 	}
-	if g.form.Get("client_assertion_type") != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" || g.form.Get("client_secret") != "" {
-		t.Fatalf("form %v", g.form)
+	form := g.observations().Form
+	if form.Get("client_assertion_type") != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" || form.Get("client_secret") != "" {
+		t.Fatalf("form %v", form)
 	}
-	parts := strings.Split(g.form.Get("client_assertion"), ".")
+	parts := strings.Split(form.Get("client_assertion"), ".")
 	if len(parts) != 3 {
 		t.Fatal("assertion is not a JWT")
 	}
@@ -240,7 +241,7 @@ func TestCertificateCredentialSignsAVerifiableAssertion(t *testing.T) {
 
 func TestErrorsNeverCarryTheSecretOrToken(t *testing.T) {
 	g := newFakeGraph(t)
-	g.tokenErr = "7000222"
+	g.app(map[string]any{"token_error": "7000222"})
 	_, err := fetch(t, g, g.connector(), nil)
 	if strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "token-") {
 		t.Fatalf("error leaks a secret: %v", err)
@@ -262,7 +263,7 @@ func TestLinksOutsideTheGraphEndpointAreNeverFollowed(t *testing.T) {
 	t.Cleanup(elsewhere.Close)
 	g := newFakeGraph(t)
 	g.addMessage("m1", "2026-09-28T10:00:00Z", fileAttachment("a1", "r.pdf", "application/pdf", "%PDF", 0))
-	g.attachmentsNext = elsewhere.URL + "/v1.0/users/monitoring@example.org/messages/m1/attachments?$skiptoken=1"
+	g.control("mailbox", map[string]any{"attachments_next": elsewhere.URL + "/v1.0/users/monitoring@example.org/messages/m1/attachments?$skiptoken=1"})
 	stored := json.RawMessage(`{"since":"2026-09-28T09:00:00Z","link":"` + elsewhere.URL + `/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?$deltatoken=0"}`)
 	page, err := fetch(t, g, g.connector(), stored)
 	mu.Lock()
@@ -299,7 +300,7 @@ func TestAttachmentRefsReadTheirBytes(t *testing.T) {
 			t.Fatalf("%s read %q", at.Key, b)
 		}
 	}
-	delete(g.files["m1"], "a1")
+	g.control("delete-attachment", map[string]any{"id": "a1", "fields": map[string]any{"message_id": "m1"}})
 	var r quivrplugin.AttachmentRequest
 	request(t, &r, g, cfgJSON, secretJSON, nil, map[string]any{"item": map[string]any{"record_key": item.RecordKey}, "attachment": item.Attachments[1]})
 	if _, err := c.OpenAttachment(context.Background(), &r); typed(t, err).Code != "attachment_gone" {

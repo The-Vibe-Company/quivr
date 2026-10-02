@@ -41,3 +41,15 @@ posts matching their author rules. All callbacks and redirects stay on loopback.
 Each test gets isolated state and reaps its own process. Builds are reused
 within each suite, and startup waits on the readiness line rather than a sleep
 or a reserved port.
+
+Graph runs with `go run ./cmd/graph` and the same `-listen`/readiness protocol.
+It serves client-secret/certificate token requests, mailbox message delta,
+message hydration, attachment listings and raw bytes using [official examples](graph/fixtures/README.md).
+Its controls under `/_fake/` accept JSON: `apps` configures `client_id`, `secret`,
+`expired`, `certificate` or `token_error`; `messages` seeds a mailbox with a
+message and attachments; `update`/`delete` change it; `partial`/`removed` inject
+one-page delta entries. `mailbox` configures `page_size` and `attachments_next`;
+`delete-attachment` removes bytes; `fail` queues path/status/code/retry_after
+failures; `clear-failures`, `expire-delta` and `delay` drive recovery scenarios.
+`GET /_fake/stats?mailbox=...&client_id=...` observes request/token counts and
+the last token form. Mailbox state is isolated, and delays release the lock.

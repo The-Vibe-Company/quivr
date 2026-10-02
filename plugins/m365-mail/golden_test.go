@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -100,7 +101,7 @@ func replay(t *testing.T, sc goldenScenario) {
 	g := newFakeGraph(t)
 	c := g.connector()
 	local := func(raw json.RawMessage) json.RawMessage {
-		return json.RawMessage(strings.ReplaceAll(string(raw), graphPlaceholder, g.server.URL))
+		return json.RawMessage(strings.ReplaceAll(string(raw), graphPlaceholder, g.url))
 	}
 	var previous json.RawMessage
 	for i, op := range sc.Ops {
@@ -113,13 +114,13 @@ func replay(t *testing.T, sc goldenScenario) {
 			}
 			g.addRaw(op.Message, files...)
 		case "remove":
-			g.removed = append(g.removed, op.ID)
+			g.control("removed", map[string]any{"id": op.ID})
 		case "partial":
-			g.partial = append(g.partial, op.ID)
+			g.control("partial", map[string]any{"id": op.ID})
 		case "page_size":
-			g.pageSize = op.N
+			g.control("mailbox", map[string]any{"page_size": op.N})
 		case "expire_delta":
-			g.expireTok = true
+			g.control("expire-delta", nil)
 		case "fail":
 			g.failNext("/messages/delta", failure{status: op.N, code: op.ID})
 		case "fetch":
@@ -146,13 +147,16 @@ func replay(t *testing.T, sc goldenScenario) {
 			} else {
 				cp, _ := json.Marshal(page.Checkpoint)
 				previous = cp
-				got.Checkpoint = json.RawMessage(strings.ReplaceAll(string(cp), g.server.URL, graphPlaceholder))
+				got.Checkpoint = json.RawMessage(strings.ReplaceAll(string(cp), g.url, graphPlaceholder))
 				got.More = page.More
 				for _, item := range page.Items {
 					got.Items = append(got.Items, goldenOf(t, g, c, sc, item))
 				}
 			}
-			if !sameJSON(t, got, op.Want) {
+			wantPage := *op.Want
+			wantPage.Checkpoint = comparableCheckpoint(t, wantPage.Checkpoint)
+			got.Checkpoint = comparableCheckpoint(t, got.Checkpoint)
+			if !sameJSON(t, got, wantPage) {
 				want, _ := json.MarshalIndent(op.Want, "", " ")
 				have, _ := json.MarshalIndent(got, "", " ")
 				t.Fatalf("op %d differs from the built-in connector\nwant %s\ngot  %s", i, want, have)
@@ -211,4 +215,37 @@ func sameJSON(t *testing.T, a, b any) bool {
 	_ = json.Unmarshal(ab, &x)
 	_ = json.Unmarshal(bb, &y)
 	return reflect.DeepEqual(x, y)
+}
+
+// Graph continuation tokens are opaque. Retain the link host/path, query
+// options and token kind; the existing replay follows the unmodified token
+// to verify paging and checkpoint resumption through the provider boundary.
+func comparableCheckpoint(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	if len(raw) == 0 {
+		return raw
+	}
+	var cp map[string]any
+	if err := json.Unmarshal(raw, &cp); err != nil {
+		t.Fatal(err)
+	}
+	if link, ok := cp["link"].(string); ok {
+		u, err := url.Parse(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := u.Query()
+		for _, key := range []string{"$skiptoken", "$deltatoken"} {
+			if q.Get(key) != "" {
+				q.Set(key, "opaque")
+			}
+		}
+		u.RawQuery = q.Encode()
+		cp["link"] = u.String()
+	}
+	b, err := json.Marshal(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

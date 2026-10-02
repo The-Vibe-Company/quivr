@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/The-Vibe-Company/quivr-v2/sdks/go v0.0.0
+	github.com/The-Vibe-Company/quivr-v2/tests/fakes v0.0.0
 	golang.org/x/net v0.59.0
 )
 
@@ -14,3 +15,5 @@ require (
 )
 
 replace github.com/The-Vibe-Company/quivr-v2/sdks/go => ../../sdks/go
+
+replace github.com/The-Vibe-Company/quivr-v2/tests/fakes => ../../tests/fakes

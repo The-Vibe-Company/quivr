@@ -1,0 +1,13 @@
+{
+  "value": [
+    {
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      "id": "attachment-1",
+      "name": "example.txt",
+      "contentType": "text/plain",
+      "size": 12,
+      "isInline": false,
+      "lastModifiedDateTime": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

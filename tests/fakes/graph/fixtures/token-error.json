@@ -1,0 +1,7 @@
+{
+  "error": "invalid_client",
+  "error_description": "Example test refusal",
+  "error_codes": [
+    7000215
+  ]
+}

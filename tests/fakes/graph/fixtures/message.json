@@ -1,0 +1,35 @@
+{
+  "id": "message-1",
+  "internetMessageId": "<message-1@example.org>",
+  "subject": "Example message",
+  "body": {
+    "contentType": "text",
+    "content": "Example body"
+  },
+  "from": {
+    "emailAddress": {
+      "name": "Desk",
+      "address": "desk@example.org"
+    }
+  },
+  "sender": {
+    "emailAddress": {
+      "name": "Desk",
+      "address": "desk@example.org"
+    }
+  },
+  "toRecipients": [
+    {
+      "emailAddress": {
+        "name": "Monitoring",
+        "address": "monitoring@example.org"
+      }
+    }
+  ],
+  "ccRecipients": [],
+  "sentDateTime": "2026-01-01T00:00:00Z",
+  "receivedDateTime": "2026-01-01T00:00:00Z",
+  "conversationId": "conversation-1",
+  "hasAttachments": false,
+  "isRead": false
+}
