@@ -29,7 +29,7 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := rebuildAdapterPool(t, ctx)
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	served, evaluation := pluginSpace("example.words", "example.words.small", 4, content.SpaceServed), pluginSpace("example.words", "example.words.large", 6, content.SpaceEvaluation)
 	// The registry is the deployment's (the verify stack pins core.ingest):
 	// restore every space's role as it was, and retire the test's spaces.
@@ -86,7 +86,7 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := content.Service{Repository: store, Baseline: store}
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	const text = "Harbour strike. Port closed."
 	r, err := service.Accept(ctx, scope, content.Command{Key: "article", Source: content.Source{CorpusID: c.ID, Namespace: "spaces", RecordKey: "article"}, Content: content.Text{Kind: "text", Text: text}})
 	if err != nil {
@@ -180,14 +180,14 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	ctx := t.Context()
 	pool := rebuildAdapterPool(t, ctx)
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	org := fmt.Sprintf("adapter-evaluation-%d", time.Now().UnixNano())
 	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
 	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "evaluation", Name: "Evaluation"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := content.Service{Repository: store, Baseline: store}
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	cmd := content.Command{Key: "one", Source: content.Source{CorpusID: c.ID, Namespace: "evaluation", RecordKey: "one"}, Content: content.Text{Kind: "text", Text: "alpha beta gamma"}}
 	receipt, err := service.Accept(ctx, scope, cmd)
 	if err != nil {

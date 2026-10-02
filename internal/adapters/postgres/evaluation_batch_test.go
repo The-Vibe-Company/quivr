@@ -41,8 +41,8 @@ func TestClaimRelatedGroupsOneVersionAndEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `UPDATE evaluation_intents SET state='done',outcome='test_cleanup' WHERE organization=$1 AND state='pending'`, org)
 	})
@@ -98,7 +98,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	otherRecord, otherVersion := publish(content.Command{Key: "other-" + run, Source: content.Source{CorpusID: a.ID, Namespace: "wire", RecordKey: "other-" + run}, Content: content.Text{Kind: "text", Text: "Other"}})
 	trigger(a.ID, record, version)
 	trigger(a.ID, otherRecord, otherVersion)
-	evaluation := postgres.EvaluationStore{ContentStore: store}
+	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
 	for i := 0; i < 20; i++ {
 		n, err := evaluation.FanOut(ctx)
 		if err != nil {
@@ -179,8 +179,8 @@ func TestConcurrentClaimsTakeOneArticleOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `UPDATE evaluation_intents SET state='done',outcome='test_cleanup' WHERE organization=$1 AND state='pending'`, org)
 	})
@@ -213,7 +213,7 @@ func TestConcurrentClaimsTakeOneArticleOnce(t *testing.T) {
 SELECT $1,v.id,1,v.subscription_id,$2,$3,$4,'evaluation' FROM subscription_versions v WHERE v.organization=$1`, org, a.ID, work.RecordID, work.VersionID); err != nil {
 		t.Fatal(err)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store}
+	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
 	const workers, rounds = 8, 40
 	for round := 0; round < rounds; round++ {
 		// Due before any other test's work, so the claims race for this Version.

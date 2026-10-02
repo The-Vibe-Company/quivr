@@ -19,13 +19,13 @@ type controlFixture struct {
 	ctx   context.Context
 	pool  *pgxpool.Pool
 	org   string
-	store postgres.ContentStore
+	store fixtureContentStores
 }
 
 func newControlFixture(t *testing.T, name string) (controlFixture, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	pool := rebuildAdapterPool(t, ctx)
-	return controlFixture{t: t, ctx: ctx, pool: pool, org: fmt.Sprintf("adapter-%s-%d", name, time.Now().UnixNano()), store: postgres.ContentStore{Pool: pool}}, cancel
+	return controlFixture{t: t, ctx: ctx, pool: pool, org: fmt.Sprintf("adapter-%s-%d", name, time.Now().UnixNano()), store: contentStores(pool)}, cancel
 }
 
 func (f controlFixture) corpus(key string) string {

@@ -38,7 +38,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	for i := range subs {
 		subs[i] = f.subscribe(fmt.Sprint("s", i))
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store, Page: 3} // four withdrawal candidates span two pages
+	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore, Page: 3} // four withdrawal candidates span two pages
 	intent := func(i int, recordID, versionID string) monitoring.Intent {
 		return f.intent(subs[i], recordID, versionID)
 	}
@@ -127,7 +127,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 
 	// Worker admission: superseded work is parked without an attempt; a
 	// correction notice is admitted.
-	ds := postgres.DeliveryStore{ContentStore: store, Organization: org}
+	ds := postgres.DeliveryStore{ContentStore: store.ContentStore, Organization: org}
 	configured := func(string, string) bool { return true }
 	// s2 and s3 keep their match.created pending for the withdrawal checks.
 	for i := 2; i < 4; i++ {
@@ -274,8 +274,8 @@ func TestNoLongerMatchesSupersededByLaterCorrection(t *testing.T) {
 	defer cancel()
 	f := newCorrectionFixture(t, ctx, "adapter-rematch-")
 	sub := f.subscribe("s")
-	evaluation := postgres.EvaluationStore{ContentStore: f.store}
-	ds := postgres.DeliveryStore{ContentStore: f.store, Organization: f.org}
+	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
+	ds := postgres.DeliveryStore{ContentStore: f.store.ContentStore, Organization: f.org}
 	configured := func(string, string) bool { return true }
 	evidence := f.evidence(sub)
 	match := func(record, version string) {
@@ -362,7 +362,7 @@ func TestRevertNotices(t *testing.T) {
 	defer cancel()
 	f := newCorrectionFixture(t, ctx, "adapter-revert-")
 	onA, onB := f.subscribe("a"), f.subscribe("b")
-	evaluation := postgres.EvaluationStore{ContentStore: f.store}
+	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
 	decide := func(sub monitoring.Subscription, record, version string, matches bool, want string) {
 		t.Helper()
 		f.commit(want, func() (string, error) {
@@ -403,7 +403,7 @@ type correctionFixture struct {
 	run, org string
 	corpusID string
 	scope    corpus.Scope
-	store    postgres.ContentStore
+	store    fixtureContentStores
 	contents content.Service
 	service  monitoring.Service
 	query    monitoring.SavedQuery
@@ -412,7 +412,7 @@ type correctionFixture struct {
 func newCorrectionFixture(t *testing.T, ctx context.Context, prefix string) *correctionFixture {
 	t.Helper()
 	pool := adapterPool(t, ctx)
-	f := &correctionFixture{t: t, ctx: ctx, pool: pool, run: fmt.Sprint(time.Now().UnixNano()), store: postgres.ContentStore{Pool: pool}}
+	f := &correctionFixture{t: t, ctx: ctx, pool: pool, run: fmt.Sprint(time.Now().UnixNano()), store: contentStores(pool)}
 	f.org = prefix + f.run
 	f.scope = corpus.Scope{Organization: f.org, Actions: []string{"corpora:write", "content:write", "content:read", "monitoring:read", "monitoring:write"}, Corpora: []string{"*"}}
 	a, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, f.scope, corpus.CreateInput{Key: "a", Name: "A"})
@@ -420,7 +420,7 @@ func newCorrectionFixture(t *testing.T, ctx context.Context, prefix string) *cor
 		t.Fatal(err)
 	}
 	f.corpusID = a.ID
-	f.contents = content.Service{Repository: f.store, Baseline: f.store}
+	f.contents = content.Service{Submissions: f.store, Receipts: f.store, RecordStore: f.store, Versions: f.store, Materialization: f.store, Baseline: f.store}
 	org := f.org
 	t.Cleanup(func() {
 		bg := context.Background()

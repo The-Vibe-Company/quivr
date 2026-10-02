@@ -132,7 +132,7 @@ contributions:
 	}
 	store := &onePushInstance{target: connectors.Target{Instance: connectors.Instance{Organization: "org_a", ID: "signed_1", CorpusID: "corpus_news", Namespace: "events", Kind: "signed", Config: json.RawMessage(`{}`), Enabled: true}}}
 	port := &acceptancePort{}
-	contents := content.Service{Repository: port}
+	contents := content.Service{Submissions: port, Receipts: port, RecordStore: port, Versions: port, Materialization: port}
 	cache := &replayMemory{}
 	handler, err := httpapi.New(nil, contents, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{}, catalogCursorKey, httpapi.WithRelay(connectors.Relay{Store: store, Registry: registry, Ingest: contents, Replays: cache}))
 	if err != nil {

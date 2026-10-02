@@ -73,9 +73,9 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			store := postgres.ContentStore{Pool: pool}
+			store := contentStores(pool)
 			objects := &objectMemory{objects: map[string][]byte{}}
-			contents := content.Service{Repository: store, Baseline: store, Embeddings: store, Blobs: objects}
+			contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store, Embeddings: store, Blobs: objects}
 			scope := corpus.Scope{Organization: "evaluation", Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
 			c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "one", Name: "Evaluation"})
 			if err != nil {

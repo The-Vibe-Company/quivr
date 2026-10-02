@@ -150,7 +150,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 			encoder := &pluginEncoder{err: c.encodeErr}
 			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, Routing: routed, Projection: p, Spaces: encoder,
 				Ranker: &scriptedRanker{answer: asking(c.request)}, Registry: spaceRegistry(routed),
-				Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}}}
+				Content: content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}}}
 			if c.noPlugin {
 				s.Spaces = nil
 			}

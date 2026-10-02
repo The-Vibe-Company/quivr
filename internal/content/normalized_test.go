@@ -40,7 +40,7 @@ func (failingBlobs) Read(context.Context, content.Blob) ([]byte, error) {
 
 func TestRoutedBlobIsAcceptedFromTheSubmittedInput(t *testing.T) {
 	repo := &stubRepository{}
-	service := content.Service{Repository: repo, Blobs: failingBlobs{}, BlobSource: stubSource{verified: markdownBlob()}, Routes: routes{"text/markdown": true}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: failingBlobs{}, BlobSource: stubSource{verified: markdownBlob()}, Routes: routes{"text/markdown": true}}
 	if _, err := service.Accept(context.Background(), scope(), routedCommand("text/markdown")); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestRoutedBlobIsAcceptedFromTheSubmittedInput(t *testing.T) {
 func TestUnroutedBlobsKeepTheExistingPath(t *testing.T) {
 	source := markdownBlob()
 	source.MediaType = "application/octet-stream"
-	service := content.Service{Repository: &stubRepository{}, Blobs: failingBlobs{}, BlobSource: stubSource{verified: source}, Routes: routes{"text/markdown": true}}
+	service := content.Service{Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: failingBlobs{}, BlobSource: stubSource{verified: source}, Routes: routes{"text/markdown": true}}
 	if _, err := service.Accept(context.Background(), scope(), routedCommand("application/octet-stream")); !errors.Is(err, content.ErrUnverifiedBlob) {
 		t.Fatalf("unrouted non-text Blob: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestUnroutedBlobsKeepTheExistingPath(t *testing.T) {
 	repo := &stubRepository{}
 	plain := markdownBlob()
 	plain.MediaType = "text/plain"
-	service = content.Service{Repository: repo, Blobs: stubBlobs{data: markdownBytes}, BlobSource: stubSource{verified: plain}, Routes: routes{"text/markdown": true}}
+	service = content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: stubBlobs{data: markdownBytes}, BlobSource: stubSource{verified: plain}, Routes: routes{"text/markdown": true}}
 	if _, err := service.Accept(context.Background(), scope(), routedCommand("text/plain")); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRoutedBlobRejections(t *testing.T) {
 		"outage": {stubSource{err: outage}, outage},
 	} {
 		t.Run(name, func(t *testing.T) {
-			service := content.Service{Repository: &stubRepository{}, Blobs: failingBlobs{}, BlobSource: tc.source, Routes: routes{"text/markdown": true}}
+			service := content.Service{Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: failingBlobs{}, BlobSource: tc.source, Routes: routes{"text/markdown": true}}
 			_, err := service.Accept(context.Background(), scope(), routedCommand("text/markdown"))
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v, want %v", err, tc.want)
@@ -113,7 +113,7 @@ func TestRoutedBlobRejections(t *testing.T) {
 
 func TestClientsCannotWriteNormalizationProvenance(t *testing.T) {
 	c := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus", Namespace: "ns", RecordKey: "r"}, Content: content.Text{Kind: "text", Text: "x"}, Provenance: map[string]any{"normalization": map[string]any{"plugin_id": "forged"}}}
-	service := content.Service{Repository: &stubRepository{}}
+	service := content.Service{Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}}
 	if _, err := service.Accept(context.Background(), scope(), c); !errors.Is(err, content.ErrInvalid) {
 		t.Fatalf("got %v", err)
 	}
@@ -172,7 +172,7 @@ func TestMaterializePublishesTheNormalizedManifestWithProvenance(t *testing.T) {
 	command.Provenance = map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}
 	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
 	provenance := content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_1", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes)}
-	service := content.Service{Repository: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: provenance}}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: provenance}}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestMaterializePublishesNormalizerExtensions(t *testing.T) {
 	command.Extensions = content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "Submitted"}}}
 	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
 	produced := content.Extensions{"acme.markdown.outline": {SchemaVersion: "1", Data: map[string]any{"heading_count": float64(1)}}}
-	service := content.Service{Repository: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: content.Normalization{PluginID: "acme.markdown"}, Extensions: produced}}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: content.Normalization{PluginID: "acme.markdown"}, Extensions: produced}}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestMaterializePublishesNormalizerExtensions(t *testing.T) {
 func TestMaterializeWaitsForNormalization(t *testing.T) {
 	command := routedCommand("text/markdown")
 	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
-	service := content.Service{Repository: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err == nil {
 		t.Fatal("published without a normalized Manifest")
 	}
@@ -259,7 +259,7 @@ func TestMaterializeQuarantinesAFailedNormalization(t *testing.T) {
 	failed := content.Normalized{Outcome: content.OutcomeFailed, InputBlobID: "blob_md",
 		Provenance: content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_9", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes)},
 		Failure:    &content.NormalizationFailure{Code: "normalizer_invalid_output", Message: "duplicate Part key"}}
-	service := content.Service{Repository: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": failed}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: memoryBlobs{}, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": failed}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestMaterializePublishesAFallbackWithItsProvenance(t *testing.T) {
 	fallback := content.Normalized{Outcome: content.OutcomeFallback, Manifest: stored,
 		Provenance: content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_2", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes), Fallback: &content.NormalizationFallback{Code: "normalizer_failed", Message: "cannot read"}},
 		Failure:    &content.NormalizationFailure{Code: "normalizer_failed", Message: "cannot read"}}
-	service := content.Service{Repository: repo, Blobs: blobs, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": fallback}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: blobs, Routes: routes{"text/markdown": true}, Normalizations: normalizations{"version_1": fallback}}
 	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestMaterializeWithoutAnOutcome(t *testing.T) {
 			repo.work.Command.Content.MediaType = tc.mediaType
 			source := markdownBlob()
 			source.MediaType = tc.mediaType
-			service := content.Service{Repository: repo, Blobs: stubBlobs{data: markdownBytes}, BlobSource: stubSource{verified: source}, Routes: tc.routes, Normalizations: normalizations{}, Supersession: tc.supersession}
+			service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: stubBlobs{data: markdownBytes}, BlobSource: stubSource{verified: source}, Routes: tc.routes, Normalizations: normalizations{}, Supersession: tc.supersession}
 			if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
 				t.Fatal(err)
 			}

@@ -150,7 +150,7 @@ func (s Service) Renormalize(ctx context.Context, org, receiptID string) error {
 }
 
 func (s Service) normalize(ctx context.Context, org, receiptID string, published bool) error {
-	work, done, err := s.Content.Repository.Work(ctx, org, receiptID)
+	work, done, err := s.Content.Materialization.Work(ctx, org, receiptID)
 	if err != nil || (done && !published) {
 		return err
 	}
@@ -194,7 +194,7 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 	}
 	// Running only once the plugin answers: an outage keeps the receipt's
 	// retrying plugin_unavailable diagnostic between attempts.
-	if err := s.Content.Repository.Progress(ctx, org, receiptID, "running", ""); err != nil {
+	if err := s.Content.Materialization.Progress(ctx, org, receiptID, "running", ""); err != nil {
 		return err
 	}
 	timeout := plugins.InvocationTimeout(pin, "normalize")
@@ -319,7 +319,7 @@ func (s Service) unavailable(ctx context.Context, inv invocation, pin *plugins.P
 
 // retry reports a failure that retrying can fix; it never records an outcome.
 func (s Service) retry(ctx context.Context, org, receiptID, code string, err error) error {
-	_ = s.Content.Repository.Progress(ctx, org, receiptID, "retrying", code)
+	_ = s.Content.Materialization.Progress(ctx, org, receiptID, "retrying", code)
 	return fmt.Errorf("%s: %w", code, err)
 }
 

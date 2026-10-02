@@ -23,7 +23,7 @@ func TestIngestionBacklogLeavesInArrivalOrder(t *testing.T) {
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	expected := acceptDispatchBacklog(t, ctx, store, 512)
 	for offset := 0; offset < len(expected); offset += 32 {
 		got, err := store.Claim(ctx, 32)
@@ -46,7 +46,7 @@ func TestIngestionBacklogLeavesInArrivalOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer nextPool.Close()
-	restarted := postgres.ContentStore{Pool: nextPool}
+	restarted := contentStores(nextPool)
 	if got, err := restarted.Claim(ctx, 32); err != nil || len(got) != 0 {
 		t.Fatalf("after restart got %+v (%v), want drained queue", got, err)
 	}
@@ -59,7 +59,7 @@ func TestIngestionBacklogLeavesInArrivalOrder(t *testing.T) {
 	}
 }
 
-func acceptDispatchBacklog(t *testing.T, ctx context.Context, store postgres.ContentStore, n int) []content.Dispatch {
+func acceptDispatchBacklog(t *testing.T, ctx context.Context, store fixtureContentStores, n int) []content.Dispatch {
 	t.Helper()
 	pool := store.Pool
 	var expected []content.Dispatch
@@ -71,7 +71,7 @@ func acceptDispatchBacklog(t *testing.T, ctx context.Context, store postgres.Con
 			t.Fatal(err)
 		}
 		key := fmt.Sprint(i)
-		receipt, err := (content.Service{Repository: store}).Accept(ctx, scope, content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "tests", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Queued receipt"}})
+		receipt, err := (content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}).Accept(ctx, scope, content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "tests", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Queued receipt"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +89,7 @@ func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
 	if err := postgres.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	expected := acceptDispatchBacklog(t, ctx, store, 3)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -108,7 +108,7 @@ func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer otherPool.Close()
-	other := postgres.ContentStore{Pool: otherPool}
+	other := contentStores(otherPool)
 	got, err = other.Claim(ctx, 32)
 	if err != nil || len(got) != 1 || got[0] != expected[2] {
 		t.Fatalf("live lease: got %+v (%v), want %+v", got, err, expected[2])
@@ -156,7 +156,7 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	if err := postgres.MigrateFS(ctx, pool, prior); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	expected := acceptDispatchBacklog(t, ctx, store, 3)
 	first := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 	for i, d := range expected {

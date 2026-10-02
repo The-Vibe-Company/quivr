@@ -24,8 +24,8 @@ func TestEnrichmentEligibilityFollowsCurrentEligibleVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store, Baseline: store, Embeddings: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store, Embeddings: store}
 	source := content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: "eligible"}
 	// promoted accepts, publishes, segments and promotes one Version of the Record.
 	promoted := func(key, text string) string {

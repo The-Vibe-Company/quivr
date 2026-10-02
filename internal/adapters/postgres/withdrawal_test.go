@@ -43,8 +43,8 @@ func TestWithdrawalFenceAtomicityAndGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}
 	source := content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: "pending"}
 	receipt, err := service.Accept(ctx, scope, content.Command{Key: "pending", Source: source, Content: content.Text{Kind: "text", Text: "Withdraw before materialization"}})
 	if err != nil {

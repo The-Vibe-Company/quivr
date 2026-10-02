@@ -49,8 +49,8 @@ func TestChangeJournalWindowsAndRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}
 	accept := func(corpusID, key string) {
 		t.Helper()
 		if _, err := service.Accept(ctx, scope, content.Command{Key: key, Source: content.Source{CorpusID: corpusID, Namespace: "changes", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Change " + key}}); err != nil {

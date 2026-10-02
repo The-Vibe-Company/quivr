@@ -103,9 +103,9 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 
 	input := []byte("# Lighthouse guide\n\nThe keeper lights the lamp.")
 	blob := content.VerifiedBlob{ID: "blob_" + run, MediaType: "text/markdown", Blob: content.Blob{Key: "inputs/" + run, SHA256: content.Hash(input), Size: int64(len(input))}}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	objects := &objectMemory{objects: map[string][]byte{}}
-	contents := content.Service{Repository: store, Catalog: store, Blobs: objects, BlobSource: verifiedSource{blob}, Relations: store, Routes: liveOf(t, pin), Normalizations: store}
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Catalog: store, Blobs: objects, BlobSource: verifiedSource{blob}, Relations: store, Routes: liveOf(t, pin), Normalizations: store}
 	receipt, err := contents.Accept(ctx, scope, content.Command{Key: "routed-" + run, Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "guide"}, Content: content.Text{Kind: "blob", BlobID: blob.ID, MediaType: "text/markdown"}})
 	if err != nil {
 		t.Fatal(err)

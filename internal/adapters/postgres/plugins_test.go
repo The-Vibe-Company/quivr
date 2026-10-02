@@ -170,7 +170,7 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +257,7 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	if _, err = store.ApplyConfiguration(ctx, registry.Seed{}); err != nil {
 		t.Fatal(err)
 	}
-	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, nil); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A later endpoint at the same version has never served these spaces.
@@ -307,7 +307,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 	registration := func(pluginID string) registry.Registration {
@@ -429,7 +429,7 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "too-early"}); !errors.Is(err, registry.ErrNoPreviousPlan) {

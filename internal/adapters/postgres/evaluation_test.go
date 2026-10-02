@@ -36,8 +36,8 @@ func TestEvaluationDispatchAndAtomicMatchCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	// searchable publishes and promotes one Version, emitting record.retrieval_ready.
 	searchable := func(corpusID, key string) (string, string) {
 		t.Helper()
@@ -112,7 +112,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	_, otherVersion := searchable(b.ID, "other-corpus")
 	trigger("record.retrieval_ready", a.ID, hitRecord, nil) // pre-migration shape: no Version
 
-	evaluation := postgres.EvaluationStore{ContentStore: store, Page: 2}
+	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore, Page: 2}
 	drain := func() {
 		t.Helper()
 		for i := 0; i < 20; i++ {

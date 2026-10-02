@@ -30,7 +30,7 @@ func TestSavedQueryVectorsAreFrozenAndReplayDoesNotEncode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	org := fmt.Sprintf("adapter-query-vectors-%d", time.Now().UnixNano())
 	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write"}, Corpora: []string{"*"}}
 	created, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "corpus", Name: "Neutral news"})
@@ -117,8 +117,8 @@ func TestSubscriptionActivationBoundaryAndDisable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}
 	accept := func(key string) {
 		t.Helper()
 		if _, err := contents.Accept(ctx, scope, content.Command{Key: key, Source: content.Source{CorpusID: a.ID, Namespace: "monitoring", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Monitoring " + key}}); err != nil {
@@ -250,7 +250,7 @@ func TestConcurrentMonitoringReplaysConverge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
 	race := func(n int, run func() (string, bool, error)) string {
 		t.Helper()

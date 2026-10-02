@@ -49,9 +49,9 @@ func TestBatchEntryFailureLeavesNoTraceAndKeepsPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	const apiKey = "adapter-batch-key-0123456789abcdef0123"
-	handler, err := httpapi.New(postgres.Store{Pool: pool}, content.Service{Repository: store, BlobSource: store}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{apiKey: scope}, []byte("adapter-cursor-key-0123456789abcdef0123"))
+	handler, err := httpapi.New(postgres.Store{Pool: pool}, content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, BlobSource: store}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{apiKey: scope}, []byte("adapter-cursor-key-0123456789abcdef0123"))
 	if err != nil {
 		t.Fatal(err)
 	}

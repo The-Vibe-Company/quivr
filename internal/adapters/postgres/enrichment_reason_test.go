@@ -27,8 +27,8 @@ func TestStoppedEnrichmentNamesItsPlanAndPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store, Embeddings: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store, Embeddings: store}
 	cmd := content.Command{Key: "pinned", Source: content.Source{CorpusID: c.ID, Namespace: "enrichment", RecordKey: "pinned"}, Content: content.Text{Kind: "text", Text: "The ferry crossed the fjord."}}
 	r, err := contents.Accept(ctx, scope, cmd)
 	if err != nil {

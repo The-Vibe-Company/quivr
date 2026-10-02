@@ -87,7 +87,7 @@ contributions:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
 	sealer, _ := connectors.NewSealer("adapter-push-test-key-0123456789abcdef")
 	service := connectors.Service{Store: store, Tokens: store, Registry: registry, Sealer: sealer}
 	instance, err := service.Create(ctx, scope, connectors.CreateInput{Key: "one", CorpusID: c.ID, Namespace: "events", Kind: "echo", Config: json.RawMessage(`{}`), PushPolicy: &connectors.PushPolicy{RatePerSecond: 1, Burst: 1, AllowedCIDRs: []string{"192.0.2.0/24"}}})
@@ -98,8 +98,8 @@ contributions:
 		t.Fatalf("policy not persisted: %+v", instance.PushPolicy)
 	}
 	newHandler := func() http.Handler {
-		h, err := httpapi.New(nil, content.Service{Repository: store.ContentStore}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{"push": scope}, []byte("push-cursor-key-0123456789abcdef"),
-			httpapi.WithRelay(connectors.Relay{Store: store, Tokens: service, Registry: registry, Ingest: content.Service{Repository: store.ContentStore}, Protection: store, Replays: store}),
+		h, err := httpapi.New(nil, content.Service{Submissions: postgres.SubmissionStore{Pool: store.Pool}, Receipts: postgres.ReceiptStore{Pool: store.Pool}, RecordStore: postgres.RecordStore{Pool: store.Pool}, Versions: postgres.VersionStore{Pool: store.Pool}, Materialization: store.ContentStore}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{"push": scope}, []byte("push-cursor-key-0123456789abcdef"),
+			httpapi.WithRelay(connectors.Relay{Store: store, Tokens: service, Registry: registry, Ingest: content.Service{Submissions: postgres.SubmissionStore{Pool: store.Pool}, Receipts: postgres.ReceiptStore{Pool: store.Pool}, RecordStore: postgres.RecordStore{Pool: store.Pool}, Versions: postgres.VersionStore{Pool: store.Pool}, Materialization: store.ContentStore}, Protection: store, Replays: store}),
 			httpapi.WithTrustedPushProxies([]string{"10.0.0.0/8"}),
 			httpapi.WithObservability(nil, observability.Reader{Store: postgres.ObservabilityStore{Pool: pool}}))
 		if err != nil {

@@ -25,7 +25,7 @@ SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN 
 // to a newly reserved slot at a newer source position, a Version identity is
 // reserved once per Record slot (a revert to earlier bytes reserves a new slot
 // and so a new Version, ADR 0003), and current only moves to desired.
-const deadVersionSQL = `(r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
+const deadVersionSQL = `(` + recordGoneSQL + `
  OR (v.id IS DISTINCT FROM r.current_version_id AND v.id IS DISTINCT FROM r.desired_version_id))`
 
 // NoticePurges records up to limit newly dead items; their grace period starts now.

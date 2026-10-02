@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/app"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
@@ -24,7 +23,7 @@ func TestNewCorporaStartOnTheRegisteredSpaces(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}

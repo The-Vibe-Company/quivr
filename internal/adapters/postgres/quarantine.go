@@ -22,8 +22,7 @@ import (
 // aliases v, r and rc.
 const stuckSQL = `record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
- WHERE v.organization=$1 AND v.quarantined AND r.desired_version_id=v.id AND NOT r.withdrawn
- AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)
+ WHERE v.organization=$1 AND v.quarantined AND r.desired_version_id=v.id AND NOT ` + recordGoneSQL + `
  AND ($2::text='' OR r.corpus_id=$2) AND ($3::text[] IS NULL OR r.corpus_id=ANY($3::text[]))
  AND ($4::text='' OR v.quarantine->>'plugin'=$4) AND ($5::text='' OR v.error_code=$5)
  AND ($6::timestamptz IS NULL OR coalesce(v.quarantined_at,rc.accepted_at)>=$6) AND ($7::timestamptz IS NULL OR coalesce(v.quarantined_at,rc.accepted_at)<$7)`
@@ -290,7 +289,7 @@ type versionState struct {
 func lockVersion(ctx context.Context, tx pgx.Tx, org, versionID string) (versionState, error) {
 	var v versionState
 	err := tx.QueryRow(ctx, `SELECT r.corpus_id,coalesce(v.quarantine_stage,'ingestion'),v.error_code,v.quarantined,v.baseline_ready,
- r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),coalesce(r.desired_version_id=v.id,false)
+ `+recordGoneSQL+`,coalesce(r.desired_version_id=v.id,false)
 FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF v,r`, org, versionID).
 		Scan(&v.corpusID, &v.stage, &v.code, &v.quarantined, &v.ready, &v.withdrawn, &v.desired)
 	return v, err

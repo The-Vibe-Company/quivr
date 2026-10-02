@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +36,7 @@ func TestUploadSessionsReconcileAndScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	org := "adapter-uploads"
 	digest := strings.Repeat("a", 64)
 	req := uploads.Request{Key: "request-key", SizeBytes: 12, SHA256: digest, MediaType: "text/plain"}

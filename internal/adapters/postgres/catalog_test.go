@@ -40,8 +40,8 @@ func TestRecordCatalogKeysetTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store, Catalog: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Catalog: store}
 	corpora := corpus.Service{Store: postgres.Store{Pool: pool}}
 	scope := corpus.Scope{Organization: "adapter-catalog", Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
 	other := scope

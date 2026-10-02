@@ -55,7 +55,7 @@ func (f *fakeProjection) Search(_ context.Context, _ []retrieval.Route, _ corpus
 	return f.candidates, nil
 }
 
-type fakeRecords struct{ content.Repository }
+type fakeRecords struct{ content.RecordReader }
 
 func (fakeRecords) Record(_ context.Context, _ string, id string) (content.Record, error) {
 	return content.Record{ID: id, Source: content.Source{CorpusID: "corpus"}}, nil
@@ -127,7 +127,7 @@ func (f *fakeEmbeddings) CommitEnrichment(context.Context, string, content.Segme
 // served.
 func service(p *fakeProjection, e *fakeEmbeddings) retrieval.Service {
 	return retrieval.Service{Embedder: fakeEmbedder{}, Routing: fakeRouting{}, Projection: p, Ranker: &scriptedRanker{answer: passthrough}, Registry: spaceList{},
-		Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: e}}
+		Content: content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: e}}
 }
 
 var searchScope = corpus.Scope{Organization: "org", Actions: []string{"content:read", "search:query"}, Corpora: []string{"*"}}

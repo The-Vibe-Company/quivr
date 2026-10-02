@@ -80,7 +80,7 @@ func TestAcceptObservesOnlyNewRevisions(t *testing.T) {
 		want        []string
 	}{{true, []string{"org_a/news-feed"}}, {false, nil}} {
 		var received []string
-		service := content.Service{Repository: &stubRepository{newRevision: c.newRevision}, Received: func(org, namespace string) { received = append(received, org+"/"+namespace) }}
+		service := content.Service{Submissions: &stubRepository{newRevision: c.newRevision}, Receipts: &stubRepository{newRevision: c.newRevision}, RecordStore: &stubRepository{newRevision: c.newRevision}, Versions: &stubRepository{newRevision: c.newRevision}, Materialization: &stubRepository{newRevision: c.newRevision}, Received: func(org, namespace string) { received = append(received, org+"/"+namespace) }}
 		command := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus", Namespace: "news-feed", RecordKey: "r"}, Content: content.Text{Kind: "text", Text: "Bonjour"}}
 		if _, err := service.Accept(context.Background(), scope(), command); err != nil {
 			t.Fatal(err)
@@ -94,7 +94,7 @@ func TestAcceptObservesOnlyNewRevisions(t *testing.T) {
 func TestBlobContentResolvesToImmutableText(t *testing.T) {
 	repo := &stubRepository{}
 	service := content.Service{
-		Repository: repo,
+		Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo,
 		Blobs:      stubBlobs{data: []byte("Bonjour 🌞")},
 		BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", Blob: content.Blob{Key: "obj", SHA256: content.Hash([]byte("Bonjour 🌞")), Size: int64(len("Bonjour 🌞"))}, MediaType: "text/html"}},
 	}
@@ -136,7 +136,7 @@ func TestBlobContentRejections(t *testing.T) {
 	} {
 		command := blobCommand()
 		command.Content.MediaType = tc.media
-		service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{data: tc.stored}, BlobSource: tc.source}
+		service := content.Service{Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: stubBlobs{data: tc.stored}, BlobSource: tc.source}
 		if _, err := service.Accept(context.Background(), scope(), command); !errors.Is(err, tc.want) {
 			t.Errorf("%s: got %v, want %v", name, err, tc.want)
 		}
@@ -145,7 +145,7 @@ func TestBlobContentRejections(t *testing.T) {
 
 func TestInlineTextRejectsUnverifiedBlobReferences(t *testing.T) {
 	repo := &stubRepository{}
-	service := content.Service{Repository: repo, Blobs: stubBlobs{}, BlobSource: stubSource{}}
+	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: stubBlobs{}, BlobSource: stubSource{}}
 	command := blobCommand()
 	command.Content = content.Text{Kind: "text", Text: "inline"}
 	command.Provenance = map[string]any{"source_blob_ids": []any{"blob_1"}}
@@ -170,7 +170,7 @@ func manifestCommand() content.Command {
 
 func manifestService() (*stubRepository, content.Service) {
 	repo := &stubRepository{}
-	return repo, content.Service{Repository: repo, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "application/xml", Blob: content.Blob{SHA256: "blob-checksum"}}}}
+	return repo, content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "application/xml", Blob: content.Blob{SHA256: "blob-checksum"}}}}
 }
 
 func TestManifestAcceptedWithVerifiedBlobPartsAndExtensions(t *testing.T) {
@@ -232,9 +232,9 @@ func TestManifestStructureRejections(t *testing.T) {
 
 func TestManifestRejectsUnverifiedBlobParts(t *testing.T) {
 	cases := map[string]content.Service{
-		"unknown blob":   {Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: content.ErrUnverifiedBlob}},
-		"media mismatch": {Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "image/png"}}},
-		"no source":      {Repository: &stubRepository{}, Blobs: stubBlobs{}},
+		"unknown blob":   {Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: content.ErrUnverifiedBlob}},
+		"media mismatch": {Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", MediaType: "image/png"}}},
+		"no source":      {Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: stubBlobs{}},
 	}
 	for name, service := range cases {
 		if _, err := service.Accept(context.Background(), scope(), manifestCommand()); !errors.Is(err, content.ErrUnverifiedBlob) {
@@ -335,7 +335,7 @@ func TestBlobVerificationOutageStaysRetryable(t *testing.T) {
 	// Blob unjudged: the command stays retryable, never unverified_blob.
 	for _, outage := range []error{context.DeadlineExceeded, context.Canceled} {
 		for name, command := range cases {
-			service := content.Service{Repository: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: outage}}
+			service := content.Service{Submissions: &stubRepository{}, Receipts: &stubRepository{}, RecordStore: &stubRepository{}, Versions: &stubRepository{}, Materialization: &stubRepository{}, Blobs: stubBlobs{}, BlobSource: stubSource{err: outage}}
 			_, err := service.Accept(context.Background(), scope(), command)
 			if errors.Is(err, content.ErrUnverifiedBlob) || !errors.Is(err, outage) {
 				t.Fatalf("%s (%v): outage reported as %v", name, outage, err)

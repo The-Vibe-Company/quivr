@@ -33,9 +33,9 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	var rebuild retrieval.RebuildStore = store
-	service := content.Service{Repository: store, Baseline: store}
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	segmented := func(corpusID, key string) content.Segmentation {
 		t.Helper()
 		cmd := content.Command{Key: key, Source: content.Source{CorpusID: corpusID, Namespace: "rebuild", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Rebuild " + key}}

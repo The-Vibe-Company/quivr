@@ -106,7 +106,7 @@ ON CONFLICT(organization,version_id) DO UPDATE SET attempts=normalization_attemp
 func (s ContentStore) Superseded(ctx context.Context, org, recordID, versionID string) (bool, bool, error) {
 	var withdrawn bool
 	var desired string
-	err := s.Pool.QueryRow(ctx, `SELECT r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),coalesce(r.desired_version_id,'') FROM records r WHERE r.organization=$1 AND r.id=$2`, org, recordID).Scan(&withdrawn, &desired)
+	err := s.Pool.QueryRow(ctx, `SELECT `+recordGoneSQL+`,coalesce(r.desired_version_id,'') FROM records r WHERE r.organization=$1 AND r.id=$2`, org, recordID).Scan(&withdrawn, &desired)
 	if err != nil {
 		return false, false, err
 	}

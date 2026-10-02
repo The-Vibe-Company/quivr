@@ -104,7 +104,7 @@ func newAPI(t *testing.T, port *acceptancePort) http.Handler {
 		readerKey: {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 		scopedKey: {Organization: "org_a", Actions: []string{"content:read", "content:write"}, Corpora: []string{"corpus_other"}},
 	}
-	contents := content.Service{Repository: port, BlobSource: verifiedBlobs{}}
+	contents := content.Service{Submissions: port, Receipts: port, RecordStore: port, Versions: port, Materialization: port, BlobSource: verifiedBlobs{}}
 	handler, err := httpapi.New(nil, contents, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"))
 	if err != nil {
 		t.Fatal(err)

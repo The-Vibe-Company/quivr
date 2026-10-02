@@ -42,8 +42,8 @@ func TestRelationResolutionEligibilityGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}
 	cmd := content.Command{Key: "target", Source: content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: "target"}, Content: content.Text{Kind: "text", Text: "Target content"}}
 	receipt, err := service.Accept(ctx, scope, cmd)
 	if err != nil {

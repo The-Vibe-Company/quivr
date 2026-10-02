@@ -29,7 +29,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
@@ -224,13 +224,13 @@ func TestReceiptProbeRecognisesOnlyTheAcceptedIdempotencyKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	key := connectors.KeyPrefix + "probe-r1"
 	if known, err := store.HasReceipt(ctx, scope.Organization, key); err != nil || known {
 		t.Fatalf("before acceptance: %v %v", known, err)
 	}
 	command := content.Command{Key: key, Source: content.Source{CorpusID: c.ID, Namespace: "mail", RecordKey: "<m@example.org>"}, Revision: "r1", Content: content.Text{Kind: "text", Text: "Bonjour"}}
-	if _, err = (content.Service{Repository: store, Catalog: store, BlobSource: store}).Accept(ctx, scope, command); err != nil {
+	if _, err = (content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Catalog: store, BlobSource: store}).Accept(ctx, scope, command); err != nil {
 		t.Fatal(err)
 	}
 	if known, err := store.HasReceipt(ctx, scope.Organization, key); err != nil || !known {
@@ -255,7 +255,7 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
@@ -333,7 +333,7 @@ func TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
+	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Minute}

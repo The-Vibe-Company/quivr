@@ -46,8 +46,8 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: repository}
+	repository := contentStores(pool)
+	service := content.Service{Submissions: repository, Receipts: repository, RecordStore: repository, Versions: repository, Materialization: repository}
 	cmd := content.Command{Key: "rollback", Source: content.Source{CorpusID: c.ID, Namespace: "tests", RecordKey: "rollback"}, Content: content.Text{Kind: "text", Text: "Test rollback"}}
 	receipt, err := service.Accept(ctx, scope, cmd)
 	if err != nil {

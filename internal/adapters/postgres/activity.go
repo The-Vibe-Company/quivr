@@ -19,7 +19,7 @@ var _ content.ActivityStore = ContentStore{}
 const activityColumns = `SELECT a.version_id,a.record_id,r.corpus_id,r.namespace,r.record_key,coalesce(a.title,''),
  coalesce(a.accepted_at,rc.accepted_at),v.materialized_at,v.segmented_at,v.retrieval_ready_at,v.enriched_at,v.evaluated_at,v.quarantined_at,r.withdrawn_at,
  v.id IS NOT NULL,coalesce(v.baseline_ready,false),coalesce(v.quarantined,false),coalesce(v.processing,''),
- r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+ ` + recordGoneSQL + `,
  coalesce(r.current_version_id=a.version_id,false)
 FROM accepted_revisions a
 JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id)

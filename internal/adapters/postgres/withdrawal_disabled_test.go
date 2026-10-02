@@ -25,8 +25,8 @@ func TestWithdrawalNoticeSurvivesDisableAndReenable(t *testing.T) {
 	defer cancel()
 	f := newCorrectionFixture(t, ctx, "adapter-reenable-")
 	sub := f.subscribe("s")
-	evaluation := postgres.EvaluationStore{ContentStore: f.store}
-	ds := postgres.DeliveryStore{ContentStore: f.store, Organization: f.org}
+	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
+	ds := postgres.DeliveryStore{ContentStore: f.store.ContentStore, Organization: f.org}
 	configured := func(string, string) bool { return true }
 	drain := func() {
 		t.Helper()

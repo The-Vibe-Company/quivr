@@ -26,7 +26,7 @@ func TestRetrievalMappingsMayAddressPluginOwnedNamespaces(t *testing.T) {
 	keys := map[string]corpus.Scope{
 		configurer: {Organization: "org_a", Actions: []string{"corpora:write", "operations:write", "operations:read"}, Corpora: []string{"*"}},
 	}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{Repository: port, BlobSource: verifiedBlobs{}, Extensions: registry}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithOperations(operations.Service{Store: store}))
+	handler, err := httpapi.New(knownCorpora{}, content.Service{Submissions: port, Receipts: port, RecordStore: port, Versions: port, Materialization: port, BlobSource: verifiedBlobs{}, Extensions: registry}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithOperations(operations.Service{Store: store}))
 	if err != nil {
 		t.Fatal(err)
 	}

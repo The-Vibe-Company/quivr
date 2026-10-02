@@ -48,7 +48,7 @@ type pluginWorld struct {
 	port     int
 	proc     *devhost.Process
 	pin      *plugins.Pin
-	store    postgres.ContentStore
+	store    fixtureContentStores
 	objects  *objectMemory
 	contents content.Service
 	service  normalization.Service
@@ -60,7 +60,7 @@ func newPluginWorld(t *testing.T, ctx context.Context, name string) *pluginWorld
 	t.Helper()
 	pool := adapterPool(t, ctx)
 	run := time.Now().UTC().Format("20060102T150405.000000000")
-	w := &pluginWorld{t: t, ctx: ctx, pool: pool, org: "adapter-" + name + "-" + run, store: postgres.ContentStore{Pool: pool}, objects: &objectMemory{objects: map[string][]byte{}}}
+	w := &pluginWorld{t: t, ctx: ctx, pool: pool, org: "adapter-" + name + "-" + run, store: contentStores(pool), objects: &objectMemory{objects: map[string][]byte{}}}
 	w.scope = corpus.Scope{Organization: w.org, Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
 	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, w.scope, corpus.CreateInput{Key: name, Name: name})
 	if err != nil {
@@ -81,7 +81,7 @@ func newPluginWorld(t *testing.T, ctx context.Context, name string) *pluginWorld
 	w.input = []byte("# Harbour\n\nThe tide turns twice a day.")
 	w.sources = blobSources{}
 	live := liveOf(t, w.pin)
-	w.contents = content.Service{Repository: w.store, Catalog: w.store, Blobs: w.objects, BlobSource: w.sources, Relations: w.store, Routes: live, Normalizations: w.store, Supersession: w.store}
+	w.contents = content.Service{Submissions: w.store, Receipts: w.store, RecordStore: w.store, Versions: w.store, Materialization: w.store, Catalog: w.store, Blobs: w.objects, BlobSource: w.sources, Relations: w.store, Routes: live, Normalizations: w.store, Supersession: w.store}
 	w.service = normalization.Service{Content: w.contents, Store: w.store, Signer: staticSigner{}, Plugin: pluginhttp.Normalizer{}, Pin: live}
 	t.Cleanup(func() {
 		if w.proc != nil {

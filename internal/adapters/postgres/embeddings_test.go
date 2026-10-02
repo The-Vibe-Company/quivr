@@ -44,8 +44,8 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store, Baseline: store, Embeddings: store, Blobs: s3store.New(cfg.S3)}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store, Embeddings: store, Blobs: s3store.New(cfg.S3)}
 	scope := corpus.Scope{Organization: "adapter-embeddings-" + strconv.FormatInt(time.Now().UnixNano(), 10), Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
 	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "e5", Name: "E5"})
 	if err != nil {
@@ -145,7 +145,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 func TestEnrichmentTimeoutsCountPerVersion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store := postgres.ContentStore{Pool: rebuildAdapterPool(t, ctx)}
+	store := contentStores(rebuildAdapterPool(t, ctx))
 	org := "adapter-timeouts-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	var got []int
 	for _, version := range []string{"version_a", "version_a", "version_b", "version_a"} {

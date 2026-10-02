@@ -25,7 +25,7 @@ type deliveryFixture struct {
 	org        string
 	scope      corpus.Scope
 	corpusID   string
-	store      postgres.ContentStore
+	store      fixtureContentStores
 	contents   content.Service
 	service    monitoring.Service
 	subs       []monitoring.Subscription
@@ -42,8 +42,8 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: store}
 	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
@@ -88,7 +88,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	if err = contents.Promote(ctx, org, seg, generation); err != nil {
 		t.Fatal(err)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store}
+	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
 	deliveries := make([]string, len(subs))
 	for i, s := range subs {
 		in := monitoring.Intent{Organization: org, SubscriptionID: s.ID, SubscriptionVersionID: s.Current.VersionID, Sequence: int64(1000 + i), CorpusID: a.ID, RecordID: work.RecordID, VersionID: work.VersionID}
@@ -98,7 +98,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 		deliveries[i] = content.StableID("delivery", org, content.StableID("match", org, s.Current.VersionID, work.VersionID), "dest", "match.created")
 	}
 	return &deliveryFixture{t: t, ctx: ctx, pool: pool, org: org, scope: scope, corpusID: a.ID, store: store, contents: contents, service: service, subs: subs, deliveries: deliveries,
-		ds: postgres.DeliveryStore{ContentStore: store, Organization: org}}
+		ds: postgres.DeliveryStore{ContentStore: store.ContentStore, Organization: org}}
 }
 
 func (f *deliveryFixture) configured(o, dest string) bool { return o == f.org && dest == "dest" }

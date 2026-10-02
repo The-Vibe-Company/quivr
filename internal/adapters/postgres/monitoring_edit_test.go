@@ -22,7 +22,7 @@ type editFixture struct {
 
 func newEditFixture(t *testing.T, ctx context.Context, prefix string) editFixture {
 	f := newCorrectionFixture(t, ctx, prefix)
-	return editFixture{f, postgres.EvaluationStore{ContentStore: f.store}, postgres.DeliveryStore{ContentStore: f.store, Organization: f.org}}
+	return editFixture{f, postgres.EvaluationStore{ContentStore: f.store.ContentStore}, postgres.DeliveryStore{ContentStore: f.store.ContentStore, Organization: f.org}}
 }
 
 // drain runs dispatch until it settles.

@@ -268,7 +268,7 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	}
 	var recordID, corpusID, desired string
 	var withdrawn, quarantined, ready, active bool
-	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),v.quarantined,v.baseline_ready FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready)
+	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready)
 	if err != nil {
 		return err
 	}
@@ -368,36 +368,4 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []cont
 		out[n-1] = l
 	}
 	return out, rows.Err()
-}
-func (s ContentStore) VersionStatus(ctx context.Context, org, id string) (content.Availability, content.Processing, string, error) {
-	var a content.Availability
-	var p content.Processing
-	var code string
-	var baseline, quarantine, withdrawn bool
-	err := s.Pool.QueryRow(ctx, `SELECT v.baseline_ready,v.quarantined,r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),coalesce(r.current_version_id=v.id,false),v.processing,v.error_code FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&baseline, &quarantine, &withdrawn, &a.Current, &p.State, &code)
-	a.State = "materialized"
-	if p.State == "running" || p.State == "retrying" {
-		a.State = "building_baseline"
-	}
-	if baseline {
-		a.State = "retrieval_ready"
-	}
-	if quarantine {
-		a.State = "quarantined"
-	}
-	a.Current = a.Current && !withdrawn && !quarantine
-	a.Searchable = baseline && a.Current
-	if baseline && !quarantine {
-		if err = s.Pool.QueryRow(ctx, `SELECT enrichment_state,enrichment_error FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&p.State, &code); err != nil {
-			return a, p, code, err
-		}
-		if p.State != "idle" {
-			p.Phase = "enrichment"
-		}
-		return a, p, code, err
-	}
-	if p.State != "idle" {
-		p.Phase = "baseline"
-	}
-	return a, p, code, err
 }

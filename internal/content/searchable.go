@@ -197,7 +197,7 @@ type Located struct {
 }
 
 func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (Version, error) {
-	r, err := s.Repository.Receipt(ctx, org, receiptID)
+	r, err := s.Receipts.Receipt(ctx, org, receiptID)
 	if err != nil {
 		return Version{}, err
 	}

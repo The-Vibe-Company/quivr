@@ -82,7 +82,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 	}
 
 	// Subscriptions of an Organization created while 0.2.0 served.
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	scope := corpus.Scope{Organization: "org_a", Actions: []string{"corpora:write", "monitoring:read", "monitoring:write"}, Corpora: []string{"*"}}
 	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "C"})
 	if err != nil {
@@ -175,7 +175,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 	if got, want := usage(old), "draining subscriptions=0 pinned_work=4"; got != want {
 		t.Fatalf("0.2.0 once every Subscription moved: %s, want %s (the pending evaluation and three earlier Versions)", got, want)
 	}
-	for evaluation := (postgres.EvaluationStore{ContentStore: store}); ; {
+	for evaluation := (postgres.EvaluationStore{ContentStore: store.ContentStore}); ; {
 		n, err := evaluation.FanOut(ctx)
 		if err != nil {
 			t.Fatal(err)

@@ -83,7 +83,7 @@ contributions:
 	}
 	store := &onePushInstance{target: connectors.Target{Instance: connectors.Instance{Organization: "org_a", ID: "connector_push", CorpusID: "corpus_news", Namespace: "events", Kind: "echo", Config: json.RawMessage(`{}`), Enabled: true}}}
 	port := &acceptancePort{}
-	contents := content.Service{Repository: port}
+	contents := content.Service{Submissions: port, Receipts: port, RecordStore: port, Versions: port, Materialization: port}
 	keys := map[string]corpus.Scope{
 		"push-key":     {Organization: "org_a", Actions: []string{"connector:push"}, Corpora: []string{"corpus_news"}},
 		"wrong-action": {Organization: "org_a", Actions: []string{"content:write", "connectors:write"}, Corpora: []string{"*"}},

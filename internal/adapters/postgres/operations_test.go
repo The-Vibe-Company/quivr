@@ -57,7 +57,7 @@ func TestRebuildAcceptanceReplayConflictAndJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	request := []byte(`{"idempotency_key":"rebuild-1"}`)
 	first, err := store.AcceptRebuild(ctx, org, a.ID, "rebuild-1", request)
 	if err != nil {

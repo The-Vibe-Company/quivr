@@ -96,7 +96,8 @@ func textParts(texts ...string) map[string]any {
 
 type repository struct {
 	mu sync.Mutex
-	content.Repository
+	content.SubmissionStore
+	content.MaterializationStore
 	work     content.Work
 	progress []string
 }
@@ -223,7 +224,7 @@ func setup(t *testing.T, answer func(n int) (int, any)) *fixture {
 	blob := content.VerifiedBlob{ID: "blob_md", MediaType: "text/markdown", Blob: content.Blob{Key: "org/blob", SHA256: content.Hash(input), Size: int64(len(input))}}
 	command := content.Command{Key: "k", Source: content.Source{CorpusID: "corpus_1", Namespace: "docs", RecordKey: "guide"}, Content: content.Text{Kind: "blob", BlobID: "blob_md", MediaType: "text/markdown", BlobSHA256: blob.Blob.SHA256}, Provenance: map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}}
 	f.repo = &repository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", RecordID: "record_1", VersionID: "version_1", Command: command}}
-	f.service = normalization.Service{Content: content.Service{Repository: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Normalizer{}, Pin: fixed{pin}}
+	f.service = normalization.Service{Content: content.Service{Submissions: f.repo, Materialization: f.repo, Blobs: f.blobs, BlobSource: blobSource{blob}}, Store: f.store, Signer: f.signer, Plugin: pluginhttp.Normalizer{}, Pin: fixed{pin}}
 	return f
 }
 

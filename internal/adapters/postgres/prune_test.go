@@ -21,7 +21,7 @@ type pruneFixture struct {
 	t      *testing.T
 	ctx    context.Context
 	pool   *pgxpool.Pool
-	store  postgres.ContentStore
+	store  fixtureContentStores
 	scope  corpus.Scope
 	corpus string
 }
@@ -34,13 +34,13 @@ func newPruneFixture(t *testing.T, ctx context.Context, name string) *pruneFixtu
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &pruneFixture{t: t, ctx: ctx, pool: pool, store: postgres.ContentStore{Pool: pool}, scope: scope, corpus: c.ID}
+	return &pruneFixture{t: t, ctx: ctx, pool: pool, store: contentStores(pool), scope: scope, corpus: c.ID}
 }
 
 // accept commits one Record: receipt.pending then record.accepted.
 func (f *pruneFixture) accept(key string) {
 	f.t.Helper()
-	if _, err := (content.Service{Repository: f.store}).Accept(f.ctx, f.scope, content.Command{Key: key, Source: content.Source{CorpusID: f.corpus, Namespace: "prune", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Prune " + key}}); err != nil {
+	if _, err := (content.Service{Submissions: f.store, Receipts: f.store, RecordStore: f.store, Versions: f.store, Materialization: f.store}).Accept(f.ctx, f.scope, content.Command{Key: key, Source: content.Source{CorpusID: f.corpus, Namespace: "prune", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Prune " + key}}); err != nil {
 		f.t.Fatal(err)
 	}
 	// Keep fixture Receipts away from a live worker.
@@ -193,7 +193,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	if count, first := f.retained(); f.watermark() != activation || first != activation+1 || count != head-activation {
 		t.Fatal("prune passed the activation boundary before dispatch started", activation, f.watermark(), first, count)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: f.store}
+	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
 	if _, err = evaluation.FanOut(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ import (
 // enriched, a vector in the served space for every segment.
 type backfillFixture struct {
 	pool                  *pgxpool.Pool
-	store                 postgres.ContentStore
+	store                 fixtureContentStores
 	org, corpusID         string
 	served, target        string
 	generation            content.Generation
@@ -93,7 +93,7 @@ func newBackfillFixtureForPlugin(t *testing.T, ctx context.Context, enriched, un
 	t.Helper()
 	pool := rebuildAdapterPool(t, ctx)
 	run := time.Now().UnixNano()
-	f := &backfillFixture{pool: pool, store: postgres.ContentStore{Pool: pool}, org: fmt.Sprintf("adapter-backfill-%d", run),
+	f := &backfillFixture{pool: pool, store: contentStores(pool), org: fmt.Sprintf("adapter-backfill-%d", run),
 		served: fmt.Sprintf("%s.small%d@1", pluginID, run), target: fmt.Sprintf("%s.large%d@1", pluginID, run),
 		segments: map[string]content.Segmentation{}, accepted: map[string]time.Time{}, recordOf: map[string]string{}, servedArtifactOfSegID: map[string]string{}}
 	for i, space := range []string{f.served, f.target} {
@@ -149,7 +149,7 @@ func newBackfillFixtureForPlugin(t *testing.T, ctx context.Context, enriched, un
 	if _, err = pool.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id) VALUES($1,$2,$3)`, f.org, f.corpusID, f.generation.ID); err != nil {
 		t.Fatal(err)
 	}
-	service := content.Service{Repository: f.store, Baseline: f.store}
+	service := content.Service{Submissions: f.store, Receipts: f.store, RecordStore: f.store, Versions: f.store, Materialization: f.store, Baseline: f.store}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < enriched+unenriched; i++ {
 		text := fmt.Sprintf("Article %d about the harbour.", i)
@@ -272,7 +272,7 @@ func addSecondaryOwner(t *testing.T, ctx context.Context, f *backfillFixture) (r
 
 	scope := corpus.Scope{Organization: f.org, Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
 	text := fmt.Sprintf("A secondary segmentation for the same corpus, %d.", run)
-	contentService := content.Service{Repository: f.store, Baseline: f.store}
+	contentService := content.Service{Submissions: f.store, Receipts: f.store, RecordStore: f.store, Versions: f.store, Materialization: f.store, Baseline: f.store}
 	receipt, err := contentService.Accept(ctx, scope, content.Command{Key: fmt.Sprintf("secondary-%d", run), Source: content.Source{CorpusID: f.corpusID, Namespace: "fill", RecordKey: fmt.Sprintf("secondary-%d", run)}, Content: content.Text{Kind: "text", Text: text}})
 	if err != nil {
 		t.Fatal(err)

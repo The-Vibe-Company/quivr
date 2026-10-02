@@ -46,8 +46,8 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	cmd := content.Command{Key: "guarded", Source: content.Source{CorpusID: c.ID, Namespace: "adapter", RecordKey: "guarded"}, Content: content.Text{Kind: "text", Text: "Atomic baseline"}}
 	r, err := service.Accept(ctx, scope, cmd)
 	if err != nil {
@@ -201,7 +201,7 @@ func wholeParts(org string, v content.Version) (content.Segmentation, error) {
 }
 
 // hydrateOne looks one candidate up; it is corpus.ErrNotFound when fenced.
-func hydrateOne(ctx context.Context, store postgres.ContentStore, scope corpus.Scope, c content.Candidate) (content.Hydrated, error) {
+func hydrateOne(ctx context.Context, store fixtureContentStores, scope corpus.Scope, c content.Candidate) (content.Hydrated, error) {
 	found, err := store.Hydrate(ctx, scope, []content.Candidate{c})
 	if err != nil {
 		return content.Hydrated{}, err
@@ -232,8 +232,8 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	if _, err = pool.Exec(ctx, `ANALYZE segments, record_versions, records, version_parts, content_blobs, projection_coverage`); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	service := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	g, err := store.Generation(ctx, org, c.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestHydrationCostFollowsTheBatch(t *testing.T) {
 	// generic plan, which must be as cheap.
 	for run := range 7 {
 		plans = nil
-		found, err := (postgres.ContentStore{Pool: explained}).Hydrate(ctx, scope, batch)
+		found, err := (contentStores(explained)).Hydrate(ctx, scope, batch)
 		if err != nil || len(found) != len(batch) {
 			t.Fatalf("run %d: hydrated %d of %d candidates, %v", run, len(found), len(batch), err)
 		}

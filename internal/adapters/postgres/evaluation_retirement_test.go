@@ -19,7 +19,7 @@ import (
 type retirementFixture struct {
 	ctx          context.Context
 	pool         *pgxpool.Pool
-	store        postgres.ContentStore
+	store        fixtureContentStores
 	scope        corpus.Scope
 	live         *monitoring.LiveEvaluators
 	service      monitoring.Service
@@ -34,7 +34,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
+	store := contentStores(pool)
 	scope := corpus.Scope{Organization: "org_a", Corpora: []string{"*"}, Actions: []string{"corpora:write", "content:write", "monitoring:write", "plugins:admin"}}
 	collection, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "C"})
 	if err != nil {
@@ -51,7 +51,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contents := content.Service{Repository: store, Baseline: store}
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	command := content.Command{Key: "article", Source: content.Source{CorpusID: collection.ID, Namespace: "wire", RecordKey: "article"}, Content: content.Text{Kind: "text", Text: "Article"}}
 	receipt, err := contents.Accept(ctx, scope, command)
 	if err != nil {
@@ -76,7 +76,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err = contents.Promote(ctx, scope.Organization, segmentation, generation); err != nil {
 		t.Fatal(err)
 	}
-	evaluations := postgres.EvaluationStore{ContentStore: store}
+	evaluations := postgres.EvaluationStore{ContentStore: store.ContentStore}
 	if _, err = evaluations.FanOut(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 func TestRetireEvaluationsAfterEvaluatorMigration(t *testing.T) {
 	fixture := newRetirementFixture(t)
 	ctx, pool, scope, live, service, subscription := fixture.ctx, fixture.pool, fixture.scope, fixture.live, fixture.service, fixture.subscription
-	evaluations := postgres.EvaluationStore{ContentStore: fixture.store}
+	evaluations := postgres.EvaluationStore{ContentStore: fixture.store.ContentStore}
 	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.2.0": fakeplugin.Fixture{}}})
 	migration, err := service.MigrateEvaluator(ctx, scope, monitoring.EvaluatorMigrationInput{PluginID: "alert-rules", FromVersion: "0.1.0"})
 	if err != nil || len(migration.Moved) != 1 {
@@ -162,7 +162,7 @@ func TestRetireEvaluationsAfterEvaluatorMigration(t *testing.T) {
 VALUES($1,$2,$3,$4,$5,$6,$7,'evaluator_unavailable')`, scope.Organization, item.SubscriptionVersionID, item.Sequence+100, item.SubscriptionID, item.CorpusID, item.RecordID, item.RecordVersionID); err != nil {
 		t.Fatal(err)
 	}
-	service.Evaluations = postgres.ContentStore{Pool: pool}
+	service.Evaluations = contentStores(pool)
 	replay, err := service.RetireEvaluations(ctx, scope, input)
 	if err != nil || !reflect.DeepEqual(replay, retired) {
 		t.Fatalf("key replay after new work: %+v, %v; want original %+v", replay, err, retired)
@@ -288,7 +288,7 @@ func TestEmptyRetirementBeforeOrganizationInitialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := corpus.Scope{Organization: "new-org", Corpora: []string{"*"}, Actions: []string{"plugins:admin", "corpora:write"}}
-	service := monitoring.Service{Evaluations: postgres.ContentStore{Pool: pool}}
+	service := monitoring.Service{Evaluations: contentStores(pool)}
 	input := monitoring.EvaluationRetirementInput{Key: "empty", PluginID: "alert-rules", Version: "0.1.0", Reason: "Retire an empty batch", DryRun: true}
 	preview, err := service.RetireEvaluations(ctx, scope, input)
 	if err != nil || len(preview.Items) != 0 || preview.CreatedAt != nil {

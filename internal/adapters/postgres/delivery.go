@@ -100,7 +100,7 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, win
 	var enabled, deleted, withdrawn, elapsed bool
 	var later monitoring.Later
 	err = tx.QueryRow(ctx, `SELECT d.state,d.attempt_count,d.destination_id,d.event_id,n.body,m.corpus_id,n.kind,s.enabled,s.deleted,
-  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),
+  `+recordGoneSQL+`,
   `+laterNoticesSQL+`,
   coalesce((SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id)>coalesce(d.window_start,d.created_at)+make_interval(secs => $3::double precision),false)
 FROM deliveries d

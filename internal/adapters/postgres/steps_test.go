@@ -32,8 +32,8 @@ func TestStepTimesAreWrittenOnceByTheirStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ContentStore{Pool: pool}
-	contents := content.Service{Repository: store, Baseline: store}
+	store := contentStores(pool)
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	accept := func(corpusID, key string, manifest *content.Manifest) (content.Command, content.Work) {
 		t.Helper()
 		cmd := content.Command{Key: key, Source: content.Source{CorpusID: corpusID, Namespace: "steps", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Dépêche " + key}}

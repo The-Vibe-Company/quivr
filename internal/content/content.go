@@ -255,12 +255,30 @@ type Work struct {
 	Position, PredecessorID                                    string
 	Command                                                    Command
 }
-type Repository interface {
+
+// SubmissionStore commits validated ingestion and withdrawal commands.
+type SubmissionStore interface {
 	Accept(context.Context, corpus.Scope, Command) (Receipt, error)
 	Withdraw(context.Context, corpus.Scope, Withdrawal) (Receipt, error)
+}
+
+// ReceiptReader reads the durable outcome of one accepted command.
+type ReceiptReader interface {
 	Receipt(context.Context, string, string) (Receipt, error)
+}
+
+// RecordReader reads a stable Record identity and its current Version pointer.
+type RecordReader interface {
 	Record(context.Context, string, string) (Record, error)
+}
+
+// VersionReader reads immutable canonical content and current availability.
+type VersionReader interface {
 	Version(context.Context, string, string, string) (StoredVersion, error)
+}
+
+// MaterializationStore runs the durable publication step for accepted work.
+type MaterializationStore interface {
 	Work(context.Context, string, string) (Work, bool, error)
 	Progress(context.Context, string, string, string, string) error
 	Publish(context.Context, Work, Publication) error
@@ -277,15 +295,19 @@ type Blobs interface {
 	Read(context.Context, Blob) ([]byte, error)
 }
 type Service struct {
-	Corpora    corpus.Store
-	Repository Repository
-	Catalog    RecordCatalog
-	Blobs      Blobs
-	Baseline   BaselineRepository
-	Embeddings EmbeddingRepository
-	BlobSource BlobSource
-	Relations  RelationResolver
-	Extensions ExtensionValidator
+	Corpora         corpus.Store
+	Submissions     SubmissionStore
+	Receipts        ReceiptReader
+	RecordStore     RecordReader
+	Versions        VersionReader
+	Materialization MaterializationStore
+	Catalog         RecordCatalog
+	Blobs           Blobs
+	Baseline        BaselineRepository
+	Embeddings      EmbeddingRepository
+	BlobSource      BlobSource
+	Relations       RelationResolver
+	Extensions      ExtensionValidator
 	// Routes names the Blob media types an external normalizer handles; nil
 	// routes none. Normalizations holds their durable validated output.
 	Routes         NormalizerRoutes
@@ -377,7 +399,7 @@ func (s Service) accept(ctx context.Context, scope corpus.Scope, c Command, reve
 		}
 		c.Position = n.String()
 	}
-	result, err := s.Repository.Accept(ctx, scope, c)
+	result, err := s.Submissions.Accept(ctx, scope, c)
 	if err == nil && result.NewRevision && s.Received != nil {
 		s.Received(scope.Organization, c.Source.Namespace)
 	}
@@ -413,7 +435,7 @@ func (s Service) withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal,
 	if w.Key == "" || w.Source.CorpusID == "" || w.Source.Namespace == "" || w.Source.RecordKey == "" || !ValidText(w.Reason) {
 		return Receipt{}, ErrInvalid
 	}
-	result, err := s.Repository.Withdraw(ctx, scope, w)
+	result, err := s.Submissions.Withdraw(ctx, scope, w)
 	if !reveal {
 		result.RecordID = ""
 		result.VersionID = ""
@@ -617,7 +639,7 @@ func (s Service) Receipt(ctx context.Context, scope corpus.Scope, id string) (Re
 	if err := scope.Require(corpus.ActionContentReceipt); err != nil {
 		return Receipt{}, err
 	}
-	r, err := s.Repository.Receipt(ctx, scope.Organization, id)
+	r, err := s.Receipts.Receipt(ctx, scope.Organization, id)
 	if err == nil && !scope.Contains(r.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
@@ -631,7 +653,7 @@ func (s Service) Record(ctx context.Context, scope corpus.Scope, id string) (Rec
 }
 
 func (s Service) record(ctx context.Context, scope corpus.Scope, id string) (Record, error) {
-	r, err := s.Repository.Record(ctx, scope.Organization, id)
+	r, err := s.RecordStore.Record(ctx, scope.Organization, id)
 	if err == nil && !scope.Contains(r.Source.CorpusID) {
 		return Record{}, corpus.ErrNotFound
 	}
@@ -680,7 +702,7 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 }
 
 func (s Service) version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
-	stored, err := s.Repository.Version(ctx, scope.Organization, recordID, id)
+	stored, err := s.Versions.Version(ctx, scope.Organization, recordID, id)
 	if err != nil {
 		return Version{}, err
 	}
@@ -829,11 +851,11 @@ func NewerPosition(incoming, existing string) bool {
 
 // Materialize performs I/O outside publication's canonical transaction.
 func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
-	work, done, err := s.Repository.Work(ctx, org, receiptID)
+	work, done, err := s.Materialization.Work(ctx, org, receiptID)
 	if err != nil || done {
 		return err
 	}
-	if err = s.Repository.Progress(ctx, org, receiptID, "running", ""); err != nil {
+	if err = s.Materialization.Progress(ctx, org, receiptID, "running", ""); err != nil {
 		return err
 	}
 	manifest := ManifestFor(work.Command)
@@ -843,8 +865,8 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 		if errors.Is(err, errWithdrawn) {
 			// A withdrawn Record never publishes: publication resolves the
 			// receipt as a conflict without reading any object.
-			if err = s.Repository.Publish(ctx, work, Publication{}); err != nil {
-				_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
+			if err = s.Materialization.Publish(ctx, work, Publication{}); err != nil {
+				_ = s.Materialization.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
 				return errors.New("canonical transaction unavailable")
 			}
 			return nil
@@ -854,18 +876,18 @@ func (s Service) Materialize(ctx context.Context, org, receiptID string) error {
 			if errors.Is(err, ErrNormalizationPending) {
 				code = "normalization_pending"
 			}
-			_ = s.Repository.Progress(ctx, org, receiptID, "retrying", code)
+			_ = s.Materialization.Progress(ctx, org, receiptID, "retrying", code)
 			return err
 		}
 	}
 	publication, err := s.objects(ctx, org, manifest)
 	if err != nil {
-		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
+		_ = s.Materialization.Progress(ctx, org, receiptID, "retrying", "blob_verification_unavailable")
 		return err
 	}
 	publication.Quarantine = quarantine
-	if err = s.Repository.Publish(ctx, work, publication); err != nil {
-		_ = s.Repository.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
+	if err = s.Materialization.Publish(ctx, work, publication); err != nil {
+		_ = s.Materialization.Progress(ctx, org, receiptID, "retrying", "publication_unavailable")
 		return errors.New("canonical transaction unavailable")
 	}
 	return nil
@@ -912,7 +934,7 @@ var ErrRepublicationWithdrawn = errors.New("record withdrawn")
 // never writes the Version; it is ErrNormalizationPending while no outcome is
 // recorded and ErrRepublicationWithdrawn for a withdrawn Record.
 func (s Service) Republication(ctx context.Context, org, receiptID string) (Work, Publication, *Diagnostic, error) {
-	work, _, err := s.Repository.Work(ctx, org, receiptID)
+	work, _, err := s.Materialization.Work(ctx, org, receiptID)
 	if err != nil {
 		return work, Publication{}, nil, err
 	}

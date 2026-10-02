@@ -691,7 +691,7 @@ func (s ContentStore) Delivery(ctx context.Context, org, id string) (monitoring.
 	var kind string
 	var next *time.Time
 	err := s.Pool.QueryRow(ctx, `SELECT d.id,d.match_id,m.subscription_id,d.destination_id,d.state,d.attempt_count,n.body,n.kind,s.enabled,s.deleted,
-  r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),`+laterNoticesSQL+`,
+  `+recordGoneSQL+`,`+laterNoticesSQL+`,
   d.last_outcome,coalesce(last.error_code,''),coalesce(last.error_message,''),
   (SELECT o.available_at FROM delivery_outbox o WHERE o.organization=d.organization AND o.delivery_id=d.id AND o.available_at<'infinity')
 FROM deliveries d

@@ -347,7 +347,11 @@ func Run(command string) error {
 	rollups := postgres.ObservabilityStore{Pool: pool}
 	recorder := observability.NewRecorder(rollups, cfg.Observability, command == "worker")
 	// Normalizer routes and extension namespaces follow the plan.
-	contents := content.Service{Repository: store, Catalog: store, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: store, Extensions: live, Normalizations: store, Supersession: store, Routes: live,
+	submissions := postgres.SubmissionStore{Pool: pool}
+	receipts := postgres.ReceiptStore{Pool: pool}
+	records := postgres.RecordStore{Pool: pool}
+	versions := postgres.VersionStore{Pool: pool}
+	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: store, Catalog: records, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: records, Extensions: live, Normalizations: store, Supersession: store, Routes: live,
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: store, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
@@ -387,7 +391,7 @@ func Run(command string) error {
 		return nil
 	}
 	connectorStore := postgres.ConnectorStore{ContentStore: store}
-	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{PublicURL: cfg.PublicURL, Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: store}}
+	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{PublicURL: cfg.PublicURL, Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: receipts}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error { return postgres.SchemaReady(ctx, pool) }
 	// The api is ready once its query encoding is warm, or warmBound passed.

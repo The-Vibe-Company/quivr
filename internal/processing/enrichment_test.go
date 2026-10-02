@@ -15,7 +15,9 @@ import (
 // oneVersion is a Version already searchable by keyword, waiting for its
 // vectors: the content store as enrichment reads and updates it.
 type oneVersion struct {
-	content.Repository
+	content.ReceiptReader
+	content.RecordReader
+	content.VersionReader
 	content.EmbeddingRepository
 	progress []string
 	timeouts int
@@ -85,7 +87,7 @@ func TestEnrichmentStopsAfterRepeatedPluginDeadlines(t *testing.T) {
 		errs = append(errs, deadline)
 	}
 	p := &plugin{errs: errs}
-	service := processing.Service{Content: content.Service{Repository: store, Blobs: store, Embeddings: store},
+	service := processing.Service{Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
 		Plugin: &processing.PluginDeriver{Plugin: p}, Routing: served{}}
 	var results []error
 	for len(p.errs) > 0 {
@@ -117,7 +119,7 @@ func TestEnrichmentAlreadySucceededEndsTheRetry(t *testing.T) {
 	enriched := time.Now()
 	store := &oneVersion{enriched: &enriched}
 	p := &plugin{errs: []error{errors.New("derived on another plan: projection missing")}}
-	service := processing.Service{Content: content.Service{Repository: store, Blobs: store, Embeddings: store},
+	service := processing.Service{Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
 		Plugin: &processing.PluginDeriver{Plugin: p}, Routing: served{}}
 	if err := service.Enrich(context.Background(), "org", "receipt"); err != nil {
 		t.Fatalf("retried enrichment of an enriched Version: %v; want it to end", err)
