@@ -72,10 +72,13 @@ var (
 	ErrOperationSuperseded = errors.New("operation_superseded")
 )
 
-// commandPermissions names, per controllable Operation kind, the permission of
-// the command that created it. Rerun revalidates it. Register a kind only once
-// its worker honors cancel_requested and the store can create its rerun target.
-var commandPermissions = map[string]string{KindProjectionRebuild: "projections:rebuild", KindRetrievalConfiguration: "corpora:write", KindBackfill: BackfillPermission, KindQuarantineReprocess: BackfillPermission}
+// controlActions ties operation controls to the command that created the work.
+var controlActions = map[string]struct{ Pause, Resume, Rerun corpus.Action }{
+	KindProjectionRebuild:      {Rerun: corpus.ActionOperationRerunRebuild},
+	KindRetrievalConfiguration: {Rerun: corpus.ActionOperationRerunRetrieval},
+	KindBackfill:               {corpus.ActionOperationPauseBackfill, corpus.ActionOperationResumeBackfill, corpus.ActionOperationRerunBackfill},
+	KindQuarantineReprocess:    {corpus.ActionOperationPauseReprocess, corpus.ActionOperationResumeReprocess, corpus.ActionOperationRerunReprocess},
+}
 
 // BackfillPermission is the operator permission that starts, pauses and
 // resumes backfills and quarantine reprocessing: the plugin registry's
@@ -212,9 +215,20 @@ type Store interface {
 type Service struct{ Store Store }
 
 // RequestRebuild authorizes and durably accepts a scoped projection rebuild.
-func (s Service) RequestRebuild(ctx context.Context, scope corpus.Scope, corpusID, key string) (Operation, error) {
-	if !scope.Allows("projections:rebuild") {
-		return Operation{}, corpus.ErrForbidden
+func (s Service) RequestRebuild(ctx context.Context, scope corpus.Scope, corpusID, key string, prepare ...func() (string, string, error)) (Operation, error) {
+	if err := scope.Require(corpus.ActionOperationsRequestRebuild); err != nil {
+		return Operation{}, err
+	}
+	if corpusID == "" || !scope.Contains(corpusID) {
+		return Operation{}, corpus.ErrNotFound
+	}
+
+	for _, load := range prepare {
+		var err error
+		corpusID, key, err = load()
+		if err != nil {
+			return Operation{}, err
+		}
 	}
 	if corpusID == "" || !scope.Contains(corpusID) {
 		return Operation{}, corpus.ErrNotFound
@@ -231,9 +245,20 @@ func (s Service) RequestRebuild(ctx context.Context, scope corpus.Scope, corpusI
 // ConfigureRetrieval authorizes and durably accepts a resolved retrieval
 // configuration change. The Corpus keeps serving its prior configuration until
 // the replacement generation is validated and routed.
-func (s Service) ConfigureRetrieval(ctx context.Context, scope corpus.Scope, corpusID, key string, cfg corpus.Retrieval) (Operation, error) {
-	if !scope.Allows("corpora:write") || !scope.Allows("operations:write") {
-		return Operation{}, corpus.ErrForbidden
+func (s Service) ConfigureRetrieval(ctx context.Context, scope corpus.Scope, corpusID, key string, cfg corpus.Retrieval, prepare ...func() (string, string, corpus.Retrieval, error)) (Operation, error) {
+	if err := scope.Require(corpus.ActionOperationsConfigureRetrieval); err != nil {
+		return Operation{}, err
+	}
+	if corpusID == "" || !scope.Contains(corpusID) {
+		return Operation{}, corpus.ErrNotFound
+	}
+
+	for _, load := range prepare {
+		var err error
+		corpusID, key, cfg, err = load()
+		if err != nil {
+			return Operation{}, err
+		}
 	}
 	if corpusID == "" || !scope.Contains(corpusID) {
 		return Operation{}, corpus.ErrNotFound
@@ -257,8 +282,8 @@ func (s Service) ConfigureRetrieval(ctx context.Context, scope corpus.Scope, cor
 
 // Read conceals Operations whose Corpus lies outside the caller's scope.
 func (s Service) Read(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
-	if !scope.Allows("operations:read") {
-		return Operation{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionOperationsRead); err != nil {
+		return Operation{}, err
 	}
 	op, err := s.Store.Operation(ctx, scope.Organization, id)
 	if err != nil {
@@ -272,9 +297,6 @@ func (s Service) Read(ctx context.Context, scope corpus.Scope, id string) (Opera
 
 // controlled loads an Operation the caller may act on with operations:write.
 func (s Service) controlled(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
-	if !scope.Allows("operations:write") {
-		return Operation{}, corpus.ErrForbidden
-	}
 	op, err := s.Store.Operation(ctx, scope.Organization, id)
 	if err != nil {
 		return Operation{}, err
@@ -282,7 +304,7 @@ func (s Service) controlled(ctx context.Context, scope corpus.Scope, id string) 
 	if !scope.Contains(op.CorpusID) {
 		return Operation{}, corpus.ErrNotFound
 	}
-	if _, ok := commandPermissions[op.Kind]; !ok {
+	if _, ok := controlActions[op.Kind]; !ok {
 		return Operation{}, ErrUnsupportedKind
 	}
 	return op, nil
@@ -291,7 +313,17 @@ func (s Service) controlled(ctx context.Context, scope corpus.Scope, id string) 
 // Cancel stops remaining work without undoing committed effects. Idempotency
 // follows Operation state: repeating the request, with any key, returns the
 // current state, and a terminal Operation keeps its outcome.
-func (s Service) Cancel(ctx context.Context, scope corpus.Scope, id, key string) (Operation, error) {
+func (s Service) Cancel(ctx context.Context, scope corpus.Scope, id, key string, prepare ...func() (string, string, error)) (Operation, error) {
+	if err := scope.Require(corpus.ActionOperationCancel); err != nil {
+		return Operation{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, key, err = load()
+		if err != nil {
+			return Operation{}, err
+		}
+	}
 	if _, err := s.controlled(ctx, scope, id); err != nil {
 		return Operation{}, err
 	}
@@ -301,16 +333,48 @@ func (s Service) Cancel(ctx context.Context, scope corpus.Scope, id, key string)
 // Pause holds a pausable Operation (a backfill) until it is resumed, without
 // undoing what it committed. Like cancel, repeating it returns the current
 // state, and a terminal Operation keeps its outcome.
-func (s Service) Pause(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
-	if _, err := s.pausable(ctx, scope, id); err != nil {
+func (s Service) Pause(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (Operation, error) {
+	var op Operation
+	err := scope.Require(corpus.ActionOperationPause, func() (corpus.Action, error) {
+		for _, load := range prepare {
+			var err error
+			id, err = load()
+			if err != nil {
+				return "", err
+			}
+		}
+		var err error
+		op, err = s.pausable(ctx, scope, id)
+		if err != nil {
+			return "", err
+		}
+		return controlActions[op.Kind].Pause, nil
+	})
+	if err != nil {
 		return Operation{}, err
 	}
 	return s.Store.PauseOperation(ctx, scope.Organization, id)
 }
 
 // Resume lets a paused Operation continue from its checkpoint.
-func (s Service) Resume(ctx context.Context, scope corpus.Scope, id string) (Operation, error) {
-	if _, err := s.pausable(ctx, scope, id); err != nil {
+func (s Service) Resume(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (Operation, error) {
+	var op Operation
+	err := scope.Require(corpus.ActionOperationResume, func() (corpus.Action, error) {
+		for _, load := range prepare {
+			var err error
+			id, err = load()
+			if err != nil {
+				return "", err
+			}
+		}
+		var err error
+		op, err = s.pausable(ctx, scope, id)
+		if err != nil {
+			return "", err
+		}
+		return controlActions[op.Kind].Resume, nil
+	})
+	if err != nil {
 		return Operation{}, err
 	}
 	return s.Store.ResumeOperation(ctx, scope.Organization, id)
@@ -326,21 +390,30 @@ func (s Service) pausable(ctx context.Context, scope corpus.Scope, id string) (O
 	if !pausable[op.Kind] {
 		return Operation{}, ErrUnsupportedKind
 	}
-	if !scope.Allows(commandPermissions[op.Kind]) {
-		return Operation{}, corpus.ErrForbidden
-	}
 	return op, nil
 }
 
 // Rerun intentionally repeats a terminal Operation under a new linked identity,
 // revalidating the caller's current command permission and Corpus scope.
-func (s Service) Rerun(ctx context.Context, scope corpus.Scope, id, key string) (Operation, error) {
-	op, err := s.controlled(ctx, scope, id)
+func (s Service) Rerun(ctx context.Context, scope corpus.Scope, id, key string, prepare ...func() (string, string, error)) (Operation, error) {
+	var op Operation
+	err := scope.Require(corpus.ActionOperationRerun, func() (corpus.Action, error) {
+		for _, load := range prepare {
+			var err error
+			id, key, err = load()
+			if err != nil {
+				return "", err
+			}
+		}
+		var err error
+		op, err = s.controlled(ctx, scope, id)
+		if err != nil {
+			return "", err
+		}
+		return controlActions[op.Kind].Rerun, nil
+	})
 	if err != nil {
 		return Operation{}, err
-	}
-	if !scope.Allows(commandPermissions[op.Kind]) {
-		return Operation{}, corpus.ErrForbidden
 	}
 	canonical, err := json.Marshal(struct {
 		Key    string `json:"idempotency_key"`

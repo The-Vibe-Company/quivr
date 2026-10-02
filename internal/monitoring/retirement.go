@@ -74,9 +74,16 @@ func evaluationScope(scope corpus.Scope) []string {
 	return slices.Compact(corpora)
 }
 
-func (s Service) EvaluationBacklog(ctx context.Context, scope corpus.Scope, after string, limit int) (EvaluationBacklogPage, error) {
-	if !scope.Allows(MigrationAction) {
-		return EvaluationBacklogPage{}, ErrForbidden
+func (s Service) EvaluationBacklog(ctx context.Context, scope corpus.Scope, after string, limit int, prepare ...func() (string, int, error)) (EvaluationBacklogPage, error) {
+	if err := scope.Require(corpus.ActionMonitoringEvaluationBacklog); err != nil {
+		return EvaluationBacklogPage{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		after, limit, err = load()
+		if err != nil {
+			return EvaluationBacklogPage{}, err
+		}
 	}
 	if s.Evaluations == nil {
 		return EvaluationBacklogPage{}, ErrNotFound
@@ -98,9 +105,16 @@ func (s Service) EvaluationBacklog(ctx context.Context, scope corpus.Scope, afte
 	return page, nil
 }
 
-func (s Service) RetireEvaluations(ctx context.Context, scope corpus.Scope, in EvaluationRetirementInput) (EvaluationRetirement, error) {
-	if !scope.Allows(MigrationAction) {
-		return EvaluationRetirement{}, ErrForbidden
+func (s Service) RetireEvaluations(ctx context.Context, scope corpus.Scope, in EvaluationRetirementInput, prepare ...func() (EvaluationRetirementInput, error)) (EvaluationRetirement, error) {
+	if err := scope.Require(corpus.ActionMonitoringRetireEvaluations); err != nil {
+		return EvaluationRetirement{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return EvaluationRetirement{}, err
+		}
 	}
 	if s.Evaluations == nil {
 		return EvaluationRetirement{}, ErrNotFound
@@ -114,9 +128,16 @@ func (s Service) RetireEvaluations(ctx context.Context, scope corpus.Scope, in E
 	return s.Evaluations.RetireEvaluations(ctx, scope.Organization, evaluationScope(scope), in)
 }
 
-func (s Service) EvaluationRetirement(ctx context.Context, scope corpus.Scope, id string) (EvaluationRetirement, error) {
-	if !scope.Allows(MigrationAction) {
-		return EvaluationRetirement{}, ErrForbidden
+func (s Service) EvaluationRetirement(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (EvaluationRetirement, error) {
+	if err := scope.Require(corpus.ActionMonitoringEvaluationRetirement); err != nil {
+		return EvaluationRetirement{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, err = load()
+		if err != nil {
+			return EvaluationRetirement{}, err
+		}
 	}
 	if s.Evaluations == nil {
 		return EvaluationRetirement{}, ErrNotFound

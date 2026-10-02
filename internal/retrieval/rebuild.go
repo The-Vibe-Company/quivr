@@ -50,7 +50,7 @@ type RebuildStore interface {
 
 // RebuildContent reads canonical Versions.
 type RebuildContent interface {
-	Version(ctx context.Context, scope corpus.Scope, recordID, versionID string) (content.Version, error)
+	TrustedVersion(ctx context.Context, org, corpusID, recordID, versionID string) (content.Version, error)
 }
 
 // SpaceDeriver derives a Version's segmentation and its vectors through the
@@ -151,7 +151,7 @@ func (r Rebuilder) stop(ctx context.Context, org, operationID string) (bool, err
 
 func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, c RebuildCandidate) error {
 	corpusID := target.Operation.CorpusID
-	v, err := r.Content.Version(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{corpusID}}, c.RecordID, c.VersionID)
+	v, err := r.Content.TrustedVersion(ctx, org, corpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) {
 		return nil // Withdrawn meanwhile; the next candidate listing excludes it.
 	}

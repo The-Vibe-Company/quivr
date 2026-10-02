@@ -44,8 +44,6 @@ func (a *API) quarantineRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		writeError(w, publicerr.MethodNotAllowed, nil)
 	case a.Quarantine == nil:
 		writeError(w, publicerr.NotFound, nil)
-	case !scope.Allows(operations.BackfillPermission):
-		writeError(w, publicerr.Forbidden, nil)
 	case method == "GET":
 		a.listQuarantine(w, r, scope)
 	default:
@@ -92,57 +90,66 @@ func (a *API) decodeQuarantinePage(token, binding string) (string, error) {
 }
 
 func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	q := r.URL.Query()
+	var limit int
+	var ok bool
+	var binding string
 	var f quarantine.Filter
-	for k, v := range q {
-		// An empty limit or page cursor gets its own code below, as on every list.
-		if len(v) != 1 || (v[0] == "" && k != "limit" && k != "page_cursor") {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
-		}
-		switch k {
-		case "corpus_id":
-			f.CorpusID = v[0]
-		case "plugin":
-			f.Plugin = v[0]
-		case "code":
-			f.Code = v[0]
-		case "quarantined_after", "quarantined_before":
-			t, err := time.Parse(time.RFC3339Nano, v[0])
-			if err != nil {
+	entries, err := a.Quarantine.List(r.Context(), scope, quarantine.Filter{}, "", 0, func() (quarantine.Filter, string, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			// An empty limit or page cursor gets its own code below, as on every list.
+			if len(v) != 1 || (v[0] == "" && k != "limit" && k != "page_cursor") {
 				writeError(w, publicerr.InvalidQuery, nil)
-				return
+				return quarantine.Filter{}, "", 0, errResponseWritten
 			}
-			t = t.UTC()
-			if k == "quarantined_after" {
-				f.After = &t
-			} else {
-				f.Before = &t
+			switch k {
+			case "corpus_id":
+				f.CorpusID = v[0]
+			case "plugin":
+				f.Plugin = v[0]
+			case "code":
+				f.Code = v[0]
+			case "quarantined_after", "quarantined_before":
+				t, err := time.Parse(time.RFC3339Nano, v[0])
+				if err != nil {
+					writeError(w, publicerr.InvalidQuery, nil)
+					return quarantine.Filter{}, "", 0, errResponseWritten
+				}
+				t = t.UTC()
+				if k == "quarantined_after" {
+					f.After = &t
+				} else {
+					f.Before = &t
+				}
+			case "limit", "page_cursor":
+			default:
+				writeError(w, publicerr.InvalidQuery, nil)
+				return quarantine.Filter{}, "", 0, errResponseWritten
 			}
-		case "limit", "page_cursor":
-		default:
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
 		}
-	}
-	limit, ok := pageLimit(w, q, quarantine.MaxPage, quarantine.MaxPage)
-	if !ok {
+		limit, ok = pageLimit(w, q, quarantine.MaxPage, quarantine.MaxPage)
+		if !ok {
+			return quarantine.Filter{}, "", 0, errResponseWritten
+		}
+		binding = quarantineBinding(scope, f)
+		after := ""
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeQuarantinePage(q.Get("page_cursor"), binding); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil)
+				return quarantine.Filter{}, "", 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return quarantine.Filter{}, "", 0, errResponseWritten
+			}
+		}
+		// One more than the page tells whether another follows.
+
+		return f, after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	binding := quarantineBinding(scope, f)
-	after := ""
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeQuarantinePage(q.Get("page_cursor"), binding); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil)
-			return
-		} else if err != nil {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
-		}
-	}
-	// One more than the page tells whether another follows.
-	entries, err := a.Quarantine.List(r.Context(), scope, f, after, limit+1)
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)
@@ -174,11 +181,17 @@ type reprocessRequest struct {
 
 func (a *API) requestReprocess(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in reprocessRequest
-	if !decodeInto(w, r, a.reprocessSchema, &in) {
+	estimate, op, err := a.Quarantine.Request(r.Context(), scope, quarantine.Request{}, func() (quarantine.Request, error) {
+		if !decodeInto(w, r, a.reprocessSchema, &in) {
+			return quarantine.Request{}, errResponseWritten
+		}
+		f := quarantine.Filter{CorpusID: in.CorpusID, Plugin: in.Plugin, Code: in.Code, After: in.QuarantinedAfter, Before: in.QuarantinedBefore}
+
+		return quarantine.Request{Key: in.IdempotencyKey, Filter: f, DryRun: in.DryRun}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	f := quarantine.Filter{CorpusID: in.CorpusID, Plugin: in.Plugin, Code: in.Code, After: in.QuarantinedAfter, Before: in.QuarantinedBefore}
-	estimate, op, err := a.Quarantine.Request(r.Context(), scope, quarantine.Request{Key: in.IdempotencyKey, Filter: f, DryRun: in.DryRun})
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)

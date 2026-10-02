@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,31 +45,33 @@ func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 	if len(path) >= 2 && path[0] == "v0" && path[1] == "uploads" {
 		switch {
 		case len(path) == 2 && r.Method == http.MethodPost:
-			if !scope.Allows("blobs:write") {
-				writeError(w, publicerr.Forbidden, nil)
-				return true
-			}
-			raw, ok := decodeRequest(w, r, a.uploadSchema)
-			if !ok {
-				return true
-			}
-			b, err := json.Marshal(raw)
-			if err != nil {
-				writeError(w, publicerr.InvalidSchema, nil)
-				return true
-			}
 			var wire transport.UploadRequest
-			if err = json.Unmarshal(b, &wire); err != nil {
-				writeError(w, publicerr.InvalidSchema, nil)
+			session, err := a.Uploads.CreateScoped(r.Context(), scope, uploads.Request{}, func() (uploads.Request, error) {
+				raw, ok := decodeRequest(w, r, a.uploadSchema)
+				if !ok {
+					return uploads.Request{}, errResponseWritten
+				}
+				b, err := json.Marshal(raw)
+				if err != nil {
+					writeError(w, publicerr.InvalidSchema, nil)
+					return uploads.Request{}, errResponseWritten
+				}
+				if err = json.Unmarshal(b, &wire); err != nil {
+					writeError(w, publicerr.InvalidSchema, nil)
+					return uploads.Request{}, errResponseWritten
+				}
+				req := uploads.Request{
+					Key:       wire.Sha256 + ":" + strconv.FormatInt(int64(wire.SizeBytes), 10) + ":" + wire.MediaType,
+					SizeBytes: int64(wire.SizeBytes),
+					SHA256:    wire.Sha256,
+					MediaType: wire.MediaType,
+				}
+
+				return req, nil
+			})
+			if errors.Is(err, errResponseWritten) {
 				return true
 			}
-			req := uploads.Request{
-				Key:       wire.Sha256 + ":" + strconv.FormatInt(int64(wire.SizeBytes), 10) + ":" + wire.MediaType,
-				SizeBytes: int64(wire.SizeBytes),
-				SHA256:    wire.Sha256,
-				MediaType: wire.MediaType,
-			}
-			session, err := a.Uploads.Create(r.Context(), scope.Organization, req)
 			if err != nil {
 				writeError(w, err, publicerr.StorageUnavailable)
 			} else {
@@ -76,11 +79,7 @@ func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 			}
 			return true
 		case len(path) == 3 && r.Method == http.MethodGet:
-			if !scope.Allows("blobs:read") {
-				writeError(w, publicerr.Forbidden, nil)
-				return true
-			}
-			session, err := a.Uploads.Get(r.Context(), scope.Organization, path[2])
+			session, err := a.Uploads.GetScoped(r.Context(), scope, path[2])
 			if err != nil {
 				writeError(w, err, publicerr.StorageUnavailable)
 			} else {
@@ -88,11 +87,7 @@ func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 			}
 			return true
 		case len(path) == 4 && path[3] == "confirm" && r.Method == http.MethodPost:
-			if !scope.Allows("blobs:write") {
-				writeError(w, publicerr.Forbidden, nil)
-				return true
-			}
-			session, err := a.Uploads.Confirm(r.Context(), scope.Organization, path[2])
+			session, err := a.Uploads.ConfirmScoped(r.Context(), scope, path[2])
 			if err != nil {
 				writeError(w, err, publicerr.StorageUnavailable)
 			} else {
@@ -104,11 +99,7 @@ func (a *API) uploadRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 		return false
 	}
 	if len(path) == 3 && path[0] == "v0" && path[1] == "blobs" && r.Method == http.MethodGet {
-		if !scope.Allows("blobs:read") {
-			writeError(w, publicerr.Forbidden, nil)
-			return true
-		}
-		blob, err := a.Uploads.Blob(r.Context(), scope.Organization, path[2])
+		blob, err := a.Uploads.BlobScoped(r.Context(), scope, path[2])
 		if err != nil {
 			writeError(w, err, publicerr.StorageUnavailable)
 		} else {

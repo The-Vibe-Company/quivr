@@ -161,9 +161,16 @@ type CredentialInput struct {
 func validText(s string) bool { return s != "" && utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 
 // Create validates and persists a Connector Instance; a replay returns it.
-func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput) (Instance, error) {
-	if !scope.Allows("connectors:write") {
-		return Instance{}, corpus.ErrForbidden
+func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput, prepare ...func() (CreateInput, error)) (Instance, error) {
+	if err := scope.Require(corpus.ActionConnectorsCreate); err != nil {
+		return Instance{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return Instance{}, err
+		}
 	}
 	if !scope.Contains(in.CorpusID) {
 		return Instance{}, corpus.ErrNotFound
@@ -232,8 +239,8 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 
 // Read returns an authorized instance; any other is not found.
 func (s Service) Read(ctx context.Context, scope corpus.Scope, id string) (Instance, error) {
-	if !scope.Allows("connectors:read") {
-		return Instance{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionConnectorsRead); err != nil {
+		return Instance{}, err
 	}
 	return s.authorized(ctx, scope, id)
 }
@@ -247,9 +254,16 @@ func (s Service) authorized(ctx context.Context, scope corpus.Scope, id string) 
 }
 
 // List returns authorized instances after a keyset position.
-func (s Service) List(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]Instance, error) {
-	if !scope.Allows("connectors:read") {
-		return nil, corpus.ErrForbidden
+func (s Service) List(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int, prepare ...func() (string, string, int, error)) ([]Instance, error) {
+	if err := scope.Require(corpus.ActionConnectorsList); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		corpusID, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if corpusID != "" && !scope.Contains(corpusID) {
 		return []Instance{}, nil
@@ -258,9 +272,16 @@ func (s Service) List(ctx context.Context, scope corpus.Scope, corpusID, after s
 }
 
 // Disable stops scheduling; it is idempotent and absorbing.
-func (s Service) Disable(ctx context.Context, scope corpus.Scope, id string) (Instance, error) {
-	if !scope.Allows("connectors:write") {
-		return Instance{}, corpus.ErrForbidden
+func (s Service) Disable(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (Instance, error) {
+	if err := scope.Require(corpus.ActionConnectorsDisable); err != nil {
+		return Instance{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, err = load()
+		if err != nil {
+			return Instance{}, err
+		}
 	}
 	if _, err := s.authorized(ctx, scope, id); err != nil {
 		return Instance{}, err
@@ -269,9 +290,16 @@ func (s Service) Disable(ctx context.Context, scope corpus.Scope, id string) (In
 }
 
 // ReplaceCredential deposits a new credential version.
-func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id string, in CredentialInput) (Instance, error) {
-	if !scope.Allows("connectors:write") {
-		return Instance{}, corpus.ErrForbidden
+func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id string, in CredentialInput, prepare ...func() (string, CredentialInput, error)) (Instance, error) {
+	if err := scope.Require(corpus.ActionConnectorsReplaceCredential); err != nil {
+		return Instance{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, in, err = load()
+		if err != nil {
+			return Instance{}, err
+		}
 	}
 	inst, err := s.authorized(ctx, scope, id)
 	if err != nil {
@@ -309,17 +337,24 @@ func (s Service) ReplaceCredential(ctx context.Context, scope corpus.Scope, id s
 
 // Kinds describes the enabled kinds and whether credentials can be deposited.
 func (s Service) Kinds(scope corpus.Scope) (Catalog, error) {
-	if !scope.Allows("connectors:read") {
-		return Catalog{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionConnectorsKinds); err != nil {
+		return Catalog{}, err
 	}
 	return Catalog{Kinds: s.Registry.Describe(), CredentialDeposits: s.Sealer.CanSeal(), MinInterval: s.minInterval()}, nil
 }
 
 // ChangeSchedule sets the polling interval. Setting the current value is a
 // no-op, so repeating the request is harmless.
-func (s Service) ChangeSchedule(ctx context.Context, scope corpus.Scope, id string, seconds int) (Instance, error) {
-	if !scope.Allows("connectors:write") {
-		return Instance{}, corpus.ErrForbidden
+func (s Service) ChangeSchedule(ctx context.Context, scope corpus.Scope, id string, seconds int, prepare ...func() (string, int, error)) (Instance, error) {
+	if err := scope.Require(corpus.ActionConnectorsChangeSchedule); err != nil {
+		return Instance{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, seconds, err = load()
+		if err != nil {
+			return Instance{}, err
+		}
 	}
 	if _, err := s.authorized(ctx, scope, id); err != nil {
 		return Instance{}, err
@@ -343,9 +378,16 @@ type RunRequest struct {
 // deployment floor still separates two runs and a source's Retry-After still
 // holds, so a request cannot poll a source faster than a schedule could.
 // Repeating it changes nothing; a run already in flight answers it.
-func (s Service) RequestRun(ctx context.Context, scope corpus.Scope, id, key string) (RunRequest, error) {
-	if !scope.Allows("connectors:write") {
-		return RunRequest{}, corpus.ErrForbidden
+func (s Service) RequestRun(ctx context.Context, scope corpus.Scope, id, key string, prepare ...func() (string, string, error)) (RunRequest, error) {
+	if err := scope.Require(corpus.ActionConnectorsRequestRun); err != nil {
+		return RunRequest{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, key, err = load()
+		if err != nil {
+			return RunRequest{}, err
+		}
 	}
 	if _, err := s.authorized(ctx, scope, id); err != nil {
 		return RunRequest{}, err

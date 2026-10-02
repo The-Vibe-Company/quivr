@@ -72,9 +72,6 @@ func newInstanceToken() (IssuedToken, TokenDeposit, error) {
 }
 
 func (s Service) tokenInstance(ctx context.Context, scope corpus.Scope, id string, enabled bool) error {
-	if !scope.Allows(ActionConnectorAdmin) {
-		return corpus.ErrForbidden
-	}
 	instance, err := s.authorized(ctx, scope, id)
 	if err != nil {
 		return err
@@ -88,7 +85,20 @@ func (s Service) tokenInstance(ctx context.Context, scope corpus.Scope, id strin
 	return nil
 }
 
-func (s Service) CreateToken(ctx context.Context, scope corpus.Scope, id string) (IssuedToken, error) {
+func (s Service) CreateToken(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (IssuedToken, error) {
+	if err := scope.Require(corpus.ActionConnectorCreateToken); err != nil {
+		return IssuedToken{}, err
+	}
+	if s.Store == nil {
+		return IssuedToken{}, corpus.ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		id, err = load()
+		if err != nil {
+			return IssuedToken{}, err
+		}
+	}
 	if err := s.tokenInstance(ctx, scope, id, true); err != nil {
 		return IssuedToken{}, err
 	}
@@ -103,7 +113,20 @@ func (s Service) CreateToken(ctx context.Context, scope corpus.Scope, id string)
 	return issued, nil
 }
 
-func (s Service) ListTokens(ctx context.Context, scope corpus.Scope, id, after string, limit int) ([]TokenInfo, error) {
+func (s Service) ListTokens(ctx context.Context, scope corpus.Scope, id, after string, limit int, prepare ...func() (string, string, int, error)) ([]TokenInfo, error) {
+	if err := scope.Require(corpus.ActionConnectorListToken); err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, corpus.ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		id, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := s.tokenInstance(ctx, scope, id, false); err != nil {
 		return nil, err
 	}
@@ -114,7 +137,20 @@ func (s Service) ListTokens(ctx context.Context, scope corpus.Scope, id, after s
 	return s.Tokens.ListInstanceTokens(ctx, scope.Organization, id, after, limit)
 }
 
-func (s Service) RotateToken(ctx context.Context, scope corpus.Scope, id, tokenID string) (IssuedToken, error) {
+func (s Service) RotateToken(ctx context.Context, scope corpus.Scope, id, tokenID string, prepare ...func() (string, string, error)) (IssuedToken, error) {
+	if err := scope.Require(corpus.ActionConnectorRotateToken); err != nil {
+		return IssuedToken{}, err
+	}
+	if s.Store == nil {
+		return IssuedToken{}, corpus.ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		id, tokenID, err = load()
+		if err != nil {
+			return IssuedToken{}, err
+		}
+	}
 	if err := s.tokenInstance(ctx, scope, id, true); err != nil {
 		return IssuedToken{}, err
 	}
@@ -129,7 +165,20 @@ func (s Service) RotateToken(ctx context.Context, scope corpus.Scope, id, tokenI
 	return issued, nil
 }
 
-func (s Service) RevokeToken(ctx context.Context, scope corpus.Scope, id, tokenID string) (TokenInfo, error) {
+func (s Service) RevokeToken(ctx context.Context, scope corpus.Scope, id, tokenID string, prepare ...func() (string, string, error)) (TokenInfo, error) {
+	if err := scope.Require(corpus.ActionConnectorRevokeToken); err != nil {
+		return TokenInfo{}, err
+	}
+	if s.Store == nil {
+		return TokenInfo{}, corpus.ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		id, tokenID, err = load()
+		if err != nil {
+			return TokenInfo{}, err
+		}
+	}
 	if err := s.tokenInstance(ctx, scope, id, false); err != nil {
 		return TokenInfo{}, err
 	}

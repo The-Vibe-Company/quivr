@@ -71,10 +71,6 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	}
-	if !scope.Allows("monitoring:read") {
-		writeError(w, publicerr.Forbidden, nil)
-		return true
-	}
 	ctx := r.Context()
 	switch resource {
 	case "match":
@@ -101,38 +97,47 @@ func (a *API) matchRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 }
 
 func (a *API) listMatches(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	q := r.URL.Query()
-	for k, v := range q {
-		if (k != "subscription_id" && k != "page_cursor" && k != "limit") || len(v) != 1 {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
-		}
-	}
-	subscriptionID := q.Get("subscription_id")
-	if subscriptionID == "" {
-		writeError(w, publicerr.InvalidQuery, nil)
-		return
-	}
-	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		writeError(w, publicerr.InvalidCursor, nil)
-		return
-	}
-	limit, ok := pageLimit(w, q, 100, 100)
-	if !ok {
-		return
-	}
+	var limit int
+	var ok bool
+	var subscriptionID string
 	var after int64
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeMatchPage(q.Get("page_cursor"), subscriptionID, scope); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil)
-			return
-		} else if err != nil {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
+	matches, err := a.Monitoring.Matches(r.Context(), scope, "", 0, 0, func() (string, int64, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			if (k != "subscription_id" && k != "page_cursor" && k != "limit") || len(v) != 1 {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return "", 0, 0, errResponseWritten
+			}
 		}
+		subscriptionID = q.Get("subscription_id")
+		if subscriptionID == "" {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", 0, 0, errResponseWritten
+		}
+		if q.Has("page_cursor") && q.Get("page_cursor") == "" {
+			writeError(w, publicerr.InvalidCursor, nil)
+			return "", 0, 0, errResponseWritten
+		}
+		limit, ok = pageLimit(w, q, 100, 100)
+		if !ok {
+			return "", 0, 0, errResponseWritten
+		}
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeMatchPage(q.Get("page_cursor"), subscriptionID, scope); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil)
+				return "", 0, 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return "", 0, 0, errResponseWritten
+			}
+		}
+
+		return subscriptionID, after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
-	matches, err := a.Monitoring.Matches(r.Context(), scope, subscriptionID, after, limit+1)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return
@@ -223,33 +228,41 @@ func (a *API) decodeAttemptPage(token, deliveryID string, s corpus.Scope) (int, 
 // listAttempts pages a Delivery's append-only attempt history. It exposes
 // bounded outcome, status and error only: no signature, secret or receiver body.
 func (a *API) listAttempts(w http.ResponseWriter, r *http.Request, scope corpus.Scope, deliveryID string) {
-	q := r.URL.Query()
-	for k, v := range q {
-		if (k != "page_cursor" && k != "limit") || len(v) != 1 {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
+	var limit int
+	var ok bool
+	attempts, err := a.Monitoring.Attempts(r.Context(), scope, "", 0, 0, func() (string, int, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			if (k != "page_cursor" && k != "limit") || len(v) != 1 {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return "", 0, 0, errResponseWritten
+			}
 		}
-	}
-	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		writeError(w, publicerr.InvalidCursor, nil)
-		return
-	}
-	limit, ok := pageLimit(w, q, 100, 100)
-	if !ok {
-		return
-	}
-	after := 0
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeAttemptPage(q.Get("page_cursor"), deliveryID, scope); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil)
-			return
-		} else if err != nil {
+		if q.Has("page_cursor") && q.Get("page_cursor") == "" {
 			writeError(w, publicerr.InvalidCursor, nil)
-			return
+			return "", 0, 0, errResponseWritten
 		}
+		limit, ok = pageLimit(w, q, 100, 100)
+		if !ok {
+			return "", 0, 0, errResponseWritten
+		}
+		after := 0
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeAttemptPage(q.Get("page_cursor"), deliveryID, scope); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil)
+				return "", 0, 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return "", 0, 0, errResponseWritten
+			}
+		}
+
+		return deliveryID, after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
-	attempts, err := a.Monitoring.Attempts(r.Context(), scope, deliveryID, after, limit+1)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return

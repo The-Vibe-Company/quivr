@@ -103,8 +103,8 @@ type RunStore interface {
 
 // Ingestor is the internal ingestion command path shared with the public API.
 type Ingestor interface {
-	Accept(context.Context, corpus.Scope, content.Command) (content.Receipt, error)
-	Withdraw(context.Context, corpus.Scope, content.Withdrawal) (content.Receipt, error)
+	TrustedAccept(context.Context, string, string, content.Command) (content.Receipt, error)
+	TrustedWithdraw(context.Context, string, string, content.Withdrawal) (content.Receipt, error)
 }
 
 // Acquirer executes one acquisition run of one instance.
@@ -194,7 +194,6 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	if owner, ok := connector.(ExtensionOwner); ok {
 		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
 	}
-	scope := corpus.Scope{Organization: org, Actions: []string{"content:write", "content:read"}, Corpora: []string{target.CorpusID}}
 	checkpoint := target.Checkpoint
 	pages := a.MaxPages
 	if pages <= 0 {
@@ -234,7 +233,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		// a replayed Receipt (re-fetched unchanged item) does not.
 		fresh := false
 		for _, item := range page.Items {
-			size, receipt, err := a.submit(ctx, scope, rc, item)
+			size, receipt, err := a.submit(ctx, org, rc, item)
 			if err != nil {
 				var typed *Error
 				switch {
@@ -298,7 +297,7 @@ type runContext struct {
 
 // submit sends one item through the ingestion command path. It returns the
 // attachment bytes it granted and the ingestion Receipt.
-func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext, item Item) (int64, content.Receipt, error) {
+func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item Item) (int64, content.Receipt, error) {
 	inst := rc.target.Instance
 	source := content.Source{CorpusID: inst.CorpusID, Namespace: inst.Namespace, RecordKey: item.RecordKey}
 	revision := item.Revision
@@ -317,7 +316,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 		revision = "sha256:" + content.Hash(b)
 	}
 	if item.Withdraw {
-		receipt, err := a.Ingest.Withdraw(ctx, scope, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
+		receipt, err := a.Ingest.TrustedWithdraw(ctx, org, inst.CorpusID, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
 		receipt.NewRevision = false
 		return 0, receipt, err
 	}
@@ -339,7 +338,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 		// The key embeds the revision, so only this exact revision is skipped;
 		// a changed item still becomes a correction.
 		if a.Receipts != nil {
-			known, err := a.Receipts.HasReceipt(ctx, scope.Organization, key)
+			known, err := a.Receipts.HasReceipt(ctx, org, key)
 			if err != nil {
 				return 0, content.Receipt{}, err
 			}
@@ -357,7 +356,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 			m.Parts = append([]content.Part(nil), manifest.Parts...)
 		}
 		for _, at := range item.Attachments {
-			req := AttachmentRequest{Organization: scope.Organization, InstanceID: inst.ID, Config: inst.Config, Credential: rc.credential, Now: a.now(),
+			req := AttachmentRequest{Organization: org, InstanceID: inst.ID, Config: inst.Config, Credential: rc.credential, Now: a.now(),
 				RecordKey: item.RecordKey, Revision: revision, Extensions: item.Extensions, Attachment: at}
 			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.target.RunSequence, key, req)
 			if err != nil {
@@ -378,7 +377,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 	if c.Manifest != nil {
 		c.Content = content.Text{Kind: "manifest"}
 	}
-	receipt, err := a.Ingest.Accept(ctx, scope, c)
+	receipt, err := a.Ingest.TrustedAccept(ctx, org, inst.CorpusID, c)
 	return stored, receipt, err
 }
 

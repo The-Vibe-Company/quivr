@@ -196,8 +196,8 @@ func (s Service) Index(ctx context.Context, org string, v content.Version, seg c
 // candidates the engine serves (rank).
 func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Result, error) {
 	out := Result{Hits: []Hit{}}
-	if !scope.Allows("content:read") || !scope.Allows("search:query") {
-		return out, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionRetrievalSearch); err != nil {
+		return out, err
 	}
 	if s.Ranker == nil && s.ProfilesRouter == nil {
 		// The api refuses to start without a retrieval plugin.

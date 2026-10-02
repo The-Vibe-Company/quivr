@@ -94,9 +94,19 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 // Rollback makes an earlier plan's roles active again as a new immutable
 // plan, after checking that every registration it brings back answers at its
 // endpoint. Nothing already produced is rewritten.
-func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackRequest) (Plan, error) {
-	if !scope.Allows(Action) {
-		return Plan{}, corpus.ErrForbidden
+func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackRequest, prepare ...func() (RollbackRequest, error)) (Plan, error) {
+	if err := scope.Require(corpus.ActionPluginRollback); err != nil {
+		return Plan{}, err
+	}
+	if s.Store == nil {
+		return Plan{}, ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		req, err = load()
+		if err != nil {
+			return Plan{}, err
+		}
 	}
 	if req.PinnedWork == "" {
 		// The default, stored as such so a retry that names it replays.

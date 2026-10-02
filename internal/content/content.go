@@ -277,6 +277,7 @@ type Blobs interface {
 	Read(context.Context, Blob) ([]byte, error)
 }
 type Service struct {
+	Corpora    corpus.Store
 	Repository Repository
 	Catalog    RecordCatalog
 	Blobs      Blobs
@@ -299,9 +300,13 @@ type Service struct {
 }
 
 func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Receipt, error) {
-	if !scope.Allows("content:write") {
-		return Receipt{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionContentAccept); err != nil {
+		return Receipt{}, err
 	}
+	return s.accept(ctx, scope, c, scope.Allows("content:read"))
+}
+
+func (s Service) accept(ctx context.Context, scope corpus.Scope, c Command, reveal bool) (Receipt, error) {
 	if !scope.Contains(c.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
@@ -376,7 +381,7 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 	if err == nil && result.NewRevision && s.Received != nil {
 		s.Received(scope.Organization, c.Source.Namespace)
 	}
-	if !scope.Allows("content:read") {
+	if !reveal {
 		result.RecordID = ""
 		result.VersionID = ""
 		result.Availability = nil
@@ -387,10 +392,21 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 // Withdraw durably fences a Record identity. The record may exist already or be
 // fenced before any materialization; a later ordinary ingestion of that identity
 // is a terminal conflict.
-func (s Service) Withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal) (Receipt, error) {
-	if !scope.Allows("content:write") {
-		return Receipt{}, corpus.ErrForbidden
+func (s Service) Withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal, prepare ...func() (Withdrawal, error)) (Receipt, error) {
+	if err := scope.Require(corpus.ActionContentWithdraw); err != nil {
+		return Receipt{}, err
 	}
+	for _, load := range prepare {
+		var err error
+		w, err = load()
+		if err != nil {
+			return Receipt{}, err
+		}
+	}
+	return s.withdraw(ctx, scope, w, scope.Allows("content:read"))
+}
+
+func (s Service) withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal, reveal bool) (Receipt, error) {
 	if !scope.Contains(w.Source.CorpusID) {
 		return Receipt{}, corpus.ErrNotFound
 	}
@@ -398,7 +414,7 @@ func (s Service) Withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal)
 		return Receipt{}, ErrInvalid
 	}
 	result, err := s.Repository.Withdraw(ctx, scope, w)
-	if !scope.Allows("content:read") {
+	if !reveal {
 		result.RecordID = ""
 		result.VersionID = ""
 		result.Availability = nil
@@ -598,8 +614,8 @@ func boundedJSON(v any) bool {
 func ValidText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 
 func (s Service) Receipt(ctx context.Context, scope corpus.Scope, id string) (Receipt, error) {
-	if !scope.Allows("content:read") {
-		return Receipt{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionContentReceipt); err != nil {
+		return Receipt{}, err
 	}
 	r, err := s.Repository.Receipt(ctx, scope.Organization, id)
 	if err == nil && !scope.Contains(r.Source.CorpusID) {
@@ -608,9 +624,13 @@ func (s Service) Receipt(ctx context.Context, scope corpus.Scope, id string) (Re
 	return r, err
 }
 func (s Service) Record(ctx context.Context, scope corpus.Scope, id string) (Record, error) {
-	if !scope.Allows("content:read") {
-		return Record{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionContentRecord); err != nil {
+		return Record{}, err
 	}
+	return s.record(ctx, scope, id)
+}
+
+func (s Service) record(ctx context.Context, scope corpus.Scope, id string) (Record, error) {
 	r, err := s.Repository.Record(ctx, scope.Organization, id)
 	if err == nil && !scope.Contains(r.Source.CorpusID) {
 		return Record{}, corpus.ErrNotFound
@@ -619,19 +639,47 @@ func (s Service) Record(ctx context.Context, scope corpus.Scope, id string) (Rec
 }
 
 // Records returns up to limit authorized Records of a Corpus after key after.
-func (s Service) Records(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]Record, error) {
-	if !scope.Allows("content:read") {
-		return nil, corpus.ErrForbidden
+func (s Service) Records(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int, prepare ...func() (string, string, int, error)) ([]Record, error) {
+	if err := scope.Require(corpus.ActionContentRecords); err != nil {
+		return nil, err
 	}
 	if !scope.Contains(corpusID) {
 		return nil, corpus.ErrNotFound
 	}
+	if s.Corpora != nil {
+		if _, err := s.Corpora.Read(ctx, scope.Organization, corpusID); err != nil {
+			return nil, err
+		}
+	}
+	preparedCorpus := corpusID
+	for _, load := range prepare {
+		var err error
+		corpusID, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if corpusID != preparedCorpus {
+		if !scope.Contains(corpusID) {
+			return nil, corpus.ErrNotFound
+		}
+		if s.Corpora != nil {
+			if _, err := s.Corpora.Read(ctx, scope.Organization, corpusID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return s.Catalog.Records(ctx, scope.Organization, corpusID, after, limit)
 }
 func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
-	if !scope.Allows("content:read") {
-		return Version{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionContentVersion); err != nil {
+		return Version{}, err
 	}
+	return s.version(ctx, scope, recordID, id)
+}
+
+func (s Service) version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
 	stored, err := s.Repository.Version(ctx, scope.Organization, recordID, id)
 	if err != nil {
 		return Version{}, err

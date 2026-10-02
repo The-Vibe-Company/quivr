@@ -24,7 +24,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := adapterPool(t, ctx)
-	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-connectors-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-connectors-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read", "changes:read"}, Corpora: []string{"*"}}
 	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Connectors"})
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := adapterPool(t, ctx)
-	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-schedule-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-schedule-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read", "changes:read"}, Corpora: []string{"*"}}
 	c, _, err := corpus.Service{Store: postgres.Store{Pool: pool}}.Create(ctx, scope, corpus.CreateInput{Key: "c", Name: "Schedules"})
 	if err != nil {
 		t.Fatal(err)

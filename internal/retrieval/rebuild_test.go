@@ -92,7 +92,7 @@ type fakeRebuildContent struct {
 	timeouts   int
 }
 
-func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID, id string) (content.Version, error) {
+func (f *fakeRebuildContent) TrustedVersion(_ context.Context, _, _ string, recordID, id string) (content.Version, error) {
 	f.reads++
 	if f.versionErr != nil {
 		return content.Version{}, f.versionErr

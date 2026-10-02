@@ -9,7 +9,6 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 )
@@ -80,7 +79,7 @@ func spacesOf(artifacts []content.Embedding) string {
 
 type runContent struct{}
 
-func (runContent) Version(_ context.Context, _ corpus.Scope, recordID, versionID string) (content.Version, error) {
+func (runContent) TrustedVersion(_ context.Context, _, _ string, recordID, versionID string) (content.Version, error) {
 	return content.Version{RecordID: recordID, ID: versionID}, nil
 }
 func (runContent) PluginSegmentationOf(_ context.Context, _ string, v content.Version, recipe string) (content.Segmentation, error) {

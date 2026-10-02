@@ -129,9 +129,16 @@ type MatchStore interface {
 }
 
 // Matches lists a visible Subscription's Match history in commit order.
-func (s Service) Matches(ctx context.Context, scope corpus.Scope, subscriptionID string, after int64, limit int) ([]Match, error) {
-	if !scope.Allows("monitoring:read") {
-		return nil, ErrForbidden
+func (s Service) Matches(ctx context.Context, scope corpus.Scope, subscriptionID string, after int64, limit int, prepare ...func() (string, int64, int, error)) ([]Match, error) {
+	if err := scope.Require(corpus.ActionMonitoringMatches); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		subscriptionID, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if _, err := s.visible(ctx, scope, subscriptionID); err != nil {
 		return nil, err
@@ -141,8 +148,8 @@ func (s Service) Matches(ctx context.Context, scope corpus.Scope, subscriptionID
 
 // Match reads one Match when its Subscription and content scope are visible.
 func (s Service) Match(ctx context.Context, scope corpus.Scope, id string) (Match, error) {
-	if !scope.Allows("monitoring:read") {
-		return Match{}, ErrForbidden
+	if err := scope.Require(corpus.ActionMonitoringMatch); err != nil {
+		return Match{}, err
 	}
 	m, err := s.MatchStore.Match(ctx, scope.Organization, id)
 	if err != nil {
@@ -156,9 +163,13 @@ func (s Service) Match(ctx context.Context, scope corpus.Scope, id string) (Matc
 
 // Delivery reads a logical Delivery under the same visibility rule as its Match.
 func (s Service) Delivery(ctx context.Context, scope corpus.Scope, id string) (Delivery, error) {
-	if !scope.Allows("monitoring:read") {
-		return Delivery{}, ErrForbidden
+	if err := scope.Require(corpus.ActionMonitoringDelivery); err != nil {
+		return Delivery{}, err
 	}
+	return s.delivery(ctx, scope, id)
+}
+
+func (s Service) delivery(ctx context.Context, scope corpus.Scope, id string) (Delivery, error) {
 	d, err := s.MatchStore.Delivery(ctx, scope.Organization, id)
 	if err != nil {
 		return Delivery{}, err
@@ -176,8 +187,18 @@ func (s Service) Delivery(ctx context.Context, scope corpus.Scope, id string) (D
 }
 
 // Attempts lists a visible Delivery's append-only attempt history.
-func (s Service) Attempts(ctx context.Context, scope corpus.Scope, deliveryID string, after, limit int) ([]Attempt, error) {
-	if _, err := s.Delivery(ctx, scope, deliveryID); err != nil {
+func (s Service) Attempts(ctx context.Context, scope corpus.Scope, deliveryID string, after, limit int, prepare ...func() (string, int, int, error)) ([]Attempt, error) {
+	if err := scope.Require(corpus.ActionMonitoringAttempts); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		deliveryID, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.delivery(ctx, scope, deliveryID); err != nil {
 		return nil, err
 	}
 	return s.MatchStore.Attempts(ctx, scope.Organization, deliveryID, after, limit)

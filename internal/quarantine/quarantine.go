@@ -100,9 +100,16 @@ const MaxPage = 100
 
 // List reads one page of the stuck Versions the filter keeps within the
 // caller's Corpora, after the Version id of the previous page.
-func (s Service) List(ctx context.Context, scope corpus.Scope, f Filter, after string, limit int) ([]Entry, error) {
-	if !scope.Allows(operations.BackfillPermission) {
-		return nil, corpus.ErrForbidden
+func (s Service) List(ctx context.Context, scope corpus.Scope, f Filter, after string, limit int, prepare ...func() (Filter, string, int, error)) ([]Entry, error) {
+	if err := scope.Require(corpus.ActionQuarantineList); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		f, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := checkWindow(f); err != nil {
 		return nil, fmt.Errorf("%w: %w", publicerr.InvalidQuery, err)
@@ -126,12 +133,19 @@ func (s Service) List(ctx context.Context, scope corpus.Scope, f Filter, after s
 
 // Request answers a dry run with its count, which it records, or accepts a
 // reprocess a dry run with the same key and scope preceded.
-func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request) (operations.ReprocessEstimate, operations.Operation, error) {
+func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request, prepare ...func() (Request, error)) (operations.ReprocessEstimate, operations.Operation, error) {
 	var none operations.ReprocessEstimate
-	f := r.Filter
-	if !scope.Allows(operations.BackfillPermission) {
-		return none, operations.Operation{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionQuarantineRequest); err != nil {
+		return none, operations.Operation{}, err
 	}
+	for _, load := range prepare {
+		var err error
+		r, err = load()
+		if err != nil {
+			return none, operations.Operation{}, err
+		}
+	}
+	f := r.Filter
 	if f.CorpusID == "" || !scope.Contains(f.CorpusID) {
 		return none, operations.Operation{}, corpus.ErrNotFound
 	}

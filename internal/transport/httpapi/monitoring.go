@@ -15,6 +15,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -75,46 +76,62 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	}
-	action := "monitoring:read"
-	if method == "POST" {
-		action = "monitoring:write"
-	}
-	if !scope.Allows(action) {
-		writeError(w, publicerr.Forbidden, nil)
-		return true
-	}
 	ctx := r.Context()
 	switch {
 	case resource == "saved-queries" && len(parts) == 0:
 		var in monitoring.SavedQueryInput
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.savedQuery, &in) {
+		q, err := a.Monitoring.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{}, func() (monitoring.SavedQueryInput, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.savedQuery, &in) {
+				return monitoring.SavedQueryInput{}, errResponseWritten
+			}
+
+			return in, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		q, err := a.Monitoring.CreateSavedQuery(ctx, scope, in)
 		respondMonitoring(w, 201, savedQueryToTransport(q), err)
 	case resource == "saved-queries" && len(parts) == 1:
 		q, err := a.Monitoring.SavedQuery(ctx, scope, parts[0])
 		respondMonitoring(w, 200, savedQueryToTransport(q), err)
 	case resource == "saved-queries" && parts[1] == "versions" && len(parts) == 2:
 		var in monitoring.SavedQueryVersionInput
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.savedQueryVersion, &in) {
+		v, err := a.Monitoring.CreateSavedQueryVersion(ctx, scope, "", monitoring.SavedQueryVersionInput{}, func() (string, monitoring.SavedQueryVersionInput, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.savedQueryVersion, &in) {
+				return "", monitoring.SavedQueryVersionInput{}, errResponseWritten
+			}
+
+			return parts[0], in, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		v, err := a.Monitoring.CreateSavedQueryVersion(ctx, scope, parts[0], in)
 		respondMonitoring(w, 201, savedQueryVersionToTransport(v), err)
 	case resource == "saved-queries" && parts[1] == "rename":
 		var in renameRequest
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+		q, err := a.Monitoring.RenameSavedQuery(ctx, scope, "", "", "", func() (string, string, string, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+				return "", "", "", errResponseWritten
+			}
+
+			return in.Key, parts[0], in.Name, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		q, err := a.Monitoring.RenameSavedQuery(ctx, scope, in.Key, parts[0], in.Name)
 		respondMonitoring(w, 200, savedQueryToTransport(q), err)
 	case resource == "saved-queries" && parts[1] == "delete":
-		key, ok := a.decodeAction(w, r)
-		if !ok {
+		q, err := a.Monitoring.DeleteSavedQuery(ctx, scope, "", "", func() (string, string, error) {
+			key, ok := a.decodeAction(w, r)
+			if !ok {
+				return "", "", errResponseWritten
+			}
+
+			return key, parts[0], nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		q, err := a.Monitoring.DeleteSavedQuery(ctx, scope, key, parts[0])
 		respondMonitoring(w, 200, savedQueryToTransport(q), err)
 	case resource == "saved-queries":
 		v, err := a.Monitoring.SavedQueryVersion(ctx, scope, parts[0], parts[2])
@@ -123,37 +140,60 @@ func (a *API) monitoringRoutes(w http.ResponseWriter, r *http.Request, scope cor
 		a.listSubscriptions(w, r, scope)
 	case len(parts) == 0:
 		var in monitoring.SubscriptionInput
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscription, &in) {
+		s, err := a.Monitoring.CreateSubscription(ctx, scope, monitoring.SubscriptionInput{}, func() (monitoring.SubscriptionInput, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscription, &in) {
+				return monitoring.SubscriptionInput{}, errResponseWritten
+			}
+
+			return in, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		s, err := a.Monitoring.CreateSubscription(ctx, scope, in)
 		respondMonitoring(w, 201, subscriptionToTransport(s), err)
 	case len(parts) == 1:
 		s, err := a.Monitoring.Subscription(ctx, scope, parts[0])
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	case parts[1] == "versions" && len(parts) == 2:
 		var in monitoring.SubscriptionVersionInput
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscriptionVersion, &in) {
+		v, err := a.Monitoring.CreateSubscriptionVersion(ctx, scope, "", monitoring.SubscriptionVersionInput{}, func() (string, monitoring.SubscriptionVersionInput, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.subscriptionVersion, &in) {
+				return "", monitoring.SubscriptionVersionInput{}, errResponseWritten
+			}
+
+			return parts[0], in, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		v, err := a.Monitoring.CreateSubscriptionVersion(ctx, scope, parts[0], in)
 		respondMonitoring(w, 201, subscriptionVersionToTransport(v), err)
 	case parts[1] == "rename":
 		var in renameRequest
-		if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+		s, err := a.Monitoring.RenameSubscription(ctx, scope, "", "", "", func() (string, string, string, error) {
+			if !a.decodeMonitoring(w, r, a.monitoringSchemas.rename, &in) {
+				return "", "", "", errResponseWritten
+			}
+
+			return in.Key, parts[0], in.Name, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		s, err := a.Monitoring.RenameSubscription(ctx, scope, in.Key, parts[0], in.Name)
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	case parts[1] == "disable" || parts[1] == "enable" || parts[1] == "delete":
-		key, ok := a.decodeAction(w, r)
-		if !ok {
-			return true
-		}
-		command := map[string]func(context.Context, corpus.Scope, string, string) (monitoring.Subscription, error){
+		command := map[string]func(context.Context, corpus.Scope, string, string, ...func() (string, string, error)) (monitoring.Subscription, error){
 			"disable": a.Monitoring.DisableSubscription, "enable": a.Monitoring.EnableSubscription, "delete": a.Monitoring.DeleteSubscription,
 		}[parts[1]]
-		s, err := command(ctx, scope, key, parts[0])
+		s, err := command(ctx, scope, "", "", func() (string, string, error) {
+			key, ok := a.decodeAction(w, r)
+			if !ok {
+				return "", "", errResponseWritten
+			}
+			return key, parts[0], nil
+		})
+		if errors.Is(err, errResponseWritten) {
+			return true
+		}
 		respondMonitoring(w, 200, subscriptionToTransport(s), err)
 	default:
 		v, err := a.Monitoring.SubscriptionVersion(ctx, scope, parts[0], parts[2])
@@ -275,47 +315,56 @@ func (a *API) decodeSubscriptionPage(token, owner string, s corpus.Scope) (strin
 // listSubscriptions pages the active Subscriptions of one owner, or the
 // global ones with owner=none, that the key sees.
 func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	q := r.URL.Query()
-	for k, v := range q {
-		if (k != "owner" && k != "page_cursor" && k != "limit") || len(v) != 1 {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
-		}
-	}
-	if !q.Has("owner") {
-		writeError(w, publicerr.InvalidQuery, nil)
-		return
-	}
-	// An empty owner is refused like any other invalid one, as on creation.
-	ownerRef := q.Get("owner")
-	if ownerRef == "" {
-		writeError(w, publicerr.InvalidOwner, nil)
-		return
-	}
-	filter := monitoring.OwnerFilter{Owner: ownerRef}
-	if ownerRef == monitoring.NoOwner {
-		filter = monitoring.OwnerFilter{Global: true}
-	}
-	if q.Has("page_cursor") && q.Get("page_cursor") == "" {
-		writeError(w, publicerr.InvalidCursor, nil)
-		return
-	}
-	limit, ok := pageLimit(w, q, 100, 100)
-	if !ok {
-		return
-	}
+	var limit int
+	var ok bool
+	var ownerRef string
 	var after string
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeSubscriptionPage(q.Get("page_cursor"), ownerRef, scope); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil)
-			return
-		} else if err != nil {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
+	subs, err := a.Monitoring.Subscriptions(r.Context(), scope, monitoring.OwnerFilter{}, "", 0, func() (monitoring.OwnerFilter, string, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			if (k != "owner" && k != "page_cursor" && k != "limit") || len(v) != 1 {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+			}
 		}
+		if !q.Has("owner") {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+		}
+		// An empty owner is refused like any other invalid one, as on creation.
+		ownerRef = q.Get("owner")
+		if ownerRef == "" {
+			writeError(w, publicerr.InvalidOwner, nil)
+			return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+		}
+		filter := monitoring.OwnerFilter{Owner: ownerRef}
+		if ownerRef == monitoring.NoOwner {
+			filter = monitoring.OwnerFilter{Global: true}
+		}
+		if q.Has("page_cursor") && q.Get("page_cursor") == "" {
+			writeError(w, publicerr.InvalidCursor, nil)
+			return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+		}
+		limit, ok = pageLimit(w, q, 100, 100)
+		if !ok {
+			return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+		}
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeSubscriptionPage(q.Get("page_cursor"), ownerRef, scope); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil)
+				return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return monitoring.OwnerFilter{}, "", 0, errResponseWritten
+			}
+		}
+
+		return filter, after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
-	subs, err := a.Monitoring.Subscriptions(r.Context(), scope, filter, after, limit+1)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return
@@ -343,15 +392,17 @@ func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope 
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
-	if !scope.Allows("monitoring:write") {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
 	var in monitoring.PreviewInput
-	if !a.decodeMonitoring(w, r, a.monitoringSchemas.preview, &in) {
+	result, err := a.Monitoring.Preview(r.Context(), scope, monitoring.PreviewInput{}, func() (monitoring.PreviewInput, error) {
+		if !a.decodeMonitoring(w, r, a.monitoringSchemas.preview, &in) {
+			return monitoring.PreviewInput{}, errResponseWritten
+		}
+
+		return in, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	result, err := a.Monitoring.Preview(r.Context(), scope, in)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return

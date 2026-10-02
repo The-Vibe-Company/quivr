@@ -204,7 +204,7 @@ func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (
 	if r.VersionID == "" {
 		return Version{}, nil
 	}
-	return s.Version(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{r.Source.CorpusID}}, r.RecordID, r.VersionID)
+	return s.TrustedVersion(ctx, org, r.Source.CorpusID, r.RecordID, r.VersionID)
 }
 
 // Validate outputs at the engine boundary even when the contribution runs locally.
@@ -270,8 +270,8 @@ const blobReadParallelism = 16
 // The result holds, at each candidate's index, its hydration, or nothing when
 // the caller may not read it or it is no longer current.
 func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate) (map[int]Hydrated, error) {
-	if !scope.Allows("content:read") || !scope.Allows("search:query") {
-		return nil, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionContentHydrate); err != nil {
+		return nil, err
 	}
 	out := map[int]Hydrated{}
 	if len(cs) == 0 {

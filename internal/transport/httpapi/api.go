@@ -38,6 +38,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -182,9 +183,11 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	}
 	a := &API{backfillSchema: backfillSchema, promotionSchema: promotionSchema, reprocessSchema: reprocessSchema, pluginSchema: pluginSchema, pluginRollbackSchema: pluginRollbackSchema, evaluatorMigrationSchema: evaluatorMigrationSchema, monitoringSchemas: monitored, actionSchema: monitored.action, connectorSchema: connectorSchema, credentialSchema: credentialSchema, scheduleSchema: scheduleSchema, Retrieval: search, searchSchema: searchSchema, Content: contents, ingestSchema: ingestSchema, Uploads: uploadService, uploadSchema: uploadSchema, withdrawSchema: withdrawSchema, batchSchema: batchSchema, configSchema: configSchema, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey, schema: schema}
 	a.evaluationRetirementSchema = evaluationRetirementSchema
+	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
 	}
+	a.Changes.Corpora = store
 	for _, raw := range a.pushProxyCIDRs {
 		if _, err := netip.ParsePrefix(raw); err != nil {
 			return nil, errors.New("trusted push proxies require CIDRs")
@@ -342,16 +345,8 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v0/corpora" {
 		switch r.Method {
 		case "POST":
-			if !scope.Allows("corpora:write") || !scope.AllCorpora() {
-				writeError(w, publicerr.Forbidden, nil)
-				return
-			}
 			a.create(w, r, scope)
 		case "GET":
-			if !scope.Allows("corpora:read") {
-				writeError(w, publicerr.Forbidden, nil)
-				return
-			}
 			a.list(w, r, scope)
 		default:
 			writeError(w, publicerr.MethodNotAllowed, nil)
@@ -359,15 +354,7 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v0/corpora/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v0/corpora/"), "/") && r.Method == "GET" {
-		if !scope.Allows("corpora:read") {
-			writeError(w, publicerr.Forbidden, nil)
-			return
-		}
 		id := strings.TrimPrefix(r.URL.Path, "/v0/corpora/")
-		if !scope.Contains(id) {
-			writeError(w, publicerr.NotFound, nil)
-			return
-		}
 		c, err := a.Service.Read(ctx, scope, id)
 		if err != nil {
 			writeError(w, err, publicerr.StorageUnavailable)
@@ -379,25 +366,31 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	writeError(w, publicerr.NotFound, nil)
 }
 func (a *API) create(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
-	raw, ok := decodeRequest(w, r, a.schema)
-	if !ok {
-		return
-	}
-	data := raw.(map[string]any)
-	if _, ok := data["retrieval"]; !ok {
-		data["retrieval"] = map[string]any{}
-	}
-	canonical, err := json.Marshal(data)
-	if err != nil {
-		writeError(w, publicerr.InvalidSchema, nil)
-		return
-	}
 	var input transport.CorpusRequest
-	if err := json.Unmarshal(canonical, &input); err != nil {
-		writeError(w, publicerr.InvalidSchema, nil)
+	c, conflict, err := a.Service.Create(r.Context(), s, corpus.CreateInput{}, func() (corpus.CreateInput, error) {
+		raw, ok := decodeRequest(w, r, a.schema)
+		if !ok {
+			return corpus.CreateInput{}, errResponseWritten
+		}
+		data := raw.(map[string]any)
+		if _, ok := data["retrieval"]; !ok {
+			data["retrieval"] = map[string]any{}
+		}
+		canonical, err := json.Marshal(data)
+		if err != nil {
+			writeError(w, publicerr.InvalidSchema, nil)
+			return corpus.CreateInput{}, errResponseWritten
+		}
+		if err := json.Unmarshal(canonical, &input); err != nil {
+			writeError(w, publicerr.InvalidSchema, nil)
+			return corpus.CreateInput{}, errResponseWritten
+		}
+
+		return corpus.CreateInput{Key: input.IdempotencyKey, Name: input.Name, Retrieval: data["retrieval"].(map[string]any)}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	c, conflict, err := a.Service.Create(r.Context(), s, corpus.CreateInput{Key: input.IdempotencyKey, Name: input.Name, Retrieval: data["retrieval"].(map[string]any)})
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 	} else if conflict {
@@ -448,37 +441,46 @@ func (a *API) signCursor(domain string, b []byte) []byte {
 }
 
 func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
-	q := r.URL.Query()
-	for k, v := range q {
-		if (k != "limit" && k != "page_cursor") || len(v) != 1 {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
+	var limit int
+	var ok bool
+	var scope string
+	items, err := a.Service.List(r.Context(), s, "", 0, func() (string, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			if (k != "limit" && k != "page_cursor") || len(v) != 1 {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return "", 0, errResponseWritten
+			}
 		}
-	}
-	limit, ok := pageLimit(w, q, 100, 100)
-	if !ok {
+		limit, ok = pageLimit(w, q, 100, 100)
+		if !ok {
+			return "", 0, errResponseWritten
+		}
+		after := ""
+		scope = scopeDigest(s)
+		if q.Has("page_cursor") {
+			parts := strings.Split(q.Get("page_cursor"), ".")
+			if len(parts) != 2 {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return "", 0, errResponseWritten
+			}
+			b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+			sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+			var c cursor
+			if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(corpusPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return "", 0, errResponseWritten
+			}
+			after = c.After
+		}
+
+		return after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	after := ""
-	scope := scopeDigest(s)
-	if q.Has("page_cursor") {
-		parts := strings.Split(q.Get("page_cursor"), ".")
-		if len(parts) != 2 {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
-		}
-		b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
-		sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
-		var c cursor
-		if e1 != nil || e2 != nil || !hmac.Equal(sig, a.signCursor(corpusPageDomain, b)) || json.Unmarshal(b, &c) != nil || c.Scope != scope {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
-		}
-		after = c.After
-	}
-	items, err := a.Service.List(r.Context(), s, after, limit+1)
 	if err != nil {
-		writeError(w, publicerr.StorageUnavailable, nil)
+		writeError(w, err, publicerr.StorageUnavailable)
 		return
 	}
 	page := map[string]any{"items": items}

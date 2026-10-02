@@ -179,10 +179,18 @@ type Service struct {
 // Request answers a dry run with its estimate, which it records, or accepts
 // a backfill a dry run with the same key and scope preceded. The caller needs
 // plugins:admin on the Corpus.
-func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request) (operations.BackfillEstimate, operations.Operation, error) {
+func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request, prepare ...func() (Request, error)) (operations.BackfillEstimate, operations.Operation, error) {
 	var none operations.BackfillEstimate
-	if !scope.Allows(operations.BackfillPermission) {
-		return none, operations.Operation{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionBackfillRequest); err != nil {
+		return none, operations.Operation{}, err
+	}
+
+	for _, load := range prepare {
+		var err error
+		r, err = load()
+		if err != nil {
+			return none, operations.Operation{}, err
+		}
 	}
 	if r.CorpusID == "" || !scope.Contains(r.CorpusID) {
 		return none, operations.Operation{}, corpus.ErrNotFound

@@ -204,12 +204,21 @@ type TokenAuthenticator interface {
 
 // DeliverAPIWithAuth keeps the resolved target and route fixed through auth,
 // validation and delivery. No plugin call precedes engine authentication.
-func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path string, req Relayed) (RelayAnswer, error) {
+func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path string, req Relayed, prepare ...func() (Relayed, error)) (RelayAnswer, error) {
 	if auth.Scope != nil && auth.InstanceToken != "" {
 		return RelayAnswer{}, ErrInvalidInstanceToken
 	}
-	if auth.Scope != nil && !auth.Scope.Allows(corpus.ActionConnectorPush) {
-		return RelayAnswer{}, corpus.ErrForbidden
+	if auth.Scope != nil {
+		if err := auth.Scope.Require(corpus.ActionConnectorDeliver); err != nil {
+			return RelayAnswer{}, err
+		}
+	}
+	for _, load := range prepare {
+		var err error
+		req, err = load()
+		if err != nil {
+			return RelayAnswer{}, err
+		}
 	}
 	target, err := r.Store.LoadDelivery(ctx, id)
 	if errors.Is(err, corpus.ErrNotFound) {

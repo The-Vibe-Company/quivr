@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -64,16 +65,18 @@ type backfillRequest struct {
 }
 
 func (a *API) requestBackfill(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	if !scope.Allows(operations.BackfillPermission) {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
 	var in backfillRequest
-	if !decodeInto(w, r, a.backfillSchema, &in) {
+	estimate, op, err := a.Backfills.Request(r.Context(), scope, backfill.Request{}, func() (backfill.Request, error) {
+		if !decodeInto(w, r, a.backfillSchema, &in) {
+			return backfill.Request{}, errResponseWritten
+		}
+
+		return backfill.Request{Key: in.IdempotencyKey, CorpusID: in.CorpusID, AcceptedAfter: in.AcceptedAfter, AcceptedBefore: in.AcceptedBefore,
+			RegistrationID: in.RegistrationID, Spaces: in.Spaces, DryRun: in.DryRun, ConfirmCost: in.ConfirmCost}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	estimate, op, err := a.Backfills.Request(r.Context(), scope, backfill.Request{Key: in.IdempotencyKey, CorpusID: in.CorpusID, AcceptedAfter: in.AcceptedAfter, AcceptedBefore: in.AcceptedBefore,
-		RegistrationID: in.RegistrationID, Spaces: in.Spaces, DryRun: in.DryRun, ConfirmCost: in.ConfirmCost})
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)
@@ -105,15 +108,17 @@ type promotionRequest struct {
 }
 
 func (a *API) promoteSpace(w http.ResponseWriter, r *http.Request, scope corpus.Scope, space string) {
-	if !scope.Allows(operations.BackfillPermission) {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
 	var in promotionRequest
-	if !decodeInto(w, r, a.promotionSchema, &in) {
+	p, err := a.Promotions.Promote(r.Context(), scope, "", false, func() (string, bool, error) {
+		if !decodeInto(w, r, a.promotionSchema, &in) {
+			return "", false, errResponseWritten
+		}
+
+		return space, in.Force, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	p, err := a.Promotions.Promote(r.Context(), scope, space, in.Force)
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)

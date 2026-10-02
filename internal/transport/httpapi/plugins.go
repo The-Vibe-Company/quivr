@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -50,10 +51,6 @@ func (a *API) pluginRoutes(w http.ResponseWriter, r *http.Request, scope corpus.
 	switch {
 	case r.Method != method:
 		writeError(w, publicerr.MethodNotAllowed, nil)
-	case !scope.Allows(registry.Action):
-		writeError(w, publicerr.Forbidden, nil)
-	case a.Plugins.Store == nil:
-		writeError(w, publicerr.NotFound, nil)
 	case rest == "" && method == "POST":
 		a.registerPlugin(w, r, scope)
 	case rest == "":
@@ -112,11 +109,21 @@ const maxPluginRegistrationBytes = 8 << 20
 
 func (a *API) registerPlugin(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in pluginRegistrationRequest
-	if !decodeIntoAtMost(w, r, maxPluginRegistrationBytes, a.pluginSchema, &in) {
+	reg, err := a.Plugins.Register(r.Context(), scope, registry.Request{}, func() (registry.Request, error) {
+		if a.Plugins.Store == nil {
+			writeError(w, publicerr.NotFound, nil)
+			return registry.Request{}, errResponseWritten
+		}
+		if !decodeIntoAtMost(w, r, maxPluginRegistrationBytes, a.pluginSchema, &in) {
+			return registry.Request{}, errResponseWritten
+		}
+
+		return registry.Request{Key: in.IdempotencyKey, Manifest: []byte(in.Manifest), Endpoint: in.Endpoint,
+			Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces, Fixtures: in.Fixtures}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	reg, err := a.Plugins.Register(r.Context(), scope, registry.Request{Key: in.IdempotencyKey, Manifest: []byte(in.Manifest), Endpoint: in.Endpoint,
-		Configuration: in.Configuration, Routes: in.Routes, Kinds: in.Kinds, Spaces: in.Spaces, Fixtures: in.Fixtures})
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return
@@ -134,10 +141,16 @@ type pluginRollbackRequest struct {
 
 func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in pluginRollbackRequest
-	if !decodeInto(w, r, a.pluginRollbackSchema, &in) {
+	plan, err := a.Plugins.Rollback(r.Context(), scope, registry.RollbackRequest{}, func() (registry.RollbackRequest, error) {
+		if !decodeInto(w, r, a.pluginRollbackSchema, &in) {
+			return registry.RollbackRequest{}, errResponseWritten
+		}
+
+		return registry.RollbackRequest{Key: in.IdempotencyKey, Plan: in.PlanID, PinnedWork: in.PinnedWork}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	plan, err := a.Plugins.Rollback(r.Context(), scope, registry.RollbackRequest{Key: in.IdempotencyKey, Plan: in.PlanID, PinnedWork: in.PinnedWork})
 	if err == nil {
 		slog.Info("pipeline plan rolled back", "plan", plan.ID, "previous", plan.PreviousPlanID, "pinned_work", in.PinnedWork)
 	}
@@ -149,11 +162,17 @@ func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.
 const maxPlanList = 100
 
 func (a *API) listPlans(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	limit, ok := pageLimit(w, r.URL.Query(), 20, maxPlanList)
-	if !ok {
+	plans, err := a.Plugins.PipelinePlans(r.Context(), scope, 0, func() (int, error) {
+		limit, ok := pageLimit(w, r.URL.Query(), 20, maxPlanList)
+		if !ok {
+			return 0, errResponseWritten
+		}
+
+		return limit, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	plans, err := a.Plugins.PipelinePlans(r.Context(), scope, limit)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return

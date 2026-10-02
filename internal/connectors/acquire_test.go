@@ -44,11 +44,11 @@ type fakeIngest struct {
 	keys      map[string]bool
 }
 
-func (f *fakeIngest) Accept(_ context.Context, s corpus.Scope, c content.Command) (content.Receipt, error) {
+func (f *fakeIngest) TrustedAccept(_ context.Context, org, corpusID string, c content.Command) (content.Receipt, error) {
 	if f.fail != nil {
 		return content.Receipt{}, f.fail
 	}
-	f.scopes = append(f.scopes, s)
+	f.scopes = append(f.scopes, corpus.Scope{Organization: org, Corpora: []string{corpusID}})
 	f.accepted = append(f.accepted, c)
 	// Like the real store, a replayed idempotency key reserves no new revision.
 	if f.keys == nil {
@@ -58,7 +58,7 @@ func (f *fakeIngest) Accept(_ context.Context, s corpus.Scope, c content.Command
 	f.keys[c.Key] = true
 	return content.Receipt{ID: "r", NewRevision: fresh}, nil
 }
-func (f *fakeIngest) Withdraw(_ context.Context, s corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
+func (f *fakeIngest) TrustedWithdraw(_ context.Context, org, corpusID string, w content.Withdrawal) (content.Receipt, error) {
 	f.withdrawn = append(f.withdrawn, w)
 	return content.Receipt{ID: "w"}, nil
 }
@@ -99,7 +99,7 @@ func TestAcquisitionIngestsThroughTheCommandPathThenCommitsTheCheckpoint(t *test
 		t.Fatalf("explicit revision lost: %+v", ingest.accepted[1])
 	}
 	scope := ingest.scopes[0]
-	if scope.Organization != "org_a" || len(scope.Corpora) != 1 || scope.Corpora[0] != "corpus_1" || !scope.Allows("content:write") {
+	if scope.Organization != "org_a" || len(scope.Corpora) != 1 || scope.Corpora[0] != "corpus_1" {
 		t.Fatalf("scope %+v", scope)
 	}
 	if !IsConnectorKey(first.Key) || ingest.withdrawn[0].Key == first.Key || !IsConnectorKey(ingest.withdrawn[0].Key) {

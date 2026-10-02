@@ -274,8 +274,11 @@ func sortedKeys[V any](m map[string]V) []string {
 // Activate makes a validated registration serve every role it declares, as a
 // new immutable plan. The previous plan stays readable.
 func (s Service) Activate(ctx context.Context, scope corpus.Scope, id string) (Plan, error) {
-	if !scope.Allows(Action) {
-		return Plan{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginActivate); err != nil {
+		return Plan{}, err
+	}
+	if s.Store == nil {
+		return Plan{}, ErrNotFound
 	}
 	plan, err := s.Store.Activate(ctx, id, func(active Plan, members map[string]Registration, target Registration) (Activation, error) {
 		a, err := PlanActivation(active, members, target, s.Validate)

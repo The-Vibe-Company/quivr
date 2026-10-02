@@ -81,12 +81,13 @@ func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
 
 // searchProfiles lists the search profiles this deployment answers.
 func (a *API) searchProfiles(w http.ResponseWriter, scope corpus.Scope) {
-	if !scope.Allows("search:query") {
+	profiles, err := a.Retrieval.ProfilesScoped(scope)
+	if err != nil {
 		writeError(w, publicerr.Forbidden, nil)
 		return
 	}
 	out := transport.SearchProfileList{Items: []transport.SearchProfileDescription{}}
-	for _, p := range a.Retrieval.Profiles() {
+	for _, p := range profiles {
 		latency, cost := p.MaxLatencyMS, float32(p.MaxCostCents)
 		item := transport.SearchProfileDescription{Name: p.Name, FullName: p.FullName, Aliases: p.Aliases, Description: optionalString(p.Description), MaxLatencyMs: &latency, MaxCostCents: &cost}
 		item.Provider.Kind = transport.SearchProfileDescriptionProviderKindPlugin

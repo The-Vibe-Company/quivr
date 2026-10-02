@@ -345,24 +345,33 @@ type Service struct {
 
 // Registrations lists every registration, oldest first.
 func (s Service) Registrations(ctx context.Context, scope corpus.Scope) ([]Registration, error) {
-	if !scope.Allows(Action) {
-		return nil, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginRegistrations); err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, ErrNotFound
 	}
 	return s.Store.PluginRegistrations(ctx)
 }
 
 // Registration returns one registration with its check report.
 func (s Service) Registration(ctx context.Context, scope corpus.Scope, id string) (Registration, error) {
-	if !scope.Allows(Action) {
-		return Registration{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginRegistration); err != nil {
+		return Registration{}, err
+	}
+	if s.Store == nil {
+		return Registration{}, ErrNotFound
 	}
 	return s.Store.PluginRegistration(ctx, id)
 }
 
 // ActivePlan returns the active Pipeline Plan.
 func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, error) {
-	if !scope.Allows(Action) {
-		return Plan{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginActivePlan); err != nil {
+		return Plan{}, err
+	}
+	if s.Store == nil {
+		return Plan{}, ErrNotFound
 	}
 	plan, err := s.Store.ActivePlan(ctx)
 	if errors.Is(err, ErrNoPlan) {
@@ -378,8 +387,11 @@ func (s Service) ActivePlan(ctx context.Context, scope corpus.Scope) (Plan, erro
 // expose only its roles and the plugin versions serving them, never a
 // registration's address, settings or manifest.
 func (s Service) ActivePlugins(ctx context.Context, scope corpus.Scope) (Plan, error) {
-	if !scope.Allows(content.ObservabilityRead) || !scope.AllCorpora() {
-		return Plan{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginActivePlugins); err != nil {
+		return Plan{}, err
+	}
+	if s.Store == nil {
+		return Plan{}, ErrNotFound
 	}
 	return s.Store.ActivePlan(ctx)
 }
@@ -387,17 +399,30 @@ func (s Service) ActivePlugins(ctx context.Context, scope corpus.Scope) (Plan, e
 // PipelinePlan returns any recorded plan: plans are immutable, so earlier
 // ones stay readable.
 func (s Service) PipelinePlan(ctx context.Context, scope corpus.Scope, id string) (Plan, error) {
-	if !scope.Allows(Action) {
-		return Plan{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionPluginPipelinePlan); err != nil {
+		return Plan{}, err
+	}
+	if s.Store == nil {
+		return Plan{}, ErrNotFound
 	}
 	return s.Store.PipelinePlan(ctx, id)
 }
 
 // PipelinePlans returns the latest limit plans, newest first: the history of
 // plan changes, each naming the plan it replaced and what recorded it.
-func (s Service) PipelinePlans(ctx context.Context, scope corpus.Scope, limit int) ([]Plan, error) {
-	if !scope.Allows(Action) {
-		return nil, corpus.ErrForbidden
+func (s Service) PipelinePlans(ctx context.Context, scope corpus.Scope, limit int, prepare ...func() (int, error)) ([]Plan, error) {
+	if err := scope.Require(corpus.ActionPluginPipelinePlans); err != nil {
+		return nil, err
+	}
+	if s.Store == nil {
+		return nil, ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return s.Store.PipelinePlans(ctx, limit)
 }

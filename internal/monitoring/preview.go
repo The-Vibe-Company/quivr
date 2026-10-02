@@ -96,9 +96,16 @@ type PreviewResult struct {
 // written: a preview has no Subscription, so it creates no Match, Delivery or
 // event. Evaluator calls run under a time budget; Records still undecided when
 // it runs out are left out, and an evaluator error fails the whole preview.
-func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput) (PreviewResult, error) {
-	if !scope.Allows("monitoring:write") {
-		return PreviewResult{}, ErrForbidden
+func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput, prepare ...func() (PreviewInput, error)) (PreviewResult, error) {
+	if err := scope.Require(corpus.ActionMonitoringPreview); err != nil {
+		return PreviewResult{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return PreviewResult{}, err
+		}
 	}
 	if s.Recent == nil || s.Versions == nil {
 		return PreviewResult{}, ErrNotFound

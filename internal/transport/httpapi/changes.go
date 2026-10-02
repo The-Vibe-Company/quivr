@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -64,23 +65,7 @@ func (a *API) changeRequest(w http.ResponseWriter, r *http.Request, scope corpus
 		writeError(w, publicerr.InvalidCursor, nil)
 		return "", "", false
 	}
-	if !scope.Allows("changes:read") {
-		writeError(w, publicerr.Forbidden, nil)
-		return "", "", false
-	}
 	corpusID := q.Get("corpus_id")
-	if corpusID == "" {
-		writeError(w, publicerr.InvalidQuery, nil)
-		return "", "", false
-	}
-	if !scope.Contains(corpusID) {
-		writeError(w, publicerr.NotFound, nil)
-		return "", "", false
-	}
-	if _, err := a.Service.Store.Read(r.Context(), scope.Organization, corpusID); err != nil {
-		writeError(w, err, publicerr.ChangesUnavailable)
-		return "", "", false
-	}
 	return corpusID, q.Get("cursor"), true
 }
 
@@ -89,11 +74,17 @@ func (a *API) pollChanges(w http.ResponseWriter, r *http.Request, scope corpus.S
 	if !ok {
 		return
 	}
-	limit, ok := pageLimit(w, r.URL.Query(), 100, 100)
-	if !ok {
+	page, err := a.Changes.Poll(r.Context(), scope, corpusID, cursor, 0, func() (int, error) {
+		limit, ok := pageLimit(w, r.URL.Query(), 100, 100)
+		if !ok {
+			return 0, errResponseWritten
+		}
+		return limit, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	page, err := a.Changes.Poll(r.Context(), scope, corpusID, cursor, limit)
+
 	if err != nil {
 		writeError(w, err, publicerr.ChangesUnavailable, corpusID)
 		return

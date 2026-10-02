@@ -84,9 +84,16 @@ func FixturesDigest(files map[string][]byte) string {
 // Register validates the manifest and settings as a startup pin would, then
 // records the registration, whose check the Contract Runner runs next. The
 // same key replays the registration; a new key checks a rejected one again.
-func (s Service) Register(ctx context.Context, scope corpus.Scope, req Request) (Registration, error) {
-	if !scope.Allows(Action) {
-		return Registration{}, corpus.ErrForbidden
+func (s Service) Register(ctx context.Context, scope corpus.Scope, req Request, prepare ...func() (Request, error)) (Registration, error) {
+	if err := scope.Require(corpus.ActionPluginRegister); err != nil {
+		return Registration{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		req, err = load()
+		if err != nil {
+			return Registration{}, err
+		}
 	}
 	pin, err := plugins.LoadPinManifest(req.Manifest, "manifest", plugins.PinConfig{Endpoint: req.Endpoint, Configuration: req.Configuration, Routes: req.Routes, Kinds: req.Kinds, Spaces: req.Spaces})
 	var issues []plugins.Issue

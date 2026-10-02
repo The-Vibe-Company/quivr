@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -22,10 +23,6 @@ func (a *API) evaluatorMigrationRoutes(w http.ResponseWriter, r *http.Request, s
 	switch {
 	case r.Method != "POST":
 		writeError(w, publicerr.MethodNotAllowed, nil)
-	case !scope.Allows(monitoring.MigrationAction):
-		writeError(w, publicerr.Forbidden, nil)
-	case a.Monitoring.Moves == nil:
-		writeError(w, publicerr.NotFound, nil)
 	default:
 		a.migrateEvaluators(w, r, scope)
 	}
@@ -34,17 +31,23 @@ func (a *API) evaluatorMigrationRoutes(w http.ResponseWriter, r *http.Request, s
 
 func (a *API) migrateEvaluators(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	var in transport.SubscriptionEvaluatorMigrationRequest
-	if !decodeInto(w, r, a.evaluatorMigrationSchema, &in) {
+	m, err := a.Monitoring.MigrateEvaluator(r.Context(), scope, monitoring.EvaluatorMigrationInput{}, func() (monitoring.EvaluatorMigrationInput, error) {
+		if !decodeInto(w, r, a.evaluatorMigrationSchema, &in) {
+			return monitoring.EvaluatorMigrationInput{}, errResponseWritten
+		}
+		request := monitoring.EvaluatorMigrationInput{PluginID: in.PluginId, FromVersion: in.FromVersion, DryRun: in.DryRun}
+		if in.Limit != nil {
+			request.Limit = *in.Limit
+		}
+		if in.After != nil {
+			request.After = *in.After
+		}
+
+		return request, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	request := monitoring.EvaluatorMigrationInput{PluginID: in.PluginId, FromVersion: in.FromVersion, DryRun: in.DryRun}
-	if in.Limit != nil {
-		request.Limit = *in.Limit
-	}
-	if in.After != nil {
-		request.After = *in.After
-	}
-	m, err := a.Monitoring.MigrateEvaluator(r.Context(), scope, request)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return

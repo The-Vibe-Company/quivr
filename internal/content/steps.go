@@ -81,18 +81,34 @@ type Activities struct {
 // Latest lists the Organization's most recently accepted Versions, newest
 // first. It spans every Corpus, so it needs a key for all Corpora: a page
 // filtered to some Corpora could not stay bounded.
-func (a Activities) Latest(ctx context.Context, scope corpus.Scope, after *ActivityCursor, limit int) ([]Activity, error) {
-	if !scope.Allows(ObservabilityRead) || !scope.AllCorpora() {
-		return nil, corpus.ErrForbidden
+func (a Activities) Latest(ctx context.Context, scope corpus.Scope, after *ActivityCursor, limit int, prepare ...func() (*ActivityCursor, int, error)) ([]Activity, error) {
+	if err := scope.Require(corpus.ActionActivityLatest, func() (corpus.Action, error) {
+		if a.Store == nil {
+			return "", corpus.ErrNotFound
+		}
+		for _, load := range prepare {
+			var err error
+			after, limit, err = load()
+			if err != nil {
+				return "", err
+			}
+		}
+		return corpus.ActionActivityLatest, nil
+	}); err != nil {
+		return nil, err
 	}
+
 	return a.Store.LatestActivity(ctx, scope.Organization, after, limit)
 }
 
 // Version reads one Version's activity; a Version outside the scope's
 // Corpora is corpus.ErrNotFound.
 func (a Activities) Version(ctx context.Context, scope corpus.Scope, versionID string) (Activity, error) {
-	if !scope.Allows(ObservabilityRead) {
-		return Activity{}, corpus.ErrForbidden
+	if err := scope.Require(corpus.ActionActivityVersion); err != nil {
+		return Activity{}, err
+	}
+	if a.Store == nil {
+		return Activity{}, corpus.ErrNotFound
 	}
 	out, err := a.Store.VersionActivity(ctx, scope.Organization, versionID)
 	if err == nil && !scope.Contains(out.Source.CorpusID) {

@@ -554,9 +554,6 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 // withdrawn, quarantined and inaccessible targets all resolve to "unavailable"
 // with no target IDs.
 func (s ContentStore) Resolve(ctx context.Context, scope corpus.Scope, relations []content.Relation) ([]content.ResolvedRelation, error) {
-	if !scope.Allows("content:read") {
-		return nil, corpus.ErrForbidden
-	}
 	resolved := make([]content.ResolvedRelation, len(relations))
 	for i, relation := range relations {
 		resolved[i] = content.ResolvedRelation{Source: relation, Status: "unavailable"}

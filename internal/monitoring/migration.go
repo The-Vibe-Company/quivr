@@ -98,11 +98,21 @@ type RefusedSubscription struct {
 // an edit would make it. Only Subscriptions whose every Corpus the key grants
 // are looked at. Calls are bounded by Limit and continue with Next; running
 // one again converges, since a moved Subscription no longer pins FromVersion.
-func (s Service) MigrateEvaluator(ctx context.Context, scope corpus.Scope, in EvaluatorMigrationInput) (EvaluatorMigration, error) {
-	if !scope.Allows(MigrationAction) {
-		return EvaluatorMigration{}, ErrForbidden
+func (s Service) MigrateEvaluator(ctx context.Context, scope corpus.Scope, in EvaluatorMigrationInput, prepare ...func() (EvaluatorMigrationInput, error)) (EvaluatorMigration, error) {
+	if err := scope.Require(corpus.ActionMonitoringMigrateEvaluator); err != nil {
+		return EvaluatorMigration{}, err
 	}
-	if s.Moves == nil || s.Evaluators == nil {
+	if s.Moves == nil {
+		return EvaluatorMigration{}, ErrNotFound
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return EvaluatorMigration{}, err
+		}
+	}
+	if s.Evaluators == nil {
 		return EvaluatorMigration{}, ErrNotFound
 	}
 	to, ok := s.Evaluators.Serving(in.PluginID)

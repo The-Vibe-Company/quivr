@@ -37,8 +37,14 @@ func (e Evaluator) Run(ctx context.Context, org, id string) error {
 	if err != nil || job.State != "queued" {
 		return err
 	}
-	scope := corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}
-	v, err := e.Content.Version(ctx, scope, job.RecordID, job.VersionID)
+	record, err := e.Content.TrustedRecord(ctx, org, job.RecordID)
+	if errors.Is(err, corpus.ErrNotFound) {
+		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
+	}
+	if err != nil {
+		return err
+	}
+	v, err := e.Content.TrustedVersion(ctx, org, record.Source.CorpusID, job.RecordID, job.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
 		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
 	}
@@ -47,10 +53,6 @@ func (e Evaluator) Run(ctx context.Context, org, id string) error {
 	}
 	if !v.Availability.Current || !v.Availability.Searchable || v.Steps.Enriched == nil {
 		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
-	}
-	record, err := e.Content.Record(ctx, scope, job.RecordID)
-	if err != nil {
-		return err
 	}
 	g, err := e.Store.PrepareEvaluation(ctx, org, record.Source.CorpusID, job.Spaces)
 	if err != nil {

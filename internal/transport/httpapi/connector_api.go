@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
@@ -37,10 +37,6 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		credential := strings.TrimPrefix(bearer, "Bearer ")
 		if scope, ok := a.Keys[credential]; ok {
 			auth.Scope = &scope
-			if !scope.Allows(corpus.ActionConnectorPush) {
-				writeError(w, publicerr.Forbidden, nil)
-				return true
-			}
 		} else if strings.HasPrefix(credential, "qit_") {
 			auth.InstanceToken = credential
 		} else {
@@ -48,16 +44,22 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
-	if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(parts[2]) > 8192 {
-		writeError(w, publicerr.RequestTooLarge, nil)
-		return true
-	}
-	headers := relayedHeaders(r.Header)
-	delete(headers, "authorization")
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
-	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
+	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{}, func() (connectors.Relayed, error) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, plugins.MaxRelayBodyBytes+1))
+		if err != nil || len(body) > plugins.MaxRelayBodyBytes || len(r.URL.RawQuery) > 8192 || len(parts[2]) > 8192 {
+			writeError(w, publicerr.RequestTooLarge, nil)
+			return connectors.Relayed{}, errResponseWritten
+		}
+		headers := relayedHeaders(r.Header)
+		delete(headers, "authorization")
+
+		return connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body}, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return true
+	}
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.ConnectorsUnavailable)

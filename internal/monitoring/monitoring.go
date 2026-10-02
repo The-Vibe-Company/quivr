@@ -244,9 +244,16 @@ type Service struct {
 	PreviewBudget time.Duration
 }
 
-func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in SavedQueryInput) (SavedQuery, error) {
-	if !scope.Allows("monitoring:write") {
-		return SavedQuery{}, ErrForbidden
+func (s Service) CreateSavedQuery(ctx context.Context, scope corpus.Scope, in SavedQueryInput, prepare ...func() (SavedQueryInput, error)) (SavedQuery, error) {
+	if err := scope.Require(corpus.ActionMonitoringCreateSavedQuery); err != nil {
+		return SavedQuery{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return SavedQuery{}, err
+		}
 	}
 	if err := s.validDefinition(ctx, scope, in.Definition); err != nil {
 		return SavedQuery{}, err
@@ -294,8 +301,8 @@ func (s Service) serves(profile string) bool {
 }
 
 func (s Service) SavedQuery(ctx context.Context, scope corpus.Scope, id string) (SavedQuery, error) {
-	if !scope.Allows("monitoring:read") {
-		return SavedQuery{}, ErrForbidden
+	if err := scope.Require(corpus.ActionMonitoringSavedQuery); err != nil {
+		return SavedQuery{}, err
 	}
 	return s.visibleQuery(ctx, scope, id)
 }
@@ -315,7 +322,10 @@ func (s Service) visibleQuery(ctx context.Context, scope corpus.Scope, id string
 // SavedQueryVersion reads any immutable Version of a visible Saved Query whose
 // own Corpora the key also grants.
 func (s Service) SavedQueryVersion(ctx context.Context, scope corpus.Scope, id, versionID string) (SavedQueryVersion, error) {
-	if _, err := s.SavedQuery(ctx, scope, id); err != nil {
+	if err := scope.Require(corpus.ActionMonitoringSavedQueryVersion); err != nil {
+		return SavedQueryVersion{}, err
+	}
+	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
 		return SavedQueryVersion{}, err
 	}
 	v, err := s.Store.SavedQueryVersion(ctx, scope.Organization, id, versionID)
@@ -332,9 +342,16 @@ func (s Service) SavedQueryVersion(ctx context.Context, scope corpus.Scope, id, 
 // Version that becomes current. Subscriptions keep the Version they pin until
 // a new Subscription Version moves them. Replaying the same request returns
 // the same Version.
-func (s Service) CreateSavedQueryVersion(ctx context.Context, scope corpus.Scope, id string, in SavedQueryVersionInput) (SavedQueryVersion, error) {
-	if !scope.Allows("monitoring:write") {
-		return SavedQueryVersion{}, ErrForbidden
+func (s Service) CreateSavedQueryVersion(ctx context.Context, scope corpus.Scope, id string, in SavedQueryVersionInput, prepare ...func() (string, SavedQueryVersionInput, error)) (SavedQueryVersion, error) {
+	if err := scope.Require(corpus.ActionMonitoringCreateSavedQueryVersion); err != nil {
+		return SavedQueryVersion{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, in, err = load()
+		if err != nil {
+			return SavedQueryVersion{}, err
+		}
 	}
 	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
 		return SavedQueryVersion{}, err
@@ -356,9 +373,16 @@ type SavedQueryEncoder interface {
 
 // DeleteSavedQuery logically deletes a Saved Query no Subscription uses any
 // more. Its Versions stay readable. Repeating it is idempotent.
-func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, id string) (SavedQuery, error) {
-	if !scope.Allows("monitoring:write") {
-		return SavedQuery{}, ErrForbidden
+func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, id string, prepare ...func() (string, string, error)) (SavedQuery, error) {
+	if err := scope.Require(corpus.ActionMonitoringDeleteSavedQuery); err != nil {
+		return SavedQuery{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, err = load()
+		if err != nil {
+			return SavedQuery{}, err
+		}
 	}
 	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
 		return SavedQuery{}, err
@@ -369,9 +393,16 @@ func (s Service) DeleteSavedQuery(ctx context.Context, scope corpus.Scope, key, 
 // RenameSavedQuery changes the display name of a Saved Query. The name is not
 // part of its immutable Versions, so no Version is created and no
 // Subscription moves. Repeating it is idempotent.
-func (s Service) RenameSavedQuery(ctx context.Context, scope corpus.Scope, key, id, name string) (SavedQuery, error) {
-	if !scope.Allows("monitoring:write") {
-		return SavedQuery{}, ErrForbidden
+func (s Service) RenameSavedQuery(ctx context.Context, scope corpus.Scope, key, id, name string, prepare ...func() (string, string, string, error)) (SavedQuery, error) {
+	if err := scope.Require(corpus.ActionMonitoringRenameSavedQuery); err != nil {
+		return SavedQuery{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, name, err = load()
+		if err != nil {
+			return SavedQuery{}, err
+		}
 	}
 	if _, err := s.visibleQuery(ctx, scope, id); err != nil {
 		return SavedQuery{}, err
@@ -430,9 +461,16 @@ func (s Service) pinnable(ctx context.Context, scope corpus.Scope, queryID, vers
 	return v, nil
 }
 
-func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in SubscriptionInput) (Subscription, error) {
-	if !scope.Allows("monitoring:write") {
-		return Subscription{}, ErrForbidden
+func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in SubscriptionInput, prepare ...func() (SubscriptionInput, error)) (Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringCreateSubscription); err != nil {
+		return Subscription{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		in, err = load()
+		if err != nil {
+			return Subscription{}, err
+		}
 	}
 	if in.Owner != "" && !validOwner(in.Owner) {
 		return Subscription{}, ErrInvalidOwner
@@ -456,9 +494,16 @@ func (s Service) CreateSubscription(ctx context.Context, scope corpus.Scope, in 
 // ones, that the key sees: it must grant every Corpus any of their Versions
 // pinned. Paging is by Subscription ID after after. Quivr enforces no
 // per-owner rule; a layer above can use this listing to apply its own.
-func (s Service) Subscriptions(ctx context.Context, scope corpus.Scope, owner OwnerFilter, after string, limit int) ([]Subscription, error) {
-	if !scope.Allows("monitoring:read") {
-		return nil, ErrForbidden
+func (s Service) Subscriptions(ctx context.Context, scope corpus.Scope, owner OwnerFilter, after string, limit int, prepare ...func() (OwnerFilter, string, int, error)) ([]Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringSubscriptions); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		owner, after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !owner.Global && !validOwner(owner.Owner) {
 		return nil, ErrInvalidOwner
@@ -499,8 +544,8 @@ func validOwner(owner string) bool {
 }
 
 func (s Service) Subscription(ctx context.Context, scope corpus.Scope, id string) (Subscription, error) {
-	if !scope.Allows("monitoring:read") {
-		return Subscription{}, ErrForbidden
+	if err := scope.Require(corpus.ActionMonitoringSubscription); err != nil {
+		return Subscription{}, err
 	}
 	return s.visible(ctx, scope, id)
 }
@@ -508,7 +553,10 @@ func (s Service) Subscription(ctx context.Context, scope corpus.Scope, id string
 // SubscriptionVersion reads any immutable Version of a visible Subscription,
 // such as the one a historical Match names, when the key grants its scope.
 func (s Service) SubscriptionVersion(ctx context.Context, scope corpus.Scope, id, versionID string) (SubscriptionVersion, error) {
-	if _, err := s.Subscription(ctx, scope, id); err != nil {
+	if err := scope.Require(corpus.ActionMonitoringSubscriptionVersion); err != nil {
+		return SubscriptionVersion{}, err
+	}
+	if _, err := s.visible(ctx, scope, id); err != nil {
 		return SubscriptionVersion{}, err
 	}
 	v, err := s.Store.SubscriptionVersion(ctx, scope.Organization, id, versionID)
@@ -526,9 +574,16 @@ func (s Service) SubscriptionVersion(ctx context.Context, scope corpus.Scope, id
 // judges only changes committed after it; earlier changes, and the Matches
 // they produced, keep the Version that was effective. Replaying the same
 // request returns the same Version.
-func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Scope, id string, in SubscriptionVersionInput) (SubscriptionVersion, error) {
-	if !scope.Allows("monitoring:write") {
-		return SubscriptionVersion{}, ErrForbidden
+func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Scope, id string, in SubscriptionVersionInput, prepare ...func() (string, SubscriptionVersionInput, error)) (SubscriptionVersion, error) {
+	if err := scope.Require(corpus.ActionMonitoringCreateSubscriptionVersion); err != nil {
+		return SubscriptionVersion{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, in, err = load()
+		if err != nil {
+			return SubscriptionVersion{}, err
+		}
 	}
 	sub, err := s.visible(ctx, scope, id)
 	if err != nil {
@@ -549,9 +604,16 @@ func (s Service) CreateSubscriptionVersion(ctx context.Context, scope corpus.Sco
 
 // DisableSubscription stops future activity. Repeating it is idempotent and
 // replaying the original creation never reenables the Subscription.
-func (s Service) DisableSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
-	if !scope.Allows("monitoring:write") {
-		return Subscription{}, ErrForbidden
+func (s Service) DisableSubscription(ctx context.Context, scope corpus.Scope, key, id string, prepare ...func() (string, string, error)) (Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringDisableSubscription); err != nil {
+		return Subscription{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, err = load()
+		if err != nil {
+			return Subscription{}, err
+		}
 	}
 	if _, err := s.visible(ctx, scope, id); err != nil {
 		return Subscription{}, err
@@ -564,9 +626,16 @@ func (s Service) DisableSubscription(ctx context.Context, scope corpus.Scope, ke
 // Deliveries become claimable again under the unchanged admission rules and
 // delivery window. Repeating it, or enabling an enabled Subscription, is
 // idempotent and commits no event. A deleted Subscription is never re-enabled.
-func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
-	if !scope.Allows("monitoring:write") {
-		return Subscription{}, ErrForbidden
+func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key, id string, prepare ...func() (string, string, error)) (Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringEnableSubscription); err != nil {
+		return Subscription{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, err = load()
+		if err != nil {
+			return Subscription{}, err
+		}
 	}
 	if _, err := s.visible(ctx, scope, id); err != nil {
 		return Subscription{}, err
@@ -578,9 +647,16 @@ func (s Service) EnableSubscription(ctx context.Context, scope corpus.Scope, key
 // guarantee, for good: no new evaluation commit and no new Delivery Attempt
 // admission. Its Versions, Matches and Deliveries stay readable. Repeating it
 // is idempotent.
-func (s Service) DeleteSubscription(ctx context.Context, scope corpus.Scope, key, id string) (Subscription, error) {
-	if !scope.Allows("monitoring:write") {
-		return Subscription{}, ErrForbidden
+func (s Service) DeleteSubscription(ctx context.Context, scope corpus.Scope, key, id string, prepare ...func() (string, string, error)) (Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringDeleteSubscription); err != nil {
+		return Subscription{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, err = load()
+		if err != nil {
+			return Subscription{}, err
+		}
 	}
 	if _, err := s.visible(ctx, scope, id); err != nil {
 		return Subscription{}, err
@@ -591,9 +667,16 @@ func (s Service) DeleteSubscription(ctx context.Context, scope corpus.Scope, key
 // RenameSubscription changes the display name of a Subscription. The name is
 // not part of its immutable Versions: evaluation, enabled state, Matches and
 // Deliveries are unchanged. Repeating it is idempotent.
-func (s Service) RenameSubscription(ctx context.Context, scope corpus.Scope, key, id, name string) (Subscription, error) {
-	if !scope.Allows("monitoring:write") {
-		return Subscription{}, ErrForbidden
+func (s Service) RenameSubscription(ctx context.Context, scope corpus.Scope, key, id, name string, prepare ...func() (string, string, string, error)) (Subscription, error) {
+	if err := scope.Require(corpus.ActionMonitoringRenameSubscription); err != nil {
+		return Subscription{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		key, id, name, err = load()
+		if err != nil {
+			return Subscription{}, err
+		}
 	}
 	if _, err := s.visible(ctx, scope, id); err != nil {
 		return Subscription{}, err

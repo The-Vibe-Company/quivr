@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -26,14 +25,6 @@ func (a *API) activePluginRoutes(w http.ResponseWriter, r *http.Request, scope c
 	}
 	// The plan is the whole deployment's, so only a key for every Corpus
 	// reads it, as for the stats.
-	if !scope.Allows(content.ObservabilityRead) || !scope.AllCorpora() {
-		writeError(w, publicerr.Forbidden, nil)
-		return true
-	}
-	if a.Plugins.Store == nil {
-		writeError(w, publicerr.NotFound, nil)
-		return true
-	}
 	plan, err := a.Plugins.ActivePlugins(r.Context(), scope)
 	if errors.Is(err, registry.ErrNoPlan) {
 		send(w, 200, transport.ActivePluginList{Items: []transport.ActivePlugin{}})

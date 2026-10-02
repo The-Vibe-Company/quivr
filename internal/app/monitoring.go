@@ -11,7 +11,6 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -19,7 +18,7 @@ import (
 )
 
 // versionParts reads the evaluated Record Version: its canonical text Parts,
-// with a worker scope limited to the Version's own Corpus, and its metadata.
+// within its Organization and Corpus, and its metadata.
 type versionParts struct {
 	vectors  subscriptionEmbeddingReader
 	content  content.Service
@@ -29,7 +28,7 @@ type versionParts struct {
 }
 
 func (v versionParts) Article(ctx context.Context, org, corpusID, recordID, versionID string) (monitoring.Article, error) {
-	version, err := v.content.Version(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{corpusID}}, recordID, versionID)
+	version, err := v.content.TrustedVersion(ctx, org, corpusID, recordID, versionID)
 	if err != nil {
 		return monitoring.Article{}, err
 	}

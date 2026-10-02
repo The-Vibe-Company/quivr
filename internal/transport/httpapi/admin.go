@@ -65,10 +65,6 @@ func (a *API) adminDocumentRoutes(w http.ResponseWriter, r *http.Request, scope 
 	switch {
 	case r.Method != "GET":
 		writeError(w, publicerr.MethodNotAllowed, nil)
-	case !scope.Allows(content.ObservabilityRead):
-		writeError(w, publicerr.Forbidden, nil)
-	case a.Activity.Store == nil:
-		writeError(w, publicerr.NotFound, nil)
 	case timeline:
 		activity, err := a.Activity.Version(r.Context(), scope, versionID)
 		if err != nil {
@@ -96,29 +92,37 @@ func (a *API) adminDocumentRoutes(w http.ResponseWriter, r *http.Request, scope 
 }
 
 func (a *API) listDocuments(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
-	q := r.URL.Query()
-	for k, v := range q {
-		if (k != "page_cursor" && k != "limit") || len(v) != 1 {
-			writeError(w, publicerr.InvalidQuery, nil)
-			return
+	var limit int
+	var ok bool
+	var after *content.ActivityCursor
+	items, err := a.Activity.Latest(r.Context(), scope, nil, 0, func() (*content.ActivityCursor, int, error) {
+		q := r.URL.Query()
+		for k, v := range q {
+			if (k != "page_cursor" && k != "limit") || len(v) != 1 {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return nil, 0, errResponseWritten
+			}
 		}
-	}
-	limit, ok := pageLimit(w, q, 100, 100)
-	if !ok {
+		limit, ok = pageLimit(w, q, 100, 100)
+		if !ok {
+			return nil, 0, errResponseWritten
+		}
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeDocumentPage(q.Get("page_cursor"), scope); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil)
+				return nil, 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return nil, 0, errResponseWritten
+			}
+		}
+
+		return after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	var after *content.ActivityCursor
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeDocumentPage(q.Get("page_cursor"), scope); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil)
-			return
-		} else if err != nil {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
-		}
-	}
-	items, err := a.Activity.Latest(r.Context(), scope, after, limit+1)
 	if err != nil {
 		writeError(w, err, publicerr.StorageUnavailable)
 		return

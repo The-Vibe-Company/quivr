@@ -60,7 +60,7 @@ type RunStore interface {
 // Content reads canonical Versions, their segmentations and their stored
 // vectors.
 type Content interface {
-	Version(ctx context.Context, scope corpus.Scope, recordID, versionID string) (content.Version, error)
+	TrustedVersion(ctx context.Context, org, corpusID, recordID, versionID string) (content.Version, error)
 	PluginSegmentationOf(ctx context.Context, org string, v content.Version, recipe string) (content.Segmentation, error)
 	LoadEmbedding(ctx context.Context, org, derivation string) (content.Embedding, []float32, error)
 }
@@ -230,7 +230,7 @@ func (b Backfiller) fail(ctx context.Context, org, id string, failure operations
 func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate) error {
 	op, g := t.Operation, t.Generation
 	skip := func(code string) error { return b.Store.SkipBackfill(ctx, org, op.ID, c.VersionID, code) }
-	v, err := b.Content.Version(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{op.CorpusID}}, c.RecordID, c.VersionID)
+	v, err := b.Content.TrustedVersion(ctx, org, op.CorpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
 		return skip(SkipUnavailable)
 	}

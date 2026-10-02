@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -19,24 +20,26 @@ func (a *API) evaluationAdministrationRoutes(w http.ResponseWriter, r *http.Requ
 	if path != evaluationBacklogPath && path != evaluationRetirementsPath && !strings.HasPrefix(path, evaluationRetirementsPath+"/") {
 		return false
 	}
-	if !scope.Allows(monitoring.MigrationAction) {
-		writeError(w, publicerr.Forbidden, nil)
-		return true
-	}
 	switch {
 	case path == evaluationBacklogPath && r.Method == http.MethodGet:
-		query := r.URL.Query()
-		for key, values := range query {
-			if len(values) != 1 || (key != "limit" && key != "after") || (key == "after" && (values[0] == "" || len(values[0]) > 256)) {
-				writeError(w, publicerr.InvalidQuery, nil)
-				return true
+		out, err := a.Monitoring.EvaluationBacklog(r.Context(), scope, "", 0, func() (string, int, error) {
+			query := r.URL.Query()
+			for key, values := range query {
+				if len(values) != 1 || (key != "limit" && key != "after") || (key == "after" && (values[0] == "" || len(values[0]) > 256)) {
+					writeError(w, publicerr.InvalidQuery, nil)
+					return "", 0, errResponseWritten
+				}
 			}
-		}
-		limit, ok := pageLimit(w, query, monitoring.DefaultMigrationLimit, monitoring.MaxMigrationLimit)
-		if !ok {
+			limit, ok := pageLimit(w, query, monitoring.DefaultMigrationLimit, monitoring.MaxMigrationLimit)
+			if !ok {
+				return "", 0, errResponseWritten
+			}
+
+			return query.Get("after"), limit, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		out, err := a.Monitoring.EvaluationBacklog(r.Context(), scope, query.Get("after"), limit)
 		if err != nil {
 			writeError(w, err, publicerr.StorageUnavailable)
 		} else {
@@ -44,29 +47,35 @@ func (a *API) evaluationAdministrationRoutes(w http.ResponseWriter, r *http.Requ
 		}
 	case path == evaluationRetirementsPath && r.Method == http.MethodPost:
 		var body transport.EvaluationRetirementRequest
-		raw, payload, ok := readJSON(w, r, maxRequestBytes)
-		if !ok {
-			return true
-		}
-		if object, ok := raw.(map[string]any); ok {
-			if value, present := object["limit"]; present {
-				number, valid := value.(json.Number)
-				limit, err := number.Int64()
-				if !valid || err != nil || limit < 1 || limit > monitoring.MaxMigrationLimit {
-					writeError(w, publicerr.InvalidLimit, nil)
-					return true
+		out, err := a.Monitoring.RetireEvaluations(r.Context(), scope, monitoring.EvaluationRetirementInput{}, func() (monitoring.EvaluationRetirementInput, error) {
+			raw, payload, ok := readJSON(w, r, maxRequestBytes)
+			if !ok {
+				return monitoring.EvaluationRetirementInput{}, errResponseWritten
+			}
+			if object, ok := raw.(map[string]any); ok {
+				if value, present := object["limit"]; present {
+					number, valid := value.(json.Number)
+					limit, err := number.Int64()
+					if !valid || err != nil || limit < 1 || limit > monitoring.MaxMigrationLimit {
+						writeError(w, publicerr.InvalidLimit, nil)
+						return monitoring.EvaluationRetirementInput{}, errResponseWritten
+					}
 				}
 			}
-		}
-		if a.evaluationRetirementSchema.Validate(raw) != nil || json.Unmarshal(payload, &body) != nil {
-			writeError(w, publicerr.InvalidSchema, nil)
+			if a.evaluationRetirementSchema.Validate(raw) != nil || json.Unmarshal(payload, &body) != nil {
+				writeError(w, publicerr.InvalidSchema, nil)
+				return monitoring.EvaluationRetirementInput{}, errResponseWritten
+			}
+			input := monitoring.EvaluationRetirementInput{Key: body.Key, PluginID: body.PluginId, Version: body.Version, Reason: body.Reason, DryRun: body.DryRun}
+			if body.Limit != nil {
+				input.Limit = *body.Limit
+			}
+
+			return input, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		input := monitoring.EvaluationRetirementInput{Key: body.Key, PluginID: body.PluginId, Version: body.Version, Reason: body.Reason, DryRun: body.DryRun}
-		if body.Limit != nil {
-			input.Limit = *body.Limit
-		}
-		out, err := a.Monitoring.RetireEvaluations(r.Context(), scope, input)
 		if err != nil {
 			writeError(w, err, publicerr.StorageUnavailable)
 		} else {
@@ -76,19 +85,31 @@ func (a *API) evaluationAdministrationRoutes(w http.ResponseWriter, r *http.Requ
 			send(w, 200, out)
 		}
 	case strings.HasPrefix(path, evaluationRetirementsPath+"/") && r.Method == http.MethodGet:
-		id := strings.TrimPrefix(path, evaluationRetirementsPath+"/")
-		if id == "" || strings.Contains(id, "/") {
-			writeError(w, publicerr.NotFound, nil)
+		out, err := a.Monitoring.EvaluationRetirement(r.Context(), scope, "", func() (string, error) {
+			id := strings.TrimPrefix(path, evaluationRetirementsPath+"/")
+			if id == "" || strings.Contains(id, "/") {
+				writeError(w, publicerr.NotFound, nil)
+				return "", errResponseWritten
+			}
+			return id, nil
+		})
+		if errors.Is(err, errResponseWritten) {
 			return true
 		}
-		out, err := a.Monitoring.EvaluationRetirement(r.Context(), scope, id)
+
 		if err != nil {
 			writeError(w, err, publicerr.StorageUnavailable)
 		} else {
 			send(w, 200, out)
 		}
 	default:
-		writeError(w, publicerr.MethodNotAllowed, nil)
+		_, err := a.Monitoring.EvaluationBacklog(r.Context(), scope, "", 0, func() (string, int, error) {
+			writeError(w, publicerr.MethodNotAllowed, nil)
+			return "", 0, errResponseWritten
+		})
+		if err != nil && !errors.Is(err, errResponseWritten) {
+			writeError(w, err, publicerr.StorageUnavailable)
+		}
 	}
 	return true
 }

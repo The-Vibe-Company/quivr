@@ -71,30 +71,24 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 	if !ok {
 		return
 	}
-	if !s.Allows("content:read") {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
-	if !s.Contains(corpusID) {
-		writeError(w, publicerr.NotFound, nil)
-		return
-	}
-	if _, err := a.Service.Store.Read(r.Context(), s.Organization, corpusID); err != nil {
-		writeError(w, err, publicerr.ContentUnavailable)
-		return
-	}
-	after := ""
-	if q.Has("page_cursor") {
-		var err error
-		if after, err = a.decodeRecordPage(q.Get("page_cursor"), corpusID, s); errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil, corpusID)
-			return
-		} else if err != nil {
-			writeError(w, publicerr.InvalidCursor, nil)
-			return
+	records, err := a.Content.Records(r.Context(), s, corpusID, "", 0, func() (string, string, int, error) {
+		after := ""
+		if q.Has("page_cursor") {
+			var err error
+			if after, err = a.decodeRecordPage(q.Get("page_cursor"), corpusID, s); errors.Is(err, errPageScope) {
+				writeError(w, publicerr.CursorScopeChanged, nil, corpusID)
+				return "", "", 0, errResponseWritten
+			} else if err != nil {
+				writeError(w, publicerr.InvalidCursor, nil)
+				return "", "", 0, errResponseWritten
+			}
 		}
+		return corpusID, after, limit + 1, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
-	records, err := a.Content.Records(r.Context(), s, corpusID, after, limit+1)
+
 	if err != nil {
 		writeError(w, err, publicerr.ContentUnavailable)
 		return

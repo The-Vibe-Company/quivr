@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 )
 
@@ -55,9 +54,16 @@ type Promotions struct{ Store PromotionStore }
 
 // Promote makes space the one search uses; promoting the former one back
 // is the same call.
-func (p Promotions) Promote(ctx context.Context, scope corpus.Scope, space string, force bool) (Promotion, error) {
-	if !scope.Allows(operations.BackfillPermission) {
-		return Promotion{}, corpus.ErrForbidden
+func (p Promotions) Promote(ctx context.Context, scope corpus.Scope, space string, force bool, prepare ...func() (string, bool, error)) (Promotion, error) {
+	if err := scope.Require(corpus.ActionBackfillPromote); err != nil {
+		return Promotion{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		space, force, err = load()
+		if err != nil {
+			return Promotion{}, err
+		}
 	}
 	return p.Store.PromoteSpace(ctx, space, force)
 }

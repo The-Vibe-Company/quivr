@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -71,20 +72,18 @@ func (a *API) operationRoutes(w http.ResponseWriter, r *http.Request, scope corp
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return true
 	}
-	if !scope.Allows("projections:rebuild") {
-		writeError(w, publicerr.Forbidden, nil)
+	op, err := a.Operations.RequestRebuild(r.Context(), scope, corpusID, "", func() (string, string, error) {
+		raw, ok := decodeRequest(w, r, a.actionSchema)
+		if !ok {
+			return "", "", errResponseWritten
+		}
+		key, _ := raw.(map[string]any)["idempotency_key"].(string)
+
+		return corpusID, key, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return true
 	}
-	if !scope.Contains(corpusID) {
-		writeError(w, publicerr.NotFound, nil)
-		return true
-	}
-	raw, ok := decodeRequest(w, r, a.actionSchema)
-	if !ok {
-		return true
-	}
-	key, _ := raw.(map[string]any)["idempotency_key"].(string)
-	op, err := a.Operations.RequestRebuild(r.Context(), scope, corpusID, key)
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)
@@ -104,26 +103,30 @@ func (a *API) operationAction(w http.ResponseWriter, r *http.Request, scope corp
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
-	if !scope.Allows("operations:write") {
-		writeError(w, publicerr.Forbidden, nil)
-		return
+	load := func() (string, error) {
+		raw, ok := decodeRequest(w, r, a.actionSchema)
+		if !ok {
+			return "", errResponseWritten
+		}
+		key, _ := raw.(map[string]any)["idempotency_key"].(string)
+		return key, nil
 	}
-	raw, ok := decodeRequest(w, r, a.actionSchema)
-	if !ok {
-		return
-	}
-	key, _ := raw.(map[string]any)["idempotency_key"].(string)
+	prepare := func() (string, string, error) { key, err := load(); return id, key, err }
+	prepareID := func() (string, error) { _, err := load(); return id, err }
 	var op operations.Operation
 	var err error
 	switch action {
 	case "cancel":
-		op, err = a.Operations.Cancel(r.Context(), scope, id, key)
+		op, err = a.Operations.Cancel(r.Context(), scope, "", "", prepare)
 	case "pause":
-		op, err = a.Operations.Pause(r.Context(), scope, id)
+		op, err = a.Operations.Pause(r.Context(), scope, "", prepareID)
 	case "resume":
-		op, err = a.Operations.Resume(r.Context(), scope, id)
+		op, err = a.Operations.Resume(r.Context(), scope, "", prepareID)
 	default:
-		op, err = a.Operations.Rerun(r.Context(), scope, id, key)
+		op, err = a.Operations.Rerun(r.Context(), scope, "", "", prepare)
+	}
+	if errors.Is(err, errResponseWritten) {
+		return
 	}
 	switch {
 	case err != nil:
@@ -144,27 +147,25 @@ func (a *API) configureRetrieval(w http.ResponseWriter, r *http.Request, scope c
 		writeError(w, publicerr.MethodNotAllowed, nil)
 		return
 	}
-	if !scope.Allows("corpora:write") || !scope.Allows("operations:write") {
-		writeError(w, publicerr.Forbidden, nil)
+	op, err := a.Operations.ConfigureRetrieval(r.Context(), scope, corpusID, "", corpus.Retrieval{}, func() (string, string, corpus.Retrieval, error) {
+		raw, ok := decodeRequest(w, r, a.configSchema)
+		if !ok {
+			return "", "", corpus.Retrieval{}, errResponseWritten
+		}
+		data := raw.(map[string]any)
+		key, _ := data["idempotency_key"].(string)
+		requested, _ := data["retrieval"].(map[string]any)
+		cfg, err := a.Service.Resolve(requested)
+		if err != nil {
+			writeError(w, err, publicerr.InvalidMapping)
+			return "", "", corpus.Retrieval{}, errResponseWritten
+		}
+
+		return corpusID, key, cfg, nil
+	})
+	if errors.Is(err, errResponseWritten) {
 		return
 	}
-	if !scope.Contains(corpusID) {
-		writeError(w, publicerr.NotFound, nil)
-		return
-	}
-	raw, ok := decodeRequest(w, r, a.configSchema)
-	if !ok {
-		return
-	}
-	data := raw.(map[string]any)
-	key, _ := data["idempotency_key"].(string)
-	requested, _ := data["retrieval"].(map[string]any)
-	cfg, err := a.Service.Resolve(requested)
-	if err != nil {
-		writeError(w, err, publicerr.InvalidMapping)
-		return
-	}
-	op, err := a.Operations.ConfigureRetrieval(r.Context(), scope, corpusID, key, cfg)
 	switch {
 	case err != nil:
 		writeError(w, err, publicerr.StorageUnavailable)

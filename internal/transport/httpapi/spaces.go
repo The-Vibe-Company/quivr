@@ -30,19 +30,8 @@ func vectorSpaceRoute(r *http.Request) (string, bool) {
 }
 
 func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope corpus.Scope, id string) {
-	if !scope.Allows("corpora:read") {
-		writeError(w, publicerr.Forbidden, nil)
-		return
-	}
-	if a.Spaces == nil || !scope.Contains(id) {
-		writeError(w, publicerr.NotFound, nil)
-		return
-	}
-	if _, err := a.Service.Read(r.Context(), scope, id); err != nil {
-		writeError(w, err, publicerr.DependencyUnavailable)
-		return
-	}
-	g, spaces, total, err := a.Spaces.VectorSpaces(r.Context(), scope.Organization, id)
+
+	g, spaces, total, err := (content.VectorSpaces{Store: a.Spaces, Corpora: a.Service.Store}).List(r.Context(), scope, id)
 	if err != nil {
 		writeError(w, err, publicerr.DependencyUnavailable)
 		return

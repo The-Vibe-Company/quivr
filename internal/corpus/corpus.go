@@ -80,9 +80,16 @@ func (s Service) Resolve(raw map[string]any) (Retrieval, error) {
 	return ResolveRetrieval(raw, s.Namespaces)
 }
 
-func (s Service) Create(ctx context.Context, scope Scope, input CreateInput) (Corpus, bool, error) {
-	if !scope.Allows("corpora:write") || !scope.AllCorpora() {
-		return Corpus{}, false, ErrForbidden
+func (s Service) Create(ctx context.Context, scope Scope, input CreateInput, prepare ...func() (CreateInput, error)) (Corpus, bool, error) {
+	if err := scope.Require(ActionCorpusCreate); err != nil {
+		return Corpus{}, false, err
+	}
+	for _, load := range prepare {
+		var err error
+		input, err = load()
+		if err != nil {
+			return Corpus{}, false, err
+		}
 	}
 	if input.Retrieval == nil {
 		input.Retrieval = map[string]any{}
@@ -109,17 +116,24 @@ func validPointer(p string) bool {
 	return true
 }
 func (s Service) Read(ctx context.Context, scope Scope, id string) (Corpus, error) {
-	if !scope.Allows("corpora:read") {
-		return Corpus{}, ErrForbidden
+	if err := scope.Require(ActionCorpusRead); err != nil {
+		return Corpus{}, err
 	}
 	if !scope.Contains(id) {
 		return Corpus{}, ErrNotFound
 	}
 	return s.Store.Read(ctx, scope.Organization, id)
 }
-func (s Service) List(ctx context.Context, scope Scope, after string, limit int) ([]Corpus, error) {
-	if !scope.Allows("corpora:read") {
-		return nil, ErrForbidden
+func (s Service) List(ctx context.Context, scope Scope, after string, limit int, prepare ...func() (string, int, error)) ([]Corpus, error) {
+	if err := scope.Require(ActionCorpusList); err != nil {
+		return nil, err
+	}
+	for _, load := range prepare {
+		var err error
+		after, limit, err = load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return s.Store.List(ctx, scope, after, limit)
 }

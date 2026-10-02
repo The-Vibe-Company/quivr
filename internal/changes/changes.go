@@ -92,6 +92,7 @@ type Page struct {
 
 // Service reads the journal for one authorized Corpus.
 type Service struct {
+	Corpora   corpus.Store
 	Journal   Journal
 	Key       []byte
 	Retention time.Duration
@@ -101,6 +102,17 @@ type Service struct {
 // now at the committed head. Expiry of a supplied cursor is detected here, so
 // transports can reject it before a stream begins.
 func (s Service) Start(ctx context.Context, scope corpus.Scope, corpusID, token string) (int64, error) {
+
+	if err := scope.Require(corpus.ActionChangesStart); err != nil {
+		return 0, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return 0, err
+	}
+	return s.start(ctx, scope, corpusID, token)
+}
+
+func (s Service) start(ctx context.Context, scope corpus.Scope, corpusID, token string) (int64, error) {
 	if token == "" {
 		w, err := s.Journal.ReadChanges(ctx, scope.Organization, corpusID, 0, 0, s.retention())
 		return w.Head, err
@@ -124,6 +136,17 @@ func (s Service) Start(ctx context.Context, scope corpus.Scope, corpusID, token 
 
 // Read returns up to limit visible changes after position.
 func (s Service) Read(ctx context.Context, scope corpus.Scope, corpusID string, position int64, limit int) (Page, error) {
+
+	if err := scope.Require(corpus.ActionChangesRead); err != nil {
+		return Page{}, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return Page{}, err
+	}
+	return s.read(ctx, scope, corpusID, position, limit)
+}
+
+func (s Service) read(ctx context.Context, scope corpus.Scope, corpusID string, position int64, limit int) (Page, error) {
 	w, err := s.Journal.ReadChanges(ctx, scope.Organization, corpusID, position, limit, s.retention())
 	if err != nil {
 		return Page{}, err
@@ -144,9 +167,27 @@ func (s Service) Read(ctx context.Context, scope corpus.Scope, corpusID string, 
 
 // Poll implements start-now polling: without a cursor it returns no events
 // and the committed head as the next cursor.
-func (s Service) Poll(ctx context.Context, scope corpus.Scope, corpusID, token string, limit int) (Page, error) {
+func (s Service) Poll(ctx context.Context, scope corpus.Scope, corpusID, token string, limit int, prepare ...func() (int, error)) (Page, error) {
+
+	if err := scope.Require(corpus.ActionChangesPoll); err != nil {
+		return Page{}, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return Page{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		limit, err = load()
+		if err != nil {
+			return Page{}, err
+		}
+	}
+	return s.poll(ctx, scope, corpusID, token, limit)
+}
+
+func (s Service) poll(ctx context.Context, scope corpus.Scope, corpusID, token string, limit int) (Page, error) {
 	if token == "" {
-		position, err := s.Start(ctx, scope, corpusID, "")
+		position, err := s.start(ctx, scope, corpusID, "")
 		if err != nil {
 			return Page{}, err
 		}
@@ -156,7 +197,7 @@ func (s Service) Poll(ctx context.Context, scope corpus.Scope, corpusID, token s
 	if err != nil {
 		return Page{}, err
 	}
-	return s.Read(ctx, scope, corpusID, position, limit)
+	return s.read(ctx, scope, corpusID, position, limit)
 }
 
 type cursorPayload struct {
@@ -211,4 +252,21 @@ func digest(s corpus.Scope) string {
 	b, _ := json.Marshal(s)
 	h := sha256.Sum256(b)
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// ErrInvalidCorpus refuses a missing change-feed collection after permission.
+var ErrInvalidCorpus = publicerr.InvalidQuery
+
+func (s Service) authorize(ctx context.Context, scope corpus.Scope, id string) error {
+	if id == "" {
+		return ErrInvalidCorpus
+	}
+	if !scope.Contains(id) {
+		return corpus.ErrNotFound
+	}
+	if s.Corpora != nil {
+		_, err := s.Corpora.Read(ctx, scope.Organization, id)
+		return err
+	}
+	return nil
 }

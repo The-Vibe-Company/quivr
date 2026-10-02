@@ -334,12 +334,11 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 	if owner, ok := connector.(ExtensionOwner); ok {
 		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
 	}
-	scope := corpus.Scope{Organization: org, Actions: []string{"content:write", "content:read"}, Corpora: []string{target.CorpusID}}
 	submitter := Acquirer{Ingest: r.Ingest}
 	rc := runContext{connector: connector, target: target, credential: credential}
 	outcome := DeliveryOutcome{Accepted: true, Carried: len(delivery.Items) > 0, Reads: delivery.Reads}
 	for _, item := range delivery.Items {
-		_, receipt, err := submitter.submit(ctx, scope, rc, item)
+		_, receipt, err := submitter.submit(ctx, org, rc, item)
 		switch {
 		case err == nil:
 			outcome.Fresh = outcome.Fresh || receipt.NewRevision

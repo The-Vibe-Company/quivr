@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
@@ -36,13 +35,14 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 		writeError(w, publicerr.NotFound, nil)
 	case r.Method != "GET":
 		writeError(w, publicerr.MethodNotAllowed, nil)
-	// The rollups cover every Corpus of the Organization, query text included.
-	case !scope.Allows(content.ObservabilityRead) || !scope.AllCorpora():
-		writeError(w, publicerr.Forbidden, nil)
-	case a.Stats.Store == nil:
-		writeError(w, publicerr.NotFound, nil)
 	default:
-		a.stats(w, r, scope.Organization, series)
+		err := a.Stats.Read(scope, func(reader observability.ScopedReader) error {
+			a.stats(w, r, reader, series)
+			return nil
+		})
+		if err != nil {
+			writeError(w, err, publicerr.NotFound)
+		}
 	}
 	return true
 }
@@ -52,7 +52,7 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 // largest only. Matches are keyed by evaluator plugin, a deployment set.
 var countedLimits = map[string][2]int{observability.SeriesReceived: {10, 100}, observability.SeriesSearchQuery: {20, 100}, observability.SeriesMatch: {100, 100}, observability.SeriesConnectorPush: {100, 100}}
 
-func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) {
+func (a *API) stats(w http.ResponseWriter, r *http.Request, reader observability.ScopedReader, series string) {
 	q := r.URL.Query()
 	limits, counted := countedLimits[series]
 	for k, v := range q {
@@ -73,7 +73,7 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 			writeError(w, publicerr.InvalidQuery, nil)
 			return
 		}
-		report, err := a.Stats.Report(r.Context(), org, series, window, observability.Key(id, "received"), observability.Key(id, "refused"))
+		report, err := reader.Report(r.Context(), series, window, observability.Key(id, "received"), observability.Key(id, "refused"))
 		if err != nil {
 			writeError(w, publicerr.StorageUnavailable, nil)
 			return
@@ -96,10 +96,10 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 		if !ok {
 			return
 		}
-		a.counts(w, r, org, series, window, limit)
+		a.counts(w, r, reader, series, window, limit)
 		return
 	}
-	report, err := a.Stats.Report(r.Context(), org, series, window)
+	report, err := reader.Report(r.Context(), series, window)
 	if err != nil {
 		writeError(w, publicerr.StorageUnavailable, nil)
 		return
@@ -131,13 +131,13 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 
 // counts serves the counted reads: documents received per source namespace,
 // Matches per evaluator and the most frequent queries.
-func (a *API) counts(w http.ResponseWriter, r *http.Request, org, series string, window observability.Window, limit int) {
+func (a *API) counts(w http.ResponseWriter, r *http.Request, reader observability.ScopedReader, series string, window observability.Window, limit int) {
 	var counts observability.Counts
 	var err error
 	if series == observability.SeriesSearchQuery {
-		counts, err = a.Stats.TopQueries(r.Context(), org, window, limit)
+		counts, err = reader.TopQueries(r.Context(), window, limit)
 	} else {
-		counts, err = a.Stats.Counts(r.Context(), org, series, window, limit)
+		counts, err = reader.Counts(r.Context(), series, window, limit)
 	}
 	if err != nil {
 		writeError(w, publicerr.StorageUnavailable, nil)
