@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
@@ -90,6 +91,8 @@ type Pin struct {
 	// every invocation idempotency key; empty for a pin loaded from the
 	// configuration alone.
 	KeyIdentity string
+	apiOnce     sync.Once
+	api         API
 	routes      map[string]RouteConfig
 }
 
@@ -446,12 +449,22 @@ func StartupGeneration(id, version, manifestDigest string) string {
 // PluginAPI is the Plugin API version the engine speaks to the pinned plugin:
 // the highest supported version its plugin_api range admits.
 func (p *Pin) PluginAPI() string {
-	if r, err := ParseRange(p.Manifest.Compatibility.PluginAPI); err == nil {
-		if v, ok := NegotiatePluginAPI(r); ok {
-			return v
+	p.apiOnce.Do(func() {
+		version := PluginAPIVersion
+		if r, err := ParseRange(p.Manifest.Compatibility.PluginAPI); err == nil {
+			if v, ok := NegotiatePluginAPI(r); ok {
+				version = v
+			}
 		}
-	}
-	return PluginAPIVersion
+		p.api = ResolveAPI(version)
+	})
+	return p.api.Version
+}
+
+// Speaks reports whether the manifest-negotiated API provides feature.
+func (p *Pin) Speaks(feature Feature) bool {
+	p.PluginAPI()
+	return p.api.Speaks(feature)
 }
 
 // Report is the inspection report the discovery check compares against.

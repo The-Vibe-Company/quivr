@@ -2,6 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 GO=${GO:-go}
+if [ "${1:-check}" = generate ]; then
+  "$GO" run ./cmd/quivr-plugin-api
+else
+  "$GO" run ./cmd/quivr-plugin-api -check
+fi
 work="$PWD/.scratch/contracts"
 mkdir -p "$work" internal/transport/generated client
 python3 -m venv "$work/venv"

@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -20,8 +21,10 @@ type Live struct {
 	// it; nil resolves only the current plan.
 	Resolve func(ctx context.Context, plan string) (*PinSet, error)
 	mu      sync.Mutex
-	// plans caches resolved plans: a plan never changes once recorded.
-	plans map[string]*snapshot
+	// plans caches at most 32 historical snapshots in least-recently-used
+	// order. Work contexts retain their snapshots after eviction.
+	plans     map[string]*snapshot
+	planOrder []string
 }
 
 type snapshot struct {
@@ -121,6 +124,9 @@ func (l *Live) snapshotOf(ctx context.Context, plan string) (*snapshot, error) {
 	}
 	l.mu.Lock()
 	cached := l.plans[plan]
+	if cached != nil {
+		l.remember(plan, cached)
+	}
 	l.mu.Unlock()
 	if cached != nil {
 		return cached, nil
@@ -137,12 +143,30 @@ func (l *Live) snapshotOf(ctx context.Context, plan string) (*snapshot, error) {
 		return nil, fmt.Errorf("pipeline plan %s: %w", plan, err)
 	}
 	l.mu.Lock()
+	// Concurrent resolutions of the same immutable plan share one snapshot.
+	if cached := l.plans[plan]; cached != nil {
+		s = cached
+	}
+	l.remember(plan, s)
+	l.mu.Unlock()
+	return s, nil
+}
+
+// remember runs with mu held. Eviction drops only the cache reference;
+// already pinned work owns its snapshot until its context is released.
+func (l *Live) remember(plan string, s *snapshot) {
 	if l.plans == nil {
 		l.plans = map[string]*snapshot{}
 	}
+	if i := slices.Index(l.planOrder, plan); i >= 0 {
+		l.planOrder = slices.Delete(l.planOrder, i, i+1)
+	}
 	l.plans[plan] = s
-	l.mu.Unlock()
-	return s, nil
+	l.planOrder = append(l.planOrder, plan)
+	if len(l.planOrder) > 32 {
+		delete(l.plans, l.planOrder[0])
+		l.planOrder = slices.Delete(l.planOrder, 0, 1)
+	}
 }
 
 // Pin returns ctx carrying work pinned to work.Plan: every lookup of this

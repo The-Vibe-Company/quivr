@@ -2,6 +2,7 @@ package plugins_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -103,5 +104,50 @@ func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
 	}
 	if resolved != 1 {
 		t.Fatalf("plan_a resolved %d times; a plan never changes, so once", resolved)
+	}
+}
+
+// Historical plan reuse is bounded without invalidating work already pinned
+// to an evicted plan. Resolution count observes the real cache contract.
+func TestHistoricalPlanCacheEvictsWithoutChangingPinnedWork(t *testing.T) {
+	set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: "../../tests/plugin-contract/valid/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9900", Routes: []plugins.RouteConfig{{MediaType: "text/markdown"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := plugins.NewLive("current", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := map[string]int{}
+	live.Resolve = func(_ context.Context, plan string) (*plugins.PinSet, error) {
+		calls[plan]++
+		return set, nil
+	}
+	pin := func(plan string) context.Context {
+		t.Helper()
+		ctx, err := live.Pin(context.Background(), plugins.Work{Plan: plan}, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	oldest := pin("oldest")
+	pin("recent")
+	for n := range 30 {
+		pin(fmt.Sprintf("other_%d", n))
+	}
+	pin("oldest") // Reuse makes this the most recently used historical plan.
+	pin("overflow")
+	pin("oldest")
+	pin("recent")
+	if calls["oldest"] != 1 || calls["recent"] != 2 {
+		t.Fatalf("resolved oldest %d times, recent %d; want 1 and 2 after LRU eviction", calls["oldest"], calls["recent"])
+	}
+	for n := range 40 {
+		pin(fmt.Sprintf("later_%d", n))
+	}
+	pin("oldest")
+	if calls["oldest"] != 2 || !live.Routed(oldest, "text/markdown") || live.Routed(context.Background(), "text/markdown") {
+		t.Fatalf("evicted plan must reload, while existing work keeps its route: calls=%d pinned=%v current=%v", calls["oldest"], live.Routed(oldest, "text/markdown"), live.Routed(context.Background(), "text/markdown"))
 	}
 }

@@ -286,17 +286,3 @@ func Float32s(vector []float64) []float32 {
 	}
 	return out
 }
-
-// SegmentsOnly reports whether a manifest's plugin_api range admits
-// SegmentOnlySince, so segment_and_embed may ask it for no space.
-func SegmentsOnly(m *Manifest) bool {
-	if m == nil {
-		return false
-	}
-	r, err := ParseRange(m.Compatibility.PluginAPI)
-	if err != nil {
-		return false
-	}
-	_, ok := admits(r, SegmentOnlySince)
-	return ok
-}

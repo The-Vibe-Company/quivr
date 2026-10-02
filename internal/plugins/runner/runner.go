@@ -177,6 +177,7 @@ type run struct {
 	opts    Options
 	report  Report
 	m       *plugins.Manifest
+	api     plugins.API
 	baseURL string
 	// pluginAPI is the Plugin API version discovery serves.
 	pluginAPI string
@@ -377,6 +378,7 @@ func (r *run) inspect() bool {
 		return false
 	}
 	r.m = inspected.Manifest
+	r.api = plugins.ResolveAPI((&plugins.Pin{Manifest: *r.m}).PluginAPI())
 	return true
 }
 

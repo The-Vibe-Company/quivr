@@ -170,7 +170,7 @@ func (r *run) invokeIngestion(ctx context.Context, ir ingestionRun) {
 		}
 	}
 	r.add(replay, started)
-	if len(replay.Issues) == 0 && plugins.SegmentsOnly(r.m) {
+	if len(replay.Issues) == 0 && r.api.Speaks(plugins.FeatureSegmentsOnly) {
 		r.segmentsOnly(ctx, ir, first.Body)
 	}
 }

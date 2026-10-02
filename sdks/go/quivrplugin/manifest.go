@@ -15,13 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.11.0"
-
-// SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
-// oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0"}
-
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
 // whole manifest with `quivr plugin inspect`.
@@ -208,9 +201,10 @@ func loadManifest(path string) (*loadedManifest, error) {
 		return nil, fmt.Errorf("%s: no Plugin API version this SDK serves (%s) satisfies the range %q", path, strings.Join(SupportedPluginAPIVersions, ", "), m.Compatibility.PluginAPI)
 	}
 	m.pluginAPI = api
+	features := resolveAPIFeatures(api)
 	if raw, ok := m.Contributions["ingestion"]; ok {
-		if compareVersions(api, "0.6.0") < 0 {
-			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.6.0, which introduced ingestion", path, m.Compatibility.PluginAPI)
+		if !features.speaks("ingestion") {
+			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API %s, which introduced ingestion", path, m.Compatibility.PluginAPI, FeatureSince["ingestion"])
 		}
 		in := &IngestionContribution{}
 		if err := json.Unmarshal(raw, in); err != nil {
@@ -231,8 +225,8 @@ func loadManifest(path string) (*loadedManifest, error) {
 		m.Ingestion = in
 	}
 	if raw, ok := m.Contributions["retrieval"]; ok {
-		if compareVersions(api, "0.7.0") < 0 {
-			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.7.0, which introduced retrieval", path, m.Compatibility.PluginAPI)
+		if !features.speaks("retrieval") {
+			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API %s, which introduced retrieval", path, m.Compatibility.PluginAPI, FeatureSince["retrieval"])
 		}
 		rc := &RetrievalContribution{}
 		if err := json.Unmarshal(raw, rc); err != nil {
@@ -288,18 +282,18 @@ func loadManifest(path string) (*loadedManifest, error) {
 			a.TimeoutMS = 120000
 		}
 	}
-	if compareVersions(api, "0.3.0") < 0 {
-		return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API 0.3.0, which introduced connectors", path, m.Compatibility.PluginAPI)
+	if !features.speaks("connector") {
+		return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API %s, which introduced connectors", path, m.Compatibility.PluginAPI, FeatureSince["connector"])
 	}
-	if c.Attachments != nil && compareVersions(api, "0.4.0") < 0 {
-		return nil, fmt.Errorf("%s: contributions.connector.attachments needs a plugin_api range that admits Plugin API 0.4.0", path)
+	if c.Attachments != nil && !features.speaks("attachments") {
+		return nil, fmt.Errorf("%s: contributions.connector.attachments needs a plugin_api range that admits Plugin API %s", path, FeatureSince["attachments"])
 	}
 	for name, kind := range c.Kinds {
-		if kind.API != nil && (!kind.Pushes() || compareVersions(api, "0.11.0") < 0) {
-			return nil, fmt.Errorf("%s: kind %s API routes require push and Plugin API 0.11.0", path, name)
+		if kind.API != nil && (!kind.Pushes() || !features.speaks("connector_api")) {
+			return nil, fmt.Errorf("%s: kind %s API routes require push and Plugin API %s", path, name, FeatureSince["connector_api"])
 		}
-		if kind.Pushes() && compareVersions(api, "0.5.0") < 0 {
-			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API 0.5.0", path, name)
+		if kind.Pushes() && !features.speaks("push") {
+			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API %s", path, name, FeatureSince["push"])
 		}
 	}
 	return m, nil

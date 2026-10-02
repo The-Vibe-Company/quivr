@@ -201,10 +201,10 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 	}
 	checkpoint := orNull(r.Checkpoint)
 	scoped := c.ref(r.InstanceID, r.Config)
-	if plugins.SendsInstanceScope(served) {
+	if plugins.ResolveAPI(served).Speaks(plugins.FeatureInstanceScope) {
 		scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
 	}
-	if c.Pushes() && plugins.SendsWebhookURL(served) {
+	if c.Pushes() && plugins.ResolveAPI(served).Speaks(plugins.FeaturePush) {
 		scoped.WebhookURL = r.WebhookURL
 	}
 	request, err := json.Marshal(fetchRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,

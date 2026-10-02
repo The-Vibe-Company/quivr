@@ -7,6 +7,25 @@ description: "The routes a plugin serves, their fields, errors and fixtures, gen
 
 The HTTP routes a plugin serves, with every field of their JSON bodies, the error envelope and the fixture files `quivr plugin test` reads. A plugin serves JSON over HTTP; every route is under `/v0`, the major version of the Plugin API. The schemas in `contracts/plugins/v0/` are the source of truth; the SDKs and `quivr plugin test` implement them.
 
+## Plugin API versions
+
+Latest Plugin API: `0.11.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`.
+
+| Feature | Since |
+| --- | --- |
+| Normalizer Contribution | `0.1.0` |
+| Subscription Contribution | `0.2.0` |
+| Connector Contribution | `0.3.0` |
+| Connector instance scope, declared checkpoint bound, underscores in identifiers | `0.3.1` |
+| Connector attachments | `0.4.0` |
+| Connector push mode and webhook URL | `0.5.0` |
+| Ingestion Contribution | `0.6.0` |
+| Retrieval Contribution | `0.7.0` |
+| Segment-only segment_and_embed requests | `0.8.0` |
+| Vector space input_price | `0.9.0` |
+| Subscription Part and query vectors | `0.10.0` |
+| Connector API routes secured by a Quivr key | `0.11.0` |
+
 ## Discovery and health
 
 ### `GET /v0/discovery`

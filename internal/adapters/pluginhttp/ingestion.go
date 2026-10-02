@@ -72,8 +72,8 @@ func (i Ingestor) Spaces() []string {
 }
 
 // SegmentsOnly reports whether the plugin's plugin_api range admits a
-// request with no space (Plugin API 0.7).
-func (i Ingestor) SegmentsOnly() bool { return plugins.SegmentsOnly(&i.Pin.Manifest) }
+// request with no space.
+func (i Ingestor) SegmentsOnly() bool { return i.Pin.Speaks(plugins.FeatureSegmentsOnly) }
 
 // VectorSpace describes one of the plugin's spaces.
 func (i Ingestor) VectorSpace(key string) (content.VectorSpace, bool) {

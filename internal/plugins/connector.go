@@ -88,22 +88,6 @@ func ConnectorMaxItems(m *Manifest) int {
 	return DefaultMaxItems
 }
 
-// InstanceScopeSince is the Plugin API version that added connector.corpus_id
-// and connector.source_namespace to fetch requests.
-const InstanceScopeSince = "0.3.1"
-
-// SendsInstanceScope reports whether a plugin whose discovery serves Plugin
-// API served receives the instance scope in fetch requests. A plugin built for
-// 0.3.0 may validate requests strictly, so it never receives the new fields.
-func SendsInstanceScope(served string) bool {
-	v, err := ParseVersion(served)
-	if err != nil {
-		return false
-	}
-	since, _ := ParseVersion(InstanceScopeSince)
-	return v.Compare(since) >= 0
-}
-
 // ConnectorMaxCheckpointBytes is the declared max_checkpoint_bytes, or its
 // default.
 func ConnectorMaxCheckpointBytes(m *Manifest) int {

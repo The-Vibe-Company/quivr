@@ -229,10 +229,10 @@ const DevWebhookBase = "https://quivr.invalid/v0/connector-webhooks/"
 
 func (r *ConnectorRun) scopedRef(kind string) connectorRef {
 	ref := r.ref(kind)
-	if plugins.SendsInstanceScope(r.PluginAPI) {
+	if plugins.ResolveAPI(r.PluginAPI).Speaks(plugins.FeatureInstanceScope) {
 		ref.CorpusID, ref.SourceNamespace = DevCorpusID, DevSourceNamespace
 	}
-	if r.pushes && plugins.SendsWebhookURL(r.PluginAPI) {
+	if r.pushes && plugins.ResolveAPI(r.PluginAPI).Speaks(plugins.FeaturePush) {
 		ref.WebhookURL = DevWebhookBase + ref.InstanceID
 	}
 	return ref

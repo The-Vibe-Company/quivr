@@ -90,17 +90,6 @@ func DeclaresPush(m *Manifest) bool {
 	return false
 }
 
-// SendsWebhookURL reports whether a plugin whose discovery serves Plugin API
-// served receives connector.webhook_url in fetch requests.
-func SendsWebhookURL(served string) bool {
-	v, err := ParseVersion(served)
-	if err != nil {
-		return false
-	}
-	since, _ := ParseVersion(PushSince)
-	return v.Compare(since) >= 0
-}
-
 // pushStatusIssues judges a fetch answer's push status: only a plugin with a
 // push kind reports one; failed carries a class and a code, active neither,
 // and only active relaxes pull with poll_interval_seconds.
