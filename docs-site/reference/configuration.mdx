@@ -67,6 +67,7 @@ Durations are Go durations: `30s`, `10m`, `168h`.
 | `changes:read` | reading the change feed |
 | `monitoring:read`, `monitoring:write` | reading and managing Saved Queries, Subscriptions, Matches and Deliveries |
 | `connectors:read`, `connectors:write` | reading and managing Connector Instances |
+| `connector:push` | calling a source plugin’s declared API routes on authorized Corpora |
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |

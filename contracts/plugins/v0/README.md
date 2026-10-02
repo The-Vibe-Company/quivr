@@ -1,7 +1,7 @@
 # Plugin Protocol v0
 
 The authoritative, language-neutral contract between the Quivr engine and an
-external plugin. It covers **Plugin API version `0.10.0`**: `0.2.0` added the
+external plugin. It covers **Plugin API version `0.11.0`**: `0.2.0` added the
 `subscription` Contribution to Plugin API `0.1.0`, `0.3.0` added `connector`,
 `0.3.1` the instance scope to connector fetch requests, the declared
 checkpoint bound and `_` in plugin ids and extension namespaces, `0.4.0`
@@ -9,7 +9,7 @@ connector attachments, `0.5.0` the connector push mode (`receive`), and
 `0.6.0` the `ingestion` Contribution, `0.7.0` the `retrieval` Contribution, and
 `0.8.0` segment-only `segment_and_embed` requests (`spaces: []`), and `0.9.0`
 a vector space's declared `input_price`, and `0.10.0` optional subscription
-Part and query vectors. JSON Schemas in this
+Part and query vectors, and `0.11.0` connector API routes secured by a Quivr key. JSON Schemas in this
 directory are the source of truth; SDKs and the Contract Runner implement them,
 not the other way round. Design context: [ADR 0001](../../../docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md),
 [ADR 0002](../../../docs/adr/0002-record-version-identity-from-submitted-input.md)
@@ -68,13 +68,13 @@ are **reserved** (declare `retrieval` for search). A manifest that declares them
 ### Plugin API versions
 
 A minor Plugin API version only adds to the previous one. This engine
-implements `0.10.0` and still serves every `0.1` to `0.9` plugin unchanged: a
+implements `0.11.0` and still serves every `0.1` to `0.10` plugin unchanged: a
 manifest is compatible when its `plugin_api` range admits any supported version
-(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0` or `0.10.0`), and the engine speaks the highest one the range admits.
+(`0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0` or `0.11.0`), and the engine speaks the highest one the range admits.
 A manifest field introduced by a later minor version needs a range that admits
 it: `contributions.connector.attachments` (0.4) with `plugin_api: ">=0.3.0 <0.4.0"`
 is `incompatible_plugin_api` at that field, and so is a kind's `push` mode (0.5)
-at its `modes`, a vector space's `input_price` (0.9), and subscription `vectors` (0.10) at their fields.
+at its `modes`, a vector space's `input_price` (0.9), subscription `vectors` (0.10), and connector kinds’ `api` (0.11) at their fields.
 A patch version only adds optional fields; a plugin that validates requests
 strictly accepts them once it is built with an SDK of that version.
 `quivr plugin inspect` reports that negotiated version. Discovery must serve
@@ -136,6 +136,7 @@ version.
 | `contributions.subscription.vectors` | Reserved for local-vector matching in a later minor version (`reserved_field`) |
 | `contributions.connector.kinds.<kind>` | One connector kind (`^[a-z][a-z0-9_]{0,31}$`, 1–32 kinds): `config_schema` (required) and `credential_schema` (absent: no credential) and `credential_required` (since 0.3.1; default true; false: an instance may run without one, with a null credential), JSON Schema 2020-12 of JSON objects; `default_interval_seconds` (60–86400); `modes`, default `[pull]`, or `[pull, push]` since 0.5 (push without pull is `invalid_modes`); `description` |
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
+| `contributions.connector.kinds.<kind>.api.routes` | Since 0.11, 1–32 named GET/POST routes with `name`, relative `path`, `auth: quivr_key` and optional local JSON Schema `request_schema`. Requires push mode. Names are unique; path templates match one segment; literals take precedence and ambiguous templates are refused |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
 | `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`, and since 0.9 an optional `input_price` (`usd_per_million_tokens`) that backfill estimates use, the cost being unknown without it; the id is the plugin id or starts with `<id>.` |
 | `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
@@ -158,7 +159,7 @@ Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
 `>=0.3.0 <0.2.0`, is invalid. `fixtures/ranges.json` is normative for every
 implementation.
 
-This engine implements Plugin API `0.10.0` (and still serves earlier versions) and reports
+This engine implements Plugin API `0.11.0` (and still serves earlier versions) and reports
 engine version `0.1.0`. Release builds may override the engine version.
 `quivr plugin inspect --json` reports both, and the negotiated Plugin API
 version under `compatibility.plugin_api.version`.
@@ -939,3 +940,38 @@ SDK's sample connector, and publishes their reports as the
 `go-ingestion-contract-report` and, for its sample retrieval plugin,
 `go-retrieval-contract-report` workflow artifacts. Write a connector with the
 [Go SDK](../../../sdks/go/README.md).
+
+## Declare secure ingress routes (Plugin API 0.11)
+
+A push kind may declare `api.routes`. The engine serves them at
+`/v0/connectors/{instance_id}/api/<path>` and authenticates every call with a
+Quivr API key that grants `connector:push` on the instance's Corpus and
+Organization. Keys are never relayed to the plugin. Other auth modes are
+reserved for later versions; `/v0/connector-webhooks/{id}` keeps its behavior.
+
+Each route has a unique `name` (`^[a-z][a-z0-9_]{0,63}$`), `method` (`GET` or
+`POST`), `path` and `auth: quivr_key`. Paths are relative, with no leading or
+trailing slash, query, dot segments or percent escapes; literals use letters,
+digits, `_`, `-` and internal dots. `{parameter}` matches one nonempty segment;
+parameter names cannot repeat within a path. Literal segments take precedence
+on method mismatches too. Routes of equal specificity that overlap are invalid,
+except the same path served with different methods. Request schemas must compile
+as JSON Schema 2020-12 without external references. A manifest's Plugin API range
+must admit 0.11.0 or later to declare `api`.
+
+The generalized `connector/receive` request adds `route` (the declared name),
+`body` (parsed JSON, null for a bodyless GET), and `request.path` (the actual
+relative path). Legacy webhook requests omit all three. POST bodies must be JSON;
+when present, `request_schema` is checked before the plugin is called. The existing
+raw `request.body_base64`, query, header and timeout bounds still apply; secure
+routes also strip Authorization. The receive response contract is unchanged.
+
+An accepted POST ingests every item and answers `202 {"receipts": [...]}` in
+item order, ignoring the plugin's response body. An empty delivery returns `[]`.
+Rejected items yield `422 item_rejected`; some other items may already be accepted.
+Retry unchanged revisions to replay their Receipts. A plugin refusal keeps its
+answer. GET is for synchronous provider challenges only: items in a GET response
+are rejected before ingestion. Reads and management use the normal Quivr API.
+
+See [Write a connector](../../../docs-site/plugins/write-a-connector.mdx) for the
+author workflow and the [HTTP reference](../../http/v0/openapi.yaml) for errors.

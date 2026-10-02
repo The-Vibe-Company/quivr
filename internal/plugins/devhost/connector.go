@@ -108,12 +108,7 @@ type ConnectorExpectedDelivery struct {
 
 // RelayedRequest is the request a receive invocation relays: lowercase header
 // names, the exact body in base64.
-type RelayedRequest struct {
-	Method     string              `json:"method"`
-	Query      string              `json:"query"`
-	Headers    map[string][]string `json:"headers"`
-	BodyBase64 string              `json:"body_base64"`
-}
+type RelayedRequest = plugins.ConnectorRelayedRequest
 
 type connectorFixture struct {
 	Connector struct {
@@ -264,13 +259,6 @@ func (r *ConnectorRun) CheckCredentialRequest(suffix string) []byte {
 	return body
 }
 
-type connectorReceiveRequest struct {
-	connectorCredentialRequest
-	Checkpoint json.RawMessage `json:"checkpoint"`
-	ReadsToday int64           `json:"reads_today"`
-	Request    RelayedRequest  `json:"request"`
-}
-
 // Relayed turns a fixture receive case into the relayed request: header names
 // lowercased, a text body encoded as base64.
 func (c ConnectorReceiveCase) Relayed() RelayedRequest {
@@ -296,13 +284,12 @@ func (c ConnectorReceiveCase) Relayed() RelayedRequest {
 // ReceiveRequest builds the receive request of one relayed delivery of the
 // run, with the dev scope and the fixture's checkpoint.
 func (r *ConnectorRun) ReceiveRequest(relayed RelayedRequest, suffix string) []byte {
-	ref := r.ref(r.Kind)
-	ref.CorpusID, ref.SourceNamespace = DevCorpusID, DevSourceNamespace
-	body, _ := json.Marshal(connectorReceiveRequest{connectorCredentialRequest: connectorCredentialRequest{
-		InvocationID: fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix), Contribution: "connector",
-		OrganizationID: "dev-organization", Configuration: r.configuration, Connector: ref,
-		Credential: r.Credential, Now: r.Now,
-	}, Checkpoint: r.Checkpoint, Request: relayed})
+	body, _ := plugins.BuildConnectorReceiveRequest(plugins.ConnectorReceiveRequest{
+		InvocationID:   fmt.Sprintf("dev-invocation-%s-%s", r.short, suffix),
+		OrganizationID: "dev-organization", Configuration: r.configuration,
+		Connector: plugins.ConnectorReceiveRef{InstanceID: "dev-connector-" + r.short, Kind: r.Kind,
+			Config: r.Config, CorpusID: DevCorpusID, SourceNamespace: DevSourceNamespace},
+		Credential: r.Credential, Now: r.Now, Checkpoint: r.Checkpoint, Request: relayed})
 	return body
 }
 

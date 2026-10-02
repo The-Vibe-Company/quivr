@@ -19,6 +19,7 @@ type pushKind struct {
 	delivery Delivery
 	err      error
 	received *[]ReceiveRequest
+	routes   []APIRoute
 }
 
 func (pushKind) Kind() string                   { return "alerts" }
@@ -28,7 +29,8 @@ func (pushKind) DefaultInterval() time.Duration { return time.Minute }
 func (k pushKind) Fetch(context.Context, FetchRequest) (Page, error) {
 	return k.page, nil
 }
-func (k pushKind) Pushes() bool { return k.pushes }
+func (k pushKind) Pushes() bool          { return k.pushes }
+func (k pushKind) APIRoutes() []APIRoute { return k.routes }
 func (k pushKind) Receive(_ context.Context, r ReceiveRequest) (Delivery, error) {
 	if k.received != nil {
 		*k.received = append(*k.received, r)
@@ -37,9 +39,10 @@ func (k pushKind) Receive(_ context.Context, r ReceiveRequest) (Delivery, error)
 }
 
 type fakePush struct {
-	target   Target
-	missing  bool
-	outcomes []DeliveryOutcome
+	target      Target
+	missing     bool
+	outcomes    []DeliveryOutcome
+	recordError error
 }
 
 func (f *fakePush) LoadDelivery(_ context.Context, id string) (Target, error) {
@@ -50,7 +53,7 @@ func (f *fakePush) LoadDelivery(_ context.Context, id string) (Target, error) {
 }
 func (f *fakePush) RecordDelivery(_ context.Context, _, _ string, o DeliveryOutcome) error {
 	f.outcomes = append(f.outcomes, o)
-	return nil
+	return f.recordError
 }
 
 var pushed = Item{RecordKey: "alert-7", Revision: "7", Position: "7", Content: content.Text{Kind: "text", Text: "Harbour closed by fog."}}
@@ -243,5 +246,35 @@ func TestWebhookURL(t *testing.T) {
 	}
 	if WebhookURL("", "connector_1") != "" {
 		t.Fatal("a deployment without a public URL has no webhook address")
+	}
+}
+
+// The relay owns challenge bookkeeping; storage health transitions have their
+// own adapter coverage. A challenge counts reads without claiming fresh items.
+func TestAPIChallengeRecordsReadsBeforeAnswering(t *testing.T) {
+	for _, storageFailure := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recorded", true: "storage unavailable"}[storageFailure], func(t *testing.T) {
+			relay, store, ingest, _ := newRelay(t, pushKind{pushes: true,
+				routes:   []APIRoute{{Name: "challenge", Method: "GET", Path: "challenge", Auth: "quivr_key"}},
+				delivery: Delivery{Accepted: true, Status: 200, Body: "challenge answer", Reads: 3}})
+			if storageFailure {
+				store.recordError = errors.New("storage unavailable")
+			}
+			answer, err := relay.DeliverAPI(context.Background(), corpus.Scope{Organization: "org_a", Actions: []string{corpus.ActionConnectorPush}, Corpora: []string{"corpus_1"}}, "connector_1", "challenge", Relayed{Method: "GET"})
+			if err != nil || len(store.outcomes) != 1 || len(ingest.accepted) != 0 {
+				t.Fatalf("answer %+v err %v outcomes %+v ingested %+v", answer, err, store.outcomes, ingest.accepted)
+			}
+			o := store.outcomes[0]
+			if !o.Accepted || o.Carried || o.Fresh || o.Reads != 3 || o.Failure != nil {
+				t.Fatalf("challenge outcome %+v", o)
+			}
+			if storageFailure {
+				if answer.Status != 503 || answer.RetryAfter == 0 {
+					t.Fatalf("storage failure answer %+v", answer)
+				}
+			} else if answer.Status != 200 || answer.Body != "challenge answer" || answer.Receipts != nil {
+				t.Fatalf("challenge answer %+v", answer)
+			}
+		})
 	}
 }

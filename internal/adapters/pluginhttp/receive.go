@@ -17,21 +17,17 @@ const ReceiveTimeoutCap = 8 * time.Second
 
 var _ connectors.Receiver = Connector{}
 
+// APIRoutes exposes the routes declared for this pinned kind.
+func (c Connector) APIRoutes() []connectors.APIRoute {
+	api := c.Pin.Manifest.Contributions.Connector.Kinds[c.Name].API
+	if api == nil {
+		return nil
+	}
+	return api.Routes
+}
+
 // Pushes reports whether the kind declares the push mode.
 func (c Connector) Pushes() bool { return plugins.KindPushes(&c.Pin.Manifest, c.Name) }
-
-type receiveRequest struct {
-	InvocationID   string                 `json:"invocation_id"`
-	Contribution   string                 `json:"contribution"`
-	OrganizationID string                 `json:"organization_id"`
-	Configuration  json.RawMessage        `json:"configuration"`
-	Connector      connectorRef           `json:"connector"`
-	Credential     json.RawMessage        `json:"credential"`
-	Checkpoint     json.RawMessage        `json:"checkpoint"`
-	Now            string                 `json:"now"`
-	ReadsToday     int64                  `json:"reads_today"`
-	Request        devhost.RelayedRequest `json:"request"`
-}
 
 // Receive relays one delivery to the plugin's receive route and judges the
 // answer with plugins.CheckReceiveOutput, as the Contract Runner does. The
@@ -40,16 +36,17 @@ type receiveRequest struct {
 // Every failure is a typed *connectors.Error, and an answer that echoes the
 // credential is refused before anything from it is used.
 func (c Connector) Receive(ctx context.Context, r connectors.ReceiveRequest) (connectors.Delivery, error) {
-	ref := c.ref(r.InstanceID, r.Config)
-	ref.CorpusID, ref.SourceNamespace = r.CorpusID, r.Namespace
-	headers := r.Request.Headers
-	if headers == nil {
-		headers = map[string][]string{}
+	if halted(ctx, c.Pin) != nil {
+		return connectors.Delivery{}, connectors.TransientError(CodePluginUnavailable)
 	}
-	request, err := json.Marshal(receiveRequest{InvocationID: invocationID(), Contribution: "connector", OrganizationID: r.Organization,
-		Configuration: c.configuration(), Connector: ref, Credential: orNull(r.Credential), Checkpoint: orNull(r.Checkpoint),
-		Now: r.Now.UTC().Format(time.RFC3339), ReadsToday: r.ReadsToday,
-		Request: devhost.RelayedRequest{Method: r.Request.Method, Query: r.Request.Query, Headers: headers, BodyBase64: base64.StdEncoding.EncodeToString(r.Request.Body)}})
+	request, err := plugins.BuildConnectorReceiveRequest(plugins.ConnectorReceiveRequest{
+		InvocationID: invocationID(), OrganizationID: r.Organization,
+		Configuration: c.configuration(), Connector: plugins.ConnectorReceiveRef{
+			InstanceID: r.InstanceID, Kind: c.Name, Config: r.Config, CorpusID: r.CorpusID, SourceNamespace: r.Namespace},
+		Credential: r.Credential, Checkpoint: r.Checkpoint,
+		Now: r.Now.UTC().Format(time.RFC3339), ReadsToday: r.ReadsToday, Route: r.Route, Body: r.Body,
+		Request: plugins.ConnectorRelayedRequest{Path: r.Request.Path, Method: r.Request.Method, Query: r.Request.Query,
+			Headers: r.Request.Headers, BodyBase64: base64.StdEncoding.EncodeToString(r.Request.Body)}})
 	if err != nil {
 		return connectors.Delivery{}, connectors.SourceError(CodePluginInvalidResponse)
 	}

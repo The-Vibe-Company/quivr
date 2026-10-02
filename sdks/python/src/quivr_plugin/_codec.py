@@ -42,8 +42,9 @@ def _encode(value: Any) -> Any:
         out = {}
         for field in dataclasses.fields(value):
             item = getattr(value, field.name)
-            # Unset optional fields are omitted; a required field keeps null.
-            if item is not None or field.default is dataclasses.MISSING:
+            # Unset optional fields are omitted; explicit JSON nulls survive a round trip.
+            if (item is not None or field.default is dataclasses.MISSING
+                    or field.name in getattr(value, "_present_fields", ())):
                 out[field.name] = _encode(item)
         return out
     if isinstance(value, dict):
@@ -114,7 +115,9 @@ def _decode_model(cls: type[Model], data: Any, path: str) -> Model:
             values[field.name] = _decode(hints[field.name], data[field.name], f"{path}.{field.name}")
         elif field.default is dataclasses.MISSING:
             raise ValueError(f"{path}: missing required field {field.name}")
-    return cls(**values)
+    model = cls(**values)
+    model._present_fields = frozenset(values)
+    return model
 
 
 def _decode_union(options: list[Any], data: Any, path: str) -> Any:

@@ -1477,6 +1477,11 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorPushReceipts defines model for ConnectorPushReceipts.
+type ConnectorPushReceipts struct {
+	Receipts []Receipt `json:"receipts"`
+}
+
 // ConnectorRunRequest defines model for ConnectorRunRequest.
 type ConnectorRunRequest struct {
 	ConnectorId string `json:"connector_id"`
@@ -3117,6 +3122,9 @@ type ListConnectorsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
+type PushConnectorAPIJSONBody = interface{}
+
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -3184,6 +3192,9 @@ type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrati
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
+
+// PushConnectorAPIJSONRequestBody defines body for PushConnectorAPI for application/json ContentType.
+type PushConnectorAPIJSONRequestBody = PushConnectorAPIJSONBody
 
 // ReplaceConnectorCredentialJSONRequestBody defines body for ReplaceConnectorCredential for application/json ContentType.
 type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
@@ -3569,6 +3580,12 @@ type ServerInterface interface {
 
 	// (GET /v0/connectors/{connector_id})
 	GetConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+	// ChallengeConnectorAPI Answer a declared source challenge
+	// (GET /v0/connectors/{connector_id}/api/{path})
+	ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string)
+	// PushConnectorAPI Push data to a declared source route
+	// (POST /v0/connectors/{connector_id}/api/{path})
+	PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string)
 
 	// (PUT /v0/connectors/{connector_id}/credential)
 	ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request, connectorId string)
@@ -4771,6 +4788,76 @@ func (siw *ServerInterfaceWrapper) GetConnector(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetConnector(w, r, connectorId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChallengeConnectorAPI operation middleware
+func (siw *ServerInterfaceWrapper) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "path" -------------
+	var path string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "path", r.PathValue("path"), &path, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChallengeConnectorAPI(w, r, connectorId, path)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PushConnectorAPI operation middleware
+func (siw *ServerInterfaceWrapper) PushConnectorAPI(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connector_id" -------------
+	var connectorId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connector_id", r.PathValue("connector_id"), &connectorId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "path" -------------
+	var path string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "path", r.PathValue("path"), &path, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PushConnectorAPI(w, r, connectorId, path)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6221,6 +6308,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/deliveries/{delivery_id}/attempts", wrapper.ListDeliveryAttempts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors", wrapper.ListConnectors)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors", wrapper.CreateConnector)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}/api/{path}", wrapper.ChallengeConnectorAPI)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/api/{path}", wrapper.PushConnectorAPI)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorChallenge)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorDelivery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}", wrapper.GetConnector)
@@ -7673,6 +7762,84 @@ type GetConnectordefaultJSONResponse struct {
 }
 
 func (response GetConnectordefaultJSONResponse) VisitGetConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChallengeConnectorAPIRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Path        string `json:"path"`
+}
+
+type ChallengeConnectorAPIResponseObject interface {
+	VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error
+}
+
+type ChallengeConnectorAPI200TextResponse string
+
+func (response ChallengeConnectorAPI200TextResponse) VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response)))
+	return err
+}
+
+type ChallengeConnectorAPIdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ChallengeConnectorAPIdefaultJSONResponse) VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PushConnectorAPIRequestObject struct {
+	ConnectorId string `json:"connector_id"`
+	Path        string `json:"path"`
+	Body        *PushConnectorAPIJSONRequestBody
+}
+
+type PushConnectorAPIResponseObject interface {
+	VisitPushConnectorAPIResponse(w http.ResponseWriter) error
+}
+
+type PushConnectorAPI202JSONResponse ConnectorPushReceipts
+
+func (response PushConnectorAPI202JSONResponse) VisitPushConnectorAPIResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PushConnectorAPIdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PushConnectorAPIdefaultJSONResponse) VisitPushConnectorAPIResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -9652,6 +9819,12 @@ type StrictServerInterface interface {
 
 	// (GET /v0/connectors/{connector_id})
 	GetConnector(ctx context.Context, request GetConnectorRequestObject) (GetConnectorResponseObject, error)
+	// ChallengeConnectorAPI Answer a declared source challenge
+	// (GET /v0/connectors/{connector_id}/api/{path})
+	ChallengeConnectorAPI(ctx context.Context, request ChallengeConnectorAPIRequestObject) (ChallengeConnectorAPIResponseObject, error)
+	// PushConnectorAPI Push data to a declared source route
+	// (POST /v0/connectors/{connector_id}/api/{path})
+	PushConnectorAPI(ctx context.Context, request PushConnectorAPIRequestObject) (PushConnectorAPIResponseObject, error)
 
 	// (PUT /v0/connectors/{connector_id}/credential)
 	ReplaceConnectorCredential(ctx context.Context, request ReplaceConnectorCredentialRequestObject) (ReplaceConnectorCredentialResponseObject, error)
@@ -10745,6 +10918,67 @@ func (sh *strictHandler) GetConnector(w http.ResponseWriter, r *http.Request, co
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetConnectorResponseObject); ok {
 		if err := validResponse.VisitGetConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChallengeConnectorAPI operation middleware
+func (sh *strictHandler) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string) {
+	var request ChallengeConnectorAPIRequestObject
+
+	request.ConnectorId = connectorId
+	request.Path = path
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChallengeConnectorAPI(ctx, request.(ChallengeConnectorAPIRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChallengeConnectorAPI")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChallengeConnectorAPIResponseObject); ok {
+		if err := validResponse.VisitChallengeConnectorAPIResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PushConnectorAPI operation middleware
+func (sh *strictHandler) PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string) {
+	var request PushConnectorAPIRequestObject
+
+	request.ConnectorId = connectorId
+	request.Path = path
+
+	var body PushConnectorAPIJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PushConnectorAPI(ctx, request.(PushConnectorAPIRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PushConnectorAPI")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PushConnectorAPIResponseObject); ok {
+		if err := validResponse.VisitPushConnectorAPIResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

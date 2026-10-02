@@ -1477,6 +1477,11 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorPushReceipts defines model for ConnectorPushReceipts.
+type ConnectorPushReceipts struct {
+	Receipts []Receipt `json:"receipts"`
+}
+
 // ConnectorRunRequest defines model for ConnectorRunRequest.
 type ConnectorRunRequest struct {
 	ConnectorId string `json:"connector_id"`
@@ -3117,6 +3122,9 @@ type ListConnectorsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
+type PushConnectorAPIJSONBody = interface{}
+
 // ListCorporaParams defines parameters for ListCorpora.
 type ListCorporaParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -3184,6 +3192,9 @@ type MigrateSubscriptionEvaluatorsJSONRequestBody = SubscriptionEvaluatorMigrati
 
 // CreateConnectorJSONRequestBody defines body for CreateConnector for application/json ContentType.
 type CreateConnectorJSONRequestBody = ConnectorCreate
+
+// PushConnectorAPIJSONRequestBody defines body for PushConnectorAPI for application/json ContentType.
+type PushConnectorAPIJSONRequestBody = PushConnectorAPIJSONBody
 
 // ReplaceConnectorCredentialJSONRequestBody defines body for ReplaceConnectorCredential for application/json ContentType.
 type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
@@ -3764,6 +3775,31 @@ type ClientInterface interface {
 	//
 	// Read configuration, credential metadata (never the secret) and the last evaluated Connector Health. Instances of other Organizations or unauthorized Corpora are 404.
 	GetConnector(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ChallengeConnectorAPI Answer a declared source challenge
+	//
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+	//
+	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
+	ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PushConnectorAPIWithBody Push data to a declared source route
+	//
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+	PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PushConnectorAPI Push data to a declared source route
+	//
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+	PushConnectorAPI(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ReplaceConnectorCredentialWithBody performs a PUT /v0/connectors/{connector_id}/credential (the `ReplaceConnectorCredential` operationId) request,
 	// with any type of body and a specified content type.
@@ -4826,6 +4862,61 @@ func (c *Client) CreateConnector(ctx context.Context, body CreateConnectorJSONRe
 // Read configuration, credential metadata (never the secret) and the last evaluated Connector Health. Instances of other Organizations or unauthorized Corpora are 404.
 func (c *Client) GetConnector(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetConnectorRequest(c.Server, connectorId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ChallengeConnectorAPI Answer a declared source challenge
+//
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+//
+// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
+func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewChallengeConnectorAPIRequest(c.Server, connectorId, path)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PushConnectorAPIWithBody Push data to a declared source route
+//
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPushConnectorAPIRequestWithBody(c.Server, connectorId, path, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PushConnectorAPI Push data to a declared source route
+//
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+func (c *Client) PushConnectorAPI(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPushConnectorAPIRequest(c.Server, connectorId, path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7630,6 +7721,101 @@ func NewGetConnectorRequest(server string, connectorId string) (*http.Request, e
 	return req, nil
 }
 
+// NewChallengeConnectorAPIRequest constructs an http.Request for the ChallengeConnectorAPI method
+func NewChallengeConnectorAPIRequest(server string, connectorId string, path string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "path", path, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/api/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPushConnectorAPIRequest calls the generic PushConnectorAPI builder with application/json body
+func NewPushConnectorAPIRequest(server string, connectorId string, path string, body PushConnectorAPIJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPushConnectorAPIRequestWithBody(server, connectorId, path, "application/json", bodyReader)
+}
+
+// NewPushConnectorAPIRequestWithBody constructs an http.Request for the PushConnectorAPI method, with any body, and a specified content type
+func NewPushConnectorAPIRequestWithBody(server string, connectorId string, path string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "path", path, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/api/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewReplaceConnectorCredentialRequest calls the generic ReplaceConnectorCredential builder with application/json body
 func NewReplaceConnectorCredentialRequest(server string, connectorId string, body ReplaceConnectorCredentialJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -10059,6 +10245,33 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetConnectorWithResponse(ctx context.Context, connectorId string, reqEditors ...RequestEditorFn) (*GetConnectorResponse, error)
 
+	// ChallengeConnectorAPIWithResponse Answer a declared source challenge
+	//
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
+	ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error)
+
+	// PushConnectorAPIWithBodyWithResponse Push data to a declared source route
+	//
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+	PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
+
+	// PushConnectorAPIWithResponse Push data to a declared source route
+	//
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+	PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
+
 	// ReplaceConnectorCredentialWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/credential (the `ReplaceConnectorCredential` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -12211,6 +12424,95 @@ func (r GetConnectorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetConnectorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ChallengeConnectorAPIResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ChallengeConnectorAPIResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ChallengeConnectorAPIResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ChallengeConnectorAPIResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ChallengeConnectorAPIResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ChallengeConnectorAPIResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PushConnectorAPIResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *ConnectorPushReceipts
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r PushConnectorAPIResponse) GetJSON202() *ConnectorPushReceipts {
+	return r.JSON202
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PushConnectorAPIResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PushConnectorAPIResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PushConnectorAPIResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PushConnectorAPIResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PushConnectorAPIResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -15026,6 +15328,51 @@ func (c *ClientWithResponses) GetConnectorWithResponse(ctx context.Context, conn
 	return ParseGetConnectorResponse(rsp)
 }
 
+// ChallengeConnectorAPIWithResponse Answer a declared source challenge
+//
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
+func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error) {
+	rsp, err := c.ChallengeConnectorAPI(ctx, connectorId, path, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseChallengeConnectorAPIResponse(rsp)
+}
+
+// PushConnectorAPIWithBodyWithResponse Push data to a declared source route
+//
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
+	rsp, err := c.PushConnectorAPIWithBody(ctx, connectorId, path, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePushConnectorAPIResponse(rsp)
+}
+
+// PushConnectorAPIWithResponse Push data to a declared source route
+//
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
+func (c *ClientWithResponses) PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
+	rsp, err := c.PushConnectorAPI(ctx, connectorId, path, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePushConnectorAPIResponse(rsp)
+}
+
 // ReplaceConnectorCredentialWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/credential (the `ReplaceConnectorCredential` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -17122,6 +17469,65 @@ func ParseGetConnectorResponse(rsp *http.Response) (*GetConnectorResponse, error
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseChallengeConnectorAPIResponse parses an HTTP response from a ChallengeConnectorAPIWithResponse call
+func ParseChallengeConnectorAPIResponse(rsp *http.Response) (*ChallengeConnectorAPIResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ChallengeConnectorAPIResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePushConnectorAPIResponse parses an HTTP response from a PushConnectorAPIWithResponse call
+func ParsePushConnectorAPIResponse(rsp *http.Response) (*PushConnectorAPIResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PushConnectorAPIResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ConnectorPushReceipts
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

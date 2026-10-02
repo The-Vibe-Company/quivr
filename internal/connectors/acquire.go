@@ -226,7 +226,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		// a replayed Receipt (re-fetched unchanged item) does not.
 		fresh := false
 		for _, item := range page.Items {
-			size, created, err := a.submit(ctx, scope, rc, item)
+			size, receipt, err := a.submit(ctx, scope, rc, item)
 			if err != nil {
 				var typed *Error
 				switch {
@@ -246,7 +246,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 				continue
 			}
 			stored += size
-			fresh = fresh || created
+			fresh = fresh || receipt.NewRevision
 		}
 		// Push active since before this run should have delivered anything
 		// new; a push kind holds back what is too recent to have arrived.
@@ -289,9 +289,8 @@ type runContext struct {
 }
 
 // submit sends one item through the ingestion command path. It returns the
-// attachment bytes it granted and whether the item reserved a new Record
-// Version (replays and withdrawals do not).
-func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext, item Item) (int64, bool, error) {
+// attachment bytes it granted and the ingestion Receipt.
+func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext, item Item) (int64, content.Receipt, error) {
 	inst := rc.target.Instance
 	source := content.Source{CorpusID: inst.CorpusID, Namespace: inst.Namespace, RecordKey: item.RecordKey}
 	revision := item.Revision
@@ -310,8 +309,9 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 		revision = "sha256:" + content.Hash(b)
 	}
 	if item.Withdraw {
-		_, err := a.Ingest.Withdraw(ctx, scope, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
-		return 0, false, err
+		receipt, err := a.Ingest.Withdraw(ctx, scope, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
+		receipt.NewRevision = false
+		return 0, receipt, err
 	}
 	if item.Manifest != nil && len(item.Manifest.Relations) > 0 {
 		// Unbound relation targets refer to Records of the same Source Namespace.
@@ -333,15 +333,15 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 		if a.Receipts != nil {
 			known, err := a.Receipts.HasReceipt(ctx, scope.Organization, key)
 			if err != nil {
-				return 0, false, err
+				return 0, content.Receipt{}, err
 			}
 			if known {
-				return 0, false, errSkipped
+				return 0, content.Receipt{}, errSkipped
 			}
 		}
 		exchanger, ok := rc.connector.(AttachmentExchanger)
 		if !ok || a.Blobs == nil {
-			return 0, false, content.ErrUnsupported
+			return 0, content.Receipt{}, content.ErrUnsupported
 		}
 		m := content.Manifest{Kind: "manifest"}
 		if manifest != nil {
@@ -353,7 +353,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 				RecordKey: item.RecordKey, Revision: revision, Extensions: item.Extensions, Attachment: at}
 			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.target.RunSequence, key, req)
 			if err != nil {
-				return 0, false, err
+				return 0, content.Receipt{}, err
 			}
 			if skip != nil {
 				if skip.ItemExtensions != nil {
@@ -371,7 +371,7 @@ func (a Acquirer) submit(ctx context.Context, scope corpus.Scope, rc runContext,
 		c.Content = content.Text{Kind: "manifest"}
 	}
 	receipt, err := a.Ingest.Accept(ctx, scope, c)
-	return stored, err == nil && receipt.NewRevision, err
+	return stored, receipt, err
 }
 
 // errAttachmentInvalid rejects only the item: its attachment can never be

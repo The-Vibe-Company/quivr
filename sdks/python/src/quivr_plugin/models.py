@@ -244,6 +244,22 @@ class SubscriptionContribution(Model):
 
 
 @dataclass(kw_only=True)
+class ConnectorAPIRoute(Model):
+    name: str
+    method: Literal["GET", "POST"]
+    path: str
+    auth: Literal["quivr_key"] = "quivr_key"
+    request_schema: Any | None = None
+
+
+@dataclass(kw_only=True)
+class ConnectorAPI(Model):
+    "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Requires push mode."
+
+    routes: list[ConnectorAPIRoute]
+
+
+@dataclass(kw_only=True)
 class ConnectorKind(Model):
     description: str | None = None
     config_schema: Any
@@ -251,6 +267,7 @@ class ConnectorKind(Model):
     credential_required: bool | None = None
     default_interval_seconds: int
     modes: list[Literal["pull", "push"]] | None = None
+    api: ConnectorAPI | None = None
 
 
 @dataclass(kw_only=True)
@@ -841,17 +858,18 @@ class ReceiveInstanceRef(Model):
 
 @dataclass(kw_only=True)
 class RelayedRequest(Model):
-    "The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed."
+    "The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed; declared API routes also remove Authorization."
 
     method: Literal["GET", "POST"]
     query: str
     headers: dict[str, list[str]]
     body_base64: str
+    path: str | None = None
 
 
 @dataclass(kw_only=True)
 class ConnectorReceiveRequest(Model):
-    "POST /v0/contributions/connector/receive, since Plugin API 0.5, for a kind that declares the push mode. The core relays one request a source sent to the instance's public webhook route: the plugin verifies it with the credential (for example a signature over the raw body), answers any challenge, and returns the items it carries. The core ingests the items, then returns the plugin's answer to the source."
+    "POST /v0/contributions/connector/receive for a push kind. Since Plugin API 0.5 the core relays public webhook requests for the plugin to verify and answer. Since 0.11 a declared API route adds route, parsed body and request.path after engine authorization. The core ingests accepted POST items and returns Receipts for declared routes; legacy webhooks and GET challenges keep the plugin answer."
 
     invocation_id: str
     contribution: Literal["connector"] = "connector"
@@ -863,6 +881,8 @@ class ConnectorReceiveRequest(Model):
     now: str
     reads_today: int
     request: RelayedRequest
+    route: str | None = None
+    body: Any | None = None
 
 
 @dataclass(kw_only=True)
@@ -876,7 +896,7 @@ class ReceiveAnswer(Model):
 
 @dataclass(kw_only=True)
 class ConnectorReceiveResponse(Model):
-    "200 body of POST /v0/contributions/connector/receive: the plugin's verdict on one relayed delivery and the answer the core returns to the source. accepted: the delivery is authentic; the core ingests its items (the fetch item shape, without attachments) before answering, so an item a pull run also returns converges on the same Receipt. refused: the delivery is not authentic or not addressed to this instance; the core returns the answer and changes nothing."
+    "200 body of POST /v0/contributions/connector/receive: the plugin's verdict on one relayed delivery and the answer the core returns to the source. accepted: the delivery is authentic; the core ingests its items (the fetch item shape, without attachments) before answering, so an item a pull run also returns converges on the same Receipt. refused: the delivery is not authentic or not addressed to this instance; the core returns the answer and changes nothing. Since Plugin API 0.11, an accepted POST on a declared API route returns 202 with ingestion Receipts instead of the plugin response; GET challenges keep the plugin response and must carry no items."
 
     verdict: Literal["accepted", "refused"]
     response: ReceiveAnswer
@@ -1169,6 +1189,8 @@ __all__ = [
     "Candidate",
     "CandidateRequest",
     "CandidateRequestFilter",
+    "ConnectorAPI",
+    "ConnectorAPIRoute",
     "ConnectorAttachment",
     "ConnectorContribution",
     "ConnectorContributionAttachments",

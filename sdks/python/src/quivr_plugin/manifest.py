@@ -17,11 +17,11 @@ from .schema import protocol_errors, schema_errors
 
 MANIFEST_FILE = "quivr-plugin.yaml"
 # The highest Plugin API version this SDK implements.
-PLUGIN_API_VERSION = "0.10.0"
+PLUGIN_API_VERSION = "0.11.0"
 # Every Plugin API version this SDK can serve, oldest first. A minor version
 # only adds to the previous one; discovery reports the highest version the
 # manifest's plugin_api range admits.
-SUPPORTED_PLUGIN_API_VERSIONS = ("0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0")
+SUPPORTED_PLUGIN_API_VERSIONS = ("0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0")
 DEFAULT_MAX_RESPONSE_BYTES = 4 << 20
 DEFAULT_MAX_BATCH_SIZE = 32
 

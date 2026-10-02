@@ -66,6 +66,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/deliveries/{delivery_id}/attempts`](#get-v0deliveriesdelivery_idattempts) | `listDeliveryAttempts` | `monitoring:read` |
 | [`POST /v0/connectors`](#post-v0connectors) | `createConnector` | `connectors:write` |
 | [`GET /v0/connectors`](#get-v0connectors) | `listConnectors` | `connectors:read` |
+| [`POST /v0/connectors/{connector_id}/api/{path}`](#post-v0connectorsconnector_idapipath) | `pushConnectorAPI` | `connector:push` |
+| [`GET /v0/connectors/{connector_id}/api/{path}`](#get-v0connectorsconnector_idapipath) | `challengeConnectorAPI` | `connector:push` |
 | [`GET /v0/connectors/{connector_id}`](#get-v0connectorsconnector_id) | `getConnector` | `connectors:read` |
 | [`POST /v0/connectors/{connector_id}/disable`](#post-v0connectorsconnector_iddisable) | `disableConnector` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/credential`](#put-v0connectorsconnector_idcredential) | `replaceConnectorCredential` | `connectors:write` |
@@ -1020,6 +1022,52 @@ Connector Instances of authorized Corpora, optionally filtered to one Corpus, in
 | `200` | `application/json` [`ConnectorPage`](#connectorpage) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
 
+#### `POST /v0/connectors/{connector_id}/api/{path}`
+
+Operation `pushConnectorAPI`. Requires `connector:push`.
+
+Push data to a declared source route
+
+Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes |  |
+| `path` | path | string | yes | The declared relative route path, including any nested segments and filled template values. Maximum length `8192`. |
+
+**Request body** (required): `application/json` any
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `202` | `application/json` [`ConnectorPushReceipts`](#connectorpushreceipts) | Items accepted for ingestion; poll each Receipt through the normal API. |
+| `default` | `application/json` [`Error`](#error) | Structured engine error, or the plugin's refusal answer. |
+
+#### `GET /v0/connectors/{connector_id}/api/{path}`
+
+Operation `challengeConnectorAPI`. Requires `connector:push`.
+
+Answer a declared source challenge
+
+Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes |  |
+| `path` | path | string | yes | The declared relative route path, including any nested segments and filled template values. Maximum length `8192`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `text/plain` string | The plugin's synchronous challenge answer. |
+| `default` | `application/json` [`Error`](#error) | Structured engine error, or the plugin's refusal answer. |
+
 #### `GET /v0/connectors/{connector_id}`
 
 Operation `getConnector`. Requires `connectors:read`.
@@ -1689,6 +1737,27 @@ Receiver endpoint, not a Quivr API route. Verify Standard Webhooks v1 HMAC-SHA25
 | `default` |  | Transport retry policy applies; do not create another Match. |
 
 ## Schemas
+
+### `ConnectorPushReceipts`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `receipts` | array of [`Receipt`](#receipt) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [receipts]
+properties:
+  receipts:
+    type: array
+    items: {$ref: '#/components/schemas/Receipt'}
+```
+
+</details>
 
 ### `SourceIdentity`
 

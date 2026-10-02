@@ -260,6 +260,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		failure(w, 401, "invalid_api_key")
 		return
 	}
+	if a.connectorAPIRoute(w, r, scope) {
+		return
+	}
 	if r.URL.Path == "/v0/changes/stream" && r.Method == "GET" {
 		a.streamChanges(w, r, scope)
 		return

@@ -310,6 +310,9 @@ func (c Connector) attachmentRequest(r connectors.AttachmentRequest, grant *atta
 // DescribeAttachment asks the plugin for the exact size and SHA-256 of one
 // attachment, or a skip, judged by plugins.CheckAttachmentAnswer.
 func (c Connector) DescribeAttachment(ctx context.Context, r connectors.AttachmentRequest) (connectors.AttachmentDescription, error) {
+	if halted(ctx, c.Pin) != nil {
+		return connectors.AttachmentDescription{}, connectors.TransientError(CodePluginUnavailable)
+	}
 	request, err := c.attachmentRequest(r, nil)
 	if err != nil {
 		return connectors.AttachmentDescription{}, connectors.SourceError(CodePluginInvalidResponse)
@@ -336,6 +339,9 @@ func (c Connector) DescribeAttachment(ctx context.Context, r connectors.Attachme
 // grant URL and headers are secrets like the credential: an answer that
 // echoes them is refused.
 func (c Connector) UploadAttachment(ctx context.Context, r connectors.AttachmentRequest, g connectors.UploadGrant) error {
+	if halted(ctx, c.Pin) != nil {
+		return connectors.TransientError(CodePluginUnavailable)
+	}
 	grant := &attachmentGrant{URL: g.URL, Method: "PUT", Headers: g.Headers, SizeBytes: g.SizeBytes, SHA256: g.SHA256, MediaType: g.MediaType, ExpiresAt: g.ExpiresAt.UTC().Format(time.RFC3339)}
 	if grant.Headers == nil {
 		grant.Headers = map[string]string{}

@@ -41,6 +41,9 @@ type ReceiveRequest struct {
 	Now        time.Time       `json:"now"`
 	ReadsToday int64           `json:"reads_today"`
 	Request    RelayedRequest  `json:"request"`
+	// Route and Body identify a secure API delivery (since 0.11).
+	Route string          `json:"route,omitempty"`
+	Body  json.RawMessage `json:"body,omitempty"`
 
 	logger *slog.Logger
 }
@@ -60,6 +63,7 @@ func (r *ReceiveRequest) Logger() *slog.Logger { return r.logger }
 // RelayedRequest is the request the source sent, bounded by the core (a body
 // of at most 1 MiB, at most 64 header names; no hop-by-hop headers, no Cookie).
 type RelayedRequest struct {
+	Path   string `json:"path,omitempty"`
 	Method string `json:"method"`
 	// Query is the raw query string, without the leading ?.
 	Query string `json:"query"`

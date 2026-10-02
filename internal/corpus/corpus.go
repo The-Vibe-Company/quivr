@@ -20,6 +20,10 @@ type Corpus struct {
 	Name      string         `json:"name"`
 	Retrieval map[string]any `json:"effective_retrieval"`
 }
+
+// ActionConnectorPush authorizes ingress on connector instances in the scope.
+const ActionConnectorPush = "connector:push"
+
 type Scope struct {
 	Organization string   `json:"organization"`
 	Actions      []string `json:"actions"`

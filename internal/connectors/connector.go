@@ -245,6 +245,7 @@ type registered struct {
 	connector  Connector
 	config     *jsonschema.Schema
 	credential *jsonschema.Schema
+	routes     []apiRoute
 }
 
 // Registry resolves the connector kinds enabled in this deployment. The kinds
@@ -277,6 +278,16 @@ func (r *Registry) Replace(list ...Connector) error {
 		}
 		if c.CredentialSchema() != nil {
 			if entry.credential, err = compile(c.Kind()+"/credential", c.CredentialSchema()); err != nil {
+				return err
+			}
+		}
+		if api, ok := c.(APIReceiver); ok && len(api.APIRoutes()) > 0 {
+			receiver, pushes := c.(Receiver)
+			if !pushes || !receiver.Pushes() {
+				return fmt.Errorf("API routes require a push receiver")
+			}
+			entry.routes, err = compileRoutes(api.APIRoutes())
+			if err != nil {
 				return err
 			}
 		}

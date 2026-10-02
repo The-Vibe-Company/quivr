@@ -62,6 +62,13 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.connector.kinds.<name>.credential_required` | boolean | no | Since Plugin API 0.3.1. Whether an instance needs a Deposited Credential before it runs. false: the credential is optional, and an instance without one is invoked with a null credential. Only meaningful with credential_schema. Default `true`. |
 | `contributions.connector.kinds.<name>.default_interval_seconds` | integer | yes | Polling interval of a new Connector Instance when it does not set one. 60 to 86400. |
 | `contributions.connector.kinds.<name>.modes` | array of `pull`, `push` | no | pull: the core schedules fetch. push, since Plugin API 0.5: the core relays the deliveries a source sends to the instance's public webhook route to receive, and returns the plugin's answer to the source. A push kind also declares pull: polling stays the fallback. Default `["pull"]`. |
+| `contributions.connector.kinds.<name>.api` | object | no | Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Requires push mode. |
+| `contributions.connector.kinds.<name>.api.routes` | array of object | yes | 1 to 32 items. |
+| `contributions.connector.kinds.<name>.api.routes[].name` | string | yes | — |
+| `contributions.connector.kinds.<name>.api.routes[].method` | `GET`, `POST` | yes | — |
+| `contributions.connector.kinds.<name>.api.routes[].path` | string | yes | Relative path, without leading or trailing slash. A &#123;name&#125; template matches one nonempty segment. Literal routes take precedence; ambiguous templates are invalid. At most 1024 characters. |
+| `contributions.connector.kinds.<name>.api.routes[].auth` | `"quivr_key"` | yes | — |
+| `contributions.connector.kinds.<name>.api.routes[].request_schema` | object or boolean | no | Optional JSON Schema 2020-12 for the parsed JSON body; external references are forbidden. |
 | `contributions.connector.timeout_ms` | integer | no | 1000 to 120000. Default `30000`. |
 | `contributions.connector.limits` | object | no | — |
 | `contributions.connector.limits.max_response_bytes` | integer | no | 1024 to 16777216. Default `4194304`. |

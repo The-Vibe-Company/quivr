@@ -1607,6 +1607,80 @@ paths:
       tags:
       - Connectors
       summary: List connectors
+  /v0/connectors/{connector_id}/api/{path}:
+    parameters:
+    - name: connector_id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: path
+      in: path
+      required: true
+      description: The declared relative route path, including any nested segments and filled template values.
+      schema:
+        type: string
+        maxLength: 8192
+    post:
+      operationId: pushConnectorAPI
+      summary: Push data to a declared source route
+      description: Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer
+        key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid
+        key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method
+        405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema
+        mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole
+        delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in
+        item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts
+        array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions
+        replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared
+        refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+      x-required-permissions:
+      - connector:push
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        '202':
+          description: Items accepted for ingestion; poll each Receipt through the normal API.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorPushReceipts'
+        default:
+          description: Structured engine error, or the plugin's refusal answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Connectors
+    get:
+      operationId: challengeConnectorAPI
+      summary: Answer a declared source challenge
+      description: Resolve a declared GET route with the same connector:push key authorization, scope, request limits and
+        deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected
+        before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged.
+        A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with
+        Allow. Only quivr_key authentication is supported in this version.
+      x-required-permissions:
+      - connector:push
+      responses:
+        '200':
+          description: The plugin's synchronous challenge answer.
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: Structured engine error, or the plugin's refusal answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Connectors
   /v0/connector-webhooks/{connector_id}:
     get:
       operationId: relayConnectorChallenge
@@ -3012,6 +3086,16 @@ components:
       description: API key, not necessarily a JWT. Server derives Organization, permitted actions and Corpus scope; every
         resource access is authorized.
   schemas:
+    ConnectorPushReceipts:
+      type: object
+      additionalProperties: false
+      required:
+      - receipts
+      properties:
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Receipt'
     SourceIdentity:
       type: object
       additionalProperties: false

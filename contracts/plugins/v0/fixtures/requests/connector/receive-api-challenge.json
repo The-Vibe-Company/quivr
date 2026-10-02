@@ -1,0 +1,40 @@
+{
+  "invocation_id": "inv-alerts-delivery-1",
+  "contribution": "connector",
+  "organization_id": "org-1",
+  "configuration": {},
+  "connector": {
+    "instance_id": "connector-9",
+    "kind": "alerts",
+    "corpus_id": "corpus-3",
+    "source_namespace": "alerts.example.com",
+    "config": {
+      "account": "desk"
+    }
+  },
+  "credential": {
+    "token": "test-token-0000",
+    "signing_secret": "test-signing-0000"
+  },
+  "checkpoint": {
+    "since": "alert-6"
+  },
+  "now": "2026-09-29T09:00:00Z",
+  "reads_today": 12,
+  "request": {
+    "method": "GET",
+    "query": "",
+    "headers": {
+      "content-type": [
+        "application/json"
+      ],
+      "x-example-signature": [
+        "sha256=SSUGTPKUcDA4Cmf/Ca9HYAILhd8zCPfYSyXSqoAk54w="
+      ]
+    },
+    "body_base64": "",
+    "path": "challenge"
+  },
+  "route": "challenge",
+  "body": null
+}

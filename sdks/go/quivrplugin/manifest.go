@@ -16,11 +16,11 @@ import (
 )
 
 // PluginAPIVersion is the newest Plugin API version this SDK implements.
-const PluginAPIVersion = "0.10.0"
+const PluginAPIVersion = "0.11.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this SDK can serve,
 // oldest first. Discovery reports the highest one the manifest range admits.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0"}
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
 // Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
@@ -121,9 +121,22 @@ type ConnectorKind struct {
 	CredentialSchema json.RawMessage `json:"credential_schema,omitempty"`
 	// CredentialRequired false makes the declared credential optional: an
 	// instance without one is invoked with a null credential (default true).
-	CredentialRequired     *bool    `json:"credential_required,omitempty"`
-	DefaultIntervalSeconds int      `json:"default_interval_seconds"`
-	Modes                  []string `json:"modes,omitempty"`
+	CredentialRequired     *bool         `json:"credential_required,omitempty"`
+	DefaultIntervalSeconds int           `json:"default_interval_seconds"`
+	Modes                  []string      `json:"modes,omitempty"`
+	API                    *ConnectorAPI `json:"api,omitempty"`
+}
+
+// ConnectorAPI declares the secure routes served by a push kind (since 0.11).
+type ConnectorAPI struct {
+	Routes []ConnectorAPIRoute `json:"routes"`
+}
+type ConnectorAPIRoute struct {
+	Name          string          `json:"name"`
+	Method        string          `json:"method"`
+	Path          string          `json:"path"`
+	Auth          string          `json:"auth"`
+	RequestSchema json.RawMessage `json:"request_schema,omitempty"`
 }
 
 // Pushes reports whether the kind declares the push mode (Plugin API 0.5):
@@ -282,6 +295,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 		return nil, fmt.Errorf("%s: contributions.connector.attachments needs a plugin_api range that admits Plugin API 0.4.0", path)
 	}
 	for name, kind := range c.Kinds {
+		if kind.API != nil && (!kind.Pushes() || compareVersions(api, "0.11.0") < 0) {
+			return nil, fmt.Errorf("%s: kind %s API routes require push and Plugin API 0.11.0", path, name)
+		}
 		if kind.Pushes() && compareVersions(api, "0.5.0") < 0 {
 			return nil, fmt.Errorf("%s: kind %s declares the push mode, which needs a plugin_api range that admits Plugin API 0.5.0", path, name)
 		}

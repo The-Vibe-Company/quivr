@@ -199,6 +199,52 @@ curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API
 
 To add the plugin to a deployment that is already running, register it with its `fixtures/` folder instead of pinning it: Quivr runs the same checks, and you activate it without a restart. See [Switch plugins without restarting](/plugins/switch-plugins-without-restarting).
 
+## Receive data through a Quivr key
+
+For a push source, use a Plugin API range that admits `0.11.0`, declare
+`modes: [pull, push]`, and add `api.routes` to the kind. This illustrative kind
+fragment declares one JSON push route and one synchronous challenge:
+
+```yaml
+modes: [pull, push]
+api:
+  routes:
+    - name: push
+      method: POST
+      path: events/{category}
+      auth: quivr_key
+      request_schema:
+        type: object
+        required: [text]
+        properties:
+          text: {type: string}
+    - {name: challenge, method: GET, path: challenge, auth: quivr_key}
+```
+
+Implement `Receiver.Receive` in Go (or the language-neutral
+`POST /v0/contributions/connector/receive` contract). Select the handler with
+`req.Route`, decode the JSON in `req.Body`, and read template values from
+`req.Request.Path`. Return stable Record Keys and revisions just as `Fetch`
+does. For a POST, return an accepted `Delivery` with its items; Quivr ingests
+them and returns `202` with their Receipts. For a GET challenge, return the
+challenge response without items. The [plugin contract](/reference/plugin-protocol#connector)
+lists the request and response fields.
+
+Grant the caller's key `connector:push` on the instance's collection using the
+[API key configuration](/reference/configuration#api-keys). A caller sends JSON
+to `POST /v0/connectors/<instance_id>/api/events/news` with that bearer key.
+The response's `receipts` array contains the normal ingestion Receipts; poll
+those with a key that grants `content:read`. Missing keys, missing permission
+or a different collection are refused before your plugin is called. A malformed
+body is `400`, a schema mismatch is `422`, an undeclared path is `404`, and a
+wrong method is `405` with `Allow`. Bodies are limited to 1 MiB. Rejected items
+return `422 item_rejected`; retrying unchanged revisions replays items that
+were already accepted. Transient failures return `503` with `Retry-After`.
+
+Quivr strips the bearer key and cookies before relaying the request. Only
+`quivr_key` auth is available here. The existing public webhook address stays
+available with its existing plugin-owned authentication.
+
 ## Go further
 
 A kind can also store binary attachments next to an item: declare `contributions.connector.attachments` and implement `OpenAttachment`, and Quivr asks for each file's size and checksum, then gives the plugin a one-time upload URL. A kind with `modes: [pull, push]` also receives the webhooks a source sends to Quivr, through `receive`; the X list connector works this way. The [plugin protocol](/reference/plugin-protocol#connector) lists every field of `fetch` and its answer, and the first-party `plugins/rss` is a complete connector built on this SDK.

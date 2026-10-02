@@ -40,12 +40,29 @@ func TestPublicIngestionRefusesTheReservedConnectorKeyFamily(t *testing.T) {
 	}
 }
 
-// memoryConnectors is a minimal in-memory connectors.Store.
+// memoryConnectors preserves the creation and scope rules of ConnectorStore.
 type memoryConnectors struct {
-	items map[string]connectors.Instance
+	items     map[string]connectors.Instance
+	creations map[[2]string]connectors.NewInstance
 }
 
 func (m *memoryConnectors) CreateConnector(_ context.Context, n connectors.NewInstance) (connectors.Instance, error) {
+	key := [2]string{n.Organization, n.RequestKey}
+	if existing, ok := m.creations[key]; ok {
+		if !bytes.Equal(existing.RequestDigest, n.RequestDigest) {
+			return connectors.Instance{}, connectors.ErrConflict
+		}
+		return m.items[existing.ID], nil
+	}
+	for _, existing := range m.items {
+		if existing.Organization == n.Organization && existing.CorpusID == n.CorpusID && existing.Namespace == n.Namespace && existing.Enabled {
+			return connectors.Instance{}, connectors.ErrNamespaceInUse
+		}
+	}
+	if m.creations == nil {
+		m.creations = map[[2]string]connectors.NewInstance{}
+	}
+	m.creations[key] = n
 	in := n.Instance
 	in.CreatedAt = time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	in.Health = connectors.Health{State: connectors.HealthActive, EvaluatedAt: in.CreatedAt}
@@ -65,7 +82,7 @@ func (m *memoryConnectors) ReadConnector(_ context.Context, org, id string) (con
 func (m *memoryConnectors) ListConnectors(_ context.Context, s corpus.Scope, corpusID, after string, limit int) ([]connectors.Instance, error) {
 	out := []connectors.Instance{}
 	for _, in := range m.items {
-		if in.Organization == s.Organization && (corpusID == "" || in.CorpusID == corpusID) && in.ID > after {
+		if in.Organization == s.Organization && s.Contains(in.CorpusID) && (corpusID == "" || in.CorpusID == corpusID) && in.ID > after {
 			out = append(out, in)
 		}
 	}
@@ -77,6 +94,9 @@ func (m *memoryConnectors) ListConnectors(_ context.Context, s corpus.Scope, cor
 }
 func (m *memoryConnectors) DisableConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
 	in, err := m.ReadConnector(ctx, org, id)
+	if err != nil {
+		return in, err
+	}
 	in.Enabled = false
 	m.items[id] = in
 	return in, err
@@ -168,6 +188,28 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 		t.Fatalf("defaults %v", body)
 	}
 	id := body["connector_id"].(string)
+	if status, replay := postJSON(t, handler, "/v0/connectors", connectorKey, valid()); status != 201 || replay["connector_id"] != id {
+		t.Fatalf("creation replay: %d %v", status, replay)
+	}
+	changed := valid()
+	changed["source_namespace"] = "different"
+	if status, conflict := postJSON(t, handler, "/v0/connectors", connectorKey, changed); status != 409 || conflict["code"] != "idempotency_conflict" {
+		t.Fatalf("creation conflict: %d %v", status, conflict)
+	}
+	for _, key := range []string{connectorKey, otherCorpusKey} {
+		status, page := readJSON(t, handler, "/v0/connectors", key)
+		if status != 200 {
+			t.Fatalf("list: %d %v", status, page)
+		}
+		conforms(t, "ConnectorPage", page)
+		want := 1
+		if key == otherCorpusKey {
+			want = 0
+		}
+		if len(page["items"].([]any)) != want {
+			t.Fatalf("scope %q listed %v", key, page)
+		}
+	}
 	cases := []struct {
 		name   string
 		key    string

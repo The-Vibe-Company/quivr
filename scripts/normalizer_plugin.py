@@ -219,7 +219,7 @@ def switch(stack, name):
 def verify(stack):
     """Refuse invalid pins at startup, then stop the plugin and restart the API and worker."""
     template = manifest(stack).read_text()
-    for name, field, bad_range, code in [('plugin-api', 'plugin_api', '">=0.11.0 <1.0.0"', 'incompatible_plugin_api'),
+    for name, field, bad_range, code in [('plugin-api', 'plugin_api', '">=999.0.0 <1000.0.0"', 'incompatible_plugin_api'),
                                           ('engine', 'engine', '">=9.0.0"', 'incompatible_engine')]:
         bad = stack.directory / f'bad-plugin-{name}'
         bad.mkdir(exist_ok=True)

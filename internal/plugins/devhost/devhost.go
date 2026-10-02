@@ -285,6 +285,15 @@ func Discover(ctx context.Context, baseURL string, report plugins.Report) (strin
 		} else if !slices.Contains(plugins.SupportedPluginAPIVersions, doc.PluginAPI) {
 			mismatch("/plugin_api", "discovery implements Plugin API %s; this engine serves %v", doc.PluginAPI, plugins.SupportedPluginAPIVersions)
 		} else {
+			if connector := m.Contributions.Connector; connector != nil {
+				since, _ := plugins.ParseVersion(plugins.ConnectorAPISince)
+				for _, kind := range connector.Kinds {
+					if kind.API != nil && v.Compare(since) < 0 {
+						mismatch("/plugin_api", "discovery implements Plugin API %s, but declared connector API routes need %s or later", doc.PluginAPI, plugins.ConnectorAPISince)
+						break
+					}
+				}
+			}
 			for _, name := range m.Contributions.Names() {
 				if since, err := plugins.ParseVersion(plugins.ContributionSince[name]); err == nil && v.Compare(since) < 0 {
 					mismatch("/plugin_api", "discovery implements Plugin API %s, but the declared %s Contribution needs Plugin API %s or later", doc.PluginAPI, name, plugins.ContributionSince[name])

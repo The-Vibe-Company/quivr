@@ -2015,6 +2015,96 @@
       "valid": true,
       "schema_valid": true,
       "description": "Plugin API 0.10 optional canonical Part segment vectors and immutable query vectors identify their common space."
+    },
+    {
+      "file": "manifests/valid/connector-api.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true
+    },
+    {
+      "file": "manifests/invalid/connector-api-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-duplicate-name.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-ambiguous-path.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-bad-schema.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-without-push.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-unsupported-auth.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-unsafe-path.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "requests/connector/receive-api.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true
+    },
+    {
+      "file": "requests/connector/receive-api-no-body.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ]
+    },
+    {
+      "file": "requests/connector/receive-api-challenge.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true
     }
   ]
 }

@@ -15,17 +15,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"gopkg.in/yaml.v3"
 )
 
 // PluginAPIVersion is the Plugin API this engine implements.
-const PluginAPIVersion = "0.10.0"
+const PluginAPIVersion = "0.11.0"
 
 // SupportedPluginAPIVersions are the Plugin API versions this engine serves,
 // oldest first. A minor version only adds to the previous one, so a plugin
 // built for Plugin API 0.1 keeps working unchanged: a manifest is compatible
 // when its plugin_api range admits any of these versions.
-var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0"}
+var SupportedPluginAPIVersions = []string{"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0"}
 
 // ContributionSince is the Plugin API version that introduced each accepted
 // Contribution. A manifest that declares one needs a plugin_api range that
@@ -44,6 +45,9 @@ var FieldSince = map[string]string{"/contributions/connector/attachments": "0.4.
 // PushSince is the Plugin API version that introduced the connector push
 // mode: the core relays webhook deliveries to receive.
 const PushSince = "0.5.0"
+
+// ConnectorAPISince introduced named connector routes secured by the engine.
+const ConnectorAPISince = "0.11.0"
 
 // SegmentOnlySince is the Plugin API version that lets segment_and_embed ask
 // for no space: the segments only, without vectors. The core then segments a
@@ -256,9 +260,15 @@ type ConnectorKind struct {
 	// means the kind takes no credential.
 	CredentialSchema json.RawMessage `json:"credential_schema,omitempty"`
 	// CredentialRequired false makes the credential optional (default true).
-	CredentialRequired     *bool    `json:"credential_required,omitempty"`
-	DefaultIntervalSeconds int      `json:"default_interval_seconds"`
-	Modes                  []string `json:"modes"`
+	CredentialRequired     *bool         `json:"credential_required,omitempty"`
+	DefaultIntervalSeconds int           `json:"default_interval_seconds"`
+	Modes                  []string      `json:"modes"`
+	API                    *ConnectorAPI `json:"api,omitempty"`
+}
+
+// ConnectorAPI declares the secure routes of one push kind (since 0.11).
+type ConnectorAPI struct {
+	Routes []connectors.APIRoute `json:"routes"`
 }
 
 // NeedsCredential reports whether an instance of the kind runs only with a
@@ -748,6 +758,11 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 	kinds, _ := connector["kinds"].(map[string]any)
 	for _, name := range sortedKeys(kinds) {
 		kind, _ := kinds[name].(map[string]any)
+		if _, present := kind["api"]; present {
+			if _, admitted := admits(r, ConnectorAPISince); !admitted {
+				issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: "/contributions/connector/kinds/" + pointerToken(name) + "/api", Message: "connector API routes require a plugin_api range admitting 0.11.0 or later"})
+			}
+		}
 		if !declaresMode(kind, "push") {
 			continue
 		}
@@ -830,6 +845,16 @@ func connectorKindIssues(connector map[string]any) []Issue {
 					issues = append(issues, Issue{Code: field.code, Path: path + "/" + field.name,
 						Message: fmt.Sprintf("the %s schema of kind %q is not a valid JSON Schema: %v", field.label, name, err)})
 				}
+			}
+		}
+		if api, present := kind["api"]; present {
+			raw, _ := json.Marshal(api)
+			var declared ConnectorAPI
+			_ = json.Unmarshal(raw, &declared)
+			if err := connectors.ValidateAPIRoutes(declared.Routes); err != nil {
+				issues = append(issues, Issue{Code: "invalid_connector_api", Path: path + "/api", Message: err.Error()})
+			} else if !declaresMode(kind, "push") {
+				issues = append(issues, Issue{Code: "invalid_connector_api", Path: path + "/api", Message: "API routes require the push mode"})
 			}
 		}
 		if declaresMode(kind, "push") && !declaresMode(kind, "pull") {

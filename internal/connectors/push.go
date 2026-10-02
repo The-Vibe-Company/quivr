@@ -107,6 +107,7 @@ func (p PushHealth) AccessRefused() bool {
 // bounded by the transport: lowercase header names, the exact body.
 type Relayed struct {
 	Method  string
+	Path    string
 	Query   string
 	Headers map[string][]string
 	Body    []byte
@@ -125,6 +126,9 @@ type ReceiveRequest struct {
 	Now        time.Time
 	ReadsToday int64
 	Request    Relayed
+	// Route and Body are present only for declared API routes.
+	Route string
+	Body  json.RawMessage
 }
 
 // Delivery is a push kind's verdict and the answer the core returns to the
@@ -179,6 +183,8 @@ type RelayAnswer struct {
 	Body        string
 	// RetryAfter asks the source to retry later (a 503).
 	RetryAfter time.Duration
+	Receipts   []content.Receipt
+	Allow      string
 }
 
 // RetryDelivery is the delay a source is asked to wait before retrying a
@@ -219,6 +225,11 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	if !target.Enabled || !ok || !pushes || !receiver.Pushes() {
 		return RelayAnswer{}, ErrNoWebhook
 	}
+	return r.deliver(ctx, target, connector, receiver, req, "", nil)
+}
+
+func (r Relay) deliver(ctx context.Context, target Target, connector Connector, receiver Receiver, req Relayed, route string, body json.RawMessage) (RelayAnswer, error) {
+	id := target.ID
 	org := target.Organization
 	fail := func(class ErrorClass, code string) (RelayAnswer, error) {
 		slog.Warn("connector delivery failed", "connector_id", id, "class", string(class), "code", code)
@@ -230,6 +241,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		}
 		return RelayAnswer{Status: 500, ContentType: "text/plain", Body: "the delivery cannot be processed"}, nil
 	}
+	var err error
 	var credential json.RawMessage
 	if target.Sealed != nil {
 		if target.Sealed.ExpiresAt != nil && !target.Sealed.ExpiresAt.After(time.Now()) {
@@ -240,7 +252,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		}
 	}
 	delivery, err := receiver.Receive(ctx, ReceiveRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace,
-		Config: target.Config, Credential: credential, Checkpoint: target.Checkpoint, Now: time.Now(), ReadsToday: target.ReadsToday, Request: req})
+		Config: target.Config, Credential: credential, Checkpoint: target.Checkpoint, Now: time.Now(), ReadsToday: target.ReadsToday, Request: req, Route: route, Body: body})
 	if err != nil {
 		var typed *Error
 		if errors.As(err, &typed) {
@@ -253,6 +265,18 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		// Not authentic, or not for this instance: no side effects.
 		return answer, nil
 	}
+	if route != "" && req.Method == "GET" {
+		if len(delivery.Items) > 0 {
+			return fail(ClassSource, "challenge_has_items")
+		}
+		if err := r.Store.RecordDelivery(ctx, org, id, DeliveryOutcome{Accepted: true, Reads: delivery.Reads}); err != nil {
+			return unavailable(), nil
+		}
+		return answer, nil
+	}
+	if route != "" {
+		answer.Receipts = []content.Receipt{}
+	}
 	if owner, ok := connector.(ExtensionOwner); ok {
 		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
 	}
@@ -261,10 +285,13 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	rc := runContext{connector: connector, target: target, credential: credential}
 	outcome := DeliveryOutcome{Accepted: true, Carried: len(delivery.Items) > 0, Reads: delivery.Reads}
 	for _, item := range delivery.Items {
-		_, created, err := submitter.submit(ctx, scope, rc, item)
+		_, receipt, err := submitter.submit(ctx, scope, rc, item)
 		switch {
 		case err == nil:
-			outcome.Fresh = outcome.Fresh || created
+			outcome.Fresh = outcome.Fresh || receipt.NewRevision
+			if route != "" {
+				answer.Receipts = append(answer.Receipts, receipt)
+			}
 		case errors.Is(err, corpus.ErrNotFound), errors.Is(err, corpus.ErrForbidden):
 			return fail(ClassAccess, "corpus_unavailable")
 		case errors.Is(err, content.ErrConflict), errors.Is(err, content.ErrInvalid), errors.Is(err, content.ErrUnsupported), errors.Is(err, content.ErrUnverifiedBlob):
@@ -278,6 +305,13 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	if err := r.Store.RecordDelivery(ctx, org, id, outcome); err != nil {
 		// The items are accepted; a retried delivery replays them.
 		return unavailable(), nil
+	}
+	if route != "" {
+		if outcome.Failure != nil {
+			return RelayAnswer{}, ErrPushItemRejected
+		}
+		answer.Status = 202
+		answer.ContentType, answer.Body = "", ""
 	}
 	return answer, nil
 }

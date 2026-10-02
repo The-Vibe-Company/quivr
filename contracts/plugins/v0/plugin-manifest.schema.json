@@ -293,7 +293,10 @@
               "maxLength": 256
             },
             "query_expression_schema": {
-              "type": ["object", "boolean"],
+              "type": [
+                "object",
+                "boolean"
+              ],
               "description": "Optional JSON Schema 2020-12 selecting expressions that need query vectors. Nonmatching expressions do not invoke the query encoder; absent means every valid expression."
             }
           },
@@ -446,6 +449,9 @@
             "pull"
           ],
           "description": "pull: the core schedules fetch. push, since Plugin API 0.5: the core relays the deliveries a source sends to the instance's public webhook route to receive, and returns the plugin's answer to the source. A push kind also declares pull: polling stays the fallback."
+        },
+        "api": {
+          "$ref": "#/$defs/ConnectorAPI"
         }
       }
     },
@@ -680,6 +686,62 @@
           "minimum": 0,
           "maximum": 100,
           "description": "Most paid spend one search may report in usage.cost_cents (for example a re-ranking or rewriting API); 0 for a profile without paid calls."
+        }
+      }
+    },
+    "ConnectorAPI": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routes"
+      ],
+      "description": "Since Plugin API 0.11: routes secured by a Quivr key with connector:push on the instance Corpus. Requires push mode.",
+      "properties": {
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/ConnectorAPIRoute"
+          }
+        }
+      }
+    },
+    "ConnectorAPIRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "method",
+        "path",
+        "auth"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^(?:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*|\\{[a-z][a-z0-9_]*\\})(?:/(?:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*|\\{[a-z][a-z0-9_]*\\}))*$",
+          "description": "Relative path, without leading or trailing slash. A {name} template matches one nonempty segment. Literal routes take precedence; ambiguous templates are invalid."
+        },
+        "auth": {
+          "const": "quivr_key"
+        },
+        "request_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "Optional JSON Schema 2020-12 for the parsed JSON body; external references are forbidden."
         }
       }
     }

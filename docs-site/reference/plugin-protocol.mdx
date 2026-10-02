@@ -253,7 +253,7 @@ Since Plugin API 0.3. Fetch one page of new or changed source items after the ch
 
 ### `POST /v0/contributions/connector/receive`
 
-Since Plugin API 0.5, for a kind that declares the push mode. The core relays one request a source sent to the instance's public webhook route: the plugin verifies it with the credential (for example a signature over the raw body), answers any challenge, and returns the items it carries. The core ingests the items, then returns the plugin's answer to the source.
+For a push kind. Since Plugin API 0.5 the core relays public webhook requests for the plugin to verify and answer. Since 0.11 a declared API route adds route, parsed body and request.path after engine authorization. The core ingests accepted POST items and returns Receipts for declared routes; legacy webhooks and GET challenges keep the plugin answer.
 
 **Request body** (`connector-receive-request.schema.json`)
 
@@ -273,11 +273,14 @@ Since Plugin API 0.5, for a kind that declares the push mode. The core relays on
 | `checkpoint` | any | yes | The current Acquisition Checkpoint, read-only: a receive answer carries no checkpoint, because pull runs own it. Null before the first run. |
 | `now` | string | yes | The core's clock (RFC 3339, UTC). |
 | `reads_today` | integer | yes | Source resources read during the current UTC day, by pull runs and deliveries. |
-| `request` | object | yes | The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed. |
+| `request` | object | yes | The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed; declared API routes also remove Authorization. |
 | `request.method` | `GET`, `POST` | yes | — |
 | `request.query` | string | yes | The raw query string, without the leading ?. At most 8192 characters. |
 | `request.headers` | map of array of string | yes | Header values by lowercase name, in arrival order. At most 64 entries. |
 | `request.body_base64` | string | yes | The exact body bytes, standard base64 (signatures cover the raw bytes); empty for no body. At most 1398104 characters. |
+| `request.path` | string | no | Since 0.11: actual relative API path, with template segments filled in. Absent for legacy webhooks. At most 8192 characters. |
+| `route` | string | no | Since 0.11: declared API route name. Absent for legacy webhooks. |
+| `body` | any | no | Since 0.11: parsed JSON body for a declared route; null for a bodyless GET challenge. |
 
 **Response body (200)** (`connector-receive-response.schema.json`)
 

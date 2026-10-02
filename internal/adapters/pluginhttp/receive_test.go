@@ -11,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
 // pushManifest is sourceManifest at Plugin API 0.5 with a kind that pushes.
@@ -98,5 +99,48 @@ func TestFetchSendsTheWebhookURLAndMapsThePushReportOfAPushKindOnly(t *testing.T
 	}
 	if _, sent := plugin.requests["/v0/contributions/connector/fetch"][0]["connector"].(map[string]any)["webhook_url"]; sent || pull.Pushes() || !push.Pushes() {
 		t.Fatal("a pull-only kind received a webhook_url")
+	}
+}
+
+// Each connector invocation must stop at the adapter boundary when rollback
+// has stopped its pinned work and its registration left the active plan.
+func TestStoppedConnectorOperationsDoNotCallTheAbandonedVersion(t *testing.T) {
+	for _, operation := range []string{"receive", "describe_attachment", "upload_attachment"} {
+		t.Run(operation, func(t *testing.T) {
+			connector, remote := pushConnector(t, func(string) (int, any) {
+				return 503, map[string]any{"code": "offline", "message": "offline", "retryable": true, "error_class": "transient"}
+			})
+			connector.Pin.Registration = "registration_old"
+			set, err := plugins.NewPinSet([]*plugins.Pin{connector.Pin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, err := plugins.NewLive("plan_old", set)
+			if err != nil {
+				t.Fatal(err)
+			}
+			work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkConnectorRun, Organization: "org_a", ID: "run_1", Plan: "plan_old", Stopped: true}, nil, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := live.Store("plan_new", nil); err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "receive":
+				r := receiveRequest()
+				r.Route = "push"
+				r.Body = json.RawMessage(`{}`)
+				_, err = connector.Receive(work, r)
+			case "describe_attachment":
+				_, err = connector.DescribeAttachment(work, connectors.AttachmentRequest{})
+			case "upload_attachment":
+				err = connector.UploadAttachment(work, connectors.AttachmentRequest{}, connectors.UploadGrant{})
+			}
+			var typed *connectors.Error
+			if !errors.As(err, &typed) || typed.Class != connectors.ClassTransient || typed.Code != pluginhttp.CodePluginUnavailable || len(remote.requests) != 0 {
+				t.Fatalf("stopped %s called plugin: requests=%v err=%v", operation, remote.requests, err)
+			}
+		})
 	}
 }
