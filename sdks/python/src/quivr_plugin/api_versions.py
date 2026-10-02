@@ -17,4 +17,5 @@ FEATURE_SINCE = {
     "connector_api": "0.11.0",
     "connector_signature": "0.12.0",
     "instance_token": "0.12.0",
+    "profile_candidates": "0.12.0",
 }

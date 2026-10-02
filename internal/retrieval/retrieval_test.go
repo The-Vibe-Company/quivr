@@ -77,7 +77,7 @@ func (f fakeBaseline) Hydrate(_ context.Context, _ corpus.Scope, cs []content.Ca
 		if strings.HasPrefix(c.SegmentID, "stale-") {
 			continue
 		}
-		h := content.Hydrated{GenerationID: c.GenerationID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, End: len([]rune(segmentText))}}
+		h := content.Hydrated{GenerationID: c.GenerationID, RecordID: "record-" + c.SegmentID, VersionID: "version-" + c.SegmentID, TextSHA256: content.Hash([]byte(segmentText)), Segment: content.Segment{ID: c.SegmentID, PartKey: "body", End: len([]rune(segmentText))}}
 		// A vec- segment holds a vector in the served space.
 		if strings.HasPrefix(c.SegmentID, "vec-") {
 			h.EmbeddingID, h.SpaceID = "embedding-"+c.SegmentID, "space"

@@ -460,3 +460,44 @@ func TestRetrievalPluginsActivateAndRollbackIndependently(t *testing.T) {
 		t.Fatalf("unchanged multi-provider configuration undid rollback: %+v", reconciled)
 	}
 }
+
+// Activation checks dependencies against its entire resulting plan. Updating
+// a provider cannot silently break an already-active dependent.
+func TestActivationPreservesSearchDependencies(t *testing.T) {
+	raw := func(id, version, requires string) string {
+		return "id: " + id + "\nversion: " + version + "\ncompatibility: {engine: '>=0.1.0 <0.2.0', plugin_api: '>=0.12.0 <0.13.0'}\ncontributions:\n  retrieval:\n    profiles:\n      default: {max_latency_ms: 100, max_cost_cents: 1}\n" + requires
+	}
+	base := dependencyRegistration(t, raw("core.retrieve", "1.0.0", ""))
+	dependent := dependencyRegistration(t, raw("example.rerank", "1.0.0", "requires: [{plugin: core.retrieve, version: '>=1.0.0 <2.0.0', profiles: [default]}]\n"))
+	active, members := plan(t, base)
+	next, err := registry.PlanActivation(active, members, dependent, nil)
+	if err != nil || len(next.Roles) != 2 {
+		t.Fatalf("valid dependency activation: %+v, %v", next, err)
+	}
+	members[dependent.ID] = dependent
+	active.Roles = next.Roles
+	for _, upgrade := range []registry.Registration{
+		dependencyRegistration(t, raw("core.retrieve", "2.0.0", "")),
+		dependencyRegistration(t, raw("core.retrieve", "1.1.0", "requires: [{plugin: example.rerank, version: '>=1.0.0', profiles: [default]}]\n")),
+	} {
+		_, err := registry.PlanActivation(active, members, upgrade, nil)
+		var issue *registry.IssueError
+		if !errors.As(err, &issue) || len(issue.Issues) == 0 || issue.Issues[0].Code != "plugin_dependency" {
+			t.Fatalf("provider upgrade admitted: %v", err)
+		}
+	}
+	_, err = registry.PlanActivation(registry.Plan{}, nil, dependent, nil)
+	if !errors.Is(err, registry.ErrConflict) {
+		t.Fatalf("missing dependency activated: %v", err)
+	}
+}
+
+func dependencyRegistration(t *testing.T, raw string) registry.Registration {
+	t.Helper()
+	p, err := plugins.LoadPinManifest([]byte(raw), "activation", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := registry.SettingsOf(p)
+	return registry.Registration{ID: registry.RegistrationID(p.Manifest.ID, p.Manifest.Version, p.ManifestDigest, p.Endpoint, settings.Digest()), PluginID: p.Manifest.ID, Version: p.Manifest.Version, Endpoint: p.Endpoint, ManifestDigest: p.ManifestDigest, Manifest: p.Source, Settings: settings, State: registry.StateValidated}
+}

@@ -102,6 +102,14 @@ type Manifest struct {
 	Secrets       []Secret                              `json:"secrets,omitempty"`
 	Extensions    map[string]map[string]json.RawMessage `json:"extensions,omitempty"`
 	Run           *Run                                  `json:"run,omitempty"`
+	Requires      []Requirement                         `json:"requires,omitempty"`
+}
+
+// Requirement names another retrieval plugin, its version range and local profiles.
+type Requirement struct {
+	Plugin   string   `json:"plugin"`
+	Version  string   `json:"version"`
+	Profiles []string `json:"profiles"`
 }
 
 type Compatibility struct {
@@ -496,6 +504,24 @@ func withoutCovered(schema, semantic []Issue) []Issue {
 func checkManifest(doc any, compat *CompatibilityReport) []Issue {
 	root, _ := doc.(map[string]any)
 	var issues []Issue
+	if requirements, ok := root["requires"].([]any); ok {
+		seen := map[string]bool{}
+		for i, value := range requirements {
+			r, _ := value.(map[string]any)
+			path := fmt.Sprintf("/requires/%d", i)
+			if version, ok := r["version"].(string); ok {
+				if _, err := ParseRange(version); err != nil {
+					issues = append(issues, Issue{Code: CodeInvalidRange, Path: path + "/version", Message: err.Error()})
+				}
+			}
+			if id, ok := r["plugin"].(string); ok {
+				if seen[id] {
+					issues = append(issues, Issue{Code: CodeInvalidManifest, Path: path + "/plugin", Message: "declare each required plugin once"})
+				}
+				seen[id] = true
+			}
+		}
+	}
 	if contributions, ok := root["contributions"].(map[string]any); ok {
 		for _, name := range ReservedContributions {
 			if _, declared := contributions[name]; declared {

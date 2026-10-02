@@ -2537,6 +2537,17 @@ type SearchProfileList struct {
 	Items []SearchProfileDescription `json:"items"`
 }
 
+// SearchProfileUsage Own usage of one profile invocation; aggregate SearchUsage totals include every level.
+type SearchProfileUsage struct {
+	CostCents     float32 `json:"cost_cents"`
+	PaidCalls     int     `json:"paid_calls"`
+	PluginVersion string  `json:"plugin_version"`
+
+	// Profile Full plugin/profile name.
+	Profile string `json:"profile"`
+	Rounds  int    `json:"rounds"`
+}
+
 // SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
 type SearchRequest struct {
 	CorpusIds []string `json:"corpus_ids"`
@@ -2563,7 +2574,7 @@ type SearchResponse struct {
 	// RetrievalProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
 
-	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
+	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and total cost across all profiles, and the time spent in each phase.
 	Usage *SearchUsage `json:"usage,omitempty"`
 }
 
@@ -2597,7 +2608,7 @@ type SearchStatsList struct {
 	Window            StatsWindowName `json:"window"`
 }
 
-// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
+// SearchUsage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and total cost across all profiles, and the time spent in each phase.
 type SearchUsage struct {
 	CostCents float32 `json:"cost_cents"`
 	ElapsedMs int     `json:"elapsed_ms"`
@@ -2605,7 +2616,10 @@ type SearchUsage struct {
 
 	// Phases Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
 	Phases *SearchPhases `json:"phases,omitempty"`
-	Rounds int           `json:"rounds"`
+
+	// Profiles Each profile invocation, outer first; paid calls and cost belong to that plugin only.
+	Profiles *[]SearchProfileUsage `json:"profiles,omitempty"`
+	Rounds   int                   `json:"rounds"`
 }
 
 // SourceIdentity defines model for SourceIdentity.

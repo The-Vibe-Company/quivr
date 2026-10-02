@@ -45,6 +45,9 @@ type ProfileRouter interface {
 	Resolve(profile string) (Ranker, string, bool)
 }
 
+// SnapshotRouter binds dependency routing to the same plan as the outer search.
+type SnapshotRouter interface{ Snapshot() ProfileRouter }
+
 // SpaceRegistry describes the vector spaces of a Corpus's routed generation.
 type SpaceRegistry interface {
 	VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error)
@@ -60,7 +63,15 @@ type Usage struct {
 	// latency objective, max_latency_ms.
 	OverObjective bool
 	// Phases is the time the search spent in each of its phases.
-	Phases Phases
+	Phases   Phases
+	Profiles []ProfileUsage
+}
+
+// ProfileUsage reports this plugin's own paid calls, without double counting dependencies.
+type ProfileUsage struct {
+	Profile, PluginVersion string
+	Rounds, PaidCalls      int
+	CostCents              float64
 }
 
 // Profile is one search profile a deployment answers.
@@ -136,10 +147,17 @@ func invocationID() string {
 // each phase took. ctx carries the profile's hard bound, and started is when
 // Search began authorizing and routing (Search).
 func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time) (Result, error) {
+	return s.rankProfile(ctx, scope, q, routes, out, started, &searchChain{enforce: s.Ranker.Manifest().SupportsSearchBudget()}, nil)
+}
+
+func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request, routes []Route, out Result, started time.Time, chain *searchChain, ancestors []*profileSpend) (Result, error) {
 	m := s.Ranker.Manifest()
 	profile := m.Contributions.Retrieval.Profiles[q.Profile]
 	timing := &Phases{Routing: time.Since(started)}
 	out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
+	spend := &profileSpend{max: profile.MaxCostCents, usage: ProfileUsage{Profile: m.ID + "/" + q.Profile, PluginVersion: m.Version}}
+	chain.profiles = append(chain.profiles, spend)
+	frames := append(slices.Clone(ancestors), spend)
 	query, err := normalizeQuery(q.Query)
 	if err != nil {
 		return out, ErrUnsupported
@@ -157,10 +175,18 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 	})
 	// Narrow hydration to the requested scope as well as the caller's grants.
 	scope.Corpora = q.CorpusIDs
-	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing}
+	sv := server{s: s, scope: scope, routes: routes, spaces: spaces, hydrated: map[string]content.Hydrated{}, vectors: map[string][]float32{}, timing: timing, chain: chain, frames: frames}
 	for {
+		if ctx.Err() != nil {
+			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
+		}
 		phase := time.Now()
-		body, err := s.Ranker.Round(ctx, session.Request())
+		request := session.Request()
+		if m.SupportsSearchBudget() {
+			deadline, _ := ctx.Deadline()
+			request.Budget = &plugins.SearchBudget{RemainingTimeMS: int(max(0, time.Until(deadline).Milliseconds())), RemainingCostCents: remainingCost(frames)}
+		}
+		body, err := s.Ranker.Round(ctx, request)
 		timing.PluginRounds += time.Since(phase)
 		switch {
 		case err == nil:
@@ -177,12 +203,21 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 			slog.Warn("retrieval plugin answer refused", "component", "search", "plugin", m.ID, "round", session.Round(), "code", issues[0].Code, "path", issues[0].Path, "detail", issues[0].Message)
 			return out, fmt.Errorf("%w: %s %s", ErrPluginInvalid, issues[0].Code, issues[0].Message)
 		}
+		spend.usage.Rounds = session.Round()
+		if err := chain.record(frames, answer.Usage); err != nil {
+			return out, err
+		}
+		if ctx.Err() != nil {
+			return out, s.deadline(ctx, m.ID, ErrUnavailable, timing)
+		}
 		if answer.Ranking != nil {
 			for _, h := range answer.Ranking.Hits {
-				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation})
+				out.Hits = append(out.Hits, Hit{Hydrated: sv.hydrated[h.SegmentID], Explanation: h.Explanation, Score: h.Score})
 			}
-			usage := session.Usage()
-			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: usage.PaidCalls, CostCents: usage.CostCents, Phases: *timing}
+			out.Usage = &Usage{Rounds: session.Round(), Elapsed: time.Since(started), PaidCalls: chain.paidCalls, CostCents: chain.costCents, Phases: *timing}
+			for _, f := range chain.profiles {
+				out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
+			}
 			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
 				slog.Warn("search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
@@ -205,7 +240,7 @@ func (s Service) rank(ctx context.Context, scope corpus.Scope, q Request, routes
 // deadline turns a failure of the plugin's round caused by the profile's
 // hard bound into ErrDeadline: the plugin outran it.
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.Warn("retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return ErrDeadline
 	}
@@ -218,7 +253,7 @@ func (s Service) deadline(ctx context.Context, plugin string, err error, timing 
 // storage) did not answer in time, as when the embedding service is down, so
 // the search is unavailable (retryable), not a plugin that outran its bound.
 func (s Service) unserved(ctx context.Context, plugin string, err error, timing *Phases) error {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 		slog.Warn("search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
 	return err
@@ -320,12 +355,17 @@ type server struct {
 	// vectors caches query encodings by space and text.
 	vectors map[string][]float32
 	timing  *Phases
+	chain   *searchChain
+	frames  []*profileSpend
 }
 
 // serve runs one candidate request through the projection and hydrates what
 // it finds: only authorized, current segments of the routed generations
 // reach the plugin, best first, once each.
 func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateRequest) ([]plugins.Candidate, error) {
+	if c.Primitive == plugins.PrimitiveProfile {
+		return sv.serveProfile(ctx, q, c)
+	}
 	text := c.QueryText
 	if text != "" {
 		normalized, err := normalizeQuery(text)

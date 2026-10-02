@@ -27,6 +27,7 @@ Latest Plugin API: `0.12.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Connector API routes secured by a Quivr key | `0.11.0` |
 | Connector signature freshness and replay protection | `0.12.0` |
 | Instance-scoped bearer tokens for connector API routes | `0.12.0` |
+| Profile candidates, declared retrieval dependencies and shared search budgets | `0.12.0` |
 
 ## Discovery and health
 
@@ -452,17 +453,18 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served` | array of object | yes | Every candidate request of earlier rounds with the candidates the core served for it, in order. Empty in round 1. At most 24 items. |
 | `served[].round` | integer | yes | 1 to 3. |
 | `served[].request_index` | integer | yes | 0 to 7. |
-| `served[].request` | object | yes | One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment. |
-| `served[].request.primitive` | `bm25`, `near_vector`, `hybrid` | yes | — |
+| `served[].request` | object | yes | One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment. profile runs a declared dependency through the engine and returns its ranked hits, scores and explanations. |
+| `served[].request.primitive` | `bm25`, `near_vector`, `hybrid`, `profile` | yes | — |
 | `served[].request.query_text` | string | no | The text to rank by: the search query or one the plugin rewrote. 1 to 8192 characters. |
 | `served[].request.vector` | array of number | no | near_vector only: a query vector with the space's dimensions, instead of query_text. 1 to 4096 items. |
 | `served[].request.space` | string | no | near_vector and hybrid: one id of the request's spaces. 1 to 200 characters. |
 | `served[].request.field` | `source`, `lexical` | no | bm25 and hybrid: source ranks the title and body as written; lexical ranks the lexical text an ingestion plugin produced. Default `"source"`. |
 | `served[].request.alpha` | number | no | hybrid: weight of the vector side (1 is vector only, 0 is keywords only). 0 to 1. Default `0.5`. |
 | `served[].request.fusion` | `relative_score`, `ranked` | no | hybrid: how the index fuses the two sides. Default `"relative_score"`. |
-| `served[].request.k` | integer | yes | Most candidates to serve; at most limits.max_candidates. 1 to 100. |
+| `served[].request.k` | integer | no | Most candidates to serve; at most limits.max_candidates. 1 to 100. |
 | `served[].request.filter` | object | no | Narrows the search's scope for this request; it never widens it. |
 | `served[].request.group_by` | `record` | no | record keeps the best candidate of each Record. |
+| `served[].request.profile` | object | no | — |
 | `served[].candidates` | array of object | yes | At most 100 items. |
 | `served[].candidates[].segment_id` | string | yes | 1 to 200 characters. |
 | `served[].candidates[].record_id` | string | yes | 1 to 200 characters. |
@@ -472,6 +474,10 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].candidates[].start` | integer | yes | Offsets of the text in its Part, in Unicode code points. |
 | `served[].candidates[].end` | integer | yes | — |
 | `served[].candidates[].score` | number | yes | The index score for this request; higher is better. bm25: BM25F; hybrid: the fused score; near_vector: 1 minus the distance. |
+| `served[].candidates[].explanation` | string | no | The inner profile explanation, when profile candidates supply one. 1 to 1024 characters. |
+| `budget` | object | no | Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only. |
+| `budget.remaining_time_ms` | integer | yes | — |
+| `budget.remaining_cost_cents` | number | yes | — |
 
 **Response body (200)** (`retrieval-search-response.schema.json`)
 
@@ -580,7 +586,7 @@ Schema: `retrieval-fixture.schema.json`.
 | `retrieval.profiles` | array of `ProfileName` (shared Manifest schema) | no | Profiles to certify; default every declared profile. |
 | `retrieval.spaces` | array of `space` (shared Manifest schema) | no | Ids of the spaces offered (served first); default one served space, fixture.served@1. At most 16 items. |
 | `retrieval.candidates` | array of object | yes | The segments the runner may serve. Unless order says otherwise, every primitive serves them ranked by how many query words they contain, ties in catalogue order. 1 to 200 items. |
-| `retrieval.order` | object | no | The exact segment order a primitive serves, whatever its query. |
+| `retrieval.order` | object | no | The exact segment order a primitive serves, whatever its query. profile supplies an offline dependency ranking; no other plugin is contacted. |
 | `retrieval.expect` | object | no | — |
 
 ### Subscription fixture

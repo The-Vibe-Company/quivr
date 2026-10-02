@@ -108,6 +108,7 @@ type HybridOptions struct {
 type Hit struct {
 	content.Hydrated
 	Explanation string
+	Score       float64
 }
 
 type Result struct {
@@ -205,6 +206,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	}
 	if q.Limit == 0 {
 		q.Limit = 10
+	}
+	if router, ok := s.ProfilesRouter.(SnapshotRouter); ok {
+		s.ProfilesRouter = router.Snapshot()
 	}
 	ranker, local, supported := s.resolveProfile(q.Profile)
 	if !supported {

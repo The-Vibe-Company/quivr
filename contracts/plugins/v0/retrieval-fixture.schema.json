@@ -90,6 +90,16 @@
               "text": {
                 "type": "string",
                 "minLength": 1
+              },
+              "score": {
+                "type": "number",
+                "description": "Optional score for profile candidates; other primitives retain catalogue rank scores."
+              },
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Optional explanation for profile candidates."
               }
             }
           },
@@ -107,9 +117,12 @@
             },
             "hybrid": {
               "$ref": "#/$defs/Order"
+            },
+            "profile": {
+              "$ref": "#/$defs/Order"
             }
           },
-          "description": "The exact segment order a primitive serves, whatever its query."
+          "description": "The exact segment order a primitive serves, whatever its query. profile supplies an offline dependency ranking; no other plugin is contacted."
         },
         "expect": {
           "type": "object",

@@ -20,6 +20,7 @@ const (
 	FeatureConnectorAPI        Feature = "connector_api"
 	FeatureConnectorSignature  Feature = "connector_signature"
 	FeatureInstanceToken       Feature = "instance_token"
+	FeatureProfileCandidates   Feature = "profile_candidates"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -46,6 +47,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureConnectorAPI, "0.11.0", "Connector API routes secured by a Quivr key", "", ""},
 	{FeatureConnectorSignature, "0.12.0", "Connector signature freshness and replay protection", "", ""},
 	{FeatureInstanceToken, "0.12.0", "Instance-scoped bearer tokens for connector API routes", "", ""},
+	{FeatureProfileCandidates, "0.12.0", "Profile candidates, declared retrieval dependencies and shared search budgets", "", "/requires"},
 }
 
 // FeatureTable returns the introduction history, oldest first.

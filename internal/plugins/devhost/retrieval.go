@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -37,10 +38,12 @@ func IsRetrievalFixture(raw []byte) bool {
 
 // FixtureCandidate is one segment of a retrieval fixture's catalogue.
 type FixtureCandidate struct {
-	SegmentID       string `json:"segment_id"`
-	RecordID        string `json:"record_id"`
-	SourceNamespace string `json:"source_namespace,omitempty"`
-	Text            string `json:"text"`
+	SegmentID       string   `json:"segment_id"`
+	RecordID        string   `json:"record_id"`
+	SourceNamespace string   `json:"source_namespace,omitempty"`
+	Text            string   `json:"text"`
+	Score           *float64 `json:"score,omitempty"`
+	Explanation     string   `json:"explanation,omitempty"`
 }
 
 type retrievalFixture struct {
@@ -176,6 +179,13 @@ func (r *RetrievalRun) Serve(c plugins.CandidateRequest) []plugins.Candidate {
 		byID[f.SegmentID] = f
 	}
 	var ranked []FixtureCandidate
+	if c.Primitive == plugins.PrimitiveProfile && c.Profile != nil {
+		if c.Profile.Query != "" {
+			c.QueryText = c.Profile.Query
+		} else {
+			c.QueryText = r.first.Query.Text
+		}
+	}
 	if ids, ok := r.order[c.Primitive]; ok {
 		for _, id := range ids {
 			ranked = append(ranked, byID[id])
@@ -207,9 +217,17 @@ func (r *RetrievalRun) Serve(c plugins.CandidateRequest) []plugins.Candidate {
 			}
 			records[f.RecordID] = true
 		}
+		score := 1 / float64(len(out)+1)
+		explanation := ""
+		if c.Primitive == plugins.PrimitiveProfile {
+			if f.Score != nil {
+				score = *f.Score
+			}
+			explanation = f.Explanation
+		}
 		out = append(out, plugins.Candidate{SegmentID: f.SegmentID, RecordID: f.RecordID, VersionID: "dev-version-" + f.RecordID, PartKey: "body",
-			Text: f.Text, End: utf8.RuneCountInString(f.Text), Score: 1 / float64(len(out)+1)})
-		if len(out) == c.K {
+			Text: f.Text, End: utf8.RuneCountInString(f.Text), Score: score, Explanation: explanation})
+		if len(out) == c.Limit() {
 			break
 		}
 	}
@@ -244,7 +262,15 @@ func DriveSearch(ctx context.Context, baseURL string, m *plugins.Manifest, first
 	session := plugins.NewRetrievalSession(m, first)
 	out := &SearchOutcome{}
 	for {
-		body, err := json.Marshal(session.Request())
+		request := session.Request()
+		if m.SupportsSearchBudget() {
+			remaining := 0
+			if deadline, ok := ctx.Deadline(); ok {
+				remaining = int(max(0, time.Until(deadline).Milliseconds()))
+			}
+			request.Budget = &plugins.SearchBudget{RemainingTimeMS: remaining, RemainingCostCents: max(0, m.Contributions.Retrieval.Profiles[request.Profile].MaxCostCents-session.Usage().CostCents)}
+		}
+		body, err := json.Marshal(request)
 		if err != nil {
 			return nil, err
 		}

@@ -23,22 +23,37 @@ const (
 	PrimitiveBM25       = "bm25"
 	PrimitiveNearVector = "near_vector"
 	PrimitiveHybrid     = "hybrid"
+	PrimitiveProfile    = "profile"
 	FieldSource         = "source"
 	FieldLexical        = "lexical"
 )
 
 // CandidateRequest asks the core for candidates.
 type CandidateRequest struct {
-	Primitive string           `json:"primitive"`
-	QueryText string           `json:"query_text,omitempty"`
-	Vector    []float32        `json:"vector,omitempty"`
-	Space     string           `json:"space,omitempty"`
-	Field     string           `json:"field,omitempty"`
-	Alpha     *float64         `json:"alpha,omitempty"`
-	Fusion    string           `json:"fusion,omitempty"`
-	K         int              `json:"k"`
-	Filter    *CandidateFilter `json:"filter,omitempty"`
-	GroupBy   string           `json:"group_by,omitempty"`
+	Primitive string             `json:"primitive"`
+	QueryText string             `json:"query_text,omitempty"`
+	Vector    []float32          `json:"vector,omitempty"`
+	Space     string             `json:"space,omitempty"`
+	Field     string             `json:"field,omitempty"`
+	Alpha     *float64           `json:"alpha,omitempty"`
+	Fusion    string             `json:"fusion,omitempty"`
+	K         int                `json:"k,omitempty"`
+	Profile   *ProfileCandidates `json:"profile,omitempty"`
+	Filter    *CandidateFilter   `json:"filter,omitempty"`
+	GroupBy   string             `json:"group_by,omitempty"`
+}
+
+// ProfileCandidates asks for a full profile declared in the manifest's requires.
+type ProfileCandidates struct {
+	Name  string `json:"name"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit"`
+}
+
+// SearchBudget covers this profile and its dependencies. Report this plugin's own usage.
+type SearchBudget struct {
+	RemainingTimeMS    int     `json:"remaining_time_ms"`
+	RemainingCostCents float64 `json:"remaining_cost_cents"`
 }
 
 // CandidateFilter narrows a request within the search's scope.
@@ -48,14 +63,15 @@ type CandidateFilter struct {
 
 // Candidate is a segment the core served: authorized, current, hydrated.
 type Candidate struct {
-	SegmentID string  `json:"segment_id"`
-	RecordID  string  `json:"record_id"`
-	VersionID string  `json:"version_id"`
-	PartKey   string  `json:"part_key"`
-	Text      string  `json:"text"`
-	Start     int     `json:"start"`
-	End       int     `json:"end"`
-	Score     float64 `json:"score"`
+	SegmentID   string  `json:"segment_id"`
+	RecordID    string  `json:"record_id"`
+	VersionID   string  `json:"version_id"`
+	PartKey     string  `json:"part_key"`
+	Text        string  `json:"text"`
+	Start       int     `json:"start"`
+	End         int     `json:"end"`
+	Score       float64 `json:"score"`
+	Explanation string  `json:"explanation,omitempty"`
 }
 
 // ServedRequest is a request of an earlier round and what the core served.
@@ -107,6 +123,7 @@ type SearchRequest struct {
 	Spaces []SearchSpace `json:"spaces"`
 	// Served holds every request of earlier rounds with its candidates.
 	Served []ServedRequest `json:"served"`
+	Budget *SearchBudget   `json:"budget,omitempty"`
 	logger *slog.Logger
 }
 
@@ -238,7 +255,24 @@ func (p *Plugin) encodeSearch(req *SearchRequest, a *SearchAnswer) ([]byte, stri
 			return nil, fmt.Sprintf("%d requests exceed max_requests %d", len(a.Requests), rc.Limits.MaxRequests)
 		}
 		for i, c := range a.Requests {
-			if c.K < 1 || c.K > rc.Limits.MaxCandidates {
+			if c.Primitive == PrimitiveProfile {
+				declared := false
+				if c.Profile != nil {
+					for _, r := range p.m.Requires {
+						for _, profile := range r.Profiles {
+							declared = declared || c.Profile.Name == r.Plugin+"/"+profile
+						}
+					}
+				}
+				if !resolveAPIFeatures(p.m.pluginAPI).speaks("profile_candidates") || !declared {
+					return nil, fmt.Sprintf("request %d: profile must be declared in requires and supported by this Plugin API", i)
+				}
+			}
+			limit := c.K
+			if c.Profile != nil {
+				limit = c.Profile.Limit
+			}
+			if limit < 1 || limit > rc.Limits.MaxCandidates {
 				return nil, fmt.Sprintf("request %d: k %d is outside 1..max_candidates %d", i, c.K, rc.Limits.MaxCandidates)
 			}
 		}

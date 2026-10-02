@@ -1,0 +1,11 @@
+{
+  "requests": [
+    {
+      "primitive": "profile",
+      "profile": {
+        "name": "core.retrieve/default",
+        "limit": 10
+      }
+    }
+  ]
+}

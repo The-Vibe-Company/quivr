@@ -28,6 +28,7 @@ Latest Plugin API: `0.12.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Connector API routes secured by a Quivr key | `0.11.0` |
 | Connector signature freshness and replay protection | `0.12.0` |
 | Instance-scoped bearer tokens for connector API routes | `0.12.0` |
+| Profile candidates, declared retrieval dependencies and shared search budgets | `0.12.0` |
 <!-- /plugin-api -->
 
 | Schema | Describes |
@@ -153,6 +154,7 @@ version.
 | `contributions.connector.timeout_ms` | Per-invocation timeout, 1000–120000, default 30000 |
 | `contributions.connector.kinds.<kind>.api.routes` | Since 0.11, 1–32 named GET/POST routes with `name`, relative `path`, `auth: quivr_key` (or `instance_token` / `signature` since 0.12), signature metadata and optional local JSON Schema `request_schema`. Requires push mode. Names are unique; path templates match one segment; literals take precedence and ambiguous templates are refused |
 | `contributions.connector.limits` | `max_response_bytes` (default 4 MiB, at most 16 MiB), `max_items` per page (default 100, at most 1000) and `max_checkpoint_bytes` (since 0.3.1; default 64 KiB, at most 1 MiB) |
+| `requires` | Required retrieval plugins: `[{plugin, version, profiles}]`, with local profile names and the same comparator grammar as compatibility. Available with profile candidates; checked against the full installation. |
 | `contributions.ingestion.spaces.<id>` | One owned vector space (1–8): `version`, `model`, `dimensions` (1–4096), `metric` (`cosine`, `dot`, `l2`), `indexes` and `query_modalities` (`[text]`), `description`, and since 0.9 an optional `input_price` (`usd_per_million_tokens`) that backfill estimates use, the cost being unknown without it; the id is the plugin id or starts with `<id>.` |
 | `contributions.ingestion.timeout_ms`, `.query_timeout_ms` | Deadlines of `segment_and_embed` (1000–300000, default 30000) and `embed_query` (100–10000, default 2000) |
 | `contributions.ingestion.limits` | `max_segments` per Version (default 256, at most 1024) and `max_response_bytes` (default and cap 16 MiB) |
@@ -715,8 +717,54 @@ The answer (`retrieval-search-response.schema.json`) is exactly one of:
 - `ranking`: `hits`, best first, each a served `segment_id` with the plugin's
   `score` and an optional `explanation` the API returns with the hit.
 
-Either may carry `usage` (`paid_calls`, `cost_cents`). The same request must
-yield the same answer.
+Either may carry `usage` (`paid_calls`, `cost_cents`) for this plugin's own
+calls. The same request must yield the same answer.
+
+**Profile candidates.** A plugin speaking the `profile_candidates` feature can
+start from another plugin's ranking. Declare `requires` at the manifest root:
+
+```yaml
+requires:
+  - plugin: core.retrieve
+    version: ">=0.1.0 <1.0.0"
+    profiles: [default]
+```
+
+Then answer a round with this illustrative request:
+
+```json
+{"requests":[{"primitive":"profile","profile":{"name":"core.retrieve/default","limit":10}}]}
+```
+
+`profile.name` is a full name declared in `requires`; deployment aliases are
+not dependencies. `query` optionally replaces the outer query text, while
+`limit` bounds the ranking (1–50, also at most `limits.max_candidates`). An
+optional `filter` narrows Source Namespaces. Other projection fields, including
+`k`, are absent. The engine runs the dependency's rounds on the same plan,
+authorized scope and projection generations, then serves its ranked hits as
+candidates with their `score` and optional `explanation`.
+
+Pinning and activation refuse missing plugins, incompatible versions, absent
+profiles, dependency cycles and chains exceeding two profile levels with
+`plugin_dependency` issues. An incompatible provider upgrade is refused too.
+A chain has one outer profile and at most one inner profile. Plugins call the
+engine only; they never contact each other.
+
+The inner deadline is the earlier of its own hard bound and the outer deadline
+minus 10 ms for the caller to finish. Feature-capable requests carry `budget`
+(`remaining_time_ms`, `remaining_cost_cents`), refreshed each round and bounded
+by every ancestor's remaining allowance. Use it before starting paid work.
+The engine counts reported inner cost against the outer limit and stops an
+over-budget chain with `retrieval_plugin_invalid`; it cannot undo a paid call
+already made. Zero remaining cost permits free rounds; any reported positive
+cost then refuses the search. Positive allowances tolerate machine roundoff
+when summing reported costs; zero remains strict. Each plugin reports only its own calls. API `usage.paid_calls`
+and `usage.cost_cents` sum every level; `usage.profiles` lists each invocation,
+outer first, with full profile name, plugin version, rounds and own paid usage.
+Older Plugin API requests omit `budget` and retain their existing fields.
+A manifest declaring `requires` must report a feature-capable API at discovery.
+Without `requires`, budget fields are sent only when the compatibility range
+excludes older APIs; a broad range alone does not prove wire support.
 
 **Errors.** A terminal envelope refuses the search (422
 `unsupported_search`); unavailability or a retryable envelope makes it
@@ -747,7 +795,7 @@ answer for the engine and the Contract Runner:
 | A space the request offers; a vector of its dimensions | `unknown_space`, `dimension_mismatch`, `invalid_vector` |
 | A filter inside the search's scope | `filter_outside_scope` |
 | Hits served earlier in this search, each once, at most `limit` | `unserved_candidate`, `duplicate_hit`, `too_many_hits` |
-| Reported cost within the profile's `max_cost_cents` (Runner; the engine logs it) | `over_budget` |
+| Reported cost within the profile's `max_cost_cents` (Runner; engine enforces chains speaking profile candidates and logs older standalone searches) | `over_budget` |
 
 **Deployment.** A retrieval pin needs no routes. Several retrieval plugins
 can be pinned together; `retrieval.profiles` maps short names, including
@@ -763,7 +811,13 @@ offered (default: `fixture.served@1`, 8 dimensions) and a catalogue of
 `candidates`. The runner serves each request from the catalogue: the
 fixture's `order` for the primitive, or else the segments sharing words with
 the query text (every segment for `near_vector`), most shared words first,
-then filters, `group_by` and `k`. `expect.top` names the ranking's first hits.
+then filters, `group_by` and `k`. For `profile`, the offline catalogue supplies
+the dependency ranking: `order.profile` sets its order, optional candidate
+`score` and `explanation` supply its ranking metadata, and `profile.limit`
+bounds the result. Without an order, its optional rewritten query or inherited
+query matches the catalogue. This certifies the caller's behavior without
+starting a dependency plugin; real installation and shared-budget execution
+are checked by the engine. `expect.top` names the ranking's first hits.
 `fixtures/retrieval/newsroom.json` is the normative fixture every retrieval
 plugin is certified with.
 

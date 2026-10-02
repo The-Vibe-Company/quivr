@@ -2191,6 +2191,90 @@
         "incompatible_plugin_api"
       ],
       "description": "Signature routes require Plugin API 0.12."
+    },
+    {
+      "file": "manifests/valid/profile-candidates.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Profile dependency declaration; installation is checked separately."
+    },
+    {
+      "file": "manifests/invalid/profile-candidates-old-api.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "requires cannot negotiate a version with profile candidates."
+    },
+    {
+      "file": "manifests/invalid/profile-candidates-range.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Unsatisfiable dependency version range."
+    },
+    {
+      "file": "requests/retrieval/search-profile-budget.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": []
+    },
+    {
+      "file": "responses/retrieval/profile-candidates.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-undeclared.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "plugin_dependency"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-with-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "requests/retrieval/search-profile-served.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": []
+    },
+    {
+      "file": "responses/retrieval/hybrid-with-profile.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
     }
   ]
 }

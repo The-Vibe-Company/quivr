@@ -62,9 +62,17 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 // milliseconds, rounded down.
 func usageToTransport(u retrieval.Usage) *transport.SearchUsage {
 	ph := u.Phases
-	return &transport.SearchUsage{Rounds: u.Rounds, ElapsedMs: int(u.Elapsed.Milliseconds()), PaidCalls: u.PaidCalls, CostCents: float32(u.CostCents),
+	profiles := make([]transport.SearchProfileUsage, 0, len(u.Profiles))
+	for _, p := range u.Profiles {
+		profiles = append(profiles, transport.SearchProfileUsage{Profile: p.Profile, PluginVersion: p.PluginVersion, Rounds: p.Rounds, PaidCalls: p.PaidCalls, CostCents: float32(p.CostCents)})
+	}
+	out := &transport.SearchUsage{Rounds: u.Rounds, ElapsedMs: int(u.Elapsed.Milliseconds()), PaidCalls: u.PaidCalls, CostCents: float32(u.CostCents),
 		Phases: &transport.SearchPhases{RoutingMs: int(ph.Routing.Milliseconds()), CoverageMs: int(ph.Coverage.Milliseconds()), PluginRoundsMs: int(ph.PluginRounds.Milliseconds()),
 			QueryEncodingMs: int(ph.QueryEncoding.Milliseconds()), IndexQueryMs: int(ph.IndexQuery.Milliseconds()), HydrationMs: int(ph.Hydration.Milliseconds())}}
+	if len(profiles) > 0 {
+		out.Profiles = &profiles
+	}
+	return out
 }
 
 // searchProfiles lists the search profiles this deployment answers.

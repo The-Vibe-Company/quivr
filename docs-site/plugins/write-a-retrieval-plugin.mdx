@@ -18,7 +18,7 @@ A search runs in rounds, three at most:
 2. The plugin answers either candidate requests or the final ranking.
 3. For each request, Quivr queries the index, drops what the caller may not read or what was withdrawn, and serves the rest. It then calls the plugin again with everything served so far.
 
-A candidate request is `bm25` (keywords), `near_vector` (one space's vectors; Quivr encodes `query_text` with the space's owner) or `hybrid` (both in one query). A ranking may hold only candidates Quivr served, and each hit can carry an explanation that the API returns with it.
+A candidate request is `bm25` (keywords), `near_vector` (one space's vectors; Quivr encodes `query_text` with the space's owner), `hybrid` (both in one query), or `profile` (another plugin's ranking, with its scores and explanations). A ranking may hold only candidates Quivr served, and each hit can carry an explanation that the API returns with it.
 
 ## Steps
 
@@ -125,3 +125,21 @@ The response lists your profiles. A search response names the profile that answe
 | `504 search_deadline_exceeded` | The plugin's rounds outran the profile's hard limit, four times `max_latency_ms` (2 to 9 seconds). |
 | `503 search_unavailable` after the hard limit | Quivr could not serve candidates in time: a dependency, such as the embedding service, is down or slow. |
 | `422 unsupported_profile` | The client named a profile the plugin does not declare. |
+
+## Start from another plugin's ranking
+
+To build on an installed retrieval plugin, use the profile-candidates feature
+in the [Plugin API history](/reference/plugin-protocol). Declare its plugin id,
+version range and local profiles in the manifest's `requires` field. Ask for
+`primitive: profile` with `profile: {name: "core.retrieve/default", limit: 10}`.
+Use the full name declared in `requires`; an optional `query` replaces your
+search's query text. The [retrieval contract](/reference/plugin-protocol#retrieval)
+lists the request fields; the [manifest reference](/reference/plugin-manifest)
+lists dependency fields.
+
+Quivr runs the inner rounds on your search's plan and scope. Reorder the
+returned candidates from `req.Served` as usual. Declare budgets for the whole
+chain, and check `req.Budget` before paid calls; report only your plugin's own
+usage. Quivr adds inner usage to the total and includes each level in
+`usage.profiles`. Chains have at most two profile levels; invalid dependencies
+are refused at installation and activation.

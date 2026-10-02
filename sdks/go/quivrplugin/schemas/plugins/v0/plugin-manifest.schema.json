@@ -146,6 +146,39 @@
           }
         }
       }
+    },
+    "requires": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "Required retrieval plugins and their local profiles. Checked against the complete installation at pin time and activation; cycles and chains deeper than two profile levels are refused.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plugin",
+          "version",
+          "profiles"
+        ],
+        "properties": {
+          "plugin": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/Range"
+          },
+          "profiles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -802,5 +835,23 @@
       },
       "description": "Since Plugin API 0.12: provider signature header, optional signed Unix-seconds timestamp header, and replay window. The plugin verifies the cryptographic signature. GET challenges bypass POST freshness/replay checks."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "requires"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contributions": {
+            "required": [
+              "retrieval"
+            ]
+          }
+        }
+      }
+    }
+  ]
 }

@@ -308,11 +308,11 @@ func TestWatcherDetectsSourceChanges(t *testing.T) {
 	}
 }
 
-// A wide compatibility range cannot make an older discovery version support
-// fields needed by declared routes. This belongs to the discovery boundary,
-// separately from validating which versions the manifest range admits.
-func TestDiscoveryRequiresProtocolForDeclaredRouteAuthentication(t *testing.T) {
-	raw := []byte(`id: source
+// A wide range cannot make an older discovery version support declared fields.
+// Discovery owns this check separately from manifest range admission.
+func TestDiscoveryRequiresDeclaredFeatures(t *testing.T) {
+	cases := []struct{ name, raw, contribution, old, current string }{
+		{"routes", `id: source
 version: 1.0.0
 compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.5.0 <0.13.0"}
 contributions:
@@ -324,30 +324,45 @@ contributions:
         modes: [pull, push]
         api:
           routes: [{name: push, method: POST, path: events, auth: quivr_key}]
-`)
-	for _, auth := range []string{"quivr_key", "instance_token"} {
-		report := plugins.Validate([]byte(strings.ReplaceAll(string(raw), "auth: quivr_key", "auth: "+auth)))
-		if !report.Valid {
-			t.Fatal(report.Errors)
-		}
-		for _, version := range []string{"0.10.0", "0.11.0", "0.12.0"} {
-			t.Run(auth+"/"+version, func(t *testing.T) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": version, "plugin": map[string]string{"id": "source", "version": "1.0.0"}, "manifest_digest": report.ManifestDigest, "contributions": []string{"connector"}})
-				}))
-				defer server.Close()
-				issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if version == "0.12.0" || (version == "0.11.0" && auth == "quivr_key") {
-					if len(issues) != 0 {
-						t.Fatal(issues)
+`, "connector", "0.10.0", "0.11.0"},
+		{"profile dependencies", `id: source
+version: 1.0.0
+compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.7.0 <0.13.0"}
+requires: [{plugin: core.retrieve, version: ">=1.0.0", profiles: [default]}]
+contributions:
+  retrieval:
+    profiles:
+      default: {max_latency_ms: 100, max_cost_cents: 1}
+`, "retrieval", "0.11.0", "0.12.0"},
+	}
+	cases = append(cases, struct{ name, raw, contribution, old, current string }{
+		"instance tokens", strings.ReplaceAll(cases[0].raw, "auth: quivr_key", "auth: instance_token"), "connector", "0.11.0", "0.12.0",
+	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			report := plugins.Validate([]byte(tc.raw))
+			if !report.Valid {
+				t.Fatal(report.Errors)
+			}
+			for _, version := range []string{tc.old, tc.current} {
+				t.Run(version, func(t *testing.T) {
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": version, "plugin": map[string]string{"id": "source", "version": "1.0.0"}, "manifest_digest": report.ManifestDigest, "contributions": []string{tc.contribution}})
+					}))
+					defer server.Close()
+					issues, err := devhost.CheckDiscovery(context.Background(), server.URL, report)
+					if err != nil {
+						t.Fatal(err)
 					}
-				} else if len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != "/plugin_api" {
-					t.Fatalf("old protocol accepted routes: %+v", issues)
-				}
-			})
-		}
+					if version == tc.current {
+						if len(issues) != 0 {
+							t.Fatal(issues)
+						}
+					} else if len(issues) != 1 || issues[0].Code != devhost.CodeDiscoveryMismatch || issues[0].Path != "/plugin_api" {
+						t.Fatalf("old protocol accepted declared feature: %+v", issues)
+					}
+				})
+			}
+		})
 	}
 }

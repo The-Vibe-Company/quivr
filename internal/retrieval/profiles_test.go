@@ -117,4 +117,47 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 	if err != nil || len(sent) != 2 || sent[0].plugin != "upgraded" || out.ProfileVersion != "plugin:example.careful@2.0.0/deep" {
 		t.Fatalf("search after activation: %+v, %v, sent %+v", out, err, sent)
 	}
+	// A plan swap during an outer round must also preserve the dependency's pin.
+	nested := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var q plugins.SearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+			t.Error(err)
+			return
+		}
+		if q.Round == 1 {
+			if err := live.Store("dependency-upgrade", next); err != nil {
+				t.Error(err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"requests": []any{map[string]any{"primitive": "profile", "profile": map[string]any{"name": "example.normal/default", "limit": 1}}}})
+		} else {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ranking": map[string]any{"hits": []any{}}})
+		}
+	}))
+	defer nested.Close()
+	composing := pin("example.composing", "1.0.0", nested.URL)
+	composing.Manifest.Compatibility.PluginAPI = ">=0.12.0 <0.13.0"
+	composing.Manifest.Requires = []plugins.Requirement{{Plugin: "example.normal", Version: ">=1.0.0 <3.0.0", Profiles: []string{"default"}}}
+	oldSet, err := plugins.NewPinSet([]*plugins.Pin{normal, composing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err = plugins.NewPinSet([]*plugins.Pin{pin("example.normal", "2.0.0", c.URL), composing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = live.Store("old-dependency", oldSet); err != nil {
+		t.Fatal(err)
+	}
+	s.ProfilesRouter = pluginhttp.LiveRetriever{Live: live, Aliases: map[string]string{"default": "example.normal/default", "compose": "example.composing/default"}}
+	sent = nil
+	_, err = s.Search(context.Background(), searchScope, retrieval.Request{Query: "library", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "compose"})
+	if err != nil || len(sent) != 2 || sent[0].plugin != "normal" || sent[1].plugin != "normal" {
+		t.Fatalf("nested search crossed plan: %v, sent %+v", err, sent)
+	}
+	sent = nil
+	_, err = s.Search(context.Background(), searchScope, retrieval.Request{Query: "library", Mode: "lexical", CorpusIDs: []string{"corpus"}, Profile: "compose"})
+	if err != nil || len(sent) != 2 || sent[0].plugin != "upgraded" {
+		t.Fatalf("next chain retained old dependency: %v, sent %+v", err, sent)
+	}
+
 }

@@ -6752,6 +6752,12 @@ components:
         cost_cents:
           type: number
           minimum: 0
+        profiles:
+          type: array
+          maxItems: 65
+          items:
+            $ref: '#/components/schemas/SearchProfileUsage'
+          description: Each profile invocation, outer first; paid calls and cost belong to that plugin only.
         phases:
           $ref: '#/components/schemas/SearchPhases'
       required:
@@ -6760,7 +6766,28 @@ components:
       - paid_calls
       - cost_cents
       description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed
-        time, the paid calls and cost the plugin reported, and the time spent in each phase.
+        time, the paid calls and total cost across all profiles, and the time spent in each phase.
+    SearchProfileUsage:
+      type: object
+      additionalProperties: false
+      required: [profile, plugin_version, rounds, paid_calls, cost_cents]
+      properties:
+        profile:
+          type: string
+          description: Full plugin/profile name.
+        plugin_version:
+          type: string
+        rounds:
+          type: integer
+          minimum: 1
+          maximum: 3
+        paid_calls:
+          type: integer
+          minimum: 0
+        cost_cents:
+          type: number
+          minimum: 0
+      description: Own usage of one profile invocation; aggregate SearchUsage totals include every level.
     SearchPhases:
       type: object
       additionalProperties: false

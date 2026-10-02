@@ -146,6 +146,9 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 	if len(issues) > 0 {
 		return nil, &PinError{Path: "plugins", Issues: issues}
 	}
+	if issues := dependencyIssues(pins); len(issues) > 0 {
+		return nil, &PinError{Path: "plugins", Issues: issues}
+	}
 	// Search Protocol v0 carries at most 16 spaces, including evaluation
 	// spaces. Refuse an unservable deployment before its first search.
 	enabledSpaces := 0

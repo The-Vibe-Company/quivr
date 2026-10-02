@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
@@ -32,6 +33,7 @@ func retrievalRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 			invalid = fmt.Sprintf("profile %q is not declared", request.Profile)
 		}
 		if invalid != "" {
+			slog.Warn("invalid retrieval request", "detail", invalid)
 			status := 400
 			if mode == "accept-invalid" {
 				status = 202
@@ -41,6 +43,22 @@ func retrievalRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		}
 		if mode == "retrieval-slow" && request.Profile != plugins.DefaultProfile {
 			<-r.Context().Done()
+			return
+		}
+
+		if mode == "retrieval-compose" {
+			if request.Round == 1 {
+				name := m.Requires[0].Plugin + "/" + m.Requires[0].Profiles[0]
+				write(w, 200, map[string]any{"requests": []any{map[string]any{"primitive": "profile", "profile": map[string]any{"name": name, "query": "rewritten query", "limit": request.Limit}}}})
+				return
+			}
+			hits := []plugins.RankedHit{}
+			candidates := request.Served[0].Candidates
+			for i := len(candidates) - 1; i >= 0; i-- {
+				c := candidates[i]
+				hits = append(hits, plugins.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: "reordered: " + c.Explanation})
+			}
+			write(w, 200, map[string]any{"ranking": map[string]any{"hits": hits}, "usage": map[string]any{"paid_calls": 1, "cost_cents": 0.25}})
 			return
 		}
 		k := min(10, contribution.Limits.MaxCandidates)
@@ -88,6 +106,9 @@ func retrievalRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 			hits = append(hits, hit)
 		}
 		answer := map[string]any{"ranking": map[string]any{"hits": hits}}
+		if mode == "retrieval-paid" {
+			answer["usage"] = map[string]any{"paid_calls": 1, "cost_cents": 0.125}
+		}
 		if mode == "retrieval-over-budget" {
 			answer["usage"] = map[string]any{"paid_calls": 1, "cost_cents": 100}
 		}

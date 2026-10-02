@@ -398,6 +398,13 @@ class RunCommand(Model):
 
 
 @dataclass(kw_only=True)
+class PluginManifestRequiresItem(Model):
+    plugin: str
+    version: str
+    profiles: list[str]
+
+
+@dataclass(kw_only=True)
 class PluginManifest(Model):
     "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md."
 
@@ -410,6 +417,7 @@ class PluginManifest(Model):
     secrets: list[Secret] | None = None
     extensions: dict[str, dict[str, Any]] | None = None
     run: RunCommand | None = None
+    requires: list[PluginManifestRequiresItem] | None = None
 
 
 @dataclass(kw_only=True)
@@ -1066,19 +1074,27 @@ class CandidateRequestFilter(Model):
 
 
 @dataclass(kw_only=True)
-class CandidateRequest(Model):
-    "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment."
+class CandidateRequestProfile(Model):
+    name: str
+    query: str | None = None
+    limit: int
 
-    primitive: Literal["bm25", "near_vector", "hybrid"]
+
+@dataclass(kw_only=True)
+class CandidateRequest(Model):
+    "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment. profile runs a declared dependency through the engine and returns its ranked hits, scores and explanations."
+
+    primitive: Literal["bm25", "near_vector", "hybrid", "profile"]
     query_text: str | None = None
     vector: list[float] | None = None
     space: str | None = None
     field: Literal["source", "lexical"] | None = None
     alpha: float | None = None
     fusion: Literal["relative_score", "ranked"] | None = None
-    k: int
+    k: int | None = None
     filter: CandidateRequestFilter | None = None
     group_by: Literal["record"] | None = None
+    profile: CandidateRequestProfile | None = None
 
 
 @dataclass(kw_only=True)
@@ -1093,6 +1109,7 @@ class Candidate(Model):
     start: int
     end: int
     score: float
+    explanation: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -1101,6 +1118,14 @@ class SearchRequestServedItem(Model):
     request_index: int
     request: CandidateRequest
     candidates: list[Candidate]
+
+
+@dataclass(kw_only=True)
+class SearchRequestBudget(Model):
+    "Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only."
+
+    remaining_time_ms: int
+    remaining_cost_cents: float
 
 
 @dataclass(kw_only=True)
@@ -1118,6 +1143,7 @@ class SearchRequest(Model):
     scope: SearchRequestScope
     spaces: list[SearchRequestSpacesItem]
     served: list[SearchRequestServedItem]
+    budget: SearchRequestBudget | None = None
 
 
 @dataclass(kw_only=True)
@@ -1153,15 +1179,18 @@ class RetrievalFixtureRetrievalCandidatesItem(Model):
     record_id: str
     source_namespace: str | None = None
     text: str
+    score: float | None = None
+    explanation: str | None = None
 
 
 @dataclass(kw_only=True)
 class RetrievalFixtureRetrievalOrder(Model):
-    "The exact segment order a primitive serves, whatever its query."
+    "The exact segment order a primitive serves, whatever its query. profile supplies an offline dependency ranking; no other plugin is contacted."
 
     bm25: list[str] | None = None
     near_vector: list[str] | None = None
     hybrid: list[str] | None = None
+    profile: list[str] | None = None
 
 
 @dataclass(kw_only=True)
@@ -1199,6 +1228,7 @@ __all__ = [
     "Candidate",
     "CandidateRequest",
     "CandidateRequestFilter",
+    "CandidateRequestProfile",
     "ConnectorAPI",
     "ConnectorAPIRoute",
     "ConnectorAttachment",
@@ -1269,6 +1299,7 @@ __all__ = [
     "Part",
     "PluginIdentity",
     "PluginManifest",
+    "PluginManifestRequiresItem",
     "Provenance",
     "PushStatus",
     "ReceiveAnswer",
@@ -1291,6 +1322,7 @@ __all__ = [
     "RetryIntent",
     "RunCommand",
     "SearchRequest",
+    "SearchRequestBudget",
     "SearchRequestQuery",
     "SearchRequestScope",
     "SearchRequestServedItem",

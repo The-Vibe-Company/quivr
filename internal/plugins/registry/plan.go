@@ -153,18 +153,17 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	if err != nil {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "/registrations/"+target.ID)}
 	}
-	alone, err := plugins.NewPinSet([]*plugins.Pin{pin})
-	if err != nil {
-		return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
-	}
 	takes := map[string]bool{}
-	for _, a := range planRoles(alone, map[*plugins.Pin]Registration{pin: target}) {
-		// An activation cannot invent a source-media route. The default and
-		// explicit routes belong to the active plan; only a plugin upgrade
-		// redirects routes that already named this plugin below.
-		if !isIngestionRoutingRole(a.Role) {
-			takes[a.Role] = true
+	// Membership roles do not invent ingestion defaults or source routes;
+	// upgrades redirect only the routes already naming this plugin below.
+	for _, role := range declaredRoles(pin.Manifest) {
+		if isIngestionRoutingRole(role) {
+			continue
 		}
+		if strings.HasPrefix(role, "normalizer:") && !pin.Routed(strings.TrimPrefix(role, "normalizer:")) {
+			continue
+		}
+		takes[role] = true
 	}
 	if len(takes) == 0 {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeInvalidPin, Path: "/routes", Message: fmt.Sprintf("%s@%s would serve no role: route at least one media type to its normalizer", target.PluginID, target.Version)}}}

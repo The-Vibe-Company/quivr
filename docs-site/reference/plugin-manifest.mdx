@@ -150,3 +150,7 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `secrets[].name` | string | yes | — |
 | `secrets[].description` | string | no | 1 to 1024 characters. |
 | `secrets[].required` | boolean | no | Default `true`. |
+| `requires` | array of object | no | Required retrieval plugins and their local profiles. Checked against the complete installation at pin time and activation; cycles and chains deeper than two profile levels are refused. 1 to 32 items. |
+| `requires[].plugin` | string | yes | At most 64 characters. |
+| `requires[].version` | string | yes | Whitespace-separated comparators that must all hold; operators >=, >, &lt;=, &lt;, = (none means =); versions are MAJOR.MINOR.PATCH. At most 128 characters. |
+| `requires[].profiles` | array of string | yes | 1 to 32 items. |

@@ -9505,7 +9505,7 @@ required:
 
 ### `SearchUsage`
 
-What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
+What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and total cost across all profiles, and the time spent in each phase.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9513,6 +9513,7 @@ What a search answered by a retrieval plugin spent; rounds of the plugin, elapse
 | `elapsed_ms` | integer | yes | Minimum `0`. |
 | `paid_calls` | integer | yes | Minimum `0`. |
 | `cost_cents` | number | yes | Minimum `0`. |
+| `profiles` | array of [`SearchProfileUsage`](#searchprofileusage) |  | Each profile invocation, outer first; paid calls and cost belong to that plugin only. At most `65` items. |
 | `phases` | [`SearchPhases`](#searchphases) |  |  |
 
 <details>
@@ -9535,6 +9536,12 @@ properties:
   cost_cents:
     type: number
     minimum: 0
+  profiles:
+    type: array
+    maxItems: 65
+    items:
+      $ref: '#/components/schemas/SearchProfileUsage'
+    description: Each profile invocation, outer first; paid calls and cost belong to that plugin only.
   phases:
     $ref: '#/components/schemas/SearchPhases'
 required:
@@ -9542,7 +9549,47 @@ required:
   - elapsed_ms
   - paid_calls
   - cost_cents
-description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
+description: What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and total cost across all profiles, and the time spent in each phase.
+```
+
+</details>
+
+### `SearchProfileUsage`
+
+Own usage of one profile invocation; aggregate SearchUsage totals include every level.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `profile` | string | yes | Full plugin/profile name. |
+| `plugin_version` | string | yes |  |
+| `rounds` | integer | yes | Minimum `1`. Maximum `3`. |
+| `paid_calls` | integer | yes | Minimum `0`. |
+| `cost_cents` | number | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [profile, plugin_version, rounds, paid_calls, cost_cents]
+properties:
+  profile:
+    type: string
+    description: Full plugin/profile name.
+  plugin_version:
+    type: string
+  rounds:
+    type: integer
+    minimum: 1
+    maximum: 3
+  paid_calls:
+    type: integer
+    minimum: 0
+  cost_cents:
+    type: number
+    minimum: 0
+description: Own usage of one profile invocation; aggregate SearchUsage totals include every level.
 ```
 
 </details>

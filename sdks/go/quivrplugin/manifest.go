@@ -25,6 +25,7 @@ type Manifest struct {
 		PluginAPI string `json:"plugin_api"`
 	} `json:"compatibility"`
 	Contributions map[string]json.RawMessage `json:"contributions"`
+	Requires      []Requirement              `json:"requires,omitempty"`
 	Configuration *struct {
 		Schema json.RawMessage `json:"schema"`
 	} `json:"configuration,omitempty"`
@@ -38,6 +39,13 @@ type Manifest struct {
 	// Retrieval is the decoded retrieval Contribution (Plugin API 0.7), with
 	// defaults; nil when the manifest declares none.
 	Retrieval *RetrievalContribution `json:"-"`
+}
+
+// Requirement declares another retrieval plugin's version range and local profiles.
+type Requirement struct {
+	Plugin   string   `json:"plugin"`
+	Version  string   `json:"version"`
+	Profiles []string `json:"profiles"`
 }
 
 // RetrievalContribution is the retrieval Contribution of a manifest.
@@ -211,6 +219,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 	}
 	m.pluginAPI = api
 	features := resolveAPIFeatures(api)
+	if len(m.Requires) > 0 && !features.speaks("profile_candidates") {
+		return nil, fmt.Errorf("requires needs Plugin API %s", FeatureSince["profile_candidates"])
+	}
 	if raw, ok := m.Contributions["ingestion"]; ok {
 		if !features.speaks("ingestion") {
 			return nil, fmt.Errorf("%s: the plugin_api range %q must admit Plugin API %s, which introduced ingestion", path, m.Compatibility.PluginAPI, FeatureSince["ingestion"])

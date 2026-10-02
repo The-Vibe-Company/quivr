@@ -1,0 +1,14 @@
+{
+  "requests": [
+    {
+      "primitive": "hybrid",
+      "space": "example.words.small@1",
+      "query_text": "query",
+      "k": 10,
+      "profile": {
+        "name": "core.retrieve/default",
+        "limit": 10
+      }
+    }
+  ]
+}

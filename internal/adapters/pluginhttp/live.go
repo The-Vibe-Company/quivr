@@ -101,7 +101,11 @@ type LiveRetriever struct {
 var _ retrieval.ProfileRouter = LiveRetriever{}
 
 func (l LiveRetriever) Profiles() []retrieval.Profile {
-	profiles, err := l.Live.Set().RetrievalProfiles(l.Aliases)
+	return retrievalProfiles(l.Live.Set(), l.Aliases)
+}
+
+func retrievalProfiles(set *plugins.PinSet, aliases map[string]string) []retrieval.Profile {
+	profiles, err := set.RetrievalProfiles(aliases)
 	if err != nil {
 		return []retrieval.Profile{}
 	}
@@ -116,7 +120,25 @@ func (l LiveRetriever) Profiles() []retrieval.Profile {
 }
 
 func (l LiveRetriever) Resolve(profile string) (retrieval.Ranker, string, bool) {
-	p, ok := l.Live.Set().ResolveRetrievalProfile(profile, l.Aliases)
+	return l.Snapshot().Resolve(profile)
+}
+
+// Snapshot keeps outer and inner rounds on one immutable Pipeline Plan.
+func (l LiveRetriever) Snapshot() retrieval.ProfileRouter {
+	return snapshotRetriever{set: l.Live.Set(), aliases: l.Aliases}
+}
+
+type snapshotRetriever struct {
+	set     *plugins.PinSet
+	aliases map[string]string
+}
+
+func (l snapshotRetriever) Profiles() []retrieval.Profile {
+	return retrievalProfiles(l.set, l.aliases)
+}
+
+func (l snapshotRetriever) Resolve(profile string) (retrieval.Ranker, string, bool) {
+	p, ok := l.set.ResolveRetrievalProfile(profile, l.aliases)
 	if !ok {
 		return nil, "", false
 	}

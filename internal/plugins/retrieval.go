@@ -32,6 +32,7 @@ const (
 	PrimitiveBM25       = "bm25"
 	PrimitiveNearVector = "near_vector"
 	PrimitiveHybrid     = "hybrid"
+	PrimitiveProfile    = "profile"
 	FieldSource         = "source"
 	FieldLexical        = "lexical"
 	FusionRelativeScore = "relative_score"
@@ -153,16 +154,31 @@ func retrievalMaxCandidates(m *Manifest) int {
 
 // CandidateRequest is one request for candidates.
 type CandidateRequest struct {
-	Primitive string           `json:"primitive"`
-	QueryText string           `json:"query_text,omitempty"`
-	Vector    []float64        `json:"vector,omitempty"`
-	Space     string           `json:"space,omitempty"`
-	Field     string           `json:"field,omitempty"`
-	Alpha     *float64         `json:"alpha,omitempty"`
-	Fusion    string           `json:"fusion,omitempty"`
-	K         int              `json:"k"`
-	Filter    *CandidateFilter `json:"filter,omitempty"`
-	GroupBy   string           `json:"group_by,omitempty"`
+	Primitive string             `json:"primitive"`
+	QueryText string             `json:"query_text,omitempty"`
+	Vector    []float64          `json:"vector,omitempty"`
+	Space     string             `json:"space,omitempty"`
+	Field     string             `json:"field,omitempty"`
+	Alpha     *float64           `json:"alpha,omitempty"`
+	Fusion    string             `json:"fusion,omitempty"`
+	K         int                `json:"k,omitempty"`
+	Profile   *ProfileCandidates `json:"profile,omitempty"`
+	Filter    *CandidateFilter   `json:"filter,omitempty"`
+	GroupBy   string             `json:"group_by,omitempty"`
+}
+
+// ProfileCandidates asks the engine to run a declared full profile name.
+type ProfileCandidates struct {
+	Name  string `json:"name"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit"`
+}
+
+func (c CandidateRequest) Limit() int {
+	if c.Profile != nil {
+		return c.Profile.Limit
+	}
+	return c.K
 }
 
 // CandidateFilter narrows a request within the search's scope.
@@ -196,14 +212,15 @@ func (c CandidateRequest) EffectiveFusion() string {
 
 // Candidate is one served candidate: an authorized, current segment.
 type Candidate struct {
-	SegmentID string  `json:"segment_id"`
-	RecordID  string  `json:"record_id"`
-	VersionID string  `json:"version_id"`
-	PartKey   string  `json:"part_key"`
-	Text      string  `json:"text"`
-	Start     int     `json:"start"`
-	End       int     `json:"end"`
-	Score     float64 `json:"score"`
+	SegmentID   string  `json:"segment_id"`
+	RecordID    string  `json:"record_id"`
+	VersionID   string  `json:"version_id"`
+	PartKey     string  `json:"part_key"`
+	Text        string  `json:"text"`
+	Start       int     `json:"start"`
+	End         int     `json:"end"`
+	Score       float64 `json:"score"`
+	Explanation string  `json:"explanation,omitempty"`
 }
 
 // ServedRequest is a candidate request of an earlier round with what the core
@@ -266,6 +283,13 @@ type SearchRequest struct {
 	Scope          SearchScope     `json:"scope"`
 	Spaces         []SearchSpace   `json:"spaces"`
 	Served         []ServedRequest `json:"served"`
+	Budget         *SearchBudget   `json:"budget,omitempty"`
+}
+
+// SearchBudget bounds the remaining work of this profile and its dependencies.
+type SearchBudget struct {
+	RemainingTimeMS    int     `json:"remaining_time_ms"`
+	RemainingCostCents float64 `json:"remaining_cost_cents"`
 }
 
 // RankedHit is one hit of a ranking.
@@ -335,11 +359,18 @@ func requestIssues(requests []CandidateRequest, request SearchRequest, m *Manife
 	maxK := retrievalMaxCandidates(m)
 	for i, c := range requests {
 		path := fmt.Sprintf("/requests/%d", i)
-		if c.K > maxK {
+		if c.Limit() > maxK {
 			issues = append(issues, Issue{Code: CodeCandidateLimit, Path: path + "/k",
-				Message: fmt.Sprintf("k is %d; the manifest declares at most %d candidates per request (limits.max_candidates)", c.K, maxK)})
+				Message: fmt.Sprintf("limit is %d; the manifest declares at most %d candidates per request (limits.max_candidates)", c.Limit(), maxK)})
 		}
-		if c.Primitive != PrimitiveBM25 {
+		if c.Primitive == PrimitiveProfile {
+			r, _ := ParseRange(m.Compatibility.PluginAPI)
+			_, admitted := admitsFeature(r, FeatureProfileCandidates)
+			if !admitted || c.Profile == nil || !m.RequiresProfile(c.Profile.Name) {
+				issues = append(issues, Issue{Code: CodePluginDependency, Path: path + "/profile", Message: "profile candidates require the profile-candidates feature and a full profile name declared in requires"})
+			}
+		}
+		if c.Primitive != PrimitiveBM25 && c.Primitive != PrimitiveProfile {
 			space, known := spaces[c.Space]
 			switch {
 			case !known:
@@ -414,6 +445,7 @@ type RetrievalSession struct {
 	m       *Manifest
 	request SearchRequest
 	usage   SearchUsage
+	cost    SearchCost
 }
 
 // NewRetrievalSession starts a search at round 1 from its first request.
@@ -445,7 +477,8 @@ func (s *RetrievalSession) Judge(raw []byte) (SearchAnswer, []Issue) {
 	}
 	if answer.Usage != nil {
 		s.usage.PaidCalls += answer.Usage.PaidCalls
-		s.usage.CostCents += answer.Usage.CostCents
+		s.cost.Add(answer.Usage.CostCents)
+		s.usage.CostCents = s.cost.Cents()
 	}
 	return answer, nil
 }
@@ -491,7 +524,7 @@ func (s *RetrievalSession) Budget() *Issue {
 		return nil
 	}
 	profile, ok := r.Profiles[s.request.Profile]
-	if !ok || s.usage.CostCents <= profile.MaxCostCents {
+	if !ok || !s.cost.Exceeds(profile.MaxCostCents) {
 		return nil
 	}
 	return &Issue{Code: CodeOverBudget, Path: "/usage/cost_cents",

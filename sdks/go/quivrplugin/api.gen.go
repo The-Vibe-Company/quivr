@@ -23,6 +23,7 @@ var FeatureSince = map[string]string{
 	"connector_api":        "0.11.0",
 	"connector_signature":  "0.12.0",
 	"instance_token":       "0.12.0",
+	"profile_candidates":   "0.12.0",
 }
 
 // apiFeatures resolves admission once per loaded plugin manifest.

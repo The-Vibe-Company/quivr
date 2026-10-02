@@ -243,6 +243,25 @@
         }
       },
       "description": "Every candidate request of earlier rounds with the candidates the core served for it, in order. Empty in round 1."
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "remaining_time_ms",
+        "remaining_cost_cents"
+      ],
+      "description": "Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only.",
+      "properties": {
+        "remaining_time_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining_cost_cents": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
     }
   },
   "$defs": {
@@ -250,16 +269,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "primitive",
-        "k"
+        "primitive"
       ],
-      "description": "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment.",
+      "description": "One candidate request. bm25 ranks by keywords on a field; near_vector ranks by one space's vectors (the core encodes query_text with the space's owner, or takes vector as given); hybrid fuses both in one index query. Candidates are Record segments the caller may read, deduplicated by segment. profile runs a declared dependency through the engine and returns its ranked hits, scores and explanations.",
       "properties": {
         "primitive": {
           "enum": [
             "bm25",
             "near_vector",
-            "hybrid"
+            "hybrid",
+            "profile"
           ]
         },
         "query_text": {
@@ -337,6 +356,33 @@
             "record"
           ],
           "description": "record keeps the best candidate of each Record."
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "limit"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{0,127}/[a-z][a-z0-9_-]{0,63}$",
+              "description": "Full plugin/profile name declared in requires."
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "description": "Optional replacement query text; otherwise inherits the outer query."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "At most limits.max_candidates ranked hits."
+            }
+          }
         }
       },
       "allOf": [
@@ -350,7 +396,8 @@
           },
           "then": {
             "required": [
-              "query_text"
+              "query_text",
+              "k"
             ],
             "not": {
               "anyOf": [
@@ -373,6 +420,11 @@
                   "required": [
                     "fusion"
                   ]
+                },
+                {
+                  "required": [
+                    "profile"
+                  ]
                 }
               ]
             }
@@ -388,7 +440,8 @@
           },
           "then": {
             "required": [
-              "space"
+              "space",
+              "k"
             ],
             "oneOf": [
               {
@@ -418,6 +471,11 @@
                   "required": [
                     "fusion"
                   ]
+                },
+                {
+                  "required": [
+                    "profile"
+                  ]
                 }
               ]
             }
@@ -434,11 +492,79 @@
           "then": {
             "required": [
               "space",
-              "query_text"
+              "query_text",
+              "k"
             ],
             "not": {
-              "required": [
-                "vector"
+              "anyOf": [
+                {
+                  "required": [
+                    "vector"
+                  ]
+                },
+                {
+                  "required": [
+                    "profile"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "primitive": {
+                "const": "profile"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "profile"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "k"
+                  ]
+                },
+                {
+                  "required": [
+                    "query_text"
+                  ]
+                },
+                {
+                  "required": [
+                    "vector"
+                  ]
+                },
+                {
+                  "required": [
+                    "space"
+                  ]
+                },
+                {
+                  "required": [
+                    "field"
+                  ]
+                },
+                {
+                  "required": [
+                    "alpha"
+                  ]
+                },
+                {
+                  "required": [
+                    "fusion"
+                  ]
+                },
+                {
+                  "required": [
+                    "group_by"
+                  ]
+                }
               ]
             }
           }
@@ -496,6 +622,12 @@
         "score": {
           "type": "number",
           "description": "The index score for this request; higher is better. bm25: BM25F; hybrid: the fused score; near_vector: 1 minus the distance."
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "The inner profile explanation, when profile candidates supply one."
         }
       }
     },
