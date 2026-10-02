@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func (articleText) Article(_ context.Context, _, _, recordID, _ string) (monitor
 
 // blocking decides like the fixture, except that it answers nothing for a
 // Record whose text says "slow" until the preview's budget runs out.
-type blocking struct{ monitoring.Fixture }
+type blocking struct{ fakeplugin.Fixture }
 
 func (b blocking) Evaluate(ctx context.Context, batch monitoring.Batch) ([]monitoring.Outcome, error) {
 	if batch.Article.Parts[0].Text == "slow" {
@@ -51,7 +52,7 @@ func (b blocking) Evaluate(ctx context.Context, batch monitoring.Batch) ([]monit
 
 // sent records the batches a preview sends.
 type sent struct {
-	monitoring.Fixture
+	fakeplugin.Fixture
 	batches chan monitoring.Batch
 }
 
@@ -97,7 +98,7 @@ func TestPreviewJudgesRecentRecordsAndWritesNothing(t *testing.T) {
 		got.Matches[0].RecordID != "strike-new" || got.Matches[1].RecordID != "strike-old" || !got.Oldest.Equal(time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("want strike-new and strike-old matched, newest first, of 4 decided Records: %+v", got)
 	}
-	if ev := got.Matches[0].Evidence; ev.Evaluator.PluginID != monitoring.FixtureEvaluator || ev.Explanation == "" || len(ev.PartKeys) != 1 {
+	if ev := got.Matches[0].Evidence; ev.Evaluator.PluginID != fakeplugin.FixtureEvaluator || ev.Explanation == "" || len(ev.PartKeys) != 1 {
 		t.Fatalf("a previewed match carries the evidence a Match would: %+v", ev)
 	}
 	if len(store.writes) != 0 || len(store.created) != 0 {

@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 )
 
 // Real PostgreSQL owns reservation concurrency, multi-key rollback, instance
@@ -25,7 +26,7 @@ func TestConnectorReplayReservationsAreAtomicAndExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	svc := connectors.Service{Store: store, Registry: registry, Sealer: sealer}
 	ids := []string{}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"os"
 	"reflect"
 	"testing"
@@ -151,7 +152,7 @@ func TestSubscriptionActivationBoundaryAndDisable(t *testing.T) {
 		return 0
 	}
 
-	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
+	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
 	definition := monitoring.Definition{CorpusIDs: []string{a.ID, b.ID}, Expression: map[string]any{"fixture": map[string]any{"decision": "match"}}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}
 	query, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: definition})
 	if err != nil {
@@ -173,7 +174,7 @@ func TestSubscriptionActivationBoundaryAndDisable(t *testing.T) {
 	}
 
 	accept("before")
-	input := monitoring.SubscriptionInput{Key: "s", Name: "S", SavedQueryID: query.ID, SavedQueryVersionID: query.Current.VersionID, Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"mode": "fixture"}}, DestinationID: "receiver"}
+	input := monitoring.SubscriptionInput{Key: "s", Name: "S", SavedQueryID: query.ID, SavedQueryVersionID: query.Current.VersionID, Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"mode": "fixture"}}, DestinationID: "receiver"}
 	sub, err := service.CreateSubscription(ctx, scope, input)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +251,7 @@ func TestConcurrentMonitoringReplaysConverge(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.ContentStore{Pool: pool}
-	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
+	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"receiver": {Organization: scope.Organization, URL: "http://127.0.0.1:9/hook", Secret: "whsec_test"}}}
 	race := func(n int, run func() (string, bool, error)) string {
 		t.Helper()
 		type outcome struct {
@@ -292,7 +293,7 @@ func TestConcurrentMonitoringReplaysConverge(t *testing.T) {
 		t.Fatal(err)
 	}
 	versionID := query.Current.VersionID
-	input := monitoring.SubscriptionInput{Key: "s", Name: "S", SavedQueryID: queryID, SavedQueryVersionID: versionID, Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{}}, DestinationID: "receiver"}
+	input := monitoring.SubscriptionInput{Key: "s", Name: "S", SavedQueryID: queryID, SavedQueryVersionID: versionID, Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{}}, DestinationID: "receiver"}
 	subID := race(8, func() (string, bool, error) {
 		s, err := service.CreateSubscription(ctx, scope, input)
 		return s.ID, s.Enabled, err

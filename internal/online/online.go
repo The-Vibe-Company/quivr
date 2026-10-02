@@ -69,8 +69,6 @@ type Env struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
-	// HTTPClient, when set, replaces the default client (tests only).
-	HTTPClient *http.Client
 }
 
 // Commands lists the online commands in help order.
@@ -153,10 +151,7 @@ func (c *connection) client(env Env) (*client.ClientWithResponses, string, error
 		return nil, "", usageError("invalid API URL: want http:// or https:// and a host")
 	}
 	display := u.Redacted()
-	hc := env.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Timeout: requestTimeout}
-	}
+	hc := &http.Client{Timeout: requestTimeout}
 	opts := []client.ClientOption{client.WithHTTPClient(hc)}
 	if key != "" {
 		opts = append(opts, client.WithRequestEditorFn(func(_ context.Context, r *http.Request) error {

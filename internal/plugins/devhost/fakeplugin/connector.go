@@ -94,6 +94,11 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		if mode == "connector-credential-leak" && req.Credential != nil {
 			fmt.Fprintln(os.Stderr, "fetching with token", req.Credential.Token)
 		}
+		if mode == "fixture" {
+			status, output := fixtureFetch(body, schema == "connector-check-credential-request.schema.json")
+			write(w, status, output)
+			return req, false
+		}
 		if req.Credential != nil && strings.HasPrefix(req.Credential.Token, "revoked") {
 			write(w, 403, map[string]any{"code": "token_rejected", "message": "the source refused the token", "retryable": mode == "connector-wrong-error-class", "error_class": "access"})
 			return req, false

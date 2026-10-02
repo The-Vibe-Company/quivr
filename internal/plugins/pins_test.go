@@ -106,7 +106,6 @@ func TestLoadPinsRoutesOnlyNormalizers(t *testing.T) {
 func TestLoadPinsRefusesConflicts(t *testing.T) {
 	markdown := writePinManifest(t, pinManifest)
 	other := writePinManifest(t, strings.Replace(pinManifest, "id: acme.markdown", "id: acme.other", 1))
-	reserved := writePinManifest(t, strings.Replace(alertsManifest, "id: acme.alerts", "id: quivr.fixture", 1))
 	source := writePinManifest(t, connectorManifest)
 	sameKind := writePinManifest(t, strings.Replace(connectorManifest, "id: acme.source", "id: acme.mirror", 1))
 	for name, tc := range map[string]struct {
@@ -118,7 +117,6 @@ func TestLoadPinsRefusesConflicts(t *testing.T) {
 		})}, plugins.CodePluginConflict},
 		"media type routed twice": {[]plugins.PinConfig{pinConfig(markdown, nil), pinConfig(other, nil)}, plugins.CodeRouteConflict},
 		"connector kind twice":    {[]plugins.PinConfig{{Manifest: source, Endpoint: "http://127.0.0.1:9903"}, {Manifest: sameKind, Endpoint: "http://127.0.0.1:9904"}}, plugins.CodeKindConflict},
-		"reserved evaluator id":   {[]plugins.PinConfig{{Manifest: reserved, Endpoint: "http://127.0.0.1:9902"}}, plugins.CodePluginConflict},
 		"invalid member pin":      {[]plugins.PinConfig{pinConfig(markdown, nil), pinConfig(other, func(c *plugins.PinConfig) { c.Endpoint = "ftp://x" })}, plugins.CodeInvalidPin},
 	} {
 		t.Run(name, func(t *testing.T) {

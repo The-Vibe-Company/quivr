@@ -305,6 +305,11 @@ func serve() error {
 			}
 			return
 		}
+		if mode == "fixture" {
+			status, output := fixtureSubscription(body)
+			write(w, status, output)
+			return
+		}
 		write(w, 200, decide(mode, body))
 	})
 	if report.Manifest.Contributions.Connector != nil {

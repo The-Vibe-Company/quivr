@@ -9,8 +9,8 @@ import (
 // By default it prunes every Organization after change_retention, the same
 // setting the API applies to Change Cursors, every minute. Retention may only
 // lengthen that window: a shorter one would expire cursors earlier than the
-// API promises, so it is refused unless AllowShortRetention confines it to
-// named Organizations (local and CI harness isolation only).
+// API promises, so it is refused unless AllowShortRetention explicitly
+// confines it to named Organizations. This can cause data loss for consumers.
 type ChangePruneConfig struct {
 	Interval            string   `json:"interval"`
 	Retention           string   `json:"retention"`
@@ -44,7 +44,7 @@ func (c ChangePruneConfig) parse(changeRetention time.Duration) (changePrune, er
 		}
 	}
 	if p.Retention < changeRetention && (!c.AllowShortRetention || len(c.Organizations) == 0) {
-		return changePrune{}, errors.New("change_prune.retention is shorter than change_retention; set allow_short_retention with named organizations only for isolated test Organizations")
+		return changePrune{}, errors.New("change_prune.retention is shorter than change_retention; set allow_short_retention with named organizations only when early event loss is acceptable")
 	}
 	return p, nil
 }

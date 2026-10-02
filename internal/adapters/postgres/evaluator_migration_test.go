@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"os"
 	"reflect"
 	"strings"
@@ -88,7 +89,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := monitoring.Service{Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: "org_a"}},
-		Evaluators: monitoring.Evaluators{"alerts@0.2.0": monitoring.Fixture{}, "alerts@0.3.0": monitoring.Fixture{}}}
+		Evaluators: monitoring.Evaluators{"alerts@0.2.0": fakeplugin.Fixture{}, "alerts@0.3.0": fakeplugin.Fixture{}}}
 	definition := monitoring.Definition{CorpusIDs: []string{c.ID}, Expression: map[string]any{"kind": "keywords"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}
 	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: definition})
 	if err != nil {

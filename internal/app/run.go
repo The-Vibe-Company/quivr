@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,8 +66,6 @@ type Config struct {
 	// CredentialKey encrypts Deposited Credentials at rest (32+ bytes). It is
 	// optional: without it credential deposits and rotations are refused.
 	CredentialKey string `json:"credential_key"`
-	// ConnectorFixtures enables the deterministic fixture connector kind (local/CI only).
-	ConnectorFixtures bool `json:"connector_fixtures"`
 	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
 	ConnectorMinInterval string                `json:"connector_min_interval"`
 	ConnectorPush        connectors.PushConfig `json:"connector_push"`
@@ -82,7 +81,7 @@ type Config struct {
 	Plugin *plugins.PinConfig `json:"plugin"`
 	// Plugins pins external plugins together: normalizers are routed by Blob
 	// media type, subscription evaluators by plugin id and version, connector
-	// kinds by name beside the built-in kinds (a kind with two providers is a
+	// kinds by name (a kind with two providers is a
 	// conflict; a connector plugin needs https unless it is on loopback). API and
 	// worker refuse to start on an invalid pin or a conflict between pins; an
 	// unreachable plugin never prevents startup.
@@ -91,9 +90,6 @@ type Config struct {
 	Ingestion plugins.IngestionRouting `json:"ingestion"`
 	// Retrieval maps deployment short names to installed plugin/profile names.
 	Retrieval RetrievalConfig `json:"retrieval"`
-	// MonitoringFixtureEvaluator installs the deterministic fixture evaluator
-	// quivr.fixture@1 (local and CI test deployments only).
-	MonitoringFixtureEvaluator bool `json:"monitoring_fixture_evaluator"`
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
@@ -190,8 +186,13 @@ func Run(command string) error {
 		return errors.New("read QUIVR_CONFIG file failed")
 	}
 	var cfg Config
-	if err = json.Unmarshal(b, &cfg); err != nil {
-		return errors.New("invalid configuration JSON")
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&cfg); err != nil {
+		return fmt.Errorf("invalid configuration JSON: %w", err)
+	}
+	if err = decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("invalid configuration JSON: expected a single object")
 	}
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
 		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
@@ -234,16 +235,8 @@ func Run(command string) error {
 	if err != nil {
 		return fmt.Errorf("connector_push: %w", err)
 	}
-	var builtinKinds []connectors.Connector
-	if cfg.ConnectorFixtures {
-		builtinKinds = append(builtinKinds, connectors.Fixture{})
-	}
-	// Connector kinds of the plan's plugins resolve beside the enabled
-	// built-in kinds; a kind with two providers refuses startup, and an
-	// activation.
-	kindsOf := func(set *plugins.PinSet) []connectors.Connector {
-		return append(append([]connectors.Connector{}, builtinKinds...), pluginhttp.Connectors(set)...)
-	}
+	// Every connector kind is supplied by a pinned plugin.
+	kindsOf := pluginhttp.Connectors
 	registry, err := connectors.NewRegistry(kindsOf(pins)...)
 	if err != nil {
 		return err
@@ -295,6 +288,12 @@ func Run(command string) error {
 	prune, err := cfg.ChangePrune.parse(retention)
 	if err != nil {
 		return err
+	}
+	if cfg.Delivery.AllowPrivateDestinations {
+		slog.Warn("delivery.allow_private_destinations is enabled: webhooks may reach internal networks; this increases SSRF exposure")
+	}
+	if cfg.ChangePrune.AllowShortRetention {
+		slog.Warn("change_prune.allow_short_retention is enabled: pruning may remove change events before API cursors expire; this can cause data loss for consumers", "retention", prune.Retention, "change_retention", retention)
 	}
 	purgeGrace := retrieval.DefaultPurgeGrace
 	if cfg.ProjectionPurgeGrace != "" {

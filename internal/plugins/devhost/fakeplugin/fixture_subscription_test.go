@@ -1,8 +1,9 @@
-package monitoring_test
+package fakeplugin_test
 
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
@@ -24,7 +25,7 @@ func (f fixtureEval) run(ctx context.Context) (monitoring.Evaluation, error) {
 	for i, text := range f.texts {
 		parts[i] = monitoring.Part{Key: []string{"title", "body", "extra"}[i], Role: "body", Text: text}
 	}
-	out, err := monitoring.Fixture{}.Evaluate(ctx, monitoring.Batch{RecordID: "record", VersionID: "version", Enriched: f.enriched, Article: monitoring.Article{Parts: parts},
+	out, err := fakeplugin.Fixture{}.Evaluate(ctx, monitoring.Batch{RecordID: "record", VersionID: "version", Enriched: f.enriched, Article: monitoring.Article{Parts: parts},
 		Items: []monitoring.BatchItem{{ID: "e1", Configuration: f.configuration}}})
 	if err != nil {
 		return monitoring.Evaluation{}, err

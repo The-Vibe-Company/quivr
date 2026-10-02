@@ -9,6 +9,7 @@ import normalizer_plugin
 import ports
 import subscription_plugin
 import connector_plugin
+import fixture_plugin
 import core_ingest_plugin
 import ingestion_plugin
 import retrieval_plugin
@@ -116,7 +117,7 @@ class Stack:
             tei=run(['docker','inspect',tei_container,'--format','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],capture_output=True,text=True).stdout.strip()+':80'
         # The core.ingest pin (scripts/connector_plugin.py FIRST_PARTY) embeds through this TEI.
         s['tei_url']='http://'+tei;self.save()
-        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_fixtures=True,connector_min_interval='1s',
+        cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
             # api and worker follow a plugin activation within this delay (THE-781).
             plugin_plan_poll='200ms',
             change_stream_poll=CHANGE_STREAM_POLL,
@@ -170,9 +171,9 @@ class Stack:
             # `quivr plugin init` template for text/markdown, or none (scripts/normalizer_plugin.py).
             plugin=normalizer_plugin.pin(self),
             # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
-            # verification the sample connector plugin (scripts/connector_plugin.py). The fixture
-            # evaluator stays installed for the notification-mechanics acceptance tests.
-            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self),monitoring_fixture_evaluator=True,
+            # verification the sample connector plugin (scripts/connector_plugin.py). The shared fake plugin
+            # supplies the scripted connector and notification-mechanics evaluator.
+            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),
             # Counts reach the stats reads within 200 ms; query text is recorded so top queries can be read back.
             observability=OBSERVABILITY_OVERRIDES)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
@@ -185,7 +186,7 @@ class Stack:
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
         keyless={k:v for k,v in cfg.items() if k!='credential_key'}
         # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
-        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
     def running(self):
@@ -301,8 +302,8 @@ class Stack:
         (self.directory/'embedding-provenance.json').write_text(json.dumps(prepare_embeddings(),indent=2))
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'],cwd=self.source)
         self.start_dependencies()
-        normalizer_plugin.prepare(self);subscription_plugin.prepare(self)
-        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);connector_plugin.start_first_party(self);self.start_processes()
+        normalizer_plugin.prepare(self);subscription_plugin.prepare(self);fixture_plugin.prepare(self)
+        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);connector_plugin.start_first_party(self);fixture_plugin.start(self);self.start_processes()
     def start_dependencies(self,attempts=2):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
@@ -441,7 +442,7 @@ class Stack:
         started again (make dev initializes a fresh schema)."""
         if hasattr(self,"fake_x"): self.fake_x.close()
         if hasattr(self,"fake_graph"): self.fake_graph.close()
-        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);fixture_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)
             self.save()

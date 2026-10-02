@@ -3,8 +3,6 @@ package monitoring
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -217,99 +215,6 @@ type EvaluationPort interface {
 
 // Evaluators are the installed evaluators keyed by EvaluatorKey.
 type Evaluators map[string]EvaluationPort
-
-// FixtureEvaluators installs only the deterministic fixture evaluator.
-func FixtureEvaluators() Evaluators {
-	return Evaluators{EvaluatorKey(Evaluator{PluginID: FixtureEvaluator, Version: FixtureEvaluatorVersion}): Fixture{}}
-}
-
-// Fixture is the deterministic test evaluator for notification mechanics; it
-// is not a relevance algorithm, and it is installed only where a deployment
-// enables it for tests. Its pinned configuration is
-// {"decisions": {"<marker>": "<decision>", ..., "default": "<decision>"}}.
-// Markers are literal substrings of Part text, checked in sorted order; the
-// first present marker decides, otherwise "default" (absent: no_match).
-// Decisions are match, no_match and not_ready, plus two fixture-only,
-// test-oriented values: "error" fails the evaluation, and
-// "match_after_enrichment" is not_ready until the Version is enriched.
-type Fixture struct{}
-
-// MaxBatch accepts the protocol's largest batch.
-func (Fixture) MaxBatch() int { return 256 }
-
-// Validate accepts any expression; the fixture reads only its configuration.
-func (Fixture) Validate(map[string]any, map[string]any) error { return nil }
-
-func (f Fixture) Evaluate(_ context.Context, b Batch) ([]Outcome, error) {
-	out := make([]Outcome, len(b.Items))
-	for i, item := range b.Items {
-		ev, err := fixtureDecide(item.Configuration, b.Article.Parts, b.Enriched)
-		out[i] = Outcome{Evaluation: ev, Err: err}
-	}
-	return out, nil
-}
-
-func fixtureDecide(configuration map[string]any, parts []Part, enriched bool) (Evaluation, error) {
-	raw, ok := configuration["decisions"]
-	if !ok {
-		raw = map[string]any{}
-	}
-	decisions, ok := raw.(map[string]any)
-	if !ok {
-		return Evaluation{}, fmt.Errorf("%w: decisions must be an object", ErrEvaluatorConfiguration)
-	}
-	markers := make([]string, 0, len(decisions))
-	for marker := range decisions {
-		if marker != "default" && marker != "" {
-			markers = append(markers, marker)
-		}
-	}
-	sort.Strings(markers)
-	chosen, value := "default", any("no_match")
-	if v, ok := decisions["default"]; ok {
-		value = v
-	}
-	var keys []string
-	for _, marker := range markers {
-		for _, p := range parts {
-			if strings.Contains(p.Text, marker) {
-				keys = append(keys, p.Key)
-			}
-		}
-		if len(keys) > 0 {
-			chosen, value = marker, decisions[marker]
-			break
-		}
-	}
-	decision, _ := value.(string)
-	switch decision {
-	case "error":
-		return Evaluation{}, fmt.Errorf("%w: fixture error decision", ErrEvaluation)
-	case "match_after_enrichment":
-		if !enriched {
-			decision = string(DecisionNotReady)
-		} else {
-			decision = string(DecisionMatch)
-		}
-	case string(DecisionMatch), string(DecisionNoMatch), string(DecisionNotReady):
-	default:
-		return Evaluation{}, fmt.Errorf("%w: unknown decision", ErrEvaluatorConfiguration)
-	}
-	return Evaluation{
-		Decision:    Decision(decision),
-		Explanation: fmt.Sprintf("Fixture evaluator decided %s from marker %q.", decision, truncate(chosen, 256)),
-		PartKeys:    keys,
-		Details:     map[string]any{"marker": truncate(chosen, 256), "decision": decision},
-	}, nil
-}
-
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n])
-}
 
 // EvaluatorSet resolves the installed evaluators by EvaluatorKey.
 type EvaluatorSet interface {

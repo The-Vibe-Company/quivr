@@ -8,8 +8,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 )
 
-// CodePluginConflict is a plugin pinned twice, or a pin that takes an
-// evaluator id the engine reserves.
+// CodePluginConflict is a plugin pinned twice.
 const CodePluginConflict = "plugin_conflict"
 
 // CodeKindConflict is a connector kind declared by two pinned plugins.
@@ -19,10 +18,6 @@ const CodeKindConflict = "kind_conflict"
 // ingestion plugin. A space key has one owner for as long as vectors exist in
 // it.
 const CodeSpaceConflict = "space_owner_conflict"
-
-// ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
-// deterministic test evaluator); no plugin may be pinned under them.
-var ReservedEvaluatorIDs = []string{"quivr.fixture"}
 
 // PinSet is every plugin pinned at startup, with its Contribution routing:
 // normalizers by accepted Blob media type, subscription evaluators by plugin
@@ -42,8 +37,8 @@ type PinSet struct {
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
 // all of them. A plugin id pinned twice, a media type routed to two plugins,
-// a connector kind provided by two plugins and a reserved evaluator id refuse
-// startup. Nothing contacts a plugin.
+// or a connector kind provided by two plugins refuses startup. Nothing
+// contacts a plugin.
 func LoadPins(configs []PinConfig) (*PinSet, error) {
 	var issues []Issue
 	pins := make([]*Pin, len(configs))
@@ -71,8 +66,8 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 // NewPinSet routes the Contributions of pins already validated one by one
 // (LoadPin, LoadPinManifest), with the rules of LoadPins: a plugin id twice,
 // a media type routed to two plugins, a connector kind provided by two, a
-// declared vector space owned by two plugins and a reserved evaluator id are
-// conflicts. Several ingestion and retrieval plugins are valid; call
+// declared vector space owned by two plugins are conflicts. Several ingestion
+// and retrieval plugins are valid; call
 // ConfigureIngestion to choose an ingestion default and source-media routes.
 // Issue paths name each pin by its position.
 func NewPinSet(pins []*Pin) (*PinSet, error) {
@@ -82,11 +77,6 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 	for i, pin := range pins {
 		prefix := fmt.Sprintf("/plugins/%d", i)
 		id := pin.Manifest.ID
-		for _, reserved := range ReservedEvaluatorIDs {
-			if id == reserved {
-				issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", PluginID: id, PluginVersion: pin.Manifest.Version, Message: fmt.Sprintf("plugin id %q is reserved by the engine; choose an id of your own", id)})
-			}
-		}
 		if first, exists := byID[id]; exists {
 			issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", PluginID: id, PluginVersion: pins[first].Manifest.Version, Message: fmt.Sprintf("plugin %q is already pinned at /plugins/%d; pin each plugin once", id, first)})
 			continue

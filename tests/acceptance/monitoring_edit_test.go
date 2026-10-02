@@ -75,7 +75,7 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 
 	// Edit the Subscription: the old rule no longer matches, a new marker does.
 	subEdit := map[string]any{"idempotency_key": "edit-subscription-" + s.recordKey, "saved_query_version_id": queryV2["version_id"],
-		"evaluator":      map[string]any{"plugin_id": "quivr.fixture", "version": "1", "configuration": map[string]any{"decisions": map[string]any{markerEdited: "match", "default": "no_match"}}},
+		"evaluator":      map[string]any{"plugin_id": "quivr.fixture", "version": "1.0.0", "configuration": map[string]any{"decisions": map[string]any{markerEdited: "match", "default": "no_match"}}},
 		"destination_id": destinationCapture}
 	second := request(t, "POST", "/v0/subscriptions/"+edited+"/versions", admin, subEdit, 201)
 	if replay := request(t, "POST", "/v0/subscriptions/"+edited+"/versions", admin, subEdit, 201); replay["version_id"] != second["version_id"] {

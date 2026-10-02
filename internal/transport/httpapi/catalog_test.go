@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
@@ -98,7 +99,7 @@ func TestCatalogReadOutages(t *testing.T) {
 // catalogConnectors holds two Connector instances so /v0/connectors issues a page cursor.
 func catalogConnectors(t *testing.T) connectors.Service {
 	t.Helper()
-	registry, err := connectors.NewRegistry(connectors.Fixture{})
+	registry, err := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func savedQueryCommand(key string, corpora ...string) map[string]any {
 func subscriptionCommand(key string, query map[string]any, destination string) map[string]any {
 	return map[string]any{"idempotency_key": key, "name": "Alertes " + key, "saved_query_id": query["saved_query_id"],
 		"saved_query_version_id": query["current_version"].(map[string]any)["version_id"],
-		"evaluator":              map[string]any{"plugin_id": "quivr.fixture", "version": "1", "configuration": map[string]any{"decisions": map[string]any{"default": "match"}}},
+		"evaluator":              map[string]any{"plugin_id": "quivr.fixture", "version": "1.0.0", "configuration": map[string]any{"decisions": map[string]any{"default": "match"}}},
 		"destination_id":         destination}
 }
 

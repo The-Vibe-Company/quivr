@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -84,7 +85,7 @@ func compileRoutes(routes []APIRoute) ([]apiRoute, error) {
 		}
 		entry := apiRoute{APIRoute: route}
 		if route.RequestSchema != nil {
-			doc, err := jsonschema.UnmarshalJSON(bytesReader(route.RequestSchema))
+			doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(route.RequestSchema))
 			if err != nil {
 				return nil, err
 			}

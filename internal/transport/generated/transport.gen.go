@@ -1379,7 +1379,7 @@ type Connector struct {
 		SilentAfterSeconds       int `json:"silent_after_seconds"`
 	} `json:"health_policy"`
 
-	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
+	// Kind Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind ConnectorKind `json:"kind"`
 
 	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
@@ -1402,7 +1402,7 @@ type ConnectorCreate struct {
 	HealthPolicy   *ConnectorHealthPolicy `json:"health_policy,omitempty"`
 	IdempotencyKey string                 `json:"idempotency_key"`
 
-	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
+	// Kind Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind ConnectorKind `json:"kind"`
 
 	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
@@ -1446,7 +1446,7 @@ type ConnectorHealthPolicy struct {
 	SilentAfterSeconds *int `json:"silent_after_seconds,omitempty"`
 }
 
-// ConnectorKind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
+// ConnectorKind Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 type ConnectorKind = string
 
 // ConnectorKindCatalog defines model for ConnectorKindCatalog.
@@ -1570,7 +1570,7 @@ type ConnectorRunRequest struct {
 
 // ConnectorSchedule defines model for ConnectorSchedule.
 type ConnectorSchedule struct {
-	// IntervalSeconds Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
+	// IntervalSeconds Polling interval. Defaults to the kind's declared interval (rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
 	IntervalSeconds *int `json:"interval_seconds,omitempty"`
 }
 
@@ -1841,7 +1841,7 @@ type EvaluationRetirementRequest struct {
 	Version string `json:"version"`
 }
 
-// EvaluatorConfig Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+// EvaluatorConfig Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 type EvaluatorConfig struct {
 	Configuration map[string]interface{} `json:"configuration"`
 	PluginId      string                 `json:"plugin_id"`
@@ -1919,7 +1919,7 @@ type Match struct {
 type MatchEvidence struct {
 	Details *map[string]interface{} `json:"details,omitempty"`
 
-	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator   EvaluatorConfig `json:"evaluator"`
 	Explanation string          `json:"explanation"`
 	PartKeys    *[]string       `json:"part_keys,omitempty"`
@@ -2768,7 +2768,7 @@ type Subscription struct {
 type SubscriptionCreate struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator      EvaluatorConfig `json:"evaluator"`
 	IdempotencyKey string          `json:"idempotency_key"`
 	Name           string          `json:"name"`
@@ -2884,7 +2884,7 @@ type SubscriptionPreviewRequest struct {
 	// Definition Immutable query definition. Expression semantics belong to the evaluator plugin; no core keyword or semantic threshold is implied. All Corpora belong to the authorized Organization.
 	Definition *SavedQueryDefinition `json:"definition,omitempty"`
 
-	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
 
 	// Limit The most Record Versions to judge, newest first. Each one costs an evaluator call.
@@ -2897,7 +2897,7 @@ type SubscriptionPreviewRequest struct {
 type SubscriptionVersion struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
 
 	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
@@ -2912,7 +2912,7 @@ type SubscriptionVersion struct {
 type SubscriptionVersionCreate struct {
 	DestinationId string `json:"destination_id"`
 
-	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator           EvaluatorConfig `json:"evaluator"`
 	IdempotencyKey      string          `json:"idempotency_key"`
 	SavedQueryVersionId string          `json:"saved_query_version_id"`

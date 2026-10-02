@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"sort"
 	"strings"
 	"sync"
@@ -211,7 +212,7 @@ func TestEngineUnavailablePluginRetriesTheWholeBatch(t *testing.T) {
 func TestEngineItemFailureRetriesOnlyItsIntents(t *testing.T) {
 	store := &fakeEvaluation{targets: map[string]monitoring.Target{}}
 	fixture := func(decisions map[string]any) monitoring.Target {
-		return monitoring.Target{Enabled: true, Subscription: monitoring.SubscriptionVersion{Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": decisions}}}}
+		return monitoring.Target{Enabled: true, Subscription: monitoring.SubscriptionVersion{Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": decisions}}}}
 	}
 	store.targets["ok"] = fixture(map[string]any{"ALERTE": "match"})
 	store.targets["fault"] = fixture(map[string]any{"ALERTE": "error"})
@@ -221,7 +222,7 @@ func TestEngineItemFailureRetriesOnlyItsIntents(t *testing.T) {
 	}
 	store.intents = []monitoring.Intent{intent("ok")}
 	store.related = []monitoring.Intent{intent("fault"), intent("off")}
-	engine := monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "ALERTE"}}, Evaluators: monitoring.FixtureEvaluators()}
+	engine := monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "ALERTE"}}, Evaluators: fakeplugin.FixtureEvaluators()}
 	if _, err := engine.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}

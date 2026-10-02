@@ -37,14 +37,6 @@ var (
 	ErrInvalidOwner = publicerr.New("invalid_owner")
 )
 
-// The deterministic fixture evaluator is a test double for notification
-// mechanics, not a relevance algorithm. It is installed only where a
-// deployment enables it for tests; real evaluators are pinned plugins.
-const (
-	FixtureEvaluator        = "quivr.fixture"
-	FixtureEvaluatorVersion = "1"
-)
-
 const (
 	// maxCorpora bounds a Saved Query scope like a search request.
 	maxCorpora = 16

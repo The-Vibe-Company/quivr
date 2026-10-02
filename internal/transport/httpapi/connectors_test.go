@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -130,7 +131,7 @@ const (
 
 // bearerSource is a kind that needs a credential, as plugin kinds such as
 // x_list do.
-type bearerSource struct{ connectors.Fixture }
+type bearerSource struct{ fakeplugin.FixtureConnector }
 
 func (bearerSource) Kind() string             { return "bearer_source" }
 func (bearerSource) CredentialRequired() bool { return true }
@@ -151,7 +152,7 @@ func connectorAPIWith(t *testing.T, store *memoryConnectors) http.Handler {
 
 func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors.Sealer) http.Handler {
 	t.Helper()
-	registry, err := connectors.NewRegistry(connectors.Fixture{}, bearerSource{})
+	registry, err := connectors.NewRegistry(fakeplugin.FixtureConnector{}, bearerSource{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -135,7 +136,7 @@ func TestSubscriptionEditAppliesFromItsCommit(t *testing.T) {
 		t.Fatalf("new Subscription on a superseded Saved Query Version: %v", err)
 	}
 
-	subEdit := monitoring.SubscriptionVersionInput{Key: "s-edit", SavedQueryVersionID: q2.VersionID, Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "no_match"}}}, DestinationID: "dest"}
+	subEdit := monitoring.SubscriptionVersionInput{Key: "s-edit", SavedQueryVersionID: q2.VersionID, Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "no_match"}}}, DestinationID: "dest"}
 	stale := subEdit
 	stale.Key, stale.SavedQueryVersionID = "s-stale", f.query.Current.VersionID
 	if _, err = f.service.CreateSubscriptionVersion(ctx, f.scope, sub.ID, stale); !errors.Is(err, monitoring.ErrUnknownSavedQuery) {

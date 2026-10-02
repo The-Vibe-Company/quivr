@@ -32,7 +32,8 @@ Webhook delivery and the RSS connector refuse private and internal addresses
 (checked after DNS resolution, so Railway's private network is unreachable
 through them). The generated configuration never sets
 `delivery.allow_private_destinations` or the rss pin's `allow_private_addresses`;
-those allowances exist for the local harness only.
+operators may enable them for trusted internal receivers or feeds, accepting
+the SSRF exposure. The local harness enables them for loopback fixtures.
 
 The generated configuration also sets `observability.record_query_text`, off by default in
 the engine, so the admin view can list the most frequent searches: query text is stored,

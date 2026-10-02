@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
@@ -34,7 +35,7 @@ func TestConnectorTokensStayScopedAndRotateWithoutExtendingOldSecrets(t *testing
 		t.Fatal(err)
 	}
 	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-token-test-key-012345678901234")
 	service := connectors.Service{Store: store, Tokens: store, Registry: registry, Sealer: sealer}
 	create := func(key string) connectors.Instance {
@@ -185,7 +186,7 @@ func TestConnectorTokensStayScopedAndRotateWithoutExtendingOldSecrets(t *testing
 }
 
 type tokenPushSource struct {
-	connectors.Fixture
+	fakeplugin.FixtureConnector
 	calls  int
 	leaked bool
 }

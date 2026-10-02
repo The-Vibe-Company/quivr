@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -162,13 +163,13 @@ func TestPruneWaitsForTheEvaluationCheckpoint(t *testing.T) {
 	defer cancel()
 	f := newPruneFixture(t, ctx, "checkpoint")
 	f.accept("before")
-	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: f.scope.Organization}}}
+	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: f.store, Corpora: f.store, Destinations: map[string]monitoring.Destination{"dest": {Organization: f.scope.Organization}}}
 	q, err := service.CreateSavedQuery(ctx, f.scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{f.corpus}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.CreateSubscription(ctx, f.scope, monitoring.SubscriptionInput{Key: "s", Name: "S", SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID,
-		Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"}); err != nil {
+		Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"}); err != nil {
 		t.Fatal(err)
 	}
 	activation := f.int(`SELECT min(activation_position) FROM subscription_versions WHERE organization=$1`)

@@ -4136,7 +4136,7 @@ description: Pin a plugin-provided profile when resolving config. Explicit field
 
 ### `ConnectorKind`
 
-Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
+Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 
 Type: string. Pattern `^[a-z][a-z0-9_]{0,31}$`.
 
@@ -4146,7 +4146,7 @@ Type: string. Pattern `^[a-z][a-z0-9_]{0,31}$`.
 ```yaml
 type: string
 pattern: ^[a-z][a-z0-9_]{0,31}$
-description: Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
+description: Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 ```
 
 </details>
@@ -4213,7 +4213,7 @@ required:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `interval_seconds` | integer |  | Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval. Minimum `1`. Maximum `86400`. |
+| `interval_seconds` | integer |  | Polling interval. Defaults to the kind's declared interval (rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval. Minimum `1`. Maximum `86400`. |
 
 <details>
 <summary>Full schema</summary>
@@ -4226,7 +4226,7 @@ properties:
     type: integer
     minimum: 1
     maximum: 86400
-    description: Polling interval. Defaults per kind (fixture/rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
+    description: Polling interval. Defaults to the kind's declared interval (rss 300, m365_mail 60, x_list 120); values below the deployment floor (30 s by default) are 422 invalid_interval.
 ```
 
 </details>
@@ -8310,7 +8310,7 @@ required:
 
 ### `EvaluatorConfig`
 
-Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8338,7 +8338,7 @@ required:
   - plugin_id
   - version
   - configuration
-description: Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0); test deployments may also install the deterministic fixture quivr.fixture@1. The configuration must satisfy the evaluator's declared configuration schema.
+description: Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 ```
 
 </details>

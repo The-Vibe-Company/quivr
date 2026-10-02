@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"reflect"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 		t.Fatal(err)
 	}
 	live := &monitoring.LiveEvaluators{}
-	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.1.0": monitoring.Fixture{}}})
+	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.1.0": fakeplugin.Fixture{}}})
 	service := monitoring.Service{Store: store, Corpora: store, Moves: store, Evaluations: store, Evaluators: live, Destinations: map[string]monitoring.Destination{"dest": {Organization: scope.Organization}}}
 	query, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{collection.ID}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
@@ -86,7 +87,7 @@ func TestRetireEvaluationsAfterEvaluatorMigration(t *testing.T) {
 	fixture := newRetirementFixture(t)
 	ctx, pool, scope, live, service, subscription := fixture.ctx, fixture.pool, fixture.scope, fixture.live, fixture.service, fixture.subscription
 	evaluations := postgres.EvaluationStore{ContentStore: fixture.store}
-	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.2.0": monitoring.Fixture{}}})
+	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.2.0": fakeplugin.Fixture{}}})
 	migration, err := service.MigrateEvaluator(ctx, scope, monitoring.EvaluatorMigrationInput{PluginID: "alert-rules", FromVersion: "0.1.0"})
 	if err != nil || len(migration.Moved) != 1 {
 		t.Fatalf("migration: %+v, %v", migration, err)

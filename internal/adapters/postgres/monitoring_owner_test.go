@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
@@ -21,7 +22,7 @@ func newOwnerFixture(t *testing.T, ctx context.Context) ownerFixture {
 
 func (f ownerFixture) create(key, owner string) (monitoring.Subscription, error) {
 	return f.service.CreateSubscription(f.ctx, f.scope, monitoring.SubscriptionInput{Key: key, Name: key, Owner: owner, SavedQueryID: f.query.ID, SavedQueryVersionID: f.query.Current.VersionID,
-		Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"})
+		Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"})
 }
 
 func (f ownerFixture) mustCreate(key, owner string) monitoring.Subscription {

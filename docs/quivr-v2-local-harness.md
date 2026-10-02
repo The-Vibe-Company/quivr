@@ -23,8 +23,9 @@ PostgreSQL, Temporal and Weaviate, so they are not the public acceptance suite.
 Its fake embeddings and external fake normalizer are not the reference baseline.
 Use THE-553's [pinned local E5/TEI profile and CC0 fixture](https://github.com/The-Vibe-Company/quivr-v2/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md).
 Monitoring matches through a pinned alert-rule plugin (the `subscription`
-template, see below); the deterministic fixture evaluator stays installed for
-the notification-mechanics tests.
+template, see below). A harness-owned `quivr.fixture@1.0.0` plugin supplies
+the scripted connector and notification-mechanics evaluator through the normal
+plugin protocol, pinned at startup by `scripts/fixture_plugin.py`.
 
 ## Commands and isolation
 
@@ -182,7 +183,8 @@ policy through the worker's `delivery` block (initial 2 s, cap 2 s, window 20 s
 instead of 1 s / 5 min / 24 h); verification records it under
 `timing_overrides` in `report.json`. Because the test receivers listen on
 loopback, the same block sets `allow_private_destinations: true`, which is also
-recorded there; deployments keep the default refusal of private destinations. The worker probe's
+recorded there; operators can also enable it for trusted internal receivers,
+accepting the SSRF exposure. Startup warns when either allowance is enabled. The worker probe's
 `/metrics` (`QUIVR_TEST_WORKER_PROBE_URL`) is scraped by the exhaustion test and
 saved as `delivery-metrics.txt`.
 

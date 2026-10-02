@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ import (
 // echoPush is a push kind that answers every relayed request with what it
 // received, so the test sees exactly what the route relays.
 type echoPush struct {
-	connectors.Fixture
+	fakeplugin.FixtureConnector
 	seen   *[]connectors.ReceiveRequest
 	answer *connectors.Delivery
 }

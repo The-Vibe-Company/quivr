@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -173,7 +174,7 @@ func monitoringServer(t *testing.T, configure ...func(*monitoring.Service)) *htt
 		Corpora:      allCorpora{},
 		Destinations: map[string]monitoring.Destination{"receiver_a": {Organization: "org_a", URL: "http://receiver.invalid/hook", Secret: "whsec_dGVzdC1zZWNyZXQtbmV2ZXItcmV0dXJuZWQ="}},
 		MatchStore:   history{},
-		Evaluators:   monitoring.FixtureEvaluators(),
+		Evaluators:   fakeplugin.FixtureEvaluators(),
 	}
 	for _, edit := range configure {
 		edit(&service)
@@ -224,7 +225,7 @@ func (previewRecords) Article(_ context.Context, _, _, recordID, _ string) (moni
 }
 
 func TestSubscriptionPreviewRoute(t *testing.T) {
-	body := `{"definition":{"corpus_ids":["corpus_a"],"expression":{},"retrieval_profile":"default","temporal_policy":"from_activation"},"evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{"decisions":{"hit":"match","wait":"not_ready"}}},"limit":3,"accepted_after":"2026-09-30T08:00:00Z"}`
+	body := `{"definition":{"corpus_ids":["corpus_a"],"expression":{},"retrieval_profile":"default","temporal_policy":"from_activation"},"evaluator":{"plugin_id":"quivr.fixture","version":"1.0.0","configuration":{"decisions":{"hit":"match","wait":"not_ready"}}},"limit":3,"accepted_after":"2026-09-30T08:00:00Z"}`
 	for name, row := range map[string]struct {
 		method, token, body string
 		status              int
@@ -264,7 +265,7 @@ func TestSubscriptionPreviewRoute(t *testing.T) {
 		"matches": []any{map[string]any{
 			"corpus_id": "corpus_a", "record_id": "hit", "record_version_id": "version_hit", "accepted_at": "2026-09-30T12:00:00Z",
 			"evidence": map[string]any{
-				"evaluator":   map[string]any{"plugin_id": "quivr.fixture", "version": "1", "configuration": map[string]any{"decisions": map[string]any{"hit": "match", "wait": "not_ready"}}},
+				"evaluator":   map[string]any{"plugin_id": "quivr.fixture", "version": "1.0.0", "configuration": map[string]any{"decisions": map[string]any{"hit": "match", "wait": "not_ready"}}},
 				"explanation": `Fixture evaluator decided match from marker "hit".`, "part_keys": []any{"body"}, "details": map[string]any{"marker": "hit", "decision": "match"},
 			},
 		}},
@@ -276,7 +277,7 @@ func TestSubscriptionPreviewRoute(t *testing.T) {
 }
 
 func subscriptionBody(key, evaluator, destination string) string {
-	return `{"idempotency_key":"` + key + `","name":"Alerts","saved_query_id":"saved_query_q1","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"` + evaluator + `","version":"1","configuration":{"decisions":{"default":"match"}}},"destination_id":"` + destination + `"}`
+	return `{"idempotency_key":"` + key + `","name":"Alerts","saved_query_id":"saved_query_q1","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"` + evaluator + `","version":"1.0.0","configuration":{"decisions":{"default":"match"}}},"destination_id":"` + destination + `"}`
 }
 
 func TestMonitoringDefinitionsRoundTripPinnedConfiguration(t *testing.T) {
@@ -334,7 +335,7 @@ func TestMonitoringEditAndDelete(t *testing.T) {
 	if v2["version_id"] != "saved_query_version_q-edit" || v2["saved_query_id"] != "saved_query_q1" {
 		t.Fatalf("new Saved Query Version: %v", v2)
 	}
-	subEdit := `{"idempotency_key":"s-edit","saved_query_version_id":"saved_query_version_q-edit","evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{}},"destination_id":"receiver_a"}`
+	subEdit := `{"idempotency_key":"s-edit","saved_query_version_id":"saved_query_version_q-edit","evaluator":{"plugin_id":"quivr.fixture","version":"1.0.0","configuration":{}},"destination_id":"receiver_a"}`
 	sv2, _ := call(t, server, "POST", "/v0/subscriptions/subscription_s1/versions", monitor, subEdit, 201)
 	if sv2["saved_query_version_id"] != "saved_query_version_q-edit" || sv2["version_id"] == first {
 		t.Fatalf("new Subscription Version: %v", sv2)
@@ -464,7 +465,7 @@ func TestSubscriptionOwnerRoutes(t *testing.T) {
 		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-empty", `""`), 422, "invalid_owner"},
 		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-long", `"`+strings.Repeat("u", 129)+`"`), 422, "invalid_owner"},
 		{"POST", "/v0/subscriptions", monitor, ownedBody("bad-type", `42`), 422, "invalid_owner"},
-		{"POST", "/v0/subscriptions/subscription_s1/versions", monitor, `{"idempotency_key":"e","owner":"user-456","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"quivr.fixture","version":"1","configuration":{}},"destination_id":"receiver_a"}`, 422, "invalid_schema"},
+		{"POST", "/v0/subscriptions/subscription_s1/versions", monitor, `{"idempotency_key":"e","owner":"user-456","saved_query_version_id":"saved_query_version_q1","evaluator":{"plugin_id":"quivr.fixture","version":"1.0.0","configuration":{}},"destination_id":"receiver_a"}`, 422, "invalid_schema"},
 	}
 	for _, r := range refusals {
 		if got, _ := call(t, server, r.method, r.path, r.token, r.body, r.status); got["code"] != r.code {

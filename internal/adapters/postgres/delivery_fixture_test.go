@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	}
 	store := postgres.ContentStore{Pool: pool}
 	contents := content.Service{Repository: store, Baseline: store}
-	service := monitoring.Service{Evaluators: monitoring.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: store}
+	service := monitoring.Service{Evaluators: fakeplugin.FixtureEvaluators(), Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}, MatchStore: store}
 	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	subs := make([]monitoring.Subscription, n)
 	for i := range subs {
 		if subs[i], err = service.CreateSubscription(ctx, scope, monitoring.SubscriptionInput{Key: fmt.Sprint("s", i), Name: fmt.Sprint("S", i), SavedQueryID: q.ID, SavedQueryVersionID: q.Current.VersionID,
-			Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"}); err != nil {
+			Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": map[string]any{"default": "match"}}}, DestinationID: "dest"}); err != nil {
 			t.Fatal(err)
 		}
 	}

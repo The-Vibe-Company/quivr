@@ -110,7 +110,7 @@ type Deliverer struct {
 	Poll, MaxPoll time.Duration
 	Now           func() time.Time
 	// AllowPrivateAddresses lifts the dial-time refusal of loopback, private,
-	// link-local and other non-public receivers. Local and test deployments only.
+	// link-local and other non-public receivers. Use only for trusted internal receivers; increases SSRF exposure.
 	AllowPrivateAddresses bool
 	client                *http.Client
 }

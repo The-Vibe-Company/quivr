@@ -39,11 +39,9 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `migration_wait` | no | How long a worker that starts before the api has applied its migrations waits for them, unready, before it exits. `0s` exits at once. Worker only. Default `5m`. |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
-| `connector_fixtures` | no | `true` enables the deterministic `fixture` connector kind. Local and CI stacks only. |
-| `monitoring_fixture_evaluator` | no | `true` installs the deterministic test alert rule `quivr.fixture@1`. Local and CI stacks only. |
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 
-Durations are Go durations: `30s`, `10m`, `168h`.
+Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup with `invalid configuration JSON: json: unknown field "<field>"`. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
 
 ## API keys
 
@@ -159,7 +157,11 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 | `retry_max` | `5m` | Longest delay between two attempts |
 | `window` | `24h` | How long a delivery is retried before it is `exhausted` |
 | `timeout` | `10s` | Deadline of one attempt |
-| `allow_private_destinations` | `false` | Allow loopback and private receiver addresses. Local and CI stacks only. |
+| `allow_private_destinations` | `false` | Allow loopback, private and link-local receiver addresses, including an internal webhook receiver in a self-hosted deployment. Startup logs a `WARN` when enabled. |
+
+<Warning>
+`delivery.allow_private_destinations` disables the startup and dial-time private-address guards. This increases server-side request forgery (SSRF) exposure: a configured receiver can reach internal services, including through DNS resolution. Enable it only for trusted destinations and restrict outbound network access. With the default `false`, both guards remain active.
+</Warning>
 
 ## Change feed pruning
 
@@ -168,9 +170,13 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `interval` | `1m` | How often the worker prunes |
-| `retention` | `change_retention` | How long events are kept; it may only be longer than `change_retention` |
+| `retention` | `change_retention` | How long events are kept; shorter windows require `allow_short_retention` and named `organizations` |
 | `organizations` | every Organization | Prune only these Organizations |
-| `allow_short_retention` | `false` | Allow a `retention` shorter than `change_retention` for the listed `organizations`. Test stacks only. |
+| `allow_short_retention` | `false` | Allow `retention` shorter than `change_retention` for explicitly listed `organizations`, for deployments accepting earlier change-event deletion. Startup logs a `WARN` when enabled. |
+
+<Warning>
+`change_prune.allow_short_retention` can permanently delete change-feed events before API cursors expire by age. Slow consumers can lose events and receive `410 cursor_expired`; they must resynchronize from the catalog. It does not delete canonical Records. With the default `false`, pruning cannot shorten the API retention window. Prefer setting a shorter `change_retention` consistently on api and worker when they should promise the same window.
+</Warning>
 
 ## Backfill
 

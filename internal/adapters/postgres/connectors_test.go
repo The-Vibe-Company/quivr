@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		t.Fatal(err)
 	}
 	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
 	one := 1
@@ -255,7 +256,7 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 		t.Fatal(err)
 	}
 	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
 	hour := 3600
@@ -333,7 +334,7 @@ func TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.ConnectorStore{ContentStore: postgres.ContentStore{Pool: pool}}
-	registry, _ := connectors.NewRegistry(connectors.Fixture{})
+	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Minute}
 	hour := 3600

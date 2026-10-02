@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"sort"
 	"sync"
 	"testing"
@@ -71,7 +72,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		}
 	}
 
-	evaluators := monitoring.FixtureEvaluators()
+	evaluators := fakeplugin.FixtureEvaluators()
 	evaluators["acme.alerts@0.1.0"] = acceptAll{}
 	service := monitoring.Service{Evaluators: evaluators, Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}}
 	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})
@@ -87,7 +88,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		return s.Current.VersionID
 	}
 	alerts := monitoring.Evaluator{PluginID: "acme.alerts", Version: "0.1.0", Configuration: map[string]any{}}
-	fixture := monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{}}
+	fixture := monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{}}
 	alertVersions := []string{subscribe("a1", alerts), subscribe("a2", alerts), subscribe("a3", alerts)}
 	subscribe("f1", fixture)
 
@@ -194,7 +195,7 @@ func TestConcurrentClaimsTakeOneArticleOnce(t *testing.T) {
 	if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/race-" + run, SHA256: "text-race-" + run, Size: 10}, content.Blob{Key: "fixture/m-race-" + run, SHA256: "manifest-race-" + run, Size: 2})); err != nil {
 		t.Fatal(err)
 	}
-	evaluators := monitoring.FixtureEvaluators()
+	evaluators := fakeplugin.FixtureEvaluators()
 	evaluators["acme.alerts@0.1.0"] = acceptAll{}
 	service := monitoring.Service{Evaluators: evaluators, Store: store, Corpora: store, Destinations: map[string]monitoring.Destination{"dest": {Organization: org}}}
 	q, err := service.CreateSavedQuery(ctx, scope, monitoring.SavedQueryInput{Key: "q", Name: "Q", Definition: monitoring.Definition{CorpusIDs: []string{a.ID}, Expression: map[string]any{"text": "strike"}, RetrievalProfile: "default", TemporalPolicy: "from_activation"}})

@@ -3,6 +3,7 @@ package monitoring_test
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"slices"
 	"strings"
 	"testing"
@@ -197,7 +198,7 @@ func (schemaEvaluator) Evaluate(context.Context, monitoring.Batch) ([]monitoring
 }
 
 func evaluators() monitoring.Evaluators {
-	installed := monitoring.FixtureEvaluators()
+	installed := fakeplugin.FixtureEvaluators()
 	installed["acme.alerts@0.1.0"] = schemaEvaluator{}
 	return installed
 }
@@ -220,7 +221,7 @@ func query(key string, corpora ...string) monitoring.SavedQueryInput {
 }
 
 func fixture() monitoring.Evaluator {
-	return monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{}}
+	return monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{}}
 }
 
 func TestSavedQueryCreationRequiresWriteAndEveryCorpus(t *testing.T) {
@@ -347,7 +348,7 @@ func TestSubscriptionPinsOnlyTheInstalledFixtureAndAnOwnedDestination(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sub.Enabled || sub.Current.Evaluator.PluginID != "quivr.fixture" || sub.Current.Evaluator.Version != "1" || sub.Current.DestinationID != "receiver_a" {
+	if !sub.Enabled || sub.Current.Evaluator.PluginID != "quivr.fixture" || sub.Current.Evaluator.Version != fakeplugin.FixtureEvaluatorVersion || sub.Current.DestinationID != "receiver_a" {
 		t.Fatalf("pinned subscription: %+v", sub)
 	}
 }

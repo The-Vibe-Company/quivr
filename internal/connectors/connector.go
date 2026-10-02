@@ -1,11 +1,12 @@
 // Package connectors owns Connector Instances: pull acquisition endpoints bound
 // to one Corpus and one Source Namespace, their Deposited Credentials, their
-// Acquisition Checkpoints and their Connector Health. Built-in connectors fetch
+// Acquisition Checkpoints and their Connector Health. Pinned connectors fetch
 // from a source; every item enters the engine through the same ingestion
 // command path as the public API.
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,7 +224,7 @@ type ExtensionOwner interface {
 }
 
 // Provider is optionally implemented by a Connector to name who provides its
-// kind in startup errors; built-in kinds are provided by "the engine".
+// kind in startup errors; connectors without it use "the engine" as a fallback.
 type Provider interface {
 	Provider() string
 }
@@ -256,8 +257,7 @@ type Registry struct {
 }
 
 // NewRegistry compiles each connector's schemas. Each kind resolves to
-// exactly one provider: a kind listed twice (for example a built-in kind and
-// a pinned plugin's) refuses startup.
+// exactly one provider: a kind listed by two pinned plugins refuses startup.
 func NewRegistry(list ...Connector) (*Registry, error) {
 	r := &Registry{}
 	return r, r.Replace(list...)
@@ -309,7 +309,7 @@ func (r *Registry) current() map[string]registered {
 }
 
 func compile(name string, schema []byte) (*jsonschema.Schema, error) {
-	doc, err := jsonschema.UnmarshalJSON(bytesReader(schema))
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
 		return nil, fmt.Errorf("%s schema: %w", name, err)
 	}
@@ -364,7 +364,7 @@ func validateJSON(schema *jsonschema.Schema, raw json.RawMessage) error {
 	if raw == nil {
 		return errors.New("missing document")
 	}
-	doc, err := jsonschema.UnmarshalJSON(bytesReader(raw))
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

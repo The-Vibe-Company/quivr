@@ -77,17 +77,13 @@ func (cfg Config) migrationPins() *plugins.PinSet {
 }
 
 // planEvaluators installs the subscription evaluators of a plan's plugins,
-// which new Subscription Versions pin, and the fixture evaluator only where
-// the deployment enables it for tests. Every other alert-rule version a plan
+// which new Subscription Versions pin. Every other alert-rule version a plan
 // named, or the process installed before (previous), stays installed for the
 // Subscription Versions that pin it, until an operator migrates them
 // (THE-805); the latest plan naming a version gives its registration. A
 // registry that cannot be read keeps the previous ones and returns the error.
 func (cfg Config) planEvaluators(ctx context.Context, store registry.Store, set *plugins.PinSet, previous monitoring.PlanEvaluators) (monitoring.PlanEvaluators, error) {
 	served := monitoring.Evaluators{}
-	if cfg.MonitoringFixtureEvaluator {
-		served = monitoring.FixtureEvaluators()
-	}
 	for _, pin := range set.Evaluators() {
 		served[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
 	}
@@ -124,7 +120,8 @@ type DeliveryConfig struct {
 	Window       string `json:"window"`
 	Timeout      string `json:"timeout"`
 	// AllowPrivateDestinations lets delivery reach loopback, private and
-	// link-local receivers. Off by default; local and CI harnesses only.
+	// link-local receivers. Off by default; enables internal receivers and
+	// increases SSRF exposure.
 	AllowPrivateDestinations bool `json:"allow_private_destinations"`
 }
 
@@ -166,7 +163,7 @@ func validateDestinations(destinations map[string]monitoring.Destination, allowP
 			return errors.New("invalid webhook destination configuration")
 		}
 		if !allowPrivate && netguard.CheckLiteral(target.Hostname()) != nil {
-			return fmt.Errorf("webhook destination %q targets a private or internal address; only local test deployments may set delivery.allow_private_destinations", id)
+			return fmt.Errorf("webhook destination %q targets a private or internal address; set delivery.allow_private_destinations only for trusted internal receivers (increases SSRF exposure)", id)
 		}
 		destinations[id] = d
 	}

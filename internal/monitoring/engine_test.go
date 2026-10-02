@@ -3,6 +3,7 @@ package monitoring_test
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
 
@@ -109,8 +110,8 @@ func (b badEvaluator) Evaluate(_ context.Context, batch monitoring.Batch) ([]mon
 
 func engineFor(store *fakeEvaluation, decisions map[string]any, enabled bool) monitoring.Engine {
 	store.intents = []monitoring.Intent{{Organization: "org", SubscriptionID: "sub", SubscriptionVersionID: "subv", Sequence: 7, CorpusID: "c", RecordID: "r", VersionID: "v"}}
-	store.target = monitoring.Target{Enabled: enabled, Subscription: monitoring.SubscriptionVersion{Evaluator: monitoring.Evaluator{PluginID: monitoring.FixtureEvaluator, Version: monitoring.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": decisions}}}}
-	return monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "Dépêche ALERTE PANNE"}}, Evaluators: monitoring.FixtureEvaluators()}
+	store.target = monitoring.Target{Enabled: enabled, Subscription: monitoring.SubscriptionVersion{Evaluator: monitoring.Evaluator{PluginID: fakeplugin.FixtureEvaluator, Version: fakeplugin.FixtureEvaluatorVersion, Configuration: map[string]any{"decisions": decisions}}}}
+	return monitoring.Engine{Store: store, Versions: parts{{Key: "body", Role: "body", Text: "Dépêche ALERTE PANNE"}}, Evaluators: fakeplugin.FixtureEvaluators()}
 }
 
 func TestEngineStepOutcomes(t *testing.T) {
@@ -153,7 +154,7 @@ func TestEngineStepOutcomes(t *testing.T) {
 				t.Fatalf("committed %v", store.committed)
 			}
 			// The usage view counts committed Matches by evaluator (THE-798).
-			if c.committed != (len(observed) == 1) || (c.committed && observed[0] != "org/"+monitoring.FixtureEvaluator) {
+			if c.committed != (len(observed) == 1) || (c.committed && observed[0] != "org/"+fakeplugin.FixtureEvaluator) {
 				t.Fatalf("observed Matches %v", observed)
 			}
 			if c.negative != (store.negative == 1) || store.withdrawn != 0 {
@@ -251,7 +252,7 @@ func TestEngineRejectsUnboundedEvidence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &fakeEvaluation{}
 			engine := engineFor(store, nil, true)
-			engine.Evaluators = monitoring.Evaluators{monitoring.FixtureEvaluator + "@" + monitoring.FixtureEvaluatorVersion: badEvaluator{out}}
+			engine.Evaluators = monitoring.Evaluators{fakeplugin.FixtureEvaluator + "@" + fakeplugin.FixtureEvaluatorVersion: badEvaluator{out}}
 			if _, err := engine.Step(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -291,7 +292,7 @@ func TestMatchReadsRequireReadScopeAndVisibleSubscription(t *testing.T) {
 	ctx := context.Background()
 	store := newStore()
 	store.subscriptions["org/sub"] = monitoring.Subscription{ID: "sub", Enabled: true, Current: monitoring.SubscriptionVersion{SubscriptionID: "sub", CorpusIDs: []string{"a", "b"}}}
-	service := monitoring.Service{Store: store, Evaluators: monitoring.FixtureEvaluators(), MatchStore: matchStore{match: monitoring.Match{ID: "m", SubscriptionID: "sub"}, delivery: monitoring.Delivery{ID: "d", SubscriptionID: "sub"}}}
+	service := monitoring.Service{Store: store, Evaluators: fakeplugin.FixtureEvaluators(), MatchStore: matchStore{match: monitoring.Match{ID: "m", SubscriptionID: "sub"}, delivery: monitoring.Delivery{ID: "d", SubscriptionID: "sub"}}}
 	full := corpus.Scope{Organization: "org", Actions: []string{"monitoring:read"}, Corpora: []string{"a", "b"}}
 	if _, err := service.Match(ctx, full, "m"); err != nil {
 		t.Fatal(err)
