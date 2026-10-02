@@ -81,7 +81,7 @@ type Projection interface {
 // Pinned names the plan the work ctx carries is pinned to and that plan's
 // ingestion registration.
 type Pinned interface {
-	Ingestion(ctx context.Context) (plan, registration string, err error)
+	Ingestion(ctx context.Context, registrationID string) (plan, registration string, err error)
 }
 
 // Steps records how long each backfilled Version took (observability), which
@@ -134,7 +134,7 @@ func (t terminal) Error() string { return t.failure.Code }
 // error so the caller retries with backoff; the Operation stays running.
 func (b Backfiller) Step(ctx context.Context, org, id string) (Progress, error) {
 	settings := b.Settings.WithDefaults()
-	plan, registration, err := b.Pinned.Ingestion(ctx)
+	plan, registration, err := b.Pinned.Ingestion(ctx, "")
 	if err != nil {
 		return Progress{}, err
 	}
@@ -143,6 +143,12 @@ func (b Backfiller) Step(ctx context.Context, org, id string) (Progress, error) 
 		return Progress{}, err
 	}
 	op := t.Operation
+	if op.Backfill != nil {
+		_, registration, err = b.Pinned.Ingestion(ctx, op.Backfill.RegistrationID)
+		if err != nil {
+			return Progress{}, err
+		}
+	}
 	switch op.State {
 	case operations.StatePaused:
 		return Progress{Wait: settings.Poll}, nil
@@ -238,39 +244,31 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 	if err != nil {
 		return err
 	}
-	data, err := b.Plugin.Fill(ctx, org, op.CorpusID, v, seg, op.Backfill.Spaces)
-	switch {
-	case errors.Is(err, processing.ErrSegmentsDiffer):
-		return skip(SkipSegmentationDiffers)
-	case errors.Is(err, content.ErrIngestionRefused):
-		return skip(SkipIngestionRefused)
-	case errors.Is(err, content.ErrConflict), errors.Is(err, content.ErrArtifactCorrupt):
-		// A stored target vector no retry can read: the Version needs a rebuild.
-		return skip(SkipArtifactUnavailable)
-	case err != nil:
-		// Work pinned to a plan whose plugin left the active plan and
-		// cannot serve it fails, rather than moving to another plugin.
-		reason, goneErr := b.Plugin.Gone(ctx, err)
-		if goneErr != nil {
-			return goneErr
-		}
-		if reason != nil {
-			return terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
-		}
-		if errors.Is(err, processing.ErrPluginDeadline) {
-			// A Version the plugin cannot embed within its deadline would
-			// hold the backfill's only slot at the same checkpoint; a rerun
-			// tries it again.
+	counter, _ := b.Content.(processing.DeadlineCounter)
+	out := processing.Derive(ctx, org, b.Plugin, counter, processing.DerivationRequest{CorpusID: op.CorpusID, Version: v, Target: g, Kind: processing.FillVectors, Segmentation: seg, Spaces: op.Backfill.Spaces})
+	if out.Terminal != nil {
+		switch out.Terminal.Code {
+		case "segmentation_differs":
+			return skip(SkipSegmentationDiffers)
+		case "ingestion_refused":
+			return skip(SkipIngestionRefused)
+		case "derivation_conflict", "artifact_unavailable":
+			return skip(SkipArtifactUnavailable)
+		case "plugin_deadline":
 			return skip(SkipPluginDeadline)
+		default:
+			return terminal{failure: operations.Error{Code: out.Terminal.Code, Message: out.Terminal.Message}}
 		}
-		return err
 	}
-	// The segment's enriched object is replaced whole: it keeps the vectors
-	// of every other space the generation holds for it.
+	if out.Retry != nil {
+		return out.Retry
+	}
+	data := out.Data
 	targets := map[string]bool{}
-	for _, s := range op.Backfill.Spaces {
-		targets[s] = true
+	for _, space := range op.Backfill.Spaces {
+		targets[space] = true
 	}
+
 	covered, err := b.Store.CoveredEmbeddings(ctx, org, g.ID, seg)
 	if err != nil {
 		return err

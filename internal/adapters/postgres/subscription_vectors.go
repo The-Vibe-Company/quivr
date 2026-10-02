@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s ContentStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID, versionID string) (content.Generation, []string, int, error) {
@@ -12,6 +14,15 @@ func (s ContentStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID,
 	if err != nil {
 		return generation, nil, 0, err
 	}
+	var recipe string
+	err = s.Pool.QueryRow(ctx, `SELECT ss.recipe FROM projection_coverage pc JOIN segmentations ss ON (ss.organization,ss.id)=(pc.organization,pc.segmentation_id) WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=$3`, org, versionID, generation.ID).Scan(&recipe)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return generation, nil, 0, nil
+	}
+	if err != nil {
+		return generation, nil, 0, err
+	}
+	generation.SpaceID = generation.ServedFor(content.PluginOfRecipe(recipe))
 	rows, err := s.Pool.Query(ctx, `SELECT ea.metadata
 FROM projection_coverage pc
 JOIN records r ON r.organization=pc.organization AND r.corpus_id=$2

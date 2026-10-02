@@ -93,10 +93,10 @@ func ownerName(owner string) string {
 // deploymentSpacesSQL is the jsonb list of the registry's served and
 // evaluation spaces, served first, that a new generation is built with; NULL
 // when nothing is registered.
-const deploymentSpacesSQL = `(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric) ORDER BY vs.role<>'served',vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))`
+const deploymentSpacesSQL = `(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id) ORDER BY vs.role<>'served',vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))`
 
 // servedSpaceSQL is the registry's served space; NULL when none is registered.
-const servedSpaceSQL = `(SELECT vs.id FROM vector_spaces vs WHERE vs.role='served' ORDER BY vs.id LIMIT 1)`
+const servedSpaceSQL = `(SELECT vs.id FROM vector_spaces vs WHERE vs.role='served' ORDER BY vs.owner_plugin_id IS DISTINCT FROM (SELECT pr.plugin_id FROM active_pipeline_plan ap JOIN pipeline_plan_roles r ON r.plan_id=ap.plan_id AND r.role IN('ingestion','ingestion-default') JOIN plugin_registrations pr ON pr.id=r.registration_id),vs.id LIMIT 1)`
 
 // scanSpaces decodes a generation's spaces.
 func scanSpaces(raw []byte) ([]content.GenerationSpace, error) {
@@ -133,7 +133,7 @@ func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (c
 			return g, nil, 0, err
 		}
 		c.GenerationRole = content.SpaceEvaluation
-		if id == g.SpaceID {
+		if g.Serves(id) {
 			c.GenerationRole = content.SpaceServed
 		}
 		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=$4)`, org, corpusID, g.ID, id).Scan(&c.Segments); err != nil {

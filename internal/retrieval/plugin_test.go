@@ -96,34 +96,42 @@ func rankedService(p *fakeProjection, r *scriptedRanker) retrieval.Service {
 // authorized and hydrated (a withdrawn segment never reaches it), and returns
 // its ranking with its explanations, the profile and what it spent.
 func TestPluginRanksServedCandidates(t *testing.T) {
-	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "stale-1", GenerationID: "gen"}, {SegmentID: "vec-a", GenerationID: "gen", Score: 2}, {SegmentID: "vec-a", GenerationID: "gen", Score: 1}, {SegmentID: "b", GenerationID: "gen", Score: 0.5}, {SegmentID: "vec-c", GenerationID: "gen"}}}
-	r := &scriptedRanker{answer: fusion}
-	result, err := rankedService(p, r).Search(context.Background(), searchScope, retrieval.Request{Query: " lanterne ", CorpusIDs: []string{"corpus"}, Profile: "default"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(p.searched) != 2 || p.searched[0].Mode != "lexical" || p.searched[0].K != retrieval.CandidateLimit || p.searched[1].Mode != "semantic" || p.searched[1].Space != "space" || len(p.searched[1].Vector) != 1 {
-		t.Fatalf("projection searched %+v; want bm25 then near_vector, k oversampled", p.searched)
-	}
-	first := r.sent[0]
-	if first.Profile != "default" || first.Query.Text != "lanterne" || first.Query.Mode != "hybrid" || len(first.Spaces) != 1 || first.Spaces[0].Coverage != (plugins.SpaceCoverage{Segments: 3, Total: 4}) || len(first.Served) != 0 {
-		t.Fatalf("round 1 request %+v", first)
-	}
-	served := r.sent[1].Served
-	ids := func(s plugins.ServedRequest) (out []string) {
-		for _, c := range s.Candidates {
-			out = append(out, c.SegmentID)
-		}
-		return out
-	}
-	if len(served) != 2 || fmt.Sprint(ids(served[0])) != "[vec-a b]" || served[0].Candidates[0].Score != 2 || served[0].Candidates[0].Text != segmentText || fmt.Sprint(ids(served[1])) != "[vec-a vec-c]" {
-		t.Fatalf("round 2 served %+v; want keywords [vec-a b] and vectors [vec-a vec-c]: deduplicated, the withdrawn one absent, vectors only with coverage, k respected", served)
-	}
-	if len(result.Hits) != 3 || result.Hits[0].Segment.ID != "vec-a" || result.Hits[2].Segment.ID != "b" || result.Hits[0].Explanation != "served by near_vector" || result.Profile != "default" || result.ProfileVersion != "plugin:example.fusion@0.1.0/default" {
-		t.Fatalf("result %+v", result)
-	}
-	if u := result.Usage; u == nil || u.Rounds != 2 || u.PaidCalls != 1 || u.CostCents != 0.25 {
-		t.Fatalf("usage %+v", result.Usage)
+	for _, secondary := range []bool{false, true} {
+		t.Run(fmt.Sprintf("secondary served space %t", secondary), func(t *testing.T) {
+			p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "stale-1", GenerationID: "gen"}, {SegmentID: "vec-a", GenerationID: "gen", Score: 2}, {SegmentID: "vec-a", GenerationID: "gen", Score: 1}, {SegmentID: "b", GenerationID: "gen", Score: 0.5}, {SegmentID: "vec-c", GenerationID: "gen"}}}
+			r := &scriptedRanker{answer: fusion}
+			s := rankedService(p, r)
+			if secondary {
+				s.Routing = spaceRouting{"corpus": {ID: "gen", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "other-owner-space", SourceNamespaceProjected: true, SpacesProjected: true, Spaces: []content.GenerationSpace{{ID: "other-owner-space", Role: content.SpaceServed, OwnerPluginID: "example.primary"}, {ID: "space", Role: content.SpaceServed, OwnerPluginID: "example.secondary"}}}}
+			}
+			result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: " lanterne ", CorpusIDs: []string{"corpus"}, Profile: "default"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.searched) != 2 || p.searched[0].Mode != "lexical" || p.searched[0].K != retrieval.CandidateLimit || p.searched[1].Mode != "semantic" || p.searched[1].Space != "space" || len(p.searched[1].Vector) != 1 {
+				t.Fatalf("projection searched %+v; want bm25 then near_vector, k oversampled", p.searched)
+			}
+			first := r.sent[0]
+			if first.Profile != "default" || first.Query.Text != "lanterne" || first.Query.Mode != "hybrid" || len(first.Spaces) != 1 || first.Spaces[0].Coverage != (plugins.SpaceCoverage{Segments: 3, Total: 4}) || len(first.Served) != 0 {
+				t.Fatalf("round 1 request %+v", first)
+			}
+			served := r.sent[1].Served
+			ids := func(s plugins.ServedRequest) (out []string) {
+				for _, c := range s.Candidates {
+					out = append(out, c.SegmentID)
+				}
+				return out
+			}
+			if len(served) != 2 || fmt.Sprint(ids(served[0])) != "[vec-a b]" || served[0].Candidates[0].Score != 2 || served[0].Candidates[0].Text != segmentText || fmt.Sprint(ids(served[1])) != "[vec-a vec-c]" {
+				t.Fatalf("round 2 served %+v; want keywords [vec-a b] and vectors [vec-a vec-c]: deduplicated, the withdrawn one absent, vectors only with coverage, k respected", served)
+			}
+			if len(result.Hits) != 3 || result.Hits[0].Segment.ID != "vec-a" || result.Hits[2].Segment.ID != "b" || result.Hits[0].Explanation != "served by near_vector" || result.Profile != "default" || result.ProfileVersion != "plugin:example.fusion@0.1.0/default" {
+				t.Fatalf("result %+v", result)
+			}
+			if u := result.Usage; u == nil || u.Rounds != 2 || u.PaidCalls != 1 || u.CostCents != 0.25 {
+				t.Fatalf("usage %+v", result.Usage)
+			}
+		})
 	}
 }
 

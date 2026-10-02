@@ -3,7 +3,7 @@
 TestIngestionPluginBefore first ingests a Corpus through the stack's
 core.ingest. The step then pins the Go SDK sample ingestion plugin
 (sdks/go/examples/hash-embedder: paragraph segments embedded by hashing their
-words in two vector spaces) in place of core.ingest, a deployment pins one
+words in two vector spaces) beside core.ingest, selected as the default
 ingestion plugin, with its small space served and its large space for
 evaluation, restarts the API and the worker on that pin, and runs
 TestIngestionPlugin through the public API: the Corpus keeps core.ingest's
@@ -95,7 +95,8 @@ def verify(stack):
         await_healthy(plugin, port, directory / 'plugin.log')
         for name, text in configs.items():
             cfg = json.loads(text)
-            others = [p for p in cfg.get('plugins', []) if not p['manifest'].endswith('/core-ingest/quivr-plugin.yaml')]
+            others = cfg.get('plugins', [])
+            cfg['ingestion'] = {'default': 'example.hash_embedder'}
             cfg['plugins'] = others + [{'manifest': str(SAMPLE / 'quivr-plugin.yaml'), 'endpoint': f'http://127.0.0.1:{port}', 'spaces': SPACES}]
             path = stack.directory / name
             path.write_text(json.dumps(cfg))
@@ -160,5 +161,37 @@ def verify(stack):
             if p is not None:
                 stop_plugin(p)
         stack.stop_processes()
+        stack.start_processes()
+        stack.start_short_retention_api()
+
+
+def verify_routes(stack):
+    """Use the manifest-driven fakeplugin beside core.ingest and pdf-text."""
+    directory = stack.directory / 'ingestion-routes'
+    directory.mkdir(exist_ok=True)
+    binary = directory / 'fixture-ingestion'
+    subprocess.run([GO, 'test', '-c', '-o', str(binary), './tests/plugin-contract'], cwd=ROOT, check=True)
+    manifest = directory / 'quivr-plugin.yaml'
+    manifest.write_text((SAMPLE / 'quivr-plugin.yaml').read_text().replace('example.hash_embedder', 'example.fixture_ingest'))
+    port = ports.allocate()
+    env = {**os.environ, 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
+    with (directory / 'plugin.log').open('a') as log:
+        plugin = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)
+    configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
+    try:
+        await_healthy(plugin, port, directory / 'plugin.log')
+        for name, text in configs.items():
+            cfg = json.loads(text)
+            cfg['plugins'].append({'manifest': str(manifest), 'endpoint': f'http://127.0.0.1:{port}', 'spaces': {k.replace('example.hash_embedder', 'example.fixture_ingest'): v for k, v in SPACES.items()}})
+            cfg['ingestion'] = {'default': 'core.ingest', 'routes': {'text/plain': 'example.fixture_ingest', 'application/pdf': 'core.ingest'}}
+            (stack.directory / name).write_text(json.dumps(cfg))
+        stack.stop_processes()
+        stack.start_processes()
+        stack.tests('^TestIngestionSourceRoutes$', {'QUIVR_TEST_INGESTION_ROUTES': uuid.uuid4().hex})
+    finally:
+        stack.stop_processes()
+        for name, text in configs.items():
+            (stack.directory / name).write_text(text)
+        stop_plugin(plugin)
         stack.start_processes()
         stack.start_short_retention_api()

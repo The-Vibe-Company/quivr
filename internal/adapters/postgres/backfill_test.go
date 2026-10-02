@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -36,25 +39,82 @@ type backfillFixture struct {
 
 func newBackfillFixture(t *testing.T, ctx context.Context, enriched, unenriched int) *backfillFixture {
 	t.Helper()
+	return newBackfillFixtureForPlugin(t, ctx, enriched, unenriched, "example.fill")
+}
+
+func backfillRegistration(t *testing.T, pluginID, served, target string, state string) registry.Registration {
+	t.Helper()
+	servedName := strings.TrimSuffix(served, "@1")
+	targetName := strings.TrimSuffix(target, "@1")
+	manifest := fmt.Sprintf(`id: %s
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.8.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      %s:
+        version: "1"
+        model: fake/backfill
+        dimensions: 4
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+      %s:
+        version: "1"
+        model: fake/backfill
+        dimensions: 4
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+    timeout_ms: 5000
+    query_timeout_ms: 1000
+    limits:
+      max_segments: 256
+`, pluginID, servedName, targetName)
+	pin, err := plugins.LoadPinManifest([]byte(manifest), "backfill fixture", plugins.PinConfig{
+		Endpoint: "http://127.0.0.1:1",
+		Spaces:   map[string]string{servedName: plugins.SpaceServed, targetName: plugins.SpaceEvaluation},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := registry.FromPins(set).Registrations[0]
+	r.State = state
+	return r
+}
+
+func newBackfillFixtureForPlugin(t *testing.T, ctx context.Context, enriched, unenriched int, pluginID string) *backfillFixture {
+	t.Helper()
 	pool := rebuildAdapterPool(t, ctx)
 	run := time.Now().UnixNano()
 	f := &backfillFixture{pool: pool, store: postgres.ContentStore{Pool: pool}, org: fmt.Sprintf("adapter-backfill-%d", run),
-		served: fmt.Sprintf("example.fill.small%d@1", run), target: fmt.Sprintf("example.fill.large%d@1", run),
+		served: fmt.Sprintf("%s.small%d@1", pluginID, run), target: fmt.Sprintf("%s.large%d@1", pluginID, run),
 		segments: map[string]content.Segmentation{}, accepted: map[string]time.Time{}, recordOf: map[string]string{}, servedArtifactOfSegID: map[string]string{}}
-	for _, space := range []string{f.served, f.target} {
+	for i, space := range []string{f.served, f.target} {
 		// Spaces of the run only: the deployment's registry is left as it is.
-		if _, err := pool.Exec(ctx, `INSERT INTO vector_spaces(id,manifest,role,metric) VALUES($1,'{}','evaluation','cosine')`, space); err != nil {
+		role := "evaluation"
+		if i == 0 {
+			role = "served"
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO vector_spaces(id,manifest,role,metric,owner_plugin_id) VALUES($1,'{}',$3,'cosine',$2)`, space, pluginID, role); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f.registration, f.plan = fmt.Sprintf("registration-%d", run), fmt.Sprintf("plan-%d", run)
-	if _, err := pool.Exec(ctx, `INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,contributions,roles,state) VALUES($1,'example.fill','0.1.0','http://127.0.0.1:1',$1,'{ingestion}','{ingestion}','inactive')`, f.registration); err != nil {
+	initial := backfillRegistration(t, pluginID, f.served, f.target, registry.StateActive)
+	f.registration, f.plan = initial.ID, fmt.Sprintf("plan-%d", run)
+	if _, _, err := (postgres.PluginStore{Pool: pool}).RegisterPlugin(ctx, initial, fmt.Sprintf("backfill-registration-%d", run)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_plans(id) VALUES($1)`, f.plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_plan_roles(plan_id,role,registration_id) VALUES($1,'ingestion',$2)`, f.plan, f.registration); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline_plan_roles(plan_id,role,registration_id) VALUES($1,'ingestion',$2),($1,$3,$2)`, f.plan, f.registration, initial.Roles[0]); err != nil {
 		t.Fatal(err)
 	}
 	// A backfill is pinned to the active plan, which names its registration:
@@ -82,8 +142,8 @@ func newBackfillFixture(t *testing.T, ctx context.Context, enriched, unenriched 
 	}
 	f.corpusID = c.ID
 	f.generation = content.Generation{ID: fmt.Sprintf("generation-fill-%d", run), Collection: fmt.Sprintf("Fill%d", run), ProfileVersion: "fill", SpaceID: f.served, SourceNamespaceProjected: true,
-		Spaces: []content.GenerationSpace{{ID: f.served, Metric: "cosine"}}, SpacesProjected: true}
-	if _, err = pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected) VALUES($1,$2,'fill',false,$3,true,jsonb_build_array(jsonb_build_object('id',$3::text,'metric','cosine')),true)`, f.generation.ID, f.generation.Collection, f.served); err != nil {
+		Spaces: []content.GenerationSpace{{ID: f.served, Metric: "cosine", Role: content.SpaceServed, OwnerPluginID: pluginID}}, SpacesProjected: true}
+	if _, err = pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected) VALUES($1,$2,'fill',false,$3,true,jsonb_build_array(jsonb_build_object('id',$3::text,'metric','cosine','role','served','owner_plugin_id',$4::text)),true)`, f.generation.ID, f.generation.Collection, f.served, pluginID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = pool.Exec(ctx, `INSERT INTO corpus_projection_routes(organization,corpus_id,generation_id) VALUES($1,$2,$3)`, f.org, f.corpusID, f.generation.ID); err != nil {
@@ -110,7 +170,7 @@ func newBackfillFixture(t *testing.T, ctx context.Context, enriched, unenriched 
 			t.Fatal(err)
 		}
 		v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: text}}}}}
-		seg, err := content.PluginSegmentation(f.org, v, "plugin:example.fill@0.1.0", json.RawMessage(`{"plugin_id":"example.fill"}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 10}, {PartKey: "body", Start: 11, End: len([]rune(text))}})
+		seg, err := content.PluginSegmentation(f.org, v, "plugin:"+pluginID+"@0.1.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 10}, {PartKey: "body", Start: 11, End: len([]rune(text))}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +197,7 @@ func newBackfillFixture(t *testing.T, ctx context.Context, enriched, unenriched 
 // in the fixture's generation, as enrichment does.
 func (f *backfillFixture) cover(t *testing.T, ctx context.Context, versionID, segmentID, space string) string {
 	t.Helper()
-	e := content.Embedding{ID: "artifact-" + segmentID + "-" + space, DerivationID: "derivation-" + segmentID + "-" + space, Organization: f.org, CorpusID: f.corpusID, VersionID: versionID, SegmentID: segmentID, SpaceID: space, Producer: "plugin:example.fill@0.1.0"}
+	e := content.Embedding{ID: "artifact-" + segmentID + "-" + space, DerivationID: "derivation-" + segmentID + "-" + space, Organization: f.org, CorpusID: f.corpusID, VersionID: versionID, SegmentID: segmentID, SpaceID: space, Producer: f.segments[versionID].Recipe}
 	if err := f.store.SaveEmbedding(ctx, e, content.VectorSpace{ID: space, Manifest: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +234,77 @@ func (f *backfillFixture) events(t *testing.T, ctx context.Context) int {
 	return n
 }
 
+// addSecondaryOwner adds a second ingestion member to the fixture's active
+// plan and publishes one Version for it in the same Corpus. The content path
+// remains public API based; the two registry rows are fixture setup so the
+// explicit registration can be accepted by the backfill store.
+func addSecondaryOwner(t *testing.T, ctx context.Context, f *backfillFixture) (registration, space, version string) {
+	t.Helper()
+	run := time.Now().UnixNano()
+	pluginID := "example.secondary_fill"
+	secondaryServed := fmt.Sprintf("example.secondary_fill.small%d@1", run)
+	space = fmt.Sprintf("example.secondary_fill.large%d@1", run)
+	for _, item := range []struct {
+		id, role string
+	}{{secondaryServed, "served"}, {space, "evaluation"}} {
+		if _, err := f.pool.Exec(ctx, `INSERT INTO vector_spaces(id,manifest,role,metric,owner_plugin_id) VALUES($1,'{}',$3,'cosine',$2)`, item.id, pluginID, item.role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	secondary := backfillRegistration(t, pluginID, secondaryServed, space, registry.StateRegistered)
+	pluginStore := postgres.PluginStore{Pool: f.pool}
+	if stored, queued, err := pluginStore.RegisterPlugin(ctx, secondary, fmt.Sprintf("backfill-secondary-registration-%d", run)); err != nil || !queued || stored.State != registry.StateRegistered {
+		t.Fatalf("register secondary owner: %+v queued %v (%v)", stored, queued, err)
+	}
+	if err := pluginStore.RecordCheck(ctx, secondary.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := (registry.Service{Store: pluginStore}).Activate(ctx, corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}, secondary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.plan = plan.ID
+	registration = secondary.ID
+	f.generation.Spaces = append(f.generation.Spaces, content.GenerationSpace{ID: secondaryServed, Metric: "cosine", Role: content.SpaceServed, OwnerPluginID: pluginID})
+	if _, err = f.pool.Exec(ctx, `UPDATE projection_generations SET spaces=spaces||jsonb_build_array(jsonb_build_object('id',$2::text,'metric','cosine','role','served','owner_plugin_id',$3::text)) WHERE id=$1`, f.generation.ID, secondaryServed, pluginID); err != nil {
+		t.Fatal(err)
+	}
+
+	scope := corpus.Scope{Organization: f.org, Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
+	text := fmt.Sprintf("A secondary segmentation for the same corpus, %d.", run)
+	contentService := content.Service{Repository: f.store, Baseline: f.store}
+	receipt, err := contentService.Accept(ctx, scope, content.Command{Key: fmt.Sprintf("secondary-%d", run), Source: content.Source{CorpusID: f.corpusID, Namespace: "fill", RecordKey: fmt.Sprintf("secondary-%d", run)}, Content: content.Text{Kind: "text", Text: text}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _, err := f.store.Work(ctx, f.org, receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.store.Publish(ctx, work, publication(content.Blob{Key: "fixture/secondary-text", SHA256: fmt.Sprintf("secondary-text-%d", run), Size: int64(len(text))}, content.Blob{Key: "fixture/secondary-manifest", SHA256: fmt.Sprintf("secondary-manifest-%d", run), Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: text}}}}}
+	seg, err := content.PluginSegmentation(f.org, v, "plugin:"+pluginID+"@0.1.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: len([]rune(text))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.store.SaveSegmentation(ctx, f.org, seg); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.store.Promote(ctx, f.org, seg, f.generation); err != nil {
+		t.Fatal(err)
+	}
+	f.segments[v.ID] = seg
+	f.accepted[v.ID] = time.Now().UTC()
+	f.recordOf[v.ID] = v.RecordID
+	for _, p := range seg.Segments {
+		f.servedArtifactOfSegID[p.ID] = f.cover(t, ctx, v.ID, p.ID, secondaryServed)
+	}
+	version = v.ID
+	return registration, space, version
+}
+
 // A backfill measures only the enriched Versions of its window, is accepted
 // once per key and scope, adds its spaces to the Corpus's generation on its
 // first step, fills Versions after its checkpoint without a content event,
@@ -183,6 +314,23 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 	defer cancel()
 	f := newBackfillFixture(t, ctx, 4, 1)
 	store := f.store
+	secondaryRegistration, secondarySpace, secondaryVersion := addSecondaryOwner(t, ctx, f)
+	secondarySpec := operations.Backfill{RegistrationID: secondaryRegistration, Spaces: []string{secondarySpace}, Estimate: operations.BackfillEstimate{Versions: 1, Segments: 1}}
+	secondarySize, err := store.BackfillSize(ctx, f.org, secondarySpec, f.corpusID)
+	if err != nil || secondarySize.Versions != 1 || secondarySize.Segments != 1 {
+		t.Fatalf("secondary owner size %+v %v, want only version %s", secondarySize, err, secondaryVersion)
+	}
+	secondaryOp, err := store.AcceptBackfill(ctx, f.org, f.corpusID, "secondary-key", []byte("secondary-scope"), secondarySpec)
+	if err != nil || secondaryOp.State != operations.StateQueued || secondaryOp.Backfill == nil || secondaryOp.Backfill.RegistrationID != secondaryRegistration {
+		t.Fatalf("secondary owner acceptance %+v %v", secondaryOp, err)
+	}
+	secondaryCandidates, err := store.BackfillCandidates(ctx, f.org, secondaryOp.ID, f.generation, 10)
+	if err != nil || len(secondaryCandidates) != 1 || secondaryCandidates[0].VersionID != secondaryVersion || secondaryCandidates[0].Recipe != "plugin:example.secondary_fill@0.1.0" {
+		t.Fatalf("secondary owner candidates %+v %v, want only %s", secondaryCandidates, err, secondaryVersion)
+	}
+	if canceled, err := store.CancelOperation(ctx, f.org, secondaryOp.ID); err != nil || canceled.State != operations.StateCanceled {
+		t.Fatalf("cancel secondary owner backfill %+v %v", canceled, err)
+	}
 	after := f.accepted[f.versions[1]]
 	spec := f.spec(&after)
 
@@ -231,10 +379,10 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 		t.Fatalf("begin %+v %+v %v", target.Operation, target.Generation, err)
 	}
 	g, err := store.CarryBackfillSpaces(ctx, f.org, op.ID)
-	if err != nil || g.ID != f.generation.ID || g.SpaceID != f.served || !g.Carries(f.target) || len(g.Spaces) != 2 {
+	if err != nil || g.ID != f.generation.ID || g.SpaceID != f.served || !g.Carries(f.target) || len(g.Spaces) != 3 {
 		t.Fatalf("generation %+v %v", g, err)
 	}
-	if again, err := store.CarryBackfillSpaces(ctx, f.org, op.ID); err != nil || len(again.Spaces) != 2 {
+	if again, err := store.CarryBackfillSpaces(ctx, f.org, op.ID); err != nil || len(again.Spaces) != 3 {
 		t.Fatalf("carrying the spaces again %+v %v", again, err)
 	}
 	if counted, err := store.Operation(ctx, f.org, op.ID); err != nil || counted.Counters["versions_in_scope"] != 3 {

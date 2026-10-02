@@ -15,9 +15,10 @@ const CodePluginConflict = "plugin_conflict"
 // CodeKindConflict is a connector kind declared by two pinned plugins.
 const CodeKindConflict = "kind_conflict"
 
-// CodeIngestionConflict is a second pinned ingestion plugin: Plugin API 0.6
-// deployments segment and embed through one plugin.
-const CodeIngestionConflict = "ingestion_conflict"
+// CodeSpaceConflict is a vector space declared by more than one pinned
+// ingestion plugin. A space key has one owner for as long as vectors exist in
+// it.
+const CodeSpaceConflict = "space_owner_conflict"
 
 // ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
 // deterministic test evaluator); no plugin may be pinned under them.
@@ -25,14 +26,18 @@ var ReservedEvaluatorIDs = []string{"quivr.fixture"}
 
 // PinSet is every plugin pinned at startup, with its Contribution routing:
 // normalizers by accepted Blob media type, subscription evaluators by plugin
-// id and version, connectors by kind. A nil set pins nothing.
+// id and version, connectors by kind, and ingestion plugins by source media
+// type and declared vector space. A nil set pins nothing.
 type PinSet struct {
-	pins        []*Pin
-	normalizers map[string]*Pin
-	evaluators  map[string]*Pin
-	connectors  map[string]*Pin
-	ingestion   *Pin
-	retrieval   []*Pin
+	pins             []*Pin
+	normalizers      map[string]*Pin
+	evaluators       map[string]*Pin
+	connectors       map[string]*Pin
+	ingestion        *Pin
+	ingestions       map[string]*Pin
+	spaces           map[string]*Pin
+	ingestionRouting IngestionRouting
+	retrieval        []*Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
@@ -66,10 +71,12 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 // NewPinSet routes the Contributions of pins already validated one by one
 // (LoadPin, LoadPinManifest), with the rules of LoadPins: a plugin id twice,
 // a media type routed to two plugins, a connector kind provided by two, a
-// second ingestion plugin and a reserved evaluator id are
-// conflicts. Issue paths name each pin by its position.
+// declared vector space owned by two plugins and a reserved evaluator id are
+// conflicts. Several ingestion and retrieval plugins are valid; call
+// ConfigureIngestion to choose an ingestion default and source-media routes.
+// Issue paths name each pin by its position.
 func NewPinSet(pins []*Pin) (*PinSet, error) {
-	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}}
+	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}, ingestions: map[string]*Pin{}, spaces: map[string]*Pin{}}
 	var issues []Issue
 	byID := map[string]int{}
 	for i, pin := range pins {
@@ -102,10 +109,20 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 			set.evaluators[EvaluatorKey(id, pin.Manifest.Version)] = pin
 		}
 		if pin.Manifest.Contributions.Ingestion != nil {
-			if set.ingestion != nil {
-				issues = append(issues, Issue{Code: CodeIngestionConflict, Path: prefix + "/manifest", PluginID: set.ingestion.Manifest.ID, PluginVersion: set.ingestion.Manifest.Version, Message: fmt.Sprintf("%s@%s already segments and embeds for this deployment; pin one ingestion plugin and enable several of its spaces instead", set.ingestion.Manifest.ID, set.ingestion.Manifest.Version)})
-			} else {
-				set.ingestion = pin
+			set.ingestions[id] = pin
+			spaceIDs := make([]string, 0, len(pin.Manifest.Contributions.Ingestion.Spaces))
+			for spaceID := range pin.Manifest.Contributions.Ingestion.Spaces {
+				spaceIDs = append(spaceIDs, spaceID)
+			}
+			sort.Strings(spaceIDs)
+			for _, spaceID := range spaceIDs {
+				space := pin.Manifest.Contributions.Ingestion.Spaces[spaceID]
+				key := SpaceKey(spaceID, space.Version)
+				if other, exists := set.spaces[key]; exists && other.Manifest.ID != id {
+					issues = append(issues, Issue{Code: CodeSpaceConflict, Path: prefix + "/manifest/contributions/ingestion/spaces/" + pointerToken(spaceID), PluginID: other.Manifest.ID, PluginVersion: other.Manifest.Version, Message: fmt.Sprintf("vector space %q is also declared by %s; each declared space key belongs to one ingestion plugin", key, other.Manifest.ID)})
+					continue
+				}
+				set.spaces[key] = pin
 			}
 		}
 		if pin.Manifest.Contributions.Retrieval != nil {
@@ -128,6 +145,30 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 	}
 	if len(issues) > 0 {
 		return nil, &PinError{Path: "plugins", Issues: issues}
+	}
+	// Search Protocol v0 carries at most 16 spaces, including evaluation
+	// spaces. Refuse an unservable deployment before its first search.
+	enabledSpaces := 0
+	for _, pin := range set.ingestions {
+		enabledSpaces += len(pin.EnabledSpaces())
+	}
+	if enabledSpaces > 16 {
+		return nil, &PinError{Path: "plugins", Issues: []Issue{{Code: CodeInvalidPin, Path: "/plugins", Message: fmt.Sprintf("%d vector spaces are enabled across ingestion plugins; the search protocol carries at most 16", enabledSpaces)}}}
+	}
+	// Keep the compatibility accessor useful for the common configurations.
+	// An ambiguous set is still valid until the operator supplies an explicit
+	// routing object through ConfigureIngestion.
+	routing := IngestionRouting{}
+	if _, ok := set.ingestions["core.ingest"]; ok {
+		routing.Default = "core.ingest"
+	} else if len(set.ingestions) == 1 {
+		for id := range set.ingestions {
+			routing.Default = id
+		}
+	}
+	if routing.Default != "" {
+		set.ingestionRouting = routing
+		set.ingestion = set.ingestions[routing.Default]
 	}
 	return set, nil
 }

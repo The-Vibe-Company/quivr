@@ -73,7 +73,10 @@ func TestPluginActivation(t *testing.T) {
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	spaces := map[string]string{"example.hash_embedder.small": "served", "example.hash_embedder.large": "evaluation"}
 	before := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
-	if got := planRoles(before)["ingestion"]; got != "example.hash_embedder@0.1.0" {
+	if got := planRoles(before)["ingestion:core.ingest"]; got != "core.ingest@1.0.0" {
+		t.Fatalf("core stays pinned beside the fixture: %v", before)
+	}
+	if got := planRoles(before)["ingestion:example.hash_embedder"]; got != "example.hash_embedder@0.1.0" {
 		t.Fatalf("before the activation ingestion is served by %q, want the pinned 0.1.0 (plan %v)", got, before)
 	}
 	register := func(key string, manifest []byte) map[string]any {
@@ -113,14 +116,17 @@ func TestPluginActivation(t *testing.T) {
 	// plan; its segmentation then waits on the frozen 0.1.0.
 	awaitReceipt(t, request(t, "POST", "/v0/records", admin, inFlightCommand(t), 202)["receipt_id"].(string))
 	plan := request(t, "POST", "/v0/admin/plugins/"+validated["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
-	if plan["plan_id"] == before["plan_id"] || plan["source"] != "activation" || planRoles(plan)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if planRoles(plan)["ingestion:core.ingest"] != planRoles(before)["ingestion:core.ingest"] {
+		t.Fatalf("hash activation changed core ingestion: %v", plan)
+	}
+	if plan["plan_id"] == before["plan_id"] || plan["source"] != "activation" || planRoles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("activation: %v, want a new plan with 0.2.0 serving ingestion", plan)
 	}
 	if active := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200); active["plan_id"] != plan["plan_id"] {
 		t.Fatalf("active plan %v, want the activated %v", active["plan_id"], plan["plan_id"])
 	}
 	earlier := request(t, "GET", "/v0/admin/plugins/plans/"+before["plan_id"].(string), operator, nil, 200)
-	if planRoles(earlier)["ingestion"] != "example.hash_embedder@0.1.0" {
+	if planRoles(earlier)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("the previous plan changed: %v", earlier)
 	}
 	if old := registrationAt(t, operator, "0.1.0", os.Getenv("QUIVR_TEST_ROLLBACK_ENDPOINT")); old["state"] != "draining" || old["pinned_work"].(float64) < 1 {
@@ -228,7 +234,7 @@ func TestPinnedWorkStarts(t *testing.T) {
 	}
 	rollback := registrationAt(t, operator, "0.1.0", b)
 	plan := request(t, "POST", "/v0/admin/plugins/"+rollback["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
-	if planRoles(plan)["ingestion"] != "example.hash_embedder@0.1.0" {
+	if planRoles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("activating 0.1.0 again: %v", plan)
 	}
 	if drained := registrationAt(t, operator, "0.2.0", a); drained["state"] != "draining" || drained["pinned_work"].(float64) < 1 {
@@ -268,7 +274,7 @@ func TestPinnedWorkDrains(t *testing.T) {
 	if d["code"] != "pinned_plugin_unavailable" || d["plugin"] != "example.hash_embedder" || d["plugin_version"] != "0.2.0" || d["contribution"] != "ingestion" {
 		t.Fatalf("diagnostic %v, want pinned_plugin_unavailable naming example.hash_embedder@0.2.0", d)
 	}
-	if pinned := request(t, "GET", "/v0/admin/plugins/plans/"+d["plan"].(string), operator, nil, 200); planRoles(pinned)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if pinned := request(t, "GET", "/v0/admin/plugins/plans/"+d["plan"].(string), operator, nil, 200); planRoles(pinned)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("the diagnostic's plan %v does not name A", pinned)
 	}
 

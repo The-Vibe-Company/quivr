@@ -120,7 +120,7 @@ func (p *runProjection) PublishEmbeddings(_ context.Context, _ content.Generatio
 
 type pinnedPlan struct{ registration string }
 
-func (p pinnedPlan) Ingestion(context.Context) (string, string, error) {
+func (p pinnedPlan) Ingestion(context.Context, string) (string, string, error) {
 	return "plan_1", p.registration, nil
 }
 

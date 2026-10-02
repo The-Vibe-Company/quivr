@@ -96,10 +96,13 @@ func TestBlobContentResolvesToImmutableText(t *testing.T) {
 	service := content.Service{
 		Repository: repo,
 		Blobs:      stubBlobs{data: []byte("Bonjour 🌞")},
-		BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", Blob: content.Blob{Key: "obj", SHA256: content.Hash([]byte("Bonjour 🌞")), Size: int64(len("Bonjour 🌞"))}, MediaType: "text/plain"}},
+		BlobSource: stubSource{verified: content.VerifiedBlob{ID: "blob_1", Blob: content.Blob{Key: "obj", SHA256: content.Hash([]byte("Bonjour 🌞")), Size: int64(len("Bonjour 🌞"))}, MediaType: "text/html"}},
 	}
-	if _, err := service.Accept(context.Background(), scope(), blobCommand()); err != nil {
+	if _, err := service.Accept(context.Background(), scope(), func() content.Command { c := blobCommand(); c.Content.MediaType = "text/html"; return c }()); err != nil {
 		t.Fatal(err)
+	}
+	if repo.accepted.SourceMediaType != "text/html" {
+		t.Fatalf("accepted source media type = %q, want text/html after Blob resolution", repo.accepted.SourceMediaType)
 	}
 	if repo.accepted.Content.Kind != "text" || repo.accepted.Content.Text != "Bonjour 🌞" {
 		t.Fatalf("blob did not resolve to text: %v", repo.accepted.Content)

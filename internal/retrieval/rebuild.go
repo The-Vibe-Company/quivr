@@ -7,6 +7,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 )
 
 // RebuildTarget is a running rebuild Operation and its logical target generation.
@@ -163,30 +164,27 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	if r.Plugin == nil || !r.Plugin.Owns(ctx, target.Generation.SpaceID) {
 		return terminal{failure: operations.Error{Code: "unsupported_vector_space", Message: "the pinned ingestion plugin does not own the target generation's vector space"}}
 	}
-	var seg content.Segmentation
-	var data []content.EmbeddingData
-	if c.VectorsRequired {
-		seg, data, err = r.Plugin.Derive(ctx, org, corpusID, v, target.Generation)
-	} else {
-		seg, data, err = r.lexicalFirst(ctx, org, corpusID, v, target.Generation)
-	}
-	switch {
-	case errors.Is(err, content.ErrIngestionRefused):
-		return terminal{failure: operations.Error{Code: "ingestion_refused", Message: "the ingestion plugin refuses a Version of the Corpus; its log names why"}}
-	case errors.Is(err, content.ErrConflict):
-		return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "the stored segmentation differs from canonical text"}}
-	case err != nil:
-		// A rebuild pinned to a plan whose plugin left the active plan and
-		// cannot serve it fails, rather than moving to another plugin.
-		reason, goneErr := r.Plugin.Gone(ctx, err)
-		if goneErr != nil {
-			return goneErr
+	req := processing.DerivationRequest{CorpusID: corpusID, Version: v, Target: target.Generation, Kind: processing.Vectors}
+	if !c.VectorsRequired {
+		routed, routeErr := r.Routing.Generation(ctx, org, corpusID)
+		if routeErr != nil {
+			return routeErr
 		}
-		if reason != nil {
-			return terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
-		}
-		return err
+		req.Current = &routed
 	}
+	counter, _ := r.Content.(processing.DeadlineCounter)
+	out := processing.Derive(ctx, org, r.Plugin, counter, req)
+	if out.Terminal != nil {
+		code := out.Terminal.Code
+		if code == "derivation_conflict" {
+			code = "segmentation_mismatch"
+		}
+		return terminal{failure: operations.Error{Code: code, Message: out.Terminal.Message}}
+	}
+	if out.Retry != nil {
+		return out.Retry
+	}
+	seg, data := out.Segmentation, out.Data
 	if err = r.Projection.Publish(ctx, target.Generation, org, corpusID, c.SourceNamespace, v, seg); err != nil {
 		return err
 	}
@@ -204,22 +202,4 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 		return terminal{failure: operations.Error{Code: "segmentation_mismatch", Message: "reconstructed segmentation differs from the durable artifact"}}
 	}
 	return err
-}
-
-// lexicalFirst covers a Version whose vectors the routed generation does not
-// serve. When the target keeps the routed generation's space, the Version is
-// still waiting for its own enrichment, which attaches its vectors after the
-// cutover: the rebuild covers it with its segments alone and never waits for
-// an embedding backend. A target of another space gets the Version's vectors
-// derived through the plugin, reusing any stored ones.
-func (r Rebuilder) lexicalFirst(ctx context.Context, org, corpusID string, v content.Version, target content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
-	routed, err := r.Routing.Generation(ctx, org, corpusID)
-	if err != nil {
-		return content.Segmentation{}, nil, err
-	}
-	if routed.SpaceID != target.SpaceID {
-		return r.Plugin.Derive(ctx, org, corpusID, v, target)
-	}
-	seg, err := r.Plugin.Segment(ctx, org, corpusID, v, target)
-	return seg, nil, err
 }

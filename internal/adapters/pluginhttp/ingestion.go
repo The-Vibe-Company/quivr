@@ -30,6 +30,9 @@ var (
 	_ retrieval.QueryEncoder     = Ingestor{}
 )
 
+// Bind records the selected owner even when stored artifacts avoid a call.
+func (i Ingestor) Bind(ctx context.Context) error { return plugins.BindIngestion(ctx, i.Pin) }
+
 func (i Ingestor) contribution() *plugins.Ingestion { return i.Pin.Manifest.Contributions.Ingestion }
 
 // Recipe names the plugin's segmentation by its id and version.
@@ -114,6 +117,9 @@ func (i Ingestor) refused(format string, args ...any) error {
 // is retried by the caller; a terminal error or an answer the output checks
 // refuse is content.ErrIngestionRefused.
 func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, keys []string) ([]processing.PluginSegment, error) {
+	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
+		return nil, err
+	}
 	if err := halted(ctx, i.Pin); err != nil {
 		return nil, err
 	}
@@ -186,6 +192,9 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
 	if !errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
 		return nil, nil
+	}
+	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
+		return nil, err
 	}
 	return plugins.Unreachable(ctx, i.Pin, "ingestion")
 }

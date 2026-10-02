@@ -76,6 +76,12 @@ type WorkStore interface {
 	WorkStopped(ctx context.Context, kind, org, id string) (bool, error)
 }
 
+// pluginWorkStore provides registration-specific drain and retry accounting.
+type pluginWorkStore interface {
+	BindIngestionWork(context.Context, string, string, string, string) error
+	CountPluginUnavailable(context.Context, string, string, string, string) (int, error)
+}
+
 // workPins pins each piece of work to the Pipeline Plan the process follows
 // when the work is first seen (Spec 5), in PostgreSQL, so its retries,
 // its later activities and a worker restart resolve plugins in that plan.
@@ -100,8 +106,21 @@ func (p workPins) Pin(ctx context.Context, kind, org, id string) (context.Contex
 	attempt := func(ctx context.Context) (int, error) { return p.store.CountUnavailable(ctx, kind, org, id) }
 	// A read that fails keeps the work going: stop is best effort within an
 	// attempt, and the next attempt reads the mark again when it is pinned.
-	marked := func(ctx context.Context) bool { s, err := p.store.WorkStopped(ctx, kind, org, id); return err == nil && s }
-	pinned, err := p.live.Pin(ctx, plugins.Work{Kind: kind, Organization: org, ID: id, Plan: plan, Stopped: stopped, StopMarked: marked}, attempt, p.budget)
+	marked := func(ctx context.Context) bool {
+		s, err := p.store.WorkStopped(ctx, kind, org, id)
+		return err == nil && s
+	}
+	var bind func(context.Context, string) error
+	var pluginAttempt func(context.Context, string) (int, error)
+	if store, ok := p.store.(pluginWorkStore); ok {
+		bind = func(ctx context.Context, registration string) error {
+			return store.BindIngestionWork(ctx, kind, org, id, registration)
+		}
+		pluginAttempt = func(ctx context.Context, registration string) (int, error) {
+			return store.CountPluginUnavailable(ctx, kind, org, id, registration)
+		}
+	}
+	pinned, err := p.live.Pin(ctx, plugins.Work{BindIngestion: bind, PluginAttempt: pluginAttempt, Kind: kind, Organization: org, ID: id, Plan: plan, Stopped: stopped, StopMarked: marked}, attempt, p.budget)
 	if err != nil {
 		slog.Error("the plan this work is pinned to cannot be resolved; it retries", "kind", kind, "work_id", id, "plan", plan, "error", err)
 	}

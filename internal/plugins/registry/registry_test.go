@@ -143,6 +143,53 @@ func roleMap(roles []registry.Assignment) map[string]string {
 	return out
 }
 
+func routedPlan(t *testing.T, routing plugins.IngestionRouting, members ...registry.Registration) (registry.Plan, map[string]registry.Registration) {
+	t.Helper()
+	byID := map[string]registry.Registration{}
+	var pins []*plugins.Pin
+	for _, member := range members {
+		byID[member.ID] = member
+		pin, err := member.Pin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pins = append(pins, pin)
+	}
+	set, err := plugins.NewPinSet(pins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.ConfigureIngestion(routing); err != nil {
+		t.Fatal(err)
+	}
+	seed := registry.FromPins(set)
+	return registry.Plan{ID: "plan_active", Roles: seed.Roles}, byID
+}
+
+// TestIngestionPlanRoutingOwnsSourceRoutesAndPluginMembership verifies that
+// a plan stores each ingestion plugin as a member, keeps one explicit default,
+// and resolves an explicit source-media route to its owner.
+func TestIngestionPlanRouting(t *testing.T) {
+	words := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	pdf := registered(t, manifest("example.pdf", "1.0.0", ingestion("example.pdf.small")))
+	active, members := routedPlan(t, plugins.IngestionRouting{Default: "example.words", Routes: map[string]string{"application/pdf": "example.pdf"}}, words, pdf)
+	set, _, err := registry.Resolve(active.Roles, members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.Ingestion() == nil || set.Ingestion().Manifest.ID != "example.words" || set.IngestionFor("application/pdf").Manifest.ID != "example.pdf" || set.IngestionFor("text/plain").Manifest.ID != "example.words" {
+		t.Fatalf("resolved ingestion routing: default=%v pdf=%v text=%v", set.Ingestion(), set.IngestionFor("application/pdf"), set.IngestionFor("text/plain"))
+	}
+	want := map[string]string{"ingestion-default": "example.words@1.0.0", "ingestion:example.pdf": "example.pdf@1.0.0", "ingestion:example.words": "example.words@1.0.0", "ingestion-route:application/pdf": "example.pdf@1.0.0"}
+	if got := roleMap(active.Roles); !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan roles %v, want %v", got, want)
+	}
+	legacy := []registry.Assignment{{Role: "ingestion", RegistrationID: words.ID, PluginID: words.PluginID, Version: words.Version}}
+	if resolved, _, err := registry.Resolve(legacy, map[string]registry.Registration{words.ID: words}); err != nil || resolved.Ingestion() == nil || resolved.Ingestion().Manifest.ID != words.PluginID {
+		t.Fatalf("legacy default plan did not resolve: %+v (%v)", resolved, err)
+	}
+}
+
 // TestActivationKeepsTheStartupRules owns how an activation computes the new
 // plan: it replaces the other version of the same plugin and any plugin whose
 // roles it takes over entirely, keeps the rest, and refuses what startup
@@ -156,12 +203,12 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 	active, members := plan(t, embedderV1, markdown)
 
 	upgrade, err := registry.PlanActivation(active, members, embedderV2, nil)
-	if err != nil || !reflect.DeepEqual(roleMap(upgrade.Roles), map[string]string{"ingestion": "example.embedder@2.0.0", "normalizer:text/markdown": "example.markdown@1.0.0", "normalizer:text/x-rst": "example.markdown@1.0.0"}) || !reflect.DeepEqual(upgrade.Retired, []string{embedderV1.ID}) {
+	if err != nil || !reflect.DeepEqual(roleMap(upgrade.Roles), map[string]string{"ingestion-default": "example.embedder@2.0.0", "ingestion:example.embedder": "example.embedder@2.0.0", "normalizer:text/markdown": "example.markdown@1.0.0", "normalizer:text/x-rst": "example.markdown@1.0.0"}) || !reflect.DeepEqual(upgrade.Retired, []string{embedderV1.ID}) {
 		t.Fatalf("upgrade: %+v (%v); want 2.0.0 serving ingestion beside the untouched normalizer, 1.0.0 retired", upgrade, err)
 	}
 	takeover, err := registry.PlanActivation(active, members, otherEmbedder, nil)
-	if err != nil || roleMap(takeover.Roles)["ingestion"] != "other.embedder@1.0.0" || !reflect.DeepEqual(takeover.Retired, []string{embedderV1.ID}) {
-		t.Fatalf("another ingestion plugin takes the role over: %+v (%v)", takeover, err)
+	if err != nil || roleMap(takeover.Roles)["ingestion-default"] != "example.embedder@1.0.0" || roleMap(takeover.Roles)["ingestion:other.embedder"] != "other.embedder@1.0.0" || len(takeover.Retired) != 0 {
+		t.Fatalf("another ingestion plugin joins without taking the default: %+v (%v)", takeover, err)
 	}
 
 	// A new alert-rule version takes the plugin's role; the old one leaves the
@@ -196,6 +243,52 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 	refused := errors.New("connector kind rss is built in")
 	if _, err := registry.PlanActivation(active, members, embedderV2, func(*plugins.PinSet) error { return refused }); !errors.Is(err, registry.ErrConflict) || !strings.Contains(err.Error(), refused.Error()) {
 		t.Fatalf("a check of the running engine refuses: %v", err)
+	}
+}
+
+// TestIngestionUpgradeKeepsUnrelatedRoutes verifies that an ingestion
+// activation upgrades only its own registration and redirects routes that
+// already name it, while an unrelated default and ingestion member stay put.
+func TestIngestionUpgradeKeepsUnrelatedRoutes(t *testing.T) {
+	words := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	pdfV1 := registered(t, manifest("example.pdf", "1.0.0", ingestion("example.pdf.small")))
+	pdfV2 := registered(t, manifest("example.pdf", "2.0.0", ingestion("example.pdf.small")))
+	active, members := routedPlan(t, plugins.IngestionRouting{Default: "example.words", Routes: map[string]string{"application/pdf": "example.pdf"}}, words, pdfV1)
+	upgrade, err := registry.PlanActivation(active, members, pdfV2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := roleMap(upgrade.Roles)
+	if got["ingestion-default"] != "example.words@1.0.0" || got["ingestion:example.words"] != "example.words@1.0.0" || got["ingestion-route:application/pdf"] != "example.pdf@2.0.0" || got["ingestion:example.pdf"] != "example.pdf@2.0.0" {
+		t.Fatalf("upgraded routing %v", got)
+	}
+	if !reflect.DeepEqual(upgrade.Retired, []string{pdfV1.ID}) {
+		t.Fatalf("retired %v, want only %s", upgrade.Retired, pdfV1.ID)
+	}
+}
+
+func TestIngestionUpgradeCannotRemoveConfiguredContribution(t *testing.T) {
+	current := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	withoutIngestion := registered(t, manifest("example.words", "2.0.0", normalizer("text/plain")), "text/plain")
+	active, members := plan(t, current)
+	if _, err := registry.PlanActivation(active, members, withoutIngestion, nil); !errors.Is(err, registry.ErrConflict) || !strings.Contains(err.Error(), plugins.CodeInvalidPin) {
+		t.Fatalf("removing the active ingestion contribution: %v, want a conflict", err)
+	}
+}
+
+// TestLegacyIngestionReconciliationAddsMembershipPreservesActivation verifies
+// that startup normalizes an old default-only plan without replacing an
+// operator-selected default that configuration did not change.
+func TestLegacyIngestionReconciliationAddsMembershipPreservesActivation(t *testing.T) {
+	configured := registered(t, manifest("core.embedder", "1.0.0", ingestion("core.embedder.small")))
+	operator := registered(t, manifest("other.embedder", "1.0.0", ingestion("other.embedder.small")))
+	configuredPlan, members := routedPlan(t, plugins.IngestionRouting{Default: "core.embedder"}, configured)
+	legacy := registry.Plan{ID: "legacy", Roles: []registry.Assignment{{Role: "ingestion", RegistrationID: operator.ID, PluginID: operator.PluginID, Version: operator.Version}}}
+	members[operator.ID] = operator
+	configuredSeed := registry.Seed{Roles: configuredPlan.Roles}
+	r := registry.Reconcile(configuredSeed, configuredSeed.Snapshot(), &legacy, members)
+	if !r.Changed || roleMap(r.Roles)["ingestion-default"] != "other.embedder@1.0.0" || roleMap(r.Roles)["ingestion:other.embedder"] != "other.embedder@1.0.0" {
+		t.Fatalf("legacy reconciliation %+v, want the operator default plus normalized membership", r)
 	}
 }
 
@@ -252,28 +345,28 @@ func TestConfigurationAppliesOnlyTheRolesItChanged(t *testing.T) {
 
 	// THE-780 seeded a plan without the ingestion role and no snapshot.
 	legacy, _ := plan(t, markdown)
-	if r := registry.Reconcile(configured, nil, &legacy, all); !r.Changed || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion": "core.embedder@1.0.0", "normalizer:text/markdown": "example.markdown@1.0.0"}) {
+	if r := registry.Reconcile(configured, nil, &legacy, all); !r.Changed || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion-default": "core.embedder@1.0.0", "ingestion:core.embedder": "core.embedder@1.0.0", "normalizer:text/markdown": "example.markdown@1.0.0"}) {
 		t.Fatalf("a registry without snapshot takes the configuration: %+v", r)
 	}
 	// Unchanged configuration: the operator's ingestion plugin stays.
-	if r := registry.Reconcile(configured, configured.Snapshot(), &operator, all); r.Changed || roleMap(r.Roles)["ingestion"] != "other.embedder@1.0.0" {
+	if r := registry.Reconcile(configured, configured.Snapshot(), &operator, all); r.Changed || roleMap(r.Roles)["ingestion-default"] != "other.embedder@1.0.0" {
 		t.Fatalf("an unchanged configuration changed the plan: %+v", r)
 	}
 	// The configuration upgrades the normalizer: that role only.
 	upgraded := seed(core, markdownV2)
 	r := registry.Reconcile(upgraded, configured.Snapshot(), &operator, all)
-	if !r.Changed || len(r.Overridden) != 0 || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion": "other.embedder@1.0.0", "normalizer:text/markdown": "example.markdown@2.0.0"}) {
+	if !r.Changed || len(r.Overridden) != 0 || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion-default": "other.embedder@1.0.0", "ingestion:other.embedder": "other.embedder@1.0.0", "normalizer:text/markdown": "example.markdown@2.0.0"}) {
 		t.Fatalf("a configuration change of another role: %+v", r)
 	}
 	// The configuration removes the normalizer the operator never touched.
-	if r := registry.Reconcile(seed(core), configured.Snapshot(), &operator, all); !r.Changed || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion": "other.embedder@1.0.0"}) {
+	if r := registry.Reconcile(seed(core), configured.Snapshot(), &operator, all); !r.Changed || !reflect.DeepEqual(roleMap(r.Roles), map[string]string{"ingestion-default": "other.embedder@1.0.0", "ingestion:other.embedder": "other.embedder@1.0.0"}) {
 		t.Fatalf("a role removed from the configuration: %+v", r)
 	}
 	// The configuration changes ingestion itself: it wins and names the activation.
 	previous := seed(activated, markdown)
 	previous.Roles[0].RegistrationID = "plugin_registration_earlier"
 	r = registry.Reconcile(configured, previous.Snapshot(), &operator, all)
-	if !r.Changed || roleMap(r.Roles)["ingestion"] != "core.embedder@1.0.0" || len(r.Overridden) != 1 || r.Overridden[0].Role != "ingestion" || !strings.Contains(r.Overridden[0].Active, "other.embedder@1.0.0") || !strings.Contains(r.Overridden[0].Configured, "core.embedder@1.0.0") {
+	if !r.Changed || roleMap(r.Roles)["ingestion-default"] != "core.embedder@1.0.0" || len(r.Overridden) != 1 || r.Overridden[0].Role != "ingestion-default" || !strings.Contains(r.Overridden[0].Active, "other.embedder@1.0.0") || !strings.Contains(r.Overridden[0].Configured, "core.embedder@1.0.0") {
 		t.Fatalf("a configuration change over an activation: %+v", r)
 	}
 }

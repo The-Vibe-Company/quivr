@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -65,8 +66,45 @@ type Generation struct {
 // GenerationSpace is one vector space of a generation and the distance its
 // index uses.
 type GenerationSpace struct {
-	ID     string `json:"id"`
-	Metric string `json:"metric"`
+	ID            string `json:"id"`
+	Metric        string `json:"metric"`
+	Role          string `json:"role,omitempty"`
+	OwnerPluginID string `json:"owner_plugin_id,omitempty"`
+}
+
+// ServedFor returns the served space owned by a plugin in this generation.
+// Generations recorded before owner roles keep their single served SpaceID.
+func (g Generation) ServedFor(pluginID string) string {
+	for _, sp := range g.Spaces {
+		if sp.OwnerPluginID == pluginID && sp.Role == SpaceServed {
+			return sp.ID
+		}
+	}
+	for _, sp := range g.Spaces {
+		if sp.OwnerPluginID != "" {
+			return ""
+		}
+	}
+	return g.SpaceID
+}
+
+// Serves reports whether this generation serves a space, including legacy ones.
+func (g Generation) Serves(space string) bool {
+	for _, sp := range g.Spaces {
+		if sp.ID == space && sp.Role != "" {
+			return sp.Role == SpaceServed
+		}
+	}
+	return space == g.SpaceID
+}
+
+// PluginOfRecipe is the producer plugin id of a plugin segmentation recipe.
+func PluginOfRecipe(recipe string) string {
+	if !strings.HasPrefix(recipe, "plugin:") {
+		return ""
+	}
+	id, _, _ := strings.Cut(strings.TrimPrefix(recipe, "plugin:"), "@")
+	return id
 }
 
 // VectorSpaces lists the ids of the spaces the generation carries vectors

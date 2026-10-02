@@ -189,7 +189,7 @@ func CheckCoverage(seg Segmentation, g Generation, data []EmbeddingData) error {
 			return ErrInvalid
 		}
 		seen[key] = true
-		if key[1] == g.SpaceID {
+		if key[1] == g.ServedFor(PluginOfRecipe(seg.Recipe)) {
 			served[key[0]] = true
 		}
 	}

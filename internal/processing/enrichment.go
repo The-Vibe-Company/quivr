@@ -31,31 +31,19 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	started := time.Now()
-	err = s.enrich(ctx, org, v)
-	if err != nil && !errors.Is(err, content.ErrConflict) && !errors.Is(err, content.ErrIngestionRefused) {
-		// Pinned work whose plugin left the active plan and stays
-		// unreachable stops here: the Version stays searchable by keyword.
-		reason, goneErr := s.gone(ctx, err)
-		if goneErr != nil {
-			err = goneErr
-		} else if reason != nil {
-			slog.Warn("pinned ingestion plugin unreachable; enrichment stops", "component", "worker", "version_id", v.ID, "plan", reason.Plan, "plugin", reason.Plugin, "plugin_version", reason.PluginVersion, "error", err.Error())
-			s.outcome(org, "enrichment", "blocked", receiptID, v, started, reason.Code)
-			return s.Content.BlockEnrichment(ctx, org, v.ID, *reason)
+	out := s.enrich(ctx, org, v)
+	err = out.Retry
+	if out.Terminal != nil {
+		s.outcome(org, "enrichment", "blocked", receiptID, v, started, out.Terminal.Code)
+		if out.Terminal.Code == content.CodeEnrichmentTimeout {
+			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", out.Terminal.Code)
 		}
-	}
-	if errors.Is(err, ErrPluginDeadline) {
-		// The plugin is reachable but never finishes this Version: stop after
-		// a bounded number of deadlines; the Version stays searchable by keyword.
-		timeouts, countErr := s.Content.CountEnrichmentTimeout(ctx, org, v.ID)
-		if countErr != nil {
-			return countErr
+		if errors.Is(out.Cause, content.ErrConflict) || errors.Is(out.Cause, content.ErrIngestionRefused) {
+			// Keep the public enrichment state for incompatible derived artifacts.
+			_ = s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", "derivation_conflict")
+			return nil
 		}
-		if timeouts >= EnrichmentTimeoutBudget {
-			slog.Warn("enrichment stops after repeated plugin deadlines", "component", "worker", "version_id", v.ID, "timeouts", timeouts, "error", err.Error())
-			s.outcome(org, "enrichment", "blocked", receiptID, v, started, content.CodeEnrichmentTimeout)
-			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", content.CodeEnrichmentTimeout)
-		}
+		return s.Content.BlockEnrichment(ctx, org, v.ID, *out.Terminal)
 	}
 	if err != nil {
 		state, code := "retrying", "enrichment_unavailable"
@@ -81,19 +69,17 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	}
 	return nil
 }
-func (s Service) enrich(ctx context.Context, org string, v content.Version) error {
+func (s Service) enrich(ctx context.Context, org string, v content.Version) DerivationResult {
 	rt, err := s.route(ctx, org, v)
 	if err == nil && rt.legacy {
-		// The legacy E5 space has no pinned owner: the Corpus's rebuild onto
-		// the plugin's spaces embeds this Version, then this retry attaches.
 		err = ErrSpaceUnowned
 	}
 	if err != nil {
-		return err
+		return DerivationResult{Retry: err}
 	}
-	seg, data, err := s.Plugin.Derive(ctx, org, rt.corpusID, v, rt.generation)
-	if err != nil {
-		return err
+	out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Vectors})
+	if out.Terminal == nil && out.Retry == nil {
+		out.Retry = s.Enrichment.IndexEmbeddings(ctx, org, v, out.Segmentation, out.Data)
 	}
-	return s.Enrichment.IndexEmbeddings(ctx, org, v, seg, data)
+	return out
 }

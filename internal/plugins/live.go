@@ -182,3 +182,9 @@ func (l *Live) Pin(ctx context.Context, work Work, attempt func(context.Context)
 	work.snapshot, work.live, work.attempt, work.budget = s, l, attempt, budget
 	return context.WithValue(ctx, workKey{}, &work), nil
 }
+
+// Ingestor resolves one immutable plan snapshot by accepted source media type.
+// Keep the returned handle for the whole derivation.
+func (l *Live) Ingestor(ctx context.Context, sourceMediaType string) *Pin {
+	return l.SetFor(ctx).IngestionFor(sourceMediaType)
+}

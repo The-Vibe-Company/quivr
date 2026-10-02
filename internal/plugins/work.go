@@ -39,6 +39,10 @@ type Work struct {
 	// Stopped reports that a rollback stopped the work when it was pinned:
 	// it never calls a plugin of its plan that left the active plan again.
 	Stopped bool
+	// BindIngestion records the routed owner for precise drain accounting.
+	BindIngestion func(context.Context, string) error
+	// PluginAttempt keeps failure budgets separate for each registration.
+	PluginAttempt func(context.Context, string) (int, error)
 	// StopMarked reads whether a rollback stopped the work since it was
 	// pinned, so an attempt already running stops at its next call to such a
 	// plugin; nil reads Stopped only.
@@ -75,7 +79,12 @@ func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.D
 			Message: fmt.Sprintf("a rollback stopped the work pinned to plan %s before it called %s@%s again; the work was not moved to another plugin version.", w.Plan, pin.Manifest.ID, pin.Manifest.Version)}, nil
 	}
 	attempts := 1
-	if w.attempt != nil {
+	if w.PluginAttempt != nil {
+		var err error
+		if attempts, err = w.PluginAttempt(ctx, pin.Registration); err != nil {
+			return nil, err
+		}
+	} else if w.attempt != nil {
 		var err error
 		if attempts, err = w.attempt(ctx); err != nil {
 			return nil, err
@@ -101,4 +110,12 @@ func Stopped(ctx context.Context, pin *Pin) bool {
 // plugins of the active plan never pays for it.
 func (w *Work) stopped(ctx context.Context) bool {
 	return w.Stopped || (w.StopMarked != nil && w.StopMarked(ctx))
+}
+
+// BindIngestion records the owner actually selected by the pinned plan.
+func BindIngestion(ctx context.Context, pin *Pin) error {
+	if w, ok := WorkOf(ctx); ok && w.BindIngestion != nil && pin != nil && pin.Registration != "" {
+		return w.BindIngestion(ctx, pin.Registration)
+	}
+	return nil
 }

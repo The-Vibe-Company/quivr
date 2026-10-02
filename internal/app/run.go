@@ -86,6 +86,8 @@ type Config struct {
 	// worker refuse to start on an invalid pin or a conflict between pins; an
 	// unreachable plugin never prevents startup.
 	Plugins []plugins.PinConfig `json:"plugins"`
+	// Ingestion routes accepted source media types to pinned ingestion owners.
+	Ingestion plugins.IngestionRouting `json:"ingestion"`
 	// Retrieval maps deployment short names to installed plugin/profile names.
 	Retrieval RetrievalConfig `json:"retrieval"`
 	// MonitoringFixtureEvaluator installs the deterministic fixture evaluator
@@ -450,7 +452,14 @@ func Run(command string) error {
 	if command == "api" {
 		// The first search must not pay the ingestion plugin's first-use
 		// loading (THE-813); the worker never encodes a query.
-		warming = warmQueries(ctx, pluginhttp.Ingestor{Pin: resolved.Ingestion()}.Warm, warmBound, warmRetry)
+		warming = warmQueries(ctx, func(ctx context.Context) error {
+			for _, pin := range resolved.Ingestions() {
+				if err := (pluginhttp.Ingestor{Pin: pin}).Warm(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, warmBound, warmRetry)
 	}
 	// Subscription evaluators follow the plan too: its alert-rule versions
 	// serve new Subscription Versions, earlier ones keep judging the
@@ -524,7 +533,7 @@ func Run(command string) error {
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
-	ingestor := pluginhttp.LiveIngestor{Live: live}
+	ingestor := pluginhttp.LiveIngestor{Live: live, Owners: planStore}
 	deriver := &processing.PluginDeriver{Content: contents, Plugin: ingestor}
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search

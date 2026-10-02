@@ -21,12 +21,33 @@ const alpha = 0.5
 type retriever struct{}
 
 func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*quivrplugin.SearchAnswer, error) {
-	if req.Round == 1 {
+	pending := []quivrplugin.SearchSpace{}
+	if req.Query.Mode != "lexical" {
+		requested := map[string]bool{}
+		for _, served := range req.Served {
+			requested[served.Request.Space] = true
+		}
+		for _, space := range req.Spaces {
+			if space.Role == "served" && !requested[space.ID] {
+				pending = append(pending, space)
+			}
+		}
+	}
+	if req.Round == 1 || len(pending) > 0 {
 		c, err := request(req)
 		if err != nil {
 			return nil, err
 		}
-		return quivrplugin.Ask(c), nil
+		requests := []quivrplugin.CandidateRequest{c}
+		if req.Query.Mode != "lexical" {
+			requests = nil
+			for _, space := range pending[:min(8, len(pending))] {
+				next := c
+				next.Space = space.ID
+				requests = append(requests, next)
+			}
+		}
+		return quivrplugin.Ask(requests...), nil
 	}
 	// The served order is the ranking: the index ranked it, and the engine
 	// kept each segment's first object, as the engine's own search did.
@@ -46,7 +67,15 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 		}
 		return hits[i].SegmentID < hits[j].SegmentID
 	})
-	return quivrplugin.Rank(hits[:min(len(hits), req.Limit)]...), nil
+	unique := hits[:0]
+	seen := map[string]bool{}
+	for _, h := range hits {
+		if !seen[h.SegmentID] {
+			seen[h.SegmentID] = true
+			unique = append(unique, h)
+		}
+	}
+	return quivrplugin.Rank(unique[:min(len(unique), req.Limit)]...), nil
 }
 
 // request is the one candidate request of a search: keywords on the title

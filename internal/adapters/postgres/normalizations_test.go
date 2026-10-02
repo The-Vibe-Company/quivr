@@ -159,6 +159,9 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if v.SourceMediaType != "text/markdown" {
+		t.Fatalf("normalized Version source media type = %q, want text/markdown", v.SourceMediaType)
+	}
 	if len(v.Manifest.Parts) != 2 || v.Manifest.Parts[1].Content.Text != "The keeper lights the lamp." {
 		t.Fatalf("published manifest %+v", v.Manifest)
 	}

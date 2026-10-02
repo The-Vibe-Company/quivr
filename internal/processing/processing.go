@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 )
 
 type Indexer interface {
@@ -81,32 +80,11 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	if s.Plugin == nil || s.Routing == nil {
 		return route{}, ErrSpaceUnowned
 	}
-	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
+	r, g, err := VersionRoute(ctx, org, v, s.Content, s.Routing)
 	if err != nil {
 		return route{}, err
 	}
-	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
-	if err != nil {
-		return route{}, err
-	}
-	out := route{corpusID: r.Source.CorpusID, generation: g}
-	switch {
-	case s.Plugin.Owns(ctx, g.SpaceID):
-		return out, nil
-	case s.LegacySpace != "" && g.SpaceID == s.LegacySpace:
-		out.legacy = true
-		return out, nil
-	}
-	return out, ErrSpaceUnowned
-}
-
-// gone is the diagnostic that stops work pinned to a plan after cause
-// (PluginDeriver.gone), or nil to keep retrying.
-func (s Service) gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
-	if s.Plugin == nil {
-		return nil, nil
-	}
-	return s.Plugin.Gone(ctx, cause)
+	return route{corpusID: r.Source.CorpusID, generation: g, legacy: s.LegacySpace != "" && g.SpaceID == s.LegacySpace}, nil
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names,
@@ -161,30 +139,14 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	started := time.Now()
-	var result content.Segmentation
 	rt, err := s.route(ctx, org, v)
+	var result content.Segmentation
 	if err == nil {
-		// The segments alone, so the Version is searchable by keyword
-		// whatever the embedding backend's state; enrichment adds vectors.
-		result, err = s.Plugin.Segment(ctx, org, rt.corpusID, v, rt.generation)
-	}
-	if errors.Is(err, content.ErrIngestionRefused) {
-		slog.Warn("ingestion plugin refused a version", "component", "worker", "version_id", v.ID, "error", err.Error())
-		s.outcome(org, "baseline", "blocked", receiptID, v, started, "ingestion_refused")
-		// The Version's diagnostic says why: no text to index, invalid
-		// text or which limit, as the plugin or the engine's checks put it.
-		return s.Content.QuarantineVersion(ctx, org, v.ID, content.RefusalReason(err))
-	}
-	if err != nil {
-		// Work pinned to a plan whose ingestion plugin left the active plan
-		// and stays unreachable is quarantined, never moved to another one.
-		reason, goneErr := s.gone(ctx, err)
-		if goneErr != nil {
-			err = goneErr
-		} else if reason != nil {
-			slog.Warn("pinned ingestion plugin unreachable; quarantining the version", "component", "worker", "version_id", v.ID, "plan", reason.Plan, "plugin", reason.Plugin, "plugin_version", reason.PluginVersion, "error", err.Error())
-			s.outcome(org, "baseline", "blocked", receiptID, v, started, reason.Code)
-			return s.Content.QuarantineVersion(ctx, org, v.ID, *reason)
+		out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Segments, AllowLegacy: rt.legacy})
+		result, err = out.Segmentation, out.Retry
+		if out.Terminal != nil {
+			s.outcome(org, "baseline", "blocked", receiptID, v, started, out.Terminal.Code)
+			return s.Content.QuarantineVersion(ctx, org, v.ID, *out.Terminal)
 		}
 	}
 	if err == nil {

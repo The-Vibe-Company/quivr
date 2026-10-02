@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 )
 
 // ProfileVersion identifies the projection recipe every generation is built
@@ -174,11 +175,7 @@ type Service struct {
 }
 
 func (s Service) Index(ctx context.Context, org string, v content.Version, seg content.Segmentation) error {
-	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
-	if err != nil {
-		return err
-	}
-	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
+	r, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
 	if err != nil {
 		return err
 	}
@@ -295,11 +292,7 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 	if err != nil || !eligible {
 		return err
 	}
-	r, err := s.Content.Record(ctx, corpus.Scope{Organization: org, Actions: []string{"content:read"}, Corpora: []string{"*"}}, v.RecordID)
-	if err != nil {
-		return err
-	}
-	g, err := s.Routing.Generation(ctx, org, r.Source.CorpusID)
+	_, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
 	if err != nil {
 		return err
 	}

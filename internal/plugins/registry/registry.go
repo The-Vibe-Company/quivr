@@ -400,8 +400,12 @@ func normalizerRole(mediaType string) string  { return "normalizer:" + mediaType
 func subscriptionRole(pluginID string) string { return "subscription:" + pluginID }
 func connectorRole(kind string) string        { return "connector:" + kind }
 
-// ingestionRole is the one ingestion role of a deployment (Plugin API 0.6).
-const ingestionRole = "ingestion"
+// ingestionRole is the canonical default ingestion assignment. The old
+// singleton role remains readable through canonicalRoles below.
+const ingestionRole = "ingestion-default"
+const legacyIngestionRole = "ingestion"
+const ingestionMembershipPrefix = "ingestion:"
+const ingestionRoutePrefix = "ingestion-route:"
 
 // retrievalRole identifies the retrieval provider independently of its version.
 func retrievalRole(pluginID string) string { return "retrieval:" + pluginID }
@@ -421,8 +425,9 @@ func registrationOf(pin *plugins.Pin, state string) Registration {
 
 // FromPins derives the seed of the startup pins: one active registration per
 // pinned plugin, and a plan whose roles are the routed media types, the
-// subscription evaluators, the connector kinds and the ingestion and
-// retrieval roles the pins resolve to. A nil set declares nothing.
+// subscription evaluators, the connector kinds, the keyed ingestion
+// memberships plus default/source routes, and the retrieval role the pins
+// resolve to. A nil set declares nothing.
 func FromPins(pins *plugins.PinSet) Seed {
 	var seed Seed
 	byPin := map[*plugins.Pin]Registration{}
@@ -454,8 +459,16 @@ func planRoles(set *plugins.PinSet, byPin map[*plugins.Pin]Registration) []Assig
 	for _, pinned := range set.Connectors() {
 		roles = append(roles, assign(connectorRole(pinned.Kind), byPin[pinned.Pin]))
 	}
+	for _, pin := range set.Ingestions() {
+		roles = append(roles, assign(ingestionMembershipRole(pin.Manifest.ID), byPin[pin]))
+	}
 	if pin := set.Ingestion(); pin != nil {
 		roles = append(roles, assign(ingestionRole, byPin[pin]))
+	}
+	for mediaType := range set.IngestionRouting().Routes {
+		if pin := set.IngestionFor(mediaType); pin != nil {
+			roles = append(roles, assign(ingestionRouteRole(mediaType), byPin[pin]))
+		}
 	}
 	for _, pin := range set.Retrievals() {
 		roles = append(roles, assign(retrievalRole(pin.Manifest.ID), byPin[pin]))
@@ -475,6 +488,9 @@ func assign(role string, r Registration) Assignment {
 	return Assignment{Role: role, RegistrationID: r.ID, PluginID: r.PluginID, Version: r.Version}
 }
 
+func ingestionMembershipRole(pluginID string) string { return ingestionMembershipPrefix + pluginID }
+func ingestionRouteRole(mediaType string) string     { return ingestionRoutePrefix + mediaType }
+
 // declaredRoles lists every role a manifest can serve, sorted.
 func declaredRoles(m plugins.Manifest) []string {
 	roles := []string{}
@@ -492,7 +508,7 @@ func declaredRoles(m plugins.Manifest) []string {
 		}
 	}
 	if m.Contributions.Ingestion != nil {
-		roles = append(roles, ingestionRole)
+		roles = append(roles, ingestionMembershipRole(m.ID))
 	}
 	if m.Contributions.Retrieval != nil {
 		roles = append(roles, retrievalRole(m.ID))

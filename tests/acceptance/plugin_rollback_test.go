@@ -29,7 +29,7 @@ const gullsText = "Gulls circled the trawler until the nets came up empty."
 func TestRollbackStarts(t *testing.T) {
 	operator, _, b, corpusID, run := rollbackSetup(t)
 	plan := request(t, "POST", "/v0/admin/plugins/"+registrationAt(t, operator, "0.2.0", b)["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
-	if planRoles(plan)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if planRoles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("activating B: %v", plan)
 	}
 	ingestEnriched(t, corpusID, "bad-release-"+run, "gulls", gullsText)
@@ -46,7 +46,7 @@ func TestRollback(t *testing.T) {
 	operator, _, _, corpusID, run := rollbackSetup(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	bad := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
-	if planRoles(bad)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if planRoles(bad)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("before the rollback B serves ingestion: %v", bad)
 	}
 	receipt := awaitReceipt(t, request(t, "POST", "/v0/records", admin, inlineCommand(corpusID, "stopped-"+run, "stopped", "The ferry waited for the tide to turn."), 202)["receipt_id"].(string))
@@ -61,7 +61,10 @@ func TestRollback(t *testing.T) {
 
 	body := map[string]any{"idempotency_key": "rollback-" + run, "pinned_work": "stop"}
 	back := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200)
-	if back["source"] != "rollback" || back["previous_plan_id"] != bad["plan_id"] || planRoles(back)["ingestion"] != "example.hash_embedder@0.1.0" {
+	if planRoles(back)["ingestion:core.ingest"] != planRoles(bad)["ingestion:core.ingest"] {
+		t.Fatalf("hash rollback changed core ingestion: %v", back)
+	}
+	if back["source"] != "rollback" || back["previous_plan_id"] != bad["plan_id"] || planRoles(back)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("rollback: %v, want a rollback plan after %v with A serving ingestion", back, bad["plan_id"])
 	}
 	if replay := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, body, 200); replay["plan_id"] != back["plan_id"] {

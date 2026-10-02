@@ -107,10 +107,10 @@ func TestBackfillStarts(t *testing.T) {
 		ingestEnriched(t, corpusID, "backfill-"+a.key+"-"+run, a.key, a.text)
 	}
 	back := request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "backfill-both-" + run}, 200)
-	if planRoles(back)["ingestion"] != planRoles(both)["ingestion"] {
+	if planRoles(back)["ingestion:example.hash_embedder"] != planRoles(both)["ingestion:example.hash_embedder"] {
 		t.Fatalf("the rollback to both spaces: %v", back)
 	}
-	if spaces, _ := vectorSpaces(t, corpusID); len(spaces) != 1 || spaces[pluginServedSpace] == nil {
+	if spaces, _ := vectorSpaces(t, corpusID); len(spaces) != 2 || spaces[pluginServedSpace] == nil || spaces[coreIngestSpace]["role"] != "served" {
 		t.Fatalf("the Corpus predates the large space: %v", spaces)
 	}
 

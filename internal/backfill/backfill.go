@@ -114,6 +114,11 @@ type Plans interface {
 	ActiveIngestion(ctx context.Context) (Ingestion, error)
 }
 
+// RegistrationPlans resolves an explicitly selected active ingestion owner.
+type RegistrationPlans interface {
+	RegistrationIngestion(context.Context, string) (Ingestion, error)
+}
+
 // Size is how much of a scope a backfill has to fill: the Versions whose
 // segments all hold a vector in the served space but miss one in a target
 // space, their segments and the code points of those segments' text.
@@ -247,6 +252,11 @@ func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request) (op
 // plan and the registry.
 func (s Service) resolve(ctx context.Context, r Request) (operations.Backfill, Ingestion, error) {
 	ingestion, err := s.Plans.ActiveIngestion(ctx)
+	if r.RegistrationID != "" {
+		if p, ok := s.Plans.(RegistrationPlans); ok {
+			ingestion, err = p.RegistrationIngestion(ctx, r.RegistrationID)
+		}
+	}
 	if err != nil {
 		return operations.Backfill{}, ingestion, err
 	}

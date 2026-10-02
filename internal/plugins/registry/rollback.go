@@ -43,7 +43,7 @@ func (r RollbackRequest) Stop() bool { return r.PinnedWork == PinnedWorkStop }
 // plan keeps judging the Subscription Versions that pin it, like after an
 // activation.
 func PlanRollback(active, target Plan, members map[string]Registration, validate func(*plugins.PinSet) error) (Activation, error) {
-	if sameRoles(canonicalRoles(active.Roles), canonicalRoles(target.Roles)) {
+	if sameRoles(canonicalRoles(active.Roles, members), canonicalRoles(target.Roles, members)) {
 		return Activation{Roles: active.Roles, Unchanged: true}, nil
 	}
 	for _, a := range target.Roles {
@@ -58,7 +58,10 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 		return Activation{}, err
 	}
 	roles := planRoles(set, byPin)
-	if !sameRoles(roles, canonicalRoles(target.Roles)) {
+	// Plans written before keyed ingestion memberships are still valid. The
+	// resolved plan carries the normalized membership and explicit default into
+	// the new rollback plan.
+	if !sameRoles(roles, canonicalRoles(target.Roles, members)) {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/plans/" + target.ID,
 			Message: "the plan's plugins no longer resolve to the roles it recorded; activate the version you want instead"}}}
 	}

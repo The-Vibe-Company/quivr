@@ -40,7 +40,11 @@ func (e savedQueryEncoder) EncodeSavedQuery(ctx context.Context, org string, def
 		if err != nil {
 			return nil, err
 		}
-		spaces[generation.SpaceID] = true
+		for _, space := range generation.VectorSpaces() {
+			if generation.Serves(space) {
+				spaces[space] = true
+			}
+		}
 	}
 	keys := make([]string, 0, len(spaces))
 	for space := range spaces {

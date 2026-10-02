@@ -58,7 +58,8 @@ func (s ContentStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, 
 	var matches bool
 	err = tx.QueryRow(ctx, `SELECT d.id,d.space_id=`+servedSpaceSQL+` AND
  (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
- =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))
+ =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
+ (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))
 FROM projection_generations d WHERE d.active AND `+servedSpaceSQL+` IS NOT NULL`).Scan(&move.Previous, &matches)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
 		return DefaultMove{}, nil
@@ -326,7 +327,7 @@ CROSS JOIN LATERAL (SELECT r.* FROM records r WHERE r.organization=c.organizatio
 CROSS JOIN LATERAL (SELECT p.blob_id FROM version_parts p WHERE p.organization=c.organization AND p.version_id=sg.version_id AND p.part_key=sg.part_key OFFSET 0) p
 CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blobs b WHERE b.organization=c.organization AND b.blob_id=p.blob_id OFFSET 0) b
 CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id OFFSET 0) pc
-LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND g.space_id=a.space_id
+LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND (g.space_id=a.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',a.space_id,'role','served')))
   WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
 WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL
 

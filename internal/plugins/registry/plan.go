@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
@@ -33,11 +34,12 @@ func Resolve(roles []Assignment, registrations map[string]Registration) (*plugin
 		}
 		members = append(members, r)
 	}
-	return resolveMembers(members)
+	routing := ingestionRouting(roles, registrations)
+	return resolveMembers(members, &routing)
 }
 
 // resolveMembers loads registrations and routes them with the startup rules.
-func resolveMembers(members []Registration) (*plugins.PinSet, map[*plugins.Pin]Registration, error) {
+func resolveMembers(members []Registration, routing *plugins.IngestionRouting) (*plugins.PinSet, map[*plugins.Pin]Registration, error) {
 	pins := make([]*plugins.Pin, 0, len(members))
 	byPin := map[*plugins.Pin]Registration{}
 	var issues []plugins.Issue
@@ -57,10 +59,42 @@ func resolveMembers(members []Registration) (*plugins.PinSet, map[*plugins.Pin]R
 	if err != nil {
 		return nil, nil, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
 	}
+	if routing != nil {
+		if err := set.ConfigureIngestion(*routing); err != nil {
+			return nil, nil, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
+		}
+	}
 	if _, err := plugins.PinsExtensionRegistry(set); err != nil {
 		return nil, nil, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
 	}
 	return set, byPin, nil
+}
+
+// ingestionRouting reconstructs the explicit source-media choices stored in a
+// plan. Both the canonical default and the old "ingestion" role select the
+// default; keyed membership roles only keep a plugin in the plan and do not
+// choose it for new Versions.
+func ingestionRouting(roles []Assignment, registrations map[string]Registration) plugins.IngestionRouting {
+	routing := plugins.IngestionRouting{Routes: map[string]string{}}
+	for _, a := range roles {
+		if !isIngestionRoutingRole(a.Role) {
+			continue
+		}
+		pluginID := a.PluginID
+		if pluginID == "" {
+			pluginID = registrations[a.RegistrationID].PluginID
+		}
+		switch {
+		case a.Role == ingestionRole || a.Role == legacyIngestionRole:
+			routing.Default = pluginID
+		case strings.HasPrefix(a.Role, ingestionRoutePrefix):
+			routing.Routes[strings.TrimPrefix(a.Role, ingestionRoutePrefix)] = pluginID
+		}
+	}
+	if len(routing.Routes) == 0 {
+		routing.Routes = nil
+	}
+	return routing
 }
 
 // issuesOf lists the issues of a pin refusal; paths of a set name pins by
@@ -105,10 +139,10 @@ type Activation struct {
 // every role it declares. For an alert-rule plugin, new Subscription Versions
 // pin target from then on, while those pinning the version that left keep it
 // until an operator migrates them (THE-805). The result must satisfy the startup rules (one
-// normalizer per media type, one provider per connector kind, one ingestion
-// and retrieval plugins per id, extension namespace ownership); a registration
-// target overlaps only in part is a conflict. validate adds the checks of
-// the running engine.
+// normalizer per media type, one provider per connector kind, the configured
+// ingestion memberships and routes, the retrieval providers, and extension
+// namespace ownership); a registration target overlaps only in part is a
+// conflict. validate adds the checks of the running engine.
 func PlanActivation(active Plan, members map[string]Registration, target Registration, validate func(*plugins.PinSet) error) (Activation, error) {
 	switch target.State {
 	case StateValidated, StateInactive, StateDraining:
@@ -125,13 +159,31 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	}
 	takes := map[string]bool{}
 	for _, a := range planRoles(alone, map[*plugins.Pin]Registration{pin: target}) {
-		takes[a.Role] = true
+		// An activation cannot invent a source-media route. The default and
+		// explicit routes belong to the active plan; only a plugin upgrade
+		// redirects routes that already named this plugin below.
+		if !isIngestionRoutingRole(a.Role) {
+			takes[a.Role] = true
+		}
 	}
 	if len(takes) == 0 {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeInvalidPin, Path: "/routes", Message: fmt.Sprintf("%s@%s would serve no role: route at least one media type to its normalizer", target.PluginID, target.Version)}}}
 	}
 	served := map[string][]string{}
-	for _, a := range canonicalRoles(active.Roles) {
+	canonicalActiveRoles := canonicalRoles(active.Roles, members)
+	for _, a := range canonicalActiveRoles {
+		if _, ok := members[a.RegistrationID]; !ok {
+			return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/registrations/" + a.RegistrationID, Message: "the active plan names a registration the registry does not have"}}}
+		}
+	}
+	hasTargetIngestion := pin.Manifest.Contributions.Ingestion != nil
+	for _, a := range canonicalActiveRoles {
+		m := members[a.RegistrationID]
+		if IsIngestionRole(a.Role) && m.PluginID == target.PluginID && !hasTargetIngestion {
+			return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeInvalidPin, Path: "/contributions/ingestion", Message: fmt.Sprintf("%s@%s removes the ingestion Contribution still used by the active default or source routes", target.PluginID, target.Version)}}}
+		}
+	}
+	for _, a := range canonicalActiveRoles {
 		served[a.RegistrationID] = append(served[a.RegistrationID], a.Role)
 	}
 	var kept []Registration
@@ -142,7 +194,9 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 			return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/registrations/" + id, Message: "the active plan names a registration the registry does not have"}}}
 		}
 		replaced := m.PluginID == target.PluginID
-		if !replaced {
+		// An unrelated ingestion registration remains a member even when the
+		// new plugin happens to provide every non-ingestion role it serves.
+		if !replaced && !registrationHasIngestion(m) {
 			replaced = true
 			for _, role := range served[id] {
 				replaced = replaced && takes[role]
@@ -154,7 +208,8 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 			kept = append(kept, m)
 		}
 	}
-	set, byPin, err := resolveMembers(append(kept, target))
+	routing := ingestionRouting(canonicalActiveRoles, members)
+	set, byPin, err := resolveMembers(append(kept, target), &routing)
 	if err != nil {
 		return Activation{}, err
 	}
@@ -165,6 +220,30 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 		}
 	}
 	return Activation{Roles: planRoles(set, byPin), Set: set, Retired: retired}, nil
+}
+
+// IsIngestionRole recognizes keyed memberships, source routes and both
+// canonical and legacy defaults.
+func IsIngestionRole(role string) bool {
+	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionMembershipPrefix) || strings.HasPrefix(role, ingestionRoutePrefix)
+}
+
+func isIngestionRoutingRole(role string) bool {
+	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionRoutePrefix)
+}
+
+func registrationHasIngestion(r Registration) bool {
+	for _, contribution := range r.Contributions {
+		if contribution == "ingestion" {
+			return true
+		}
+	}
+	for _, role := range r.Roles {
+		if IsIngestionRole(role) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -228,11 +307,19 @@ type Reconciliation struct {
 // breaks a startup rule, the configuration's plan applies whole too.
 // registrations must hold the active plan's members and the configured ones.
 func Reconcile(configured Seed, snapshot map[string]string, active *Plan, registrations map[string]Registration) Reconciliation {
+	configuredRoles := canonicalRoles(configured.Roles, registrations)
+	activeRoles := []Assignment(nil)
+	originalActiveRoles := []Assignment(nil)
+	if active != nil {
+		originalActiveRoles = active.Roles
+		activeRoles = canonicalRoles(active.Roles, registrations)
+	}
+	snapshot = canonicalSnapshot(snapshot, registrations)
 	whole := func(reason string) Reconciliation {
-		r := Reconciliation{Roles: configured.Roles, Whole: reason != "", Reason: reason}
-		r.Changed = active == nil || !sameRoles(active.Roles, configured.Roles)
+		r := Reconciliation{Roles: configuredRoles, Whole: reason != "", Reason: reason}
+		r.Changed = active == nil || !sameRoles(originalActiveRoles, configuredRoles)
 		if active != nil && r.Changed && snapshot != nil {
-			r.Overridden = overrides(snapshot, active.Roles, configured.Roles)
+			r.Overridden = overrides(snapshot, activeRoles, configuredRoles)
 		}
 		return r
 	}
@@ -240,10 +327,9 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 		return whole("")
 	}
 	want := map[string]Assignment{}
-	for _, a := range configured.Roles {
+	for _, a := range configuredRoles {
 		want[a.Role] = a
 	}
-	snapshot = canonicalSnapshot(snapshot, registrations)
 	retrievalSnapshotCount := 0
 	for role, id := range snapshot {
 		if role == retrievalRole(registrations[id].PluginID) {
@@ -257,7 +343,7 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 	// process can write a singleton plan after the snapshot was migrated. A
 	// complete multi-provider snapshot preserves operator rollbacks unchanged.
 	restoreRetrieval := false
-	for _, a := range canonicalRoles(active.Roles) {
+	for _, a := range activeRoles {
 		merged[a.Role] = a
 		if retrievalSnapshotCount == 1 && a.Role == retrievalRole(a.PluginID) {
 			if _, configured := want[a.Role]; configured {
@@ -302,7 +388,92 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 	if derived := planRoles(set, byPin); !sameRoles(derived, out) {
 		return whole("a plugin would keep only part of the roles it declares")
 	}
-	return Reconciliation{Roles: out, Changed: !sameRoles(active.Roles, out), Overridden: overridden}
+	return Reconciliation{Roles: out, Changed: !sameRoles(originalActiveRoles, out), Overridden: overridden}
+}
+
+// canonicalRoles gives plans one role vocabulary while keeping old plans
+// readable. The old singleton ingestion role becomes an explicit canonical
+// default and every default or source route also supplies the keyed
+// membership needed to retain that plugin in a multi-ingestion plan.
+func canonicalRoles(roles []Assignment, registrations map[string]Registration) []Assignment {
+	type candidate struct {
+		assignment Assignment
+		priority   int
+	}
+	byRole := map[string]candidate{}
+	add := func(a Assignment, priority int) {
+		if r, ok := registrations[a.RegistrationID]; ok {
+			if a.PluginID == "" {
+				a.PluginID = r.PluginID
+			}
+			if a.Version == "" {
+				a.Version = r.Version
+			}
+		}
+		switch a.Role {
+		case legacyIngestionRole:
+			a.Role = ingestionRole
+			priority = 1
+		case "retrieval":
+			a.Role = retrievalRole(a.PluginID)
+		}
+		if previous, ok := byRole[a.Role]; !ok || priority >= previous.priority {
+			byRole[a.Role] = candidate{assignment: a, priority: priority}
+		}
+	}
+	for _, a := range roles {
+		priority := 1
+		if a.Role == ingestionRole {
+			priority = 2
+		}
+		add(a, priority)
+	}
+	for _, original := range roles {
+		if !isIngestionRoutingRole(original.Role) {
+			continue
+		}
+		a := original
+		if r, ok := registrations[a.RegistrationID]; ok {
+			if a.PluginID == "" {
+				a.PluginID = r.PluginID
+			}
+			if a.Version == "" {
+				a.Version = r.Version
+			}
+		}
+		if a.PluginID == "" {
+			continue
+		}
+		membership := ingestionMembershipRole(a.PluginID)
+		if _, exists := byRole[membership]; !exists {
+			a.Role = membership
+			byRole[membership] = candidate{assignment: a, priority: 1}
+		}
+	}
+	out := make([]Assignment, 0, len(byRole))
+	for _, role := range sortedKeys(byRole) {
+		out = append(out, byRole[role].assignment)
+	}
+	return out
+}
+
+// canonicalSnapshot applies the same role vocabulary to the startup snapshot
+// used by Reconcile. A legacy default is retained as the explicit canonical
+// default, and its registration is added as a membership when absent.
+func canonicalSnapshot(snapshot map[string]string, registrations map[string]Registration) map[string]string {
+	if snapshot == nil {
+		return nil
+	}
+	roles := make([]Assignment, 0, len(snapshot))
+	for role, id := range snapshot {
+		roles = append(roles, Assignment{Role: role, RegistrationID: id})
+	}
+	canonical := canonicalRoles(roles, registrations)
+	result := make(map[string]string, len(canonical))
+	for _, assignment := range canonical {
+		result[assignment.Role] = assignment.RegistrationID
+	}
+	return result
 }
 
 // overrides lists the roles the operator had changed since the snapshot and
@@ -313,7 +484,7 @@ func overrides(snapshot map[string]string, active, configured []Assignment) []Ov
 		want[a.Role] = a
 	}
 	var out []Override
-	for _, a := range canonicalRoles(active) {
+	for _, a := range active {
 		c := want[a.Role]
 		if a.RegistrationID != snapshot[a.Role] && a.RegistrationID != c.RegistrationID {
 			out = append(out, Override{Role: a.Role, Active: a.describe(), Configured: c.describe()})
@@ -343,24 +514,39 @@ func (s Seed) Snapshot() map[string]string {
 	return m
 }
 
-// canonicalRoles reads legacy single-provider plans without rewriting them.
-func canonicalRoles(roles []Assignment) []Assignment {
-	out := append([]Assignment(nil), roles...)
-	for i := range out {
-		if out[i].Role == "retrieval" {
-			out[i].Role = retrievalRole(out[i].PluginID)
+// DefaultIngestion names the default registration of a recorded plan. Legacy
+// singleton plans and keyed singleton/core.ingest plans remain readable.
+func DefaultIngestion(plan Plan) string {
+	var sole string
+	seen := map[string]bool{}
+	var core string
+	for _, a := range plan.Roles {
+		if a.Role == ingestionRole || a.Role == legacyIngestionRole {
+			return a.RegistrationID
+		}
+		if strings.HasPrefix(a.Role, ingestionMembershipPrefix) {
+			seen[a.RegistrationID] = true
+			sole = a.RegistrationID
+			if a.PluginID == "core.ingest" {
+				core = a.RegistrationID
+			}
 		}
 	}
-	return out
+	if core != "" {
+		return core
+	}
+	if len(seen) == 1 {
+		return sole
+	}
+	return ""
 }
 
-func canonicalSnapshot(snapshot map[string]string, registrations map[string]Registration) map[string]string {
-	out := map[string]string{}
-	for role, id := range snapshot {
-		if role == "retrieval" {
-			role = retrievalRole(registrations[id].PluginID)
+// HasIngestion reports whether the registration is an ingestion member.
+func HasIngestion(plan Plan, id string) bool {
+	for _, a := range plan.Roles {
+		if a.RegistrationID == id && IsIngestionRole(a.Role) {
+			return true
 		}
-		out[role] = id
 	}
-	return out
+	return false
 }

@@ -50,9 +50,10 @@ func TestPromoteSpace(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	f := newBackfillFixture(t, ctx, 2, 0)
+	other := newBackfillFixtureForPlugin(t, ctx, 1, 0, "example.other_fill")
 	store := f.store
 	restoreRegistry(t, ctx, f.pool)
-	if _, err := f.pool.Exec(ctx, `UPDATE vector_spaces SET role=CASE WHEN id=$1 THEN 'served' ELSE 'evaluation' END WHERE id=$1 OR role='served'`, f.served); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE vector_spaces SET role=CASE WHEN id=$1 OR id=$2 THEN 'served' ELSE 'evaluation' END WHERE id=$1 OR id=$2 OR role='served'`, f.served, other.served); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(ctx, `UPDATE projection_generations SET spaces=spaces||jsonb_build_array(jsonb_build_object('id',$2::text,'metric','cosine')) WHERE id=$1`, f.generation.ID, f.target); err != nil {
@@ -104,6 +105,10 @@ func TestPromoteSpace(t *testing.T) {
 	p, err := store.PromoteSpace(ctx, f.target, true)
 	if err != nil || p.Served != f.target || p.Previous != f.served || p.GenerationsSwitched != 1 {
 		t.Fatalf("forced promotion %+v %v", p, err)
+	}
+	otherGeneration, otherErr := store.Generation(ctx, other.org, other.corpusID)
+	if roleOf(other.served) != "served" || otherErr != nil || otherGeneration.SpaceID != other.served {
+		t.Fatalf("promoting one owner changed the other: %+v (%v), role %s", otherGeneration, otherErr, roleOf(other.served))
 	}
 	if roleOf(f.target) != "served" || roleOf(f.served) != "evaluation" || served() != f.target {
 		t.Fatal("the promotion did not swap the served space")

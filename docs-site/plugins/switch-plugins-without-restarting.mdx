@@ -110,7 +110,7 @@ curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" -H "Authorizatio
 ```
 
 ```json
-{"source": "rollback", "previous_plan_id": "plan_…", "roles": [{"role": "ingestion", "plugin_id": "core.ingest", "version": "…"}, "…"]}
+{"source": "rollback", "previous_plan_id": "plan_…", "roles": [{"role": "ingestion:core.ingest", "plugin_id": "core.ingest", "version": "…"}, "…"]}
 ```
 
 The answer is a new plan whose roles are the previous plan's, and `previous_plan_id` names the plan you left. To return to an earlier plan, add its `plan_id` to the request. The api and the worker follow a rollback as they follow an activation. Nothing already produced is rewritten: articles the version you left processed keep their text and stay searchable.
@@ -130,7 +130,7 @@ Quivr first checks that every plugin the rollback brings back still answers at i
 
 The processing of a receipt, a connector run and a rebuild each record the plan that was active when they started. Their retries, their later steps and a worker restart keep calling that plan's plugins, so an article is never processed half by one version and half by the other. Keep the old version running until it is `inactive`.
 
-If the old version cannot be reached while it drains, its pinned work retries with backoff, up to `pinned_plugin_attempts` attempts (10 by default). The work then stops with the diagnostic `pinned_plugin_unavailable`, which names the plan and the plugin: a Version still waiting for its text is quarantined, a searchable Version keeps its text and its enrichment stops, and a rebuild fails. The work is never moved to the new version. A plugin of the active plan, in contrast, may be unreachable for any time: its work keeps retrying. Do not terminate pinned work by hand in Temporal, since its count would never be released. To run quarantined Versions through the new version, [reprocess them](/plugins/reprocess-quarantined-versions).
+If the old version cannot be reached while it drains, its pinned work retries with backoff, up to `pinned_plugin_attempts` attempts (10 by default). The work then stops with the diagnostic `pinned_plugin_unavailable`, which names the plan and the plugin: a Version still waiting for its text is quarantined, a searchable Version keeps its text and its enrichment stops, and a rebuild fails. The work is never moved to the new version. A plugin of the active plan, in contrast, may be unreachable for any time: its work keeps retrying. Each ingestion registration counts only its routed receipts and backfills. A rebuild shares enrichment's budget of three reached embedding deadlines per Version; outages do not consume it. Backfill keeps its skip-on-deadline policy. Do not terminate pinned work by hand in Temporal, since its count would never be released. To run quarantined Versions through the new version, [reprocess them](/plugins/reprocess-quarantined-versions).
 
 ## Upgrade an alert rule
 
@@ -156,4 +156,4 @@ The plugins pinned in `QUIVR_CONFIG` are registered at every start. The configur
 
 - A normalizer's check gives each fixture's input file by its path on the api's machine, a `file://` URL, as `quivr plugin test` does. The normalizer must run where it can read the api's temporary folder, for example on the same machine; elsewhere it is rejected, so pin it in the configuration instead.
 - An activation replaces only the retrieval provider with the same plugin id; other retrieval providers keep serving. Configured profile aliases must still resolve in the resulting plan.
-- An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespaces, and vector spaces whose model changes without a new space version.
+- An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension namespaces, and vector spaces whose model changes without a new space version.

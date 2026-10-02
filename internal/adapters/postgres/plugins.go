@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -36,6 +37,7 @@ type querier interface {
 // release with a worker that died during its last attempt and no longer
 // counts.
 const pinnedWorkSQL = `(SELECT count(*) FROM pipeline_plan_work w WHERE (w.kind<>'connector_run' OR w.pinned_at>now()-interval '` + connectorRunPinExpiry + `')
+ AND (w.ingestion_registration_id IS NULL OR NOT ('ingestion'=ANY(plugin_registrations.contributions)) OR w.ingestion_registration_id=plugin_registrations.id)
  AND EXISTS (SELECT 1 FROM pipeline_plan_roles pr WHERE pr.plan_id=w.plan_id AND pr.registration_id=plugin_registrations.id))`
 
 // evaluatorSQL keeps the Subscription Versions v pinning the evaluator of an
@@ -611,4 +613,53 @@ func (s PluginStore) Rollback(ctx context.Context, req registry.RollbackRequest,
 		return out, err
 	}
 	return out, tx.Commit(ctx)
+}
+
+// BindIngestionWork names a receipt's routed owner; retries cannot move it.
+func (s PluginStore) BindIngestionWork(ctx context.Context, kind, org, id, registration string) error {
+	if kind != "ingestion" {
+		return nil
+	}
+	tag, err := s.Pool.Exec(ctx, `UPDATE pipeline_plan_work w SET ingestion_registration_id=$4
+ WHERE kind=$1 AND organization=$2 AND work_id=$3 AND (ingestion_registration_id IS NULL OR ingestion_registration_id=$4)
+ AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.plan_id=w.plan_id AND r.registration_id=$4 AND (r.role='ingestion' OR r.role LIKE 'ingestion:%'))`, kind, org, id, registration)
+	if err == nil && tag.RowsAffected() != 1 {
+		return registry.ErrConflict
+	}
+	return err
+}
+
+// CountPluginUnavailable counts only attempts to the failed registration.
+func (s PluginStore) CountPluginUnavailable(ctx context.Context, kind, org, id, registration string) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `UPDATE pipeline_plan_work SET plugin_unavailable_attempts=jsonb_set(plugin_unavailable_attempts,ARRAY[$4::text],to_jsonb(COALESCE((plugin_unavailable_attempts->>$4)::int,0)+1))
+ WHERE kind=$1 AND organization=$2 AND work_id=$3 RETURNING (plugin_unavailable_attempts->>$4)::int`, kind, org, id, registration).Scan(&n)
+	return n, err
+}
+
+// IngestionSpaceOwner resolves retained declared spaces through their recorded
+// owner, including a registration that has drained from the active plan.
+func (s PluginStore) IngestionSpaceOwner(ctx context.Context, space string) (*plugins.Pin, error) {
+	r, err := scanRegistration(s.Pool.QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE plugin_id=(SELECT owner_plugin_id FROM vector_spaces WHERE id=$1) AND version=(SELECT owner_plugin_version FROM vector_spaces WHERE id=$1)
+ AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.registration_id=plugin_registrations.id AND (r.role='ingestion' OR r.role LIKE 'ingestion:%'))
+ ORDER BY (state='active') DESC,(state='draining') DESC,created_at DESC,id LIMIT 1`, space))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	pin, err := r.Pin()
+	if err != nil {
+		return nil, err
+	}
+	if pin.Manifest.Contributions.Ingestion == nil {
+		return nil, nil
+	}
+	for name, declared := range pin.Manifest.Contributions.Ingestion.Spaces {
+		if plugins.SpaceKey(name, declared.Version) == space {
+			return pin, nil
+		}
+	}
+	return nil, nil
 }

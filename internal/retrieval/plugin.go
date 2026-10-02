@@ -414,7 +414,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			}
 			// A vector hit on the served space counts only with its embedding
 			// coverage, as in a semantic search.
-			if c.Primitive == plugins.PrimitiveNearVector && c.Space == routed[f.GenerationID].Generation.SpaceID && h.EmbeddingID == "" {
+			if c.Primitive == plugins.PrimitiveNearVector && routed[f.GenerationID].Generation.Serves(c.Space) && h.EmbeddingID == "" {
 				continue
 			}
 			if c.GroupBy == plugins.GroupByRecord {

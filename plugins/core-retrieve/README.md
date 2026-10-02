@@ -8,23 +8,23 @@ plugin is pinned (`scripts/connector_plugin.py` `FIRST_PARTY`, Railway
 
 ## What it does
 
-One round of candidates, then the ranking:
+Up to two rounds of candidates, then the ranking:
 
-- **Round 1** asks for one candidate list of `k = limit` that follows the
-  search mode: `lexical` is `bm25` on the title and body (`field: source`),
-  `semantic` is `near_vector` in the served space, `hybrid` is `hybrid` in the
-  served space with alpha 0.5 and relative score fusion. A semantic or hybrid
+- **Round 1** asks for `k = limit` candidates per request: `lexical` uses
+  one `bm25` request on the title and body (`field: source`); `semantic` uses
+  `near_vector` in every served space; `hybrid` uses `hybrid` in every served
+  space with alpha 0.5 and relative score fusion, in batches of at most eight requests. A semantic or hybrid
   search whose Corpora serve no vector space is refused (422
   `unsupported_search`).
-- **Round 2** returns the served candidates, in the order served, as the
-  ranking, with the index's score and an explanation naming the primitive and
+- **Ranking** merges candidates by descending index score and keeps each
+  segment's highest score once, with an explanation naming the primitive and
   the space. Candidates of equal score, which the index returns in the order
   their objects were written, rank by segment id, so the same search over the
   same Records always ranks the same way.
 
 It makes no model call: the engine encodes the query with the owner of the
-served space, core.ingest or, for a Corpus not rebuilt since THE-777, the
-engine's former E5 space. It needs no configuration.
+space: the ingestion plugin that declares it or, for a Corpus not rebuilt
+since THE-777, the engine's former E5 space. It needs no configuration.
 
 ## Profiles
 

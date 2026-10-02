@@ -3,7 +3,7 @@
 # alpha 0.5 by relative score. Every stack pins it unless another retrieval
 # plugin is pinned. Check it with: quivr plugin inspect . && quivr plugin test .
 id: core.retrieve
-version: 1.0.0
+version: 1.1.0
 description: Keywords (BM25F on title and body), the served vector space, or both fused with alpha 0.5 by relative score, as the index ranks them.
 compatibility:
   engine: ">=0.1.0 <0.2.0"
@@ -22,9 +22,9 @@ contributions:
         max_latency_ms: 3000
         max_cost_cents: 1
     limits:
-      # One candidate request, then the ranking.
-      max_rounds: 2
-      max_requests: 1
+      # One candidate request per served space, then the merged ranking.
+      max_rounds: 3
+      max_requests: 8
       # A search's limit is at most 50.
       max_candidates: 50
 run:

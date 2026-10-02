@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
@@ -27,6 +28,18 @@ func configured(t *testing.T, configs ...plugins.PinConfig) registry.Seed {
 	t.Helper()
 	pins, err := plugins.LoadPins(configs)
 	if err != nil {
+		t.Fatal(err)
+	}
+	return registry.FromPins(pins)
+}
+
+func configuredIngestion(t *testing.T, routing plugins.IngestionRouting, configs ...plugins.PinConfig) registry.Seed {
+	t.Helper()
+	pins, err := plugins.LoadPins(configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = pins.ConfigureIngestion(routing); err != nil {
 		t.Fatal(err)
 	}
 	return registry.FromPins(pins)
@@ -113,7 +126,7 @@ func TestPluginConfigurationReconcilesAnEarlierPlan(t *testing.T) {
 		t.Fatalf("api and worker applying together: %+v, errors %v; want one new plan both follow", results, errs)
 	}
 	plan, err := store.ActivePlan(ctx)
-	want := map[string]string{"ingestion": "example.hash_embedder@0.1.0", "normalizer:application/pdf": "pdf-text@0.1.0"}
+	want := map[string]string{"ingestion-default": "example.hash_embedder@0.1.0", "ingestion:example.hash_embedder": "example.hash_embedder@0.1.0", "normalizer:application/pdf": "pdf-text@0.1.0"}
 	if err != nil || plan.ID != results[0].Plan || plan.Source != registry.SourceConfiguration || !reflect.DeepEqual(roles(plan), want) {
 		t.Fatalf("reconciled plan %+v (%v), want roles %v from the configuration", plan, err, want)
 	}
@@ -217,13 +230,13 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 		t.Fatalf("a refused activation changed the plan to %s", plan.ID)
 	}
 	plan, err := service.Activate(ctx, operatorScope, next.ID)
-	if err != nil || plan.ID == applied.Plan || plan.Source != registry.SourceActivation || roles(plan)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if err != nil || plan.ID == applied.Plan || plan.Source != registry.SourceActivation || roles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("activation: %+v (%v), want a new plan with 0.2.0 serving ingestion", plan, err)
 	}
 	if active, _ := store.ActivePlanID(ctx); active != plan.ID {
 		t.Fatalf("active plan %s, want %s", active, plan.ID)
 	}
-	if earlier, err := store.PipelinePlan(ctx, applied.Plan); err != nil || roles(earlier)["ingestion"] != "example.hash_embedder@0.1.0" {
+	if earlier, err := store.PipelinePlan(ctx, applied.Plan); err != nil || roles(earlier)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("the earlier plan stays readable: %+v (%v)", earlier, err)
 	}
 	var owner string
@@ -233,6 +246,31 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	if again, err := service.Activate(ctx, operatorScope, next.ID); err != nil || again.ID != plan.ID {
 		t.Fatalf("activating the active registration again: %+v (%v), want the same plan", again, err)
 	}
+	for _, space := range []string{"example.hash_embedder.small@1", "example.hash_embedder.large@1"} {
+		pin, err := store.IngestionSpaceOwner(ctx, space)
+		if err != nil || pin == nil || pin.Registration != next.ID {
+			t.Fatalf("served/evaluation owner for %s: %v %v", space, pin, err)
+		}
+	}
+	// Retired spaces still address their registry owner while older Corpus
+	// generations carry them; inactive registration does not erase its handle.
+	if _, err = store.ApplyConfiguration(ctx, registry.Seed{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A later endpoint at the same version has never served these spaces.
+	unactivated := next
+	unactivated.Endpoint += "/unactivated"
+	unactivated.ID = registry.RegistrationID(unactivated.PluginID, unactivated.Version, unactivated.ManifestDigest, unactivated.Endpoint, unactivated.Settings.Digest())
+	if _, queued, err := store.RegisterPlugin(ctx, unactivated, "register-unactivated-owner"); err != nil || !queued {
+		t.Fatalf("unactivated same-version registration: queued %v (%v)", queued, err)
+	}
+	pin, err := store.IngestionSpaceOwner(ctx, "example.hash_embedder.large@1")
+	if err != nil || pin == nil || pin.Registration != next.ID {
+		t.Fatalf("retained owner: %v %v", pin, err)
+	}
 }
 
 var operatorScope = corpus.Scope{Organization: "org_ops", Actions: []string{registry.Action}, Corpora: []string{"*"}}
@@ -241,8 +279,9 @@ var operatorScope = corpus.Scope{Organization: "org_ops", Actions: []string{regi
 // pinning work to its plan (THE-782) on real PostgreSQL: work keeps the plan
 // it was first pinned to whatever plan is active when it retries, a
 // registration an activation leaves out reads as draining with the count of
-// work pinned to a plan naming it, and as inactive once that work is
-// released, and each unreachable attempt is counted on the work.
+// work pinned to a plan naming it, unrelated ingestion work stays with its
+// registration, and unavailable attempts have independent registration
+// budgets.
 func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -251,7 +290,14 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
-	seed := configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces})
+	seed := configuredIngestion(t, plugins.IngestionRouting{Default: "example.hash_embedder"},
+		plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces},
+		plugins.PinConfig{
+			Manifest:      "../../../plugins/core-ingest/quivr-plugin.yaml",
+			Endpoint:      "http://127.0.0.1:9961",
+			Configuration: json.RawMessage(`{"tei_url":"http://127.0.0.1:9962","tokenizer":{"python":"python3","model":"tokenizer.json"}}`),
+			Spaces:        map[string]string{"core.ingest.e5-small": plugins.SpaceServed},
+		})
 	first, err := store.ApplyConfiguration(ctx, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -264,8 +310,29 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err = (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
+	registration := func(pluginID string) registry.Registration {
+		t.Helper()
+		for _, r := range seed.Registrations {
+			if r.PluginID == pluginID {
+				return r
+			}
+		}
+		t.Fatalf("seed has no registration for %s", pluginID)
+		return registry.Registration{}
+	}
+	hash := registration("example.hash_embedder")
+	core := registration("core.ingest")
 	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", first.Plan); err != nil || pinned != first.Plan {
 		t.Fatalf("pinning work to the active plan: %q (%v)", pinned, err)
+	}
+	if err = store.BindIngestionWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", hash.ID); err != nil {
+		t.Fatalf("binding the old receipt to hash_embedder: %v", err)
+	}
+	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_core", first.Plan); err != nil || pinned != first.Plan {
+		t.Fatalf("pinning core.ingest work to the active plan: %q (%v)", pinned, err)
+	}
+	if err = store.BindIngestionWork(ctx, plugins.WorkIngestion, "org_a", "receipt_core", core.ID); err != nil {
+		t.Fatalf("binding the core receipt: %v", err)
 	}
 
 	next := embedderVersion(t, "0.2.0")
@@ -285,13 +352,27 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", second.ID); err != nil || pinned != second.ID {
 		t.Fatalf("new work is pinned to %q (%v), want the active plan", pinned, err)
 	}
-	if plan, byID, err := store.PlanMembers(ctx, first.Plan); err != nil || roles(plan)["ingestion"] != "example.hash_embedder@0.1.0" || len(byID) != 1 {
+	if err = store.BindIngestionWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", next.ID); err != nil {
+		t.Fatalf("binding new hash work: %v", err)
+	}
+	if plan, byID, err := store.PlanMembers(ctx, first.Plan); err != nil || roles(plan)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" || roles(plan)["ingestion:core.ingest"] != "core.ingest@1.0.0" || len(byID) != 2 {
 		t.Fatalf("the pinned plan's members: %+v %v (%v)", plan, byID, err)
 	}
 	for want := 1; want <= 2; want++ {
 		if n, err := store.CountUnavailable(ctx, plugins.WorkIngestion, "org_a", "receipt_old"); err != nil || n != want {
 			t.Fatalf("unavailable attempt %d counted as %d (%v)", want, n, err)
 		}
+	}
+	for want := 1; want <= 2; want++ {
+		if n, err := store.CountPluginUnavailable(ctx, plugins.WorkIngestion, "org_a", "receipt_old", hash.ID); err != nil || n != want {
+			t.Fatalf("hash unavailable attempt %d counted as %d (%v)", want, n, err)
+		}
+	}
+	if n, err := store.CountPluginUnavailable(ctx, plugins.WorkIngestion, "org_a", "receipt_core", core.ID); err != nil || n != 1 {
+		t.Fatalf("core unavailable budget: %d (%v), want 1", n, err)
+	}
+	if n, err := store.CountPluginUnavailable(ctx, plugins.WorkIngestion, "org_a", "receipt_new", next.ID); err != nil || n != 1 {
+		t.Fatalf("upgraded hash unavailable budget: %d (%v), want 1", n, err)
 	}
 
 	state := func(id string) (string, int) {
@@ -302,9 +383,12 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 		}
 		return r.State, r.PinnedWork
 	}
-	old := seed.Registrations[0].ID
+	old := hash.ID
 	if s, n := state(old); s != registry.StateDraining || n != 1 {
 		t.Fatalf("0.1.0 after the activation: %s with %d pinned, want draining with 1", s, n)
+	}
+	if s, n := state(core.ID); s != registry.StateActive || n != 1 {
+		t.Fatalf("core.ingest after the hash activation: %s with %d pinned, want active with 1", s, n)
 	}
 	if s, n := state(next.ID); s != registry.StateActive || n != 1 {
 		t.Fatalf("0.2.0 after the activation: %s with %d pinned, want active with 1", s, n)
@@ -379,7 +463,7 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	unreachable = nil
 	stop := registry.RollbackRequest{Key: "rollback-1", PinnedWork: registry.PinnedWorkStop}
 	back, err := service.Rollback(ctx, operatorScope, stop)
-	if err != nil || back.Source != registry.SourceRollback || back.PreviousPlanID != bad.ID || roles(back)["ingestion"] != "example.hash_embedder@0.1.0" {
+	if err != nil || back.Source != registry.SourceRollback || back.PreviousPlanID != bad.ID || roles(back)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.1.0" {
 		t.Fatalf("rollback: %+v (%v), want a rollback plan after %s with 0.1.0 serving ingestion", back, err, bad.ID)
 	}
 	if active, _ := store.ActivePlanID(ctx); active != back.ID {
@@ -407,7 +491,7 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 		t.Fatalf("the key with another request: %v, want ErrIdempotencyConflict", err)
 	}
 	named, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "rollback-2", Plan: bad.ID})
-	if err != nil || named.PreviousPlanID != back.ID || roles(named)["ingestion"] != "example.hash_embedder@0.2.0" {
+	if err != nil || named.PreviousPlanID != back.ID || roles(named)["ingestion:example.hash_embedder"] != "example.hash_embedder@0.2.0" {
 		t.Fatalf("a rollback to a named plan: %+v (%v), want 0.2.0 serving again", named, err)
 	}
 	if replay, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "rollback-2", Plan: bad.ID, PinnedWork: registry.PinnedWorkDrain}); err != nil || replay.ID != named.ID {
@@ -439,12 +523,13 @@ func TestRetrievalProvidersPersistIndependentLifecycles(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, other := seed.Registrations[0], seed.Registrations[1]
+	const upgradeVersion = "2.0.0"
 	if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", "search_provider_work", first.Plan); err != nil {
 		t.Fatal(err)
 	}
 	service := registry.Service{Store: store, Reach: func(context.Context, registry.Registration) error { return nil }}
 	next, err := service.Register(ctx, operatorScope, registry.Request{Key: "upgrade-search",
-		Manifest: []byte(strings.Replace(string(old.Manifest), "version: 1.0.0", "version: 1.1.0", 1)), Endpoint: old.Endpoint})
+		Manifest: []byte(strings.Replace(string(old.Manifest), "version: "+old.Version, "version: "+upgradeVersion, 1)), Endpoint: old.Endpoint})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +546,7 @@ func TestRetrievalProvidersPersistIndependentLifecycles(t *testing.T) {
 	activate := func() {
 		t.Helper()
 		p, err := service.Activate(ctx, operatorScope, next.ID)
-		if err != nil || roles(p)["retrieval:core.retrieve"] != "core.retrieve@1.1.0" || roles(p)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.1.0" {
+		if err != nil || roles(p)["retrieval:core.retrieve"] != "core.retrieve@"+upgradeVersion || roles(p)["retrieval:example.fusion_retriever"] != other.PluginID+"@"+other.Version {
 			t.Fatalf("activation %+v: %v", p, err)
 		}
 		check(old.ID, registry.StateDraining)
@@ -469,7 +554,7 @@ func TestRetrievalProvidersPersistIndependentLifecycles(t *testing.T) {
 	}
 	activate()
 	back, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "restore-search", Plan: first.Plan})
-	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@1.0.0" || roles(back)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.1.0" {
+	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@"+old.Version || roles(back)["retrieval:example.fusion_retriever"] != other.PluginID+"@"+other.Version {
 		t.Fatalf("rollback %+v: %v", back, err)
 	}
 	check(old.ID, registry.StateActive)
@@ -502,10 +587,19 @@ func TestLegacyRetrievalPlanCanReconcileAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := registry.Service{Store: store, Reach: func(context.Context, registry.Registration) error { return nil }}
 	old := seed.Registrations[0]
+	// Construct the persisted plan and configuration snapshot an older
+	// binary wrote; current configuration writes use canonical role names.
+	if _, err = pool.Exec(ctx, `UPDATE pipeline_plan_roles SET role='retrieval' WHERE plan_id=$1 AND role='retrieval:core.retrieve'`, first.Plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE pipeline_configuration SET roles=jsonb_build_object('retrieval',$1::text)`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	service := registry.Service{Store: store, Reach: func(context.Context, registry.Registration) error { return nil }}
+	const upgradeVersion = "2.0.0"
 	next, err := service.Register(ctx, operatorScope, registry.Request{Key: "upgrade-legacy-search",
-		Manifest: []byte(strings.Replace(string(old.Manifest), "version: 1.0.0", "version: 1.1.0", 1)), Endpoint: old.Endpoint})
+		Manifest: []byte(strings.Replace(string(old.Manifest), "version: "+old.Version, "version: "+upgradeVersion, 1)), Endpoint: old.Endpoint})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,15 +613,15 @@ func TestLegacyRetrievalPlanCanReconcileAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, err := store.ActivePlan(ctx)
-	if err != nil || roles(active)["retrieval:core.retrieve"] != "core.retrieve@1.1.0" {
+	if err != nil || roles(active)["retrieval:core.retrieve"] != "core.retrieve@"+upgradeVersion {
 		t.Fatalf("startup preserved operator upgrade: %+v (%v)", active, err)
 	}
 	back, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "restore-legacy-search", Plan: first.Plan})
-	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@1.0.0" {
+	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@"+old.Version {
 		t.Fatalf("rollback to recorded singleton: %+v (%v)", back, err)
 	}
 	recorded, err := store.PipelinePlan(ctx, first.Plan)
-	if err != nil || roles(recorded)["retrieval"] != "core.retrieve@1.0.0" {
+	if err != nil || roles(recorded)["retrieval"] != "core.retrieve@"+old.Version {
 		t.Fatalf("historical plan remained readable and unchanged: %+v (%v)", recorded, err)
 	}
 }

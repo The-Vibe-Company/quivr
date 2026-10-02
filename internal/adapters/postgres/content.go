@@ -140,7 +140,7 @@ func (s ContentStore) Accept(ctx context.Context, scope corpus.Scope, c content.
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return content.Receipt{}, err
 	}
-	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,'')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, canonical, content.Title(c))
+	reservation, err := tx.Exec(ctx, `INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,predecessor_id,command,accepted_at,title,source_media_type) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,now(),nullif($10,''),COALESCE(NULLIF($11,''),'text/plain')) ON CONFLICT DO NOTHING`, scope.Organization, recordID, slot, digest, versionID, order, c.Position, predecessor, canonical, content.Title(c), c.SourceMediaType)
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -336,7 +336,7 @@ func (s ContentStore) Records(ctx context.Context, org, corpusID, after string, 
 func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (content.StoredVersion, error) {
 	v := content.StoredVersion{}
 	var provenance, extensions []byte
-	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance,v.extensions,rc.accepted_at,v.materialized_at,v.segmented_at,v.retrieval_ready_at,v.enriched_at,v.evaluated_at,v.quarantined_at,r.withdrawn_at FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance, &extensions, &v.AcceptedAt, &v.Steps.Materialized, &v.Steps.Segmented, &v.Steps.RetrievalReady, &v.Steps.Enriched, &v.Steps.Evaluated, &v.Steps.Quarantined, &v.Steps.Withdrawn)
+	err := s.Pool.QueryRow(ctx, `SELECT v.record_id,v.id,r.corpus_id,t.object_key,t.sha256,t.byte_length,m.object_key,m.sha256,m.byte_length,v.provenance,v.extensions,rc.accepted_at,v.materialized_at,v.segmented_at,v.retrieval_ready_at,v.enriched_at,v.evaluated_at,v.quarantined_at,r.withdrawn_at,COALESCE(ar.source_media_type,'text/plain') FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN content_blobs t ON (t.organization,t.blob_id)=(v.organization,v.text_blob_id) JOIN content_blobs m ON (m.organization,m.blob_id)=(v.organization,v.manifest_blob_id) LEFT JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order WHERE v.organization=$1 AND v.record_id=$2 AND v.id=$3`, org, recordID, id).Scan(&v.RecordID, &v.ID, &v.CorpusID, &v.TextBlob.Key, &v.TextBlob.SHA256, &v.TextBlob.Size, &v.ManifestBlob.Key, &v.ManifestBlob.SHA256, &v.ManifestBlob.Size, &provenance, &extensions, &v.AcceptedAt, &v.Steps.Materialized, &v.Steps.Segmented, &v.Steps.RetrievalReady, &v.Steps.Enriched, &v.Steps.Evaluated, &v.Steps.Quarantined, &v.Steps.Withdrawn, &v.SourceMediaType)
 	v.Steps.Accepted = v.AcceptedAt
 	v.Steps = utcSteps(v.Steps)
 	v.AcceptedAt = v.Steps.Accepted
@@ -415,7 +415,7 @@ func (s ContentStore) Work(ctx context.Context, org, id string) (content.Work, b
 	w := content.Work{Organization: org, ReceiptID: id}
 	var command []byte
 	var state string
-	err := s.Pool.QueryRow(ctx, `SELECT r.record_id,a.command,r.state,r.slot,r.digest,a.version_id,a.acceptance_order,a.source_position,coalesce(a.predecessor_id,'') FROM ingestion_receipts r JOIN accepted_revisions a ON (a.organization,a.record_id,a.slot)=(r.organization,r.record_id,r.slot) WHERE r.organization=$1 AND r.id=$2`, org, id).Scan(&w.RecordID, &command, &state, &w.Slot, &w.Digest, &w.VersionID, &w.Order, &w.Position, &w.PredecessorID)
+	err := s.Pool.QueryRow(ctx, `SELECT r.record_id,a.command,r.state,r.slot,r.digest,a.version_id,a.acceptance_order,a.source_position,coalesce(a.predecessor_id,''),a.source_media_type FROM ingestion_receipts r JOIN accepted_revisions a ON (a.organization,a.record_id,a.slot)=(r.organization,r.record_id,r.slot) WHERE r.organization=$1 AND r.id=$2`, org, id).Scan(&w.RecordID, &command, &state, &w.Slot, &w.Digest, &w.VersionID, &w.Order, &w.Position, &w.PredecessorID, &w.Command.SourceMediaType)
 	if err != nil {
 		return w, false, err
 	}

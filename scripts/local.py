@@ -595,6 +595,7 @@ def parts():
             step('retrieval_plugin',retrieval_plugin.verify),
             # v0 pins one plugin: switch to the reference pdf-text plugin (the make dev default) for PDFs.
             step('pdf_normalizer_pin',normalizer_plugin.switch,'pdf-text'),
+            step('ingestion_source_routes',ingestion_plugin.verify_routes),
             acceptance('pdf_normalizer','TestPDF'),
             # Alerts decided by the pinned alert-rule template, next to pdf-text: one webhook per match,
             # none for a non-match, 422 for an invalid expression, metadata rules; then a rule-plugin outage

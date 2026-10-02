@@ -61,18 +61,18 @@ func (cfg Config) loadPins(command string) (*plugins.PinSet, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = pins.ConfigureIngestion(cfg.Ingestion); err != nil {
+		return pins, err
+	}
 	_, err = pins.RetrievalProfiles(cfg.Retrieval.Profiles)
 	return pins, err
 }
 
 // migrationPins loads the pins for `quivr migrate`, which registers the
-// ingestion plugin's spaces. A pin migrate cannot load registers nothing:
-// api and worker refuse it at their own startup.
+// ingestion plugins' spaces. Serving-route errors do not discard valid
+// pins; api and worker refuse those routes at their own startup.
 func (cfg Config) migrationPins() *plugins.PinSet {
-	pins, err := cfg.loadPins("api")
-	if err != nil {
-		return nil
-	}
+	pins, _ := cfg.loadPins("api")
 	return pins
 }
 

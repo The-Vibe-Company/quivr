@@ -32,6 +32,9 @@ func uploadBlob(t *testing.T, token string, data []byte, mediaType string) strin
 	t.Helper()
 	sum := sha256.Sum256(data)
 	created := request(t, "POST", "/v0/uploads", token, map[string]any{"size_bytes": len(data), "sha256": hex.EncodeToString(sum[:]), "media_type": mediaType}, 201)
+	if created["state"] == "verified" {
+		return created["blob_id"].(string)
+	}
 	if status := rawTransfer(t, created["upload_url"].(string), uploadHeaders(created), data); status/100 != 2 {
 		t.Fatalf("transfer refused: %d", status)
 	}

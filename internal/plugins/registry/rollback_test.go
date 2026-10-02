@@ -2,6 +2,7 @@ package registry_test
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -82,5 +83,41 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 	refused := errors.New("connector kind rss is built in")
 	if _, err := registry.PlanRollback(active, target, members, func(*plugins.PinSet) error { return refused }); !errors.Is(err, registry.ErrConflict) || !strings.Contains(err.Error(), refused.Error()) {
 		t.Fatalf("a check of the running engine refuses: %v", err)
+	}
+}
+
+// TestRollbackRestoresPinnedIngestionRoutes verifies that rollback resolves
+// the target plan's source routes, so an unrelated default remains in place
+// while the routed plugin version returns.
+func TestRollbackRestoresPinnedIngestionRoutes(t *testing.T) {
+	words := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	pdfV1 := registered(t, manifest("example.pdf", "1.0.0", ingestion("example.pdf.small")))
+	pdfV2 := registered(t, manifest("example.pdf", "2.0.0", ingestion("example.pdf.small")))
+	source, err := os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriever := registered(t, string(source))
+	active, members := routedPlan(t, plugins.IngestionRouting{Default: "example.words", Routes: map[string]string{"application/pdf": "example.pdf"}}, words, pdfV2, retriever)
+	target, targetMembers := routedPlan(t, plugins.IngestionRouting{Default: "example.words", Routes: map[string]string{"application/pdf": "example.pdf"}}, words, pdfV1, retriever)
+	target.ID = "plan_target"
+	for i := range target.Roles {
+		switch target.Roles[i].Role {
+		case "ingestion-default":
+			target.Roles[i].Role = "ingestion"
+		case "retrieval:example.fusion_retriever":
+			target.Roles[i].Role = "retrieval"
+		}
+	}
+	for id, member := range targetMembers {
+		members[id] = member
+	}
+	back, err := registry.PlanRollback(active, target, members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := roleMap(back.Roles)
+	if got["ingestion-default"] != "example.words@1.0.0" || got["ingestion-route:application/pdf"] != "example.pdf@1.0.0" || got["retrieval:example.fusion_retriever"] != retriever.PluginID+"@"+retriever.Version || !reflect.DeepEqual(back.Retired, []string{pdfV2.ID}) || len(back.Returning) != 1 || back.Returning[0].ID != pdfV1.ID {
+		t.Fatalf("rollback roles=%v retired=%v returning=%v", got, back.Retired, back.Returning)
 	}
 }

@@ -58,9 +58,24 @@ func (p planIngestion) ActiveIngestion(ctx context.Context) (backfill.Ingestion,
 	if err != nil {
 		return backfill.Ingestion{}, err
 	}
-	id := ingestionRole(plan)
+	return p.ingestion(ctx, registry.DefaultIngestion(plan))
+}
+
+// RegistrationIngestion selects any ingestion member of the active plan.
+func (p planIngestion) RegistrationIngestion(ctx context.Context, id string) (backfill.Ingestion, error) {
+	plan, err := p.store.ActivePlan(ctx)
+	if err != nil {
+		return backfill.Ingestion{}, err
+	}
+	if registry.HasIngestion(plan, id) {
+		return p.ingestion(ctx, id)
+	}
+	return backfill.Ingestion{}, backfill.ErrRegistrationNotActive
+}
+
+func (p planIngestion) ingestion(ctx context.Context, id string) (backfill.Ingestion, error) {
 	if id == "" {
-		return backfill.Ingestion{}, fmt.Errorf("%w: the active pipeline plan has no ingestion plugin", backfill.ErrInvalid)
+		return backfill.Ingestion{}, fmt.Errorf("%w: the plan has no default ingestion plugin", backfill.ErrInvalid)
 	}
 	reg, err := p.store.PluginRegistration(ctx, id)
 	if err != nil {
@@ -70,7 +85,12 @@ func (p planIngestion) ActiveIngestion(ctx context.Context) (backfill.Ingestion,
 	if err != nil {
 		// A registration recorded before registrations kept their manifest:
 		// the plan this process follows loaded the same plugin.
-		pin = p.live.Set().Ingestion()
+		for _, candidate := range p.live.Set().Ingestions() {
+			if candidate.Registration == id {
+				pin = candidate
+				break
+			}
+		}
 		if pin == nil || pin.Manifest.ID != reg.PluginID || pin.Manifest.Version != reg.Version {
 			return backfill.Ingestion{}, err
 		}
@@ -92,7 +112,7 @@ func (p planIngestion) ActiveIngestion(ctx context.Context) (backfill.Ingestion,
 // Ingestion names the plan the work ctx carries is pinned to (the one the
 // process follows when it is not pinned) and that plan's ingestion
 // registration.
-func (p planIngestion) Ingestion(ctx context.Context) (string, string, error) {
+func (p planIngestion) Ingestion(ctx context.Context, registrationID string) (string, string, error) {
 	id := p.live.Plan()
 	if w, ok := plugins.WorkOf(ctx); ok {
 		id = w.Plan
@@ -104,16 +124,13 @@ func (p planIngestion) Ingestion(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return plan.ID, ingestionRole(plan), nil
-}
-
-func ingestionRole(plan registry.Plan) string {
-	for _, role := range plan.Roles {
-		if role.Role == "ingestion" {
-			return role.RegistrationID
-		}
+	if registrationID == "" {
+		return plan.ID, registry.DefaultIngestion(plan), nil
 	}
-	return ""
+	if registry.HasIngestion(plan, registrationID) {
+		return plan.ID, registrationID, nil
+	}
+	return plan.ID, "", nil
 }
 
 // backfillThroughput reads recent throughput from the observability rollups:

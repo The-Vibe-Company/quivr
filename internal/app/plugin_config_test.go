@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 )
 
 // An invalid pin refuses api and worker startup before any dependency is used,
@@ -134,5 +137,34 @@ func TestInvalidSearchAliasRefusesStartup(t *testing.T) {
 		if err := Run(command); err == nil || !strings.Contains(err.Error(), "unknown profile") {
 			t.Fatalf("%s must reject the profile before dependencies: %v", command, err)
 		}
+	}
+}
+
+// Migration registers valid ingestion pins even when serving routes are
+// invalid; a routing typo must not retire every configured owner's spaces.
+func TestMigrationKeepsSpacesWhenRoutingIsInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ingestion plugins.IngestionRouting
+		retrieval RetrievalConfig
+	}{
+		{name: "unknown search profile", retrieval: RetrievalConfig{Profiles: map[string]string{"default": "core.retrieve/missing"}}},
+		{name: "unknown ingestion default", ingestion: plugins.IngestionRouting{Default: "example.missing"}},
+		{name: "unknown source route", ingestion: plugins.IngestionRouting{Routes: map[string]string{"application/pdf": "example.missing"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Plugins: []plugins.PinConfig{
+				{Manifest: "../../plugins/core-ingest/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1", Configuration: json.RawMessage(`{"tei_url":"http://127.0.0.1:1","tokenizer":{"python":"python3","model":"/unused/tokenizer.json"}}`)},
+				{Manifest: "../../plugins/core-retrieve/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1"},
+				{Manifest: "../../sdks/go/examples/hash-embedder/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1", Spaces: map[string]string{"example.hash_embedder.small": "served", "example.hash_embedder.large": "evaluation"}},
+			}, Ingestion: tc.ingestion, Retrieval: tc.retrieval}
+			owners := map[string]int{}
+			for _, space := range DeploymentSpaces(cfg.migrationPins()) {
+				owners[space.OwnerPluginID]++
+			}
+			if !reflect.DeepEqual(owners, map[string]int{"core.ingest": 1, "example.hash_embedder": 2}) {
+				t.Fatalf("migration registers owners %v; want both configured ingestion owners and all enabled spaces", owners)
+			}
+		})
 	}
 }

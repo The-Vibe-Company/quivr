@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +50,8 @@ func (c *CoverageCache) spaces(ctx context.Context, registry SpaceRegistry, org 
 		_, spaces, total, err := registry.VectorSpaces(ctx, org, r.CorpusID)
 		return spaces, total, err
 	}
-	key := strings.Join(append([]string{org, r.CorpusID, r.Generation.ID, r.Generation.SpaceID}, r.Generation.VectorSpaces()...), "\x00")
+	roles, _ := json.Marshal(r.Generation.Spaces)
+	key := strings.Join(append([]string{org, r.CorpusID, r.Generation.ID, r.Generation.SpaceID, string(roles)}, r.Generation.VectorSpaces()...), "\x00")
 	c.mu.Lock()
 	e, ok := c.entries[key]
 	c.mu.Unlock()
@@ -62,7 +64,8 @@ func (c *CoverageCache) spaces(ctx context.Context, registry SpaceRegistry, org 
 	}
 	// Routing or its served space moved between the two reads: serve this
 	// answer, keep nothing.
-	if g.ID != r.Generation.ID || g.SpaceID != r.Generation.SpaceID {
+	currentRoles, _ := json.Marshal(g.Spaces)
+	if g.ID != r.Generation.ID || g.SpaceID != r.Generation.SpaceID || string(currentRoles) != string(roles) {
 		return spaces, total, nil
 	}
 	c.mu.Lock()

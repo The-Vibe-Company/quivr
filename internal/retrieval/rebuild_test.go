@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 )
 
@@ -88,6 +89,7 @@ func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operati
 type fakeRebuildContent struct {
 	versionErr error
 	reads      int
+	timeouts   int
 }
 
 func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID, id string) (content.Version, error) {
@@ -96,6 +98,11 @@ func (f *fakeRebuildContent) Version(_ context.Context, _ corpus.Scope, recordID
 		return content.Version{}, f.versionErr
 	}
 	return content.Version{ID: id, RecordID: recordID}, nil
+}
+
+func (f *fakeRebuildContent) CountEnrichmentTimeout(context.Context, string, string) (int, error) {
+	f.timeouts++
+	return f.timeouts, nil
 }
 
 type fakeRebuildProjection struct{ lexical, vectors int }
@@ -299,5 +306,28 @@ func TestRebuildTerminalFailureAfterCancelRequestSettlesCanceled(t *testing.T) {
 	run(t, r)
 	if store.activated || store.state != operations.StateCanceled || len(store.failed) != 0 {
 		t.Fatalf("activated=%v state=%s failed=%v", store.activated, store.state, store.failed)
+	}
+}
+
+// A rebuild shares the vector deadline budget with enrichment: outages retry
+// freely; the third reached deadline fails the Operation without cutover.
+func TestRebuildStopsAfterTheSharedVectorDeadlineBudget(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+	canonical := &fakeRebuildContent{}
+	plugin := &fakeDeriver{}
+	rebuilder := retrieval.Rebuilder{Store: store, Content: canonical, Projection: &fakeRebuildProjection{}, Plugin: plugin, Routing: routedTo("space")}
+	for _, cause := range []error{processing.ErrPluginDeadline, errors.New("connection refused"), processing.ErrPluginDeadline} {
+		plugin.err = cause
+		if done, err := rebuilder.Step(context.Background(), "org", "op"); err == nil || done {
+			t.Fatalf("transient derivation: done=%v err=%v", done, err)
+		}
+	}
+	if canonical.timeouts != 2 || len(store.failed) != 0 {
+		t.Fatalf("outage consumed deadline budget: %d %v", canonical.timeouts, store.failed)
+	}
+	plugin.err = processing.ErrPluginDeadline
+	done, err := rebuilder.Step(context.Background(), "org", "op")
+	if err != nil || !done || len(store.failed) != 1 || store.failed[0].Code != content.CodeEnrichmentTimeout || store.activated {
+		t.Fatalf("deadline budget: done=%v err=%v failures=%v activated=%v", done, err, store.failed, store.activated)
 	}
 }

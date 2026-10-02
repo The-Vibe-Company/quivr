@@ -27,9 +27,10 @@ const backfillScopeSQL = `records r JOIN record_versions v ON (v.organization,v.
  JOIN segmentations s ON s.organization=pc.organization AND s.id=pc.segmentation_id
  LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
  WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND s.recipe LIKE 'plugin:%'
+ AND split_part(substring(s.recipe from 8),'@',1)=(SELECT pr.plugin_id FROM plugin_registrations pr WHERE pr.id=$8)
  AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4) AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
  AND NOT EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
-  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND (ec.space_id=$6 OR ec.space_id<>ALL($7::text[]))))
+  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec JOIN vector_spaces vs ON vs.id=ec.space_id WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND vs.owner_plugin_id=split_part(substring(s.recipe from 8),'@',1) AND (ec.space_id=$6 OR ec.space_id<>ALL($7::text[]))))
  AND EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($7::text[]) t(space) WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
   AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=t.space))`
 
@@ -63,7 +64,7 @@ func (s ContentStore) BackfillSize(ctx context.Context, org string, spec operati
 	}
 	err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT sg.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0) FROM segments sg
 WHERE (sg.organization,sg.version_id,sg.segmentation_id) IN (SELECT v.organization,v.id,pc.segmentation_id FROM `+backfillScopeSQL+`)`,
-		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces).Scan(&size.Versions, &size.Segments, &size.CodePoints)
+		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces, spec.RegistrationID).Scan(&size.Versions, &size.Segments, &size.CodePoints)
 	return size, err
 }
 
@@ -146,7 +147,7 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 	// must still name its registration for ingestion: its first step then
 	// runs on that plan even if a worker has not followed it yet.
 	var plan string
-	err := tx.QueryRow(ctx, `SELECT a.plan_id FROM active_pipeline_plan a JOIN pipeline_plan_roles r ON r.plan_id=a.plan_id AND r.role='ingestion' AND r.registration_id=$1`, spec.RegistrationID).Scan(&plan)
+	err := tx.QueryRow(ctx, `SELECT a.plan_id FROM active_pipeline_plan a JOIN pipeline_plan_roles r ON r.plan_id=a.plan_id AND (r.role='ingestion' OR r.role LIKE 'ingestion:%') AND r.registration_id=$1`, spec.RegistrationID).Scan(&plan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return operations.Operation{}, backfill.ErrRegistrationNotActive
 	}
@@ -167,7 +168,7 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 	if _, err = tx.Exec(ctx, `INSERT INTO backfills(organization,operation_id,registration_id,spaces,accepted_after,accepted_before,estimate,plan_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, org, id, spec.RegistrationID, spec.Spaces, spec.AcceptedAfter, spec.AcceptedBefore, estimate, plan); err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES('operation',$1,$2,$3)`, org, id, plan); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id,ingestion_registration_id) VALUES('operation',$1,$2,$3,$4)`, org, id, plan, spec.RegistrationID); err != nil {
 		return operations.Operation{}, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
@@ -242,7 +243,7 @@ func (s ContentStore) CarryBackfillSpaces(ctx context.Context, org, id string) (
 	}
 	if _, counted := op.Counters["versions_in_scope"]; !counted {
 		var size int64
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces).Scan(&size); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID).Scan(&size); err != nil {
 			return g, err
 		}
 		if err = addCounters(ctx, tx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
@@ -302,7 +303,7 @@ func carrySpaces(ctx context.Context, tx pgx.Tx, g content.Generation, spaces []
 	if len(missing) == 0 {
 		return g, nil
 	}
-	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric) ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
+	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id) ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
 WHERE id=$1 RETURNING spaces`, g.ID, missing).Scan(&raw)
 	if err != nil {
 		return g, err
@@ -331,8 +332,8 @@ func (s ContentStore) BackfillCandidates(ctx context.Context, org, id string, g 
 	if op.Backfill == nil {
 		return nil, operations.ErrUnsupportedKind
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,(SELECT s2.recipe FROM segmentations s2 WHERE s2.organization=pc.organization AND s2.id=pc.segmentation_id) FROM `+backfillScopeSQL+` AND v.id>$8 ORDER BY v.id LIMIT $9`,
-		org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.Checkpoint, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,(SELECT s2.recipe FROM segmentations s2 WHERE s2.organization=pc.organization AND s2.id=pc.segmentation_id) FROM `+backfillScopeSQL+` AND v.id>$9 ORDER BY v.id LIMIT $10`,
+		org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.Checkpoint, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -36,6 +36,15 @@ type IngestionPlugin interface {
 }
 
 // PluginSegment is one segment a plugin returned, with a vector per space key.
+type workBinder interface{ Bind(context.Context) error }
+
+func (d PluginDeriver) bind(ctx context.Context) error {
+	if p, ok := d.Plugin.(workBinder); ok {
+		return p.Bind(ctx)
+	}
+	return nil
+}
+
 type PluginSegment struct {
 	content.SegmentInput
 	Vectors map[string][]float32
@@ -50,12 +59,63 @@ type PluginDeriver struct {
 	Plugin  IngestionPlugin
 }
 
-// Following is an ingestion plugin that follows the Pipeline Plan (Spec 5):
-// the plan the work ctx carries is pinned to, or else the active one. A
-// derivation resolves it once, so every call of one derivation reaches the
-// same plugin version even when the active plan changes meanwhile.
-type Following interface {
-	Current(ctx context.Context) IngestionPlugin
+// Routed resolves ingestion by the Version's accepted source media type,
+// and resolves query/backfill work by the vector space's owner.
+type Routed interface {
+	Ingestor(context.Context, string) IngestionPlugin
+	ForSpace(context.Context, string) IngestionPlugin
+}
+
+func (d PluginDeriver) forVersion(ctx context.Context, v content.Version) PluginDeriver {
+	if r, ok := d.Plugin.(Routed); ok {
+		d.Plugin = r.Ingestor(ctx, v.SourceMediaType)
+		return d
+	}
+	return d.resolved(ctx)
+}
+func (d PluginDeriver) forSpace(ctx context.Context, space string) PluginDeriver {
+	if r, ok := d.Plugin.(Routed); ok {
+		d.Plugin = r.ForSpace(ctx, space)
+		return d
+	}
+	return d.resolved(ctx)
+}
+
+type ingestionFailure struct {
+	plugin IngestionPlugin
+	cause  error
+}
+
+func (e *ingestionFailure) Error() string { return e.cause.Error() }
+func (e *ingestionFailure) Unwrap() error { return e.cause }
+func (d PluginDeriver) failure(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &ingestionFailure{plugin: d.Plugin, cause: err}
+}
+
+// Bound resolves one source route (or a backfill target owner) for an entire step.
+func (d PluginDeriver) Bound(ctx context.Context, mediaType string, spaces []string) DerivationDriver {
+	if len(spaces) > 0 {
+		return d.forSpace(ctx, spaces[0])
+	}
+	return d.forVersion(ctx, content.Version{SourceMediaType: mediaType})
+}
+func (d PluginDeriver) ServedSpace(g content.Generation) string {
+	if d.Plugin == nil {
+		return ""
+	}
+	return g.ServedFor(content.PluginOfRecipe(d.Plugin.Recipe()))
+}
+
+// Serves checks the routed owner's served space of a generation.
+func (d PluginDeriver) Serves(ctx context.Context, v content.Version, g content.Generation) error {
+	d = d.forVersion(ctx, v)
+	if d.Plugin == nil || !d.owns(g.ServedFor(content.PluginOfRecipe(d.Plugin.Recipe()))) {
+		return d.failure(ErrSpaceUnowned)
+	}
+	return nil
 }
 
 // Pinned is an ingestion plugin that decides whether work pinned to its plan
@@ -66,10 +126,9 @@ type Pinned interface {
 	Gone(ctx context.Context, cause error) (*content.Diagnostic, error)
 }
 
-// resolved is the deriver with the plugin the plan names for ctx.
 func (d PluginDeriver) resolved(ctx context.Context) PluginDeriver {
-	if f, ok := d.Plugin.(Following); ok {
-		d.Plugin = f.Current(ctx)
+	if r, ok := d.Plugin.(Routed); ok {
+		d.Plugin = r.Ingestor(ctx, "")
 	}
 	return d
 }
@@ -77,7 +136,13 @@ func (d PluginDeriver) resolved(ctx context.Context) PluginDeriver {
 // Gone is the diagnostic that stops work pinned to a plan after cause
 // (Pinned), or nil to keep retrying.
 func (d PluginDeriver) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
-	if p, ok := d.resolved(ctx).Plugin.(Pinned); ok {
+	var failure *ingestionFailure
+	if errors.As(cause, &failure) {
+		d.Plugin = failure.plugin
+	} else {
+		d = d.resolved(ctx)
+	}
+	if p, ok := d.Plugin.(Pinned); ok {
 		return p.Gone(ctx, cause)
 	}
 	return nil, nil
@@ -85,7 +150,7 @@ func (d PluginDeriver) Gone(ctx context.Context, cause error) (*content.Diagnost
 
 // Owns reports whether the plugin the plan names for ctx owns a space.
 func (d PluginDeriver) Owns(ctx context.Context, space string) bool {
-	return d.Plugin != nil && d.resolved(ctx).owns(space)
+	return d.Plugin != nil && d.forSpace(ctx, space).owns(space)
 }
 
 func (d PluginDeriver) owns(space string) bool { return d.Plugin != nil && d.Plugin.Owns(space) }
@@ -96,9 +161,16 @@ func (d PluginDeriver) owns(space string) bool { return d.Plugin != nil && d.Plu
 // limited to Plugin API 0.6 answers segments and vectors in one call; both
 // are stored, the vectors in the generation's spaces it owns or, for a
 // generation it does not serve, in the spaces the deployment enables.
-func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, error) {
-	d = d.resolved(ctx)
-	seg, err := d.Content.PluginSegmentationOf(ctx, org, v, d.Plugin.Recipe())
+func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (seg content.Segmentation, err error) {
+	d = d.forVersion(ctx, v)
+	defer func() { err = d.failure(err) }()
+	if err = d.bind(ctx); err != nil {
+		return
+	}
+	if d.Plugin == nil {
+		return seg, ErrSpaceUnowned
+	}
+	seg, err = d.Content.PluginSegmentationOf(ctx, org, v, d.Plugin.Recipe())
 	if !errors.Is(err, corpus.ErrNotFound) {
 		return seg, err
 	}
@@ -130,11 +202,18 @@ func (d PluginDeriver) owned(g content.Generation) []string {
 
 // Derive returns a Version's plugin segmentation and its vectors in every
 // space of the generation the plugin owns, the served one included.
-func (d PluginDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
-	d = d.resolved(ctx)
+func (d PluginDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (seg content.Segmentation, data []content.EmbeddingData, err error) {
+	d = d.forVersion(ctx, v)
+	defer func() { err = d.failure(err) }()
+	if err = d.bind(ctx); err != nil {
+		return
+	}
+	if d.Plugin == nil {
+		return seg, nil, ErrSpaceUnowned
+	}
 	spaces := d.owned(g)
-	if !d.owns(g.SpaceID) || len(spaces) == 0 {
-		return content.Segmentation{}, nil, fmt.Errorf("the pinned ingestion plugin does not own space %s", g.SpaceID)
+	if !d.owns(g.ServedFor(content.PluginOfRecipe(d.Plugin.Recipe()))) || len(spaces) == 0 {
+		return content.Segmentation{}, nil, fmt.Errorf("%w: the pinned ingestion plugin does not own space %s", ErrSpaceUnowned, g.SpaceID)
 	}
 	return d.derive(ctx, org, corpusID, v, spaces)
 }
@@ -191,8 +270,13 @@ var ErrSegmentsDiffer = errors.New("segments differ")
 // otherwise the plugin embeds the Version in those spaces only, and its
 // segments must have seg's Parts and offsets (ErrSegmentsDiffer). Each
 // vector is stored as an Embedding Artifact of seg's segment.
-func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string) ([]content.EmbeddingData, error) {
-	d = d.resolved(ctx)
+func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string) (_ []content.EmbeddingData, err error) {
+	if len(spaces) > 0 {
+		d = d.forSpace(ctx, spaces[0])
+	} else {
+		d = d.resolved(ctx)
+	}
+	defer func() { err = d.failure(err) }()
 	for _, key := range spaces {
 		if !d.owns(key) {
 			return nil, fmt.Errorf("%w: the pinned ingestion plugin does not own space %s", ErrSpaceUnowned, key)

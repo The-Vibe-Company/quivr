@@ -2271,8 +2271,8 @@ paths:
       description: Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and
         worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves
         the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the
-        engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and
-        retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict
+        engine applies at startup (one normalizer per media type, one provider per connector kind, valid ingestion source
+        routes and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict
         lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating
         the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782
         pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from
@@ -2371,20 +2371,20 @@ paths:
   /v0/admin/backfills:
     post:
       operationId: requestBackfill
-      description: Reprocess a Corpus's past Versions with the active ingestion plugin, to fill vector spaces of the generation
-        the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window on when
-        Quivr accepted its Versions. Only Versions whose segments all hold a vector in the served space and miss one in a
-        target space are processed; live enrichment fills the target spaces for newer Versions once the backfill has started.
-        A dry run is required. dry_run true answers 200 with the estimate and records it under the idempotency key. The same
-        body with dry_run false then accepts the backfill as a queued Operation (202, Location). Without a dry run recorded
-        under that key and scope, the answer is 409 dry_run_required. An estimated cost above the deployment's backfill.max_cost_without_confirmation
-        needs confirm_cost true, otherwise 409 cost_confirmation_required. The same key with another scope is 409 idempotency_conflict,
-        and an accepted key replays its Operation. A Corpus whose previous backfill has not finished is 409 backfill_in_progress.
-        The backfill runs on its own task queue at the deployment's backfill.rate, pinned to the Pipeline Plan active when
-        it starts. It can be paused, resumed and canceled, and resumes from its checkpoint after a restart. It never creates
-        Record Versions or content events. Versions whose projected segments the plugin would cut differently are skipped
-        and counted (segmentation_differs), and a rebuild re-segments them. Requires plugins:admin, on a key of the Corpus's
-        Organization that grants the Corpus.
+      description: Reprocess a Corpus's past Versions with a selected active ingestion plugin, to fill vector spaces of the
+        generation the Corpus is routed to, typically a new evaluation space. The scope is the Corpus and, optionally, a window
+        on when Quivr accepted its Versions. Only Versions segmented by the selected plugin whose segments all hold a vector
+        in the served space and miss one in a target space are processed; live enrichment fills the target spaces for newer
+        Versions once the backfill has started. A dry run is required. dry_run true answers 200 with the estimate and records
+        it under the idempotency key. The same body with dry_run false then accepts the backfill as a queued Operation (202,
+        Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. An estimated cost
+        above the deployment's backfill.max_cost_without_confirmation needs confirm_cost true, otherwise 409 cost_confirmation_required.
+        The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose
+        previous backfill has not finished is 409 backfill_in_progress. The backfill runs on its own task queue at the deployment's
+        backfill.rate, pinned to the Pipeline Plan active when it starts. It can be paused, resumed and canceled, and resumes
+        from its checkpoint after a restart. It never creates Record Versions or content events. Versions whose projected
+        segments the plugin would cut differently are skipped and counted (segmentation_differs), and a rebuild re-segments
+        them. Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
       x-required-permissions:
       - plugins:admin
       requestBody:
@@ -4687,7 +4687,8 @@ components:
         registration_id:
           type: string
           minLength: 1
-          description: The ingestion plugin registration to run; absent, the active plan's. Another one is 409 registration_not_active.
+          description: The ingestion plugin registration to run; absent, the active plan's default. Any ingestion member of
+            the active plan is accepted; a registration outside it is 409 registration_not_active.
         spaces:
           type: array
           minItems: 1

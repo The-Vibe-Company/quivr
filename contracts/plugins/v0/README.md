@@ -644,12 +644,19 @@ judge every answer for the engine and the Contract Runner:
 
 **Deployment.** A pin enables spaces with `spaces: {"<id>": "served" |
 "evaluation"}` (absent: the only declared space, served); exactly one is
-served, and a deployment pins one ingestion plugin (`ingestion_conflict`). A
-projection generation carries the spaces enabled when it was built, served
-first, each as a named vector. A Corpus goes through the plugin once its
-routed generation is served by one of the plugin's spaces; a Corpus built
-before keeps its path until it is rebuilt, and the rebuild calls the plugin
-only for Versions without stored vectors in the new spaces.
+served per plugin. Several ingestion plugins can be pinned together, each
+owning distinct spaces. Deployment `ingestion.routes` maps the submitted
+Blob's source media type to a plugin id; inline text uses `text/plain`.
+`ingestion.default` handles unlisted types (implicitly `core.ingest` when
+pinned, otherwise the only ingestion plugin). Normalization preserves the
+source media type, so a PDF converted to text follows its PDF route. The
+selected plugin receives the Version's text Parts; this routing adds no
+non-text embedding operation.
+A projection generation carries the enabled spaces with their owners and
+served/evaluation roles, each as a named vector. Earlier Corpora keep their
+spaces until rebuilt. Search lists every served space and query encoding
+calls its owner. Backfill, promotion and pinned-work drain operate per owner;
+immutable plans preserve source routes and defaults during upgrades and rollback.
 `GET /v0/corpora/{corpus_id}/vector-spaces` lists a Corpus's spaces with their
 owner, role and coverage.
 

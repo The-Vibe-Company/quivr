@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
@@ -214,4 +215,101 @@ func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
 			t.Errorf("%s: %v; want unavailability, a deadline: %v", c.name, err, c.deadline)
 		}
 	}
+}
+
+// Source routes and query ownership resolve from the same immutable work plan,
+// even after the deployment switches its default and source routes.
+func TestLiveIngestionRoutesSourceAndQueryToPinnedOwners(t *testing.T) {
+	ctx := context.Background()
+	var calls, bound []string
+	makePin := func(id string, vector []float32) *plugins.Pin {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls = append(calls, id+r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			if strings.HasSuffix(r.URL.Path, "embed_query") {
+				_ = json.NewEncoder(w).Encode(map[string]any{"vector": vector})
+			} else {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		t.Cleanup(server.Close)
+		pin, err := plugins.LoadPinManifest([]byte(strings.ReplaceAll(embedderManifest, "acme.embedder", id)), id, plugins.PinConfig{Endpoint: server.URL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin.Registration = "registration-" + id
+		return pin
+	}
+	pdf := makePin("example.pdf", []float32{1, 0})
+	text := makePin("example.text", []float32{0, 1})
+	set, err := plugins.NewPinSet([]*plugins.Pin{pdf, text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = set.ConfigureIngestion(plugins.IngestionRouting{Default: "example.pdf", Routes: map[string]string{"text/plain": "example.text", "application/pdf": "example.pdf"}}); err != nil {
+		t.Fatal(err)
+	}
+	live, err := plugins.NewLive("plan-routed", set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := live.Pin(ctx, plugins.Work{Kind: plugins.WorkIngestion, Organization: "org", ID: "receipt", Plan: "plan-routed", BindIngestion: func(_ context.Context, registration string) error { bound = append(bound, registration); return nil }}, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, _ := plugins.NewPinSet([]*plugins.Pin{pdf, text})
+	if err = next.ConfigureIngestion(plugins.IngestionRouting{Default: "example.text"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = live.Store("plan-next", next); err != nil {
+		t.Fatal(err)
+	}
+	ingestor := pluginhttp.LiveIngestor{Live: live}
+	for _, c := range []struct{ media, owner string }{{"application/pdf", "example.pdf"}, {"text/plain", "example.text"}, {"text/html", "example.pdf"}, {"", "example.text"}} {
+		v := content.Version{ID: "version", SourceMediaType: c.media, Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "normalized text"}}}}}
+		space := c.owner + ".small@1"
+		if _, err = ingestor.SegmentAndEmbed(pinned, "org", "corpus", v, []string{space}); !errors.Is(err, pluginhttp.ErrUnavailable) {
+			t.Fatalf("source %s: %v", c.media, err)
+		}
+		if got := bound[len(bound)-1]; got != "registration-"+c.owner {
+			t.Fatalf("source %s bound to %s, want %s", c.media, got, c.owner)
+		}
+		vector, err := ingestor.EncodeQuery(pinned, "org", space, "query")
+		want := []float32{1, 0}
+		if c.owner == "example.text" {
+			want = []float32{0, 1}
+		}
+		if err != nil || !slices.Equal(vector, want) {
+			t.Fatalf("space %s: %v %v, want %v", space, vector, err, want)
+		}
+		if got := calls[len(calls)-2:]; !strings.HasPrefix(got[0], c.owner) || !strings.HasPrefix(got[1], c.owner) {
+			t.Fatalf("source %s reached %v, want %s", c.media, got, c.owner)
+		}
+	}
+	// The PDF owner leaves the active plan while an earlier generation still
+	// carries its space. Query encoding keeps reaching its recorded owner.
+	remaining, err := plugins.NewPinSet([]*plugins.Pin{text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = live.Store("plan-without-pdf", remaining); err != nil {
+		t.Fatal(err)
+	}
+	ingestor.Owners = retainedIngestionOwner{pin: pdf}
+	vector, err := ingestor.EncodeQuery(ctx, "org", "example.pdf.small@1", "query")
+	if err != nil || !slices.Equal(vector, []float32{1, 0}) || !ingestor.Owns("example.pdf.small@1") {
+		t.Fatalf("retained PDF owner: %v %v", vector, err)
+	}
+}
+
+type retainedIngestionOwner struct{ pin *plugins.Pin }
+
+func (r retainedIngestionOwner) IngestionSpaceOwner(_ context.Context, space string) (*plugins.Pin, error) {
+	for name, declared := range r.pin.Manifest.Contributions.Ingestion.Spaces {
+		if plugins.SpaceKey(name, declared.Version) == space {
+			return r.pin, nil
+		}
+	}
+	return nil, nil
 }

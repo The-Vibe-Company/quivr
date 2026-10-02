@@ -24,8 +24,9 @@ var promotionGapSQL = `WITH routed AS (
  JOIN records r ON r.organization=rt.organization AND r.corpus_id=rt.corpus_id
  JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
  JOIN projection_coverage pc ON pc.organization=v.organization AND pc.version_id=v.id AND pc.generation_id=rt.generation_id
+ JOIN segmentations ss ON ss.organization=pc.organization AND ss.id=pc.segmentation_id
  JOIN segments sg ON sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
- WHERE ` + eligibleVersionSQL + ` AND (NOT rt.carries OR NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=rt.generation_id AND ec.space_id=$1))
+ WHERE ` + eligibleVersionSQL + ` AND (SELECT owner_plugin_id FROM vector_spaces WHERE id=$1)=split_part(substring(ss.recipe from 8),'@',1) AND (NOT rt.carries OR NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=rt.generation_id AND ec.space_id=$1))
 )
 SELECT count(DISTINCT (organization,corpus_id)),count(*) FROM gaps`
 
@@ -42,8 +43,8 @@ func (s ContentStore) PromoteSpace(ctx context.Context, space string, force bool
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
 		return out, err
 	}
-	var role string
-	if err = tx.QueryRow(ctx, `SELECT role FROM vector_spaces WHERE id=$1`, space).Scan(&role); err != nil {
+	var role, owner string
+	if err = tx.QueryRow(ctx, `SELECT role,owner_plugin_id FROM vector_spaces WHERE id=$1`, space).Scan(&role, &owner); err != nil {
 		return out, notFound(err)
 	}
 	switch role {
@@ -53,7 +54,7 @@ func (s ContentStore) PromoteSpace(ctx context.Context, space string, force bool
 	default:
 		return out, backfill.ErrNotEvaluation
 	}
-	err = tx.QueryRow(ctx, `SELECT id FROM vector_spaces WHERE role='served' ORDER BY id LIMIT 1`).Scan(&out.Previous)
+	err = tx.QueryRow(ctx, `SELECT id FROM vector_spaces WHERE role='served' AND owner_plugin_id=$1 ORDER BY id LIMIT 1`, owner).Scan(&out.Previous)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
@@ -63,20 +64,23 @@ func (s ContentStore) PromoteSpace(ctx context.Context, space string, force bool
 	if out.CorporaIncomplete > 0 && !force {
 		return out, &backfill.IncompleteError{Promotion: out}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE vector_spaces SET role=CASE WHEN id=$1 THEN 'served' ELSE 'evaluation' END WHERE id=$1 OR role='served'`, space); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE vector_spaces SET role=CASE WHEN id=$1 THEN 'served' ELSE 'evaluation' END WHERE owner_plugin_id=$2 AND (id=$1 OR role='served')`, space, owner); err != nil {
 		return out, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO vector_space_promotions(served_space_id,previous_space_id) VALUES($1,$2)
-ON CONFLICT(singleton) DO UPDATE SET served_space_id=EXCLUDED.served_space_id,previous_space_id=EXCLUDED.previous_space_id,promoted_at=now()`, space, out.Previous); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO vector_space_promotions(served_space_id,previous_space_id,owner_plugin_id) VALUES($1,$2,$3)
+ON CONFLICT(owner_plugin_id) DO UPDATE SET served_space_id=EXCLUDED.served_space_id,previous_space_id=EXCLUDED.previous_space_id,promoted_at=now()`, space, out.Previous, owner); err != nil {
 		return out, err
 	}
 	// Every generation that carries the space and served the one it replaces
 	// serves it from now on, the default one included, so new Corpora start
 	// on it; promoting back switches exactly those again. Their other spaces
 	// keep their vectors.
-	tag, err := tx.Exec(ctx, `UPDATE projection_generations g SET space_id=$1,
- spaces=(SELECT jsonb_agg(e ORDER BY e->>'id'<>$1) FROM jsonb_array_elements(g.spaces) e)
-WHERE `+carriesSQL+` AND g.space_id<>$1 AND ($2='' OR g.space_id=$2)`, space, out.Previous)
+	tag, err := tx.Exec(ctx, `UPDATE projection_generations g SET space_id=CASE WHEN space_id=$2 THEN $1 ELSE space_id END,
+ spaces=(SELECT jsonb_agg(CASE WHEN e->>'id'=$1 THEN e||jsonb_build_object('role','served','owner_plugin_id',$3::text)
+ WHEN e->>'id'=$2 THEN e||jsonb_build_object('role','evaluation','owner_plugin_id',$3::text) ELSE e END
+ ORDER BY e->>'id'<>CASE WHEN g.space_id=$2 THEN $1 ELSE g.space_id END,n)
+ FROM jsonb_array_elements(g.spaces) WITH ORDINALITY s(e,n))
+WHERE `+carriesSQL+` AND (g.space_id=$2 OR g.spaces @> jsonb_build_array(jsonb_build_object('id',$2::text,'role','served')))`, space, out.Previous, owner)
 	if err != nil {
 		return out, err
 	}
@@ -90,31 +94,41 @@ WHERE `+carriesSQL+` AND g.space_id<>$1 AND ($2='' OR g.space_id=$2)`, space, ou
 // the replaced one. Otherwise the plugin's roles decide again and the
 // promotion is forgotten.
 func keepPromotion(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSpace) ([]content.RegisteredSpace, error) {
-	var served, previous string
-	err := tx.QueryRow(ctx, `SELECT served_space_id,previous_space_id FROM vector_space_promotions`).Scan(&served, &previous)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return spaces, nil
-	}
+	rows, err := tx.Query(ctx, `SELECT owner_plugin_id,served_space_id,previous_space_id FROM vector_space_promotions`)
 	if err != nil {
 		return nil, err
 	}
-	roles := map[string]string{}
-	for _, sp := range spaces {
-		roles[sp.ID] = sp.Role
-	}
-	if roles[served] != content.SpaceEvaluation || roles[previous] != content.SpaceServed {
-		_, err = tx.Exec(ctx, `DELETE FROM vector_space_promotions`)
-		return spaces, err
-	}
-	out := make([]content.RegisteredSpace, len(spaces))
-	for i, sp := range spaces {
-		switch sp.ID {
-		case served:
-			sp.Role = content.SpaceServed
-		case previous:
-			sp.Role = content.SpaceEvaluation
+	type promotion struct{ owner, served, previous string }
+	var promotions []promotion
+	for rows.Next() {
+		var p promotion
+		if err = rows.Scan(&p.owner, &p.served, &p.previous); err != nil {
+			rows.Close()
+			return nil, err
 		}
-		out[i] = sp
+		promotions = append(promotions, p)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	out := append([]content.RegisteredSpace(nil), spaces...)
+	byID := map[string]int{}
+	for i, sp := range out {
+		byID[sp.ID] = i
+	}
+	for _, p := range promotions {
+		si, sok := byID[p.served]
+		pi, pok := byID[p.previous]
+		if !sok || !pok || out[si].OwnerPluginID != p.owner || out[pi].OwnerPluginID != p.owner || out[si].Role != content.SpaceEvaluation || out[pi].Role != content.SpaceServed {
+			if _, err = tx.Exec(ctx, `DELETE FROM vector_space_promotions WHERE owner_plugin_id=$1`, p.owner); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		out[si].Role = content.SpaceServed
+		out[pi].Role = content.SpaceEvaluation
 	}
 	return out, nil
 }

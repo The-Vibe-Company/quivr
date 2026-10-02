@@ -114,14 +114,17 @@ type RelationResolver interface {
 }
 
 type Command struct {
-	Key        string         `json:"idempotency_key"`
-	Source     Source         `json:"source"`
-	Revision   string         `json:"source_revision,omitempty"`
-	Position   string         `json:"source_position,omitempty"`
-	Content    Text           `json:"content"`
-	Manifest   *Manifest      `json:"manifest,omitempty"`
-	Extensions Extensions     `json:"extensions,omitempty"`
-	Provenance map[string]any `json:"provenance,omitempty"`
+	// SourceMediaType is engine-owned acceptance metadata, stored apart from
+	// the canonical command so existing receipt replays keep their identity.
+	SourceMediaType string         `json:"-"`
+	Key             string         `json:"idempotency_key"`
+	Source          Source         `json:"source"`
+	Revision        string         `json:"source_revision,omitempty"`
+	Position        string         `json:"source_position,omitempty"`
+	Content         Text           `json:"content"`
+	Manifest        *Manifest      `json:"manifest,omitempty"`
+	Extensions      Extensions     `json:"extensions,omitempty"`
+	Provenance      map[string]any `json:"provenance,omitempty"`
 }
 
 // Withdrawal is an absorbing command that fences a Record identity. It shares
@@ -180,14 +183,16 @@ type Record struct {
 	CurrentVersionID string `json:"current_version_id,omitempty"`
 }
 type Version struct {
-	RecordID     string             `json:"record_id"`
-	ID           string             `json:"version_id"`
-	Manifest     Manifest           `json:"manifest"`
-	Extensions   Extensions         `json:"extensions,omitempty"`
-	Provenance   map[string]any     `json:"provenance,omitempty"`
-	Availability Availability       `json:"availability"`
-	Relations    []ResolvedRelation `json:"relations"`
-	Processing   Processing         `json:"processing"`
+	// SourceMediaType routes ingestion after normalization.
+	SourceMediaType string             `json:"-"`
+	RecordID        string             `json:"record_id"`
+	ID              string             `json:"version_id"`
+	Manifest        Manifest           `json:"manifest"`
+	Extensions      Extensions         `json:"extensions,omitempty"`
+	Provenance      map[string]any     `json:"provenance,omitempty"`
+	Availability    Availability       `json:"availability"`
+	Relations       []ResolvedRelation `json:"relations"`
+	Processing      Processing         `json:"processing"`
 	// Diagnostics explain a quarantine, a normalizer fallback or a recorded
 	// normalizer conflict.
 	Diagnostics []Diagnostic `json:"diagnostics"`
@@ -233,6 +238,7 @@ type Publication struct {
 }
 
 type StoredVersion struct {
+	SourceMediaType        string
 	RecordID, ID, CorpusID string
 	AcceptedAt             *time.Time
 	Steps                  Steps
@@ -302,6 +308,10 @@ func (s Service) Accept(ctx context.Context, scope corpus.Scope, c Command) (Rec
 	if _, forged := c.Provenance["normalization"]; forged {
 		// Normalization provenance is engine-owned; only publication writes it.
 		return Receipt{}, ErrInvalid
+	}
+	c.SourceMediaType = "text/plain"
+	if c.Content.Kind == "blob" {
+		c.SourceMediaType = c.Content.MediaType
 	}
 	switch c.Content.Kind {
 	case "text":
@@ -652,7 +662,7 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if diagnostics == nil {
 		diagnostics = []Diagnostic{}
 	}
-	return Version{RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Steps: stored.Steps, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
+	return Version{SourceMediaType: stored.SourceMediaType, RecordID: recordID, ID: id, AcceptedAt: stored.AcceptedAt, Steps: stored.Steps, Manifest: manifest, Extensions: stored.Extensions, Provenance: stored.Provenance, Availability: stored.Availability, Relations: relations, Processing: stored.Processing, Diagnostics: diagnostics}, nil
 }
 
 // resolveRelations expands source Relations independently of the immutable

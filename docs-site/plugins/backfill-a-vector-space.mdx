@@ -31,7 +31,7 @@ EOF
  "input_tokens": 9600000, "estimated_seconds": 6000, "duration_basis": "rate", "estimated_cost_usd": 0.2, "confirmation_required": true}
 ```
 
-`spaces` defaults to the evaluation spaces of the active ingestion plugin; name them in `spaces` to choose. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each article. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
+`registration_id` selects any ingestion registration in the active plan; omit it to use the default ingestion plugin. `spaces` defaults to that plugin's evaluation spaces; name them in `spaces` to choose. Only articles segmented by that plugin are in scope. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each article. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
 
 </Step>
 <Step title="Start it">
@@ -79,7 +79,7 @@ curl -s -X POST "$QUIVR_API_URL/v0/admin/spaces/acme.embedder.large@1/promote" -
 {"served_space_id": "acme.embedder.large@1", "previous_space_id": "acme.embedder.base@1", "generations_switched": 3, "corpora_incomplete": 0, "segments_missing": 0}
 ```
 
-A promotion applies to the whole deployment. It is refused with `409 coverage_incomplete` while some Corpus has current articles without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the articles without a vector drop out of semantic results until a backfill fills them.
+A promotion applies to this space's owner across the deployment. Other plugins keep their served spaces. It is refused with `409 coverage_incomplete` while some Corpus has current articles segmented by this owner without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the articles without a vector drop out of semantic results until a backfill fills them.
 
 </Step>
 </Steps>
@@ -91,7 +91,7 @@ curl -s "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/vector-spaces" -H "Authorization: 
   | jq '{segments, spaces: [.items[] | {vector_space_id, role, covered: .coverage.segments}]}'
 ```
 
-The new space is `served` and covers every segment. Semantic hits name it in `vector_space_id`.
+The new space is `served` and covers every segment produced by its owner. Semantic hits name it in `vector_space_id`.
 
 ## Go back to the previous model
 
@@ -113,6 +113,6 @@ Promote the former space the same way. It stayed an evaluation space and kept it
 | `409 cost_confirmation_required` | The estimate exceeds `backfill.max_cost_without_confirmation` | Add `"confirm_cost": true` |
 | `409 idempotency_conflict` | The key was used with another scope | Use a new key |
 | `409 backfill_in_progress` | Another backfill of the Corpus has not finished | Wait for it, or cancel it |
-| `409 registration_not_active` | `registration_id` is not the active ingestion plugin | Omit it, or activate that registration |
+| `409 registration_not_active` | `registration_id` is not an ingestion member of the active plan | Omit it, or activate that registration |
 | `409 rebuild_required` | The Corpus's index predates named vector spaces | Rebuild the Corpus first |
 | `422 invalid_backfill` | A space the plugin does not declare or the deployment does not enable, or an empty window | Check `spaces` and the window |

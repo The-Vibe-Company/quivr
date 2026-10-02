@@ -78,7 +78,7 @@ The Contract Runner sends the normative article and your fixtures in `fixtures/`
 </Step>
 <Step title="Pin it">
 
-A deployment pins exactly one ingestion plugin, which replaces the first-party `core-ingest`. Pin yours in the configuration of every `api`, `worker` and `migrate` process, and say which space serves search:
+Several ingestion plugins can run beside `core.ingest`; [source media routing](/reference/configuration#ingestion-routing) chooses one per Version. To use yours alone, pin it in the configuration of every `api`, `worker` and `migrate` process, and say which space serves search:
 
 ```json QUIVR_CONFIG
 {"plugins": [
@@ -100,7 +100,7 @@ curl -s -X POST "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/rebuilds" -H "Authorizatio
   -H "Content-Type: application/json" -d '{"idempotency_key": "move-to-acme-embedder"}' | jq '{operation_id, state}'
 ```
 
-The rebuild asks your plugin for every Version without vectors in the new spaces, then switches search over at once. Follow it with `GET /v0/operations/{operation_id}`.
+The rebuild asks each Version's routed plugin for every Version without vectors in the new spaces, then switches search over at once. Follow it with `GET /v0/operations/{operation_id}`.
 
 </Step>
 </Steps>

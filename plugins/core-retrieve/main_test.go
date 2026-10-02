@@ -69,3 +69,53 @@ func TestRanksTheServedOrderWithEqualScoresBySegment(t *testing.T) {
 		t.Fatalf("ranking %v, want [seg_d seg_a seg_c seg_b]: served order, equal scores by segment id, cut to the limit", got)
 	}
 }
+
+// Several ingestion owners serve disjoint text segments in the same Corpus.
+// Vector searches query every served space and merge repeated candidates.
+func TestSearchesEveryServedSpaceAndDeduplicatesHits(t *testing.T) {
+	req := &quivrplugin.SearchRequest{Round: 1, Limit: 10, Spaces: []quivrplugin.SearchSpace{{ID: "text@1", Role: "served"}, {ID: "pdf@1", Role: "served"}, {ID: "trial@1", Role: "evaluation"}}}
+	req.Query.Text, req.Query.Mode = "harbour", "hybrid"
+	answer, err := (retriever{}).Search(t.Context(), req)
+	if err != nil || len(answer.Requests) != 2 || answer.Requests[0].Space != "text@1" || answer.Requests[1].Space != "pdf@1" {
+		t.Fatalf("candidate requests = %+v (%v), want text and PDF served spaces", answer, err)
+	}
+	req.Round = 2
+	req.Served = []quivrplugin.ServedRequest{
+		{Request: answer.Requests[0], Candidates: []quivrplugin.Candidate{{SegmentID: "text", Score: .9}, {SegmentID: "pdf", Score: .1}}},
+		{Request: answer.Requests[1], Candidates: []quivrplugin.Candidate{{SegmentID: "pdf", Score: .8}, {SegmentID: "text", Score: .2}}},
+	}
+	answer, err = (retriever{}).Search(t.Context(), req)
+	if err != nil || len(answer.Ranking) != 2 || answer.Ranking[0].SegmentID != "text" || answer.Ranking[1].SegmentID != "pdf" || answer.Ranking[1].Score != .8 {
+		t.Fatalf("ranking = %+v (%v), want each segment once with its best score", answer, err)
+	}
+}
+
+// The full search-protocol space boundary takes two candidate rounds and
+// one ranking round, without dropping an owner or exceeding eight requests.
+func TestSearchesTheFullSpaceBoundary(t *testing.T) {
+	req := &quivrplugin.SearchRequest{Round: 1, Limit: 50}
+	req.Query.Text, req.Query.Mode = "harbour", "semantic"
+	for i := range 16 {
+		req.Spaces = append(req.Spaces, quivrplugin.SearchSpace{ID: fmt.Sprintf("space%d@1", i), Role: "served"})
+	}
+	seen := map[string]bool{}
+	for round := 1; round <= 2; round++ {
+		req.Round = round
+		answer, err := (retriever{}).Search(t.Context(), req)
+		if err != nil || len(answer.Requests) != 8 {
+			t.Fatalf("round %d: %+v (%v), want eight requests", round, answer, err)
+		}
+		for _, request := range answer.Requests {
+			if seen[request.Space] {
+				t.Fatalf("space %s requested twice", request.Space)
+			}
+			seen[request.Space] = true
+			req.Served = append(req.Served, quivrplugin.ServedRequest{Request: request, Candidates: []quivrplugin.Candidate{{SegmentID: request.Space, Score: 1}}})
+		}
+	}
+	req.Round = 3
+	answer, err := (retriever{}).Search(t.Context(), req)
+	if err != nil || len(answer.Requests) != 0 || len(answer.Ranking) != 16 || len(seen) != 16 {
+		t.Fatalf("final ranking: %+v (%v), want all 16 owners", answer, err)
+	}
+}

@@ -297,8 +297,8 @@ def drain(base, operator, name, version, endpoint, clock, switched, during=None)
 
 def activate(base, operator, reg, version):
     plan = expect(base, operator, 'POST', f"/v0/admin/plugins/{reg['registration_id']}/activate", {})
-    ingestion = [x for x in plan['roles'] if x['role'] == 'ingestion']
-    if not ingestion or ingestion[0]['version'] != version:
+    ingestion = [x for x in plan['roles'] if x['role'] == f"ingestion:{reg['plugin_id']}"]
+    if len(ingestion) != 1 or ingestion[0]['registration_id'] != reg['registration_id'] or ingestion[0]['version'] != version:
         raise RuntimeError(f'activating {version}: {plan}')
     return plan
 
@@ -403,7 +403,7 @@ def scenario(stack, report, clock):
         phase('rollback')
         switched = clock.now()
         back = expect(base, operator, 'POST', '/v0/admin/plugins/plan/rollback', {'idempotency_key': 'rollback-' + run, 'pinned_work': 'drain'})
-        if back['source'] != 'rollback' or [x['version'] for x in back['roles'] if x['role'] == 'ingestion'] != ['0.1.0']:
+        if back['source'] != 'rollback' or [x['version'] for x in back['roles'] if x['role'] == f"ingestion:{b_reg['plugin_id']}"] != ['0.1.0']:
             raise RuntimeError(f'rollback: {back}')
 
         def restart_api():

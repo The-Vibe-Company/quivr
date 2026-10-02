@@ -1249,7 +1249,7 @@ type BackfillRequest struct {
 	DryRun         bool   `json:"dry_run"`
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// RegistrationId The ingestion plugin registration to run; absent, the active plan's. Another one is 409 registration_not_active.
+	// RegistrationId The ingestion plugin registration to run; absent, the active plan's default. Any ingestion member of the active plan is accepted; a registration outside it is 409 registration_not_active.
 	RegistrationId *string `json:"registration_id,omitempty"`
 
 	// Spaces The vector spaces to fill, which the plugin declares and the deployment serves or evaluates; absent, the deployment's evaluation spaces the plugin owns.

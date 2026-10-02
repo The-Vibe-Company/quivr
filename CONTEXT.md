@@ -61,15 +61,15 @@ A named and versioned embedding representation whose dimensions, distance metric
 _Avoid_: Universal embedding, vector column
 
 **Space Owner**:
-The single ingestion plugin (or, for the legacy E5 space generations built before core.ingest still serve, the engine) that declares a vector space and alone produces its document and query vectors. A space never changes owner; vectors from another model or template are a new space version.
+The ingestion plugin (or, for the legacy E5 space generations built before core.ingest still serve, the engine) that declares a vector space and alone produces its document and query vectors. A space never changes owner; vectors from another model or template are a new space version.
 _Avoid_: Shared space, embedder
 
 **Served Space**:
-The vector space a deployment answers search with; each projection generation pins one when it is built, and a space promotion can switch it to another space the generation carries.
+A vector space a deployment answers search with; each ingestion owner serves one space, whose choice each projection generation pins. A space promotion switches that owner to another carried space.
 _Avoid_: Default embedding, active model
 
 **Space Promotion**:
-An operator's switch of the served space to an evaluation space, in the registry and in every projection generation that carries it; the former served space stays for evaluation with its vectors, so promoting it again reverts.
+An operator's switch of one owner's served space to an evaluation space, in the registry and in every projection generation that carries it; the former served space stays for evaluation with its vectors, so promoting it again reverts.
 _Avoid_: Model switch, reindex
 
 **Evaluation Space**:
