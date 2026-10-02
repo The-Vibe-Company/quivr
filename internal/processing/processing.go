@@ -19,6 +19,7 @@ type Indexer interface {
 // enrichment (vectors) of each Version through the pinned ingestion plugin.
 // The engine segments and embeds nothing itself.
 type Service struct {
+	Evaluation *Evaluator
 	Content    content.Service
 	Retrieval  Indexer
 	Enrichment EnrichmentIndexer

@@ -106,6 +106,7 @@ Several ingestion plugins can be pinned together. `ingestion` chooses one for ea
 | --- | --- |
 | `default` | Plugin id for source types without a route. Defaults to `core.ingest` when pinned, or the only ingestion plugin. With several other plugins, name a default. |
 | `routes` | Map of exact source media types to pinned ingestion plugin ids. Invalid targets prevent startup. |
+| `evaluation` | Map of source media types to lists of additional ingestion plugin ids. They fill independent projections after served enrichment succeeds. Targets must be pinned, distinct and different from that format's served plugin. |
 
 Illustrative routing with both plugins pinned:
 
@@ -113,7 +114,11 @@ Illustrative routing with both plugins pinned:
 {"ingestion": {"default": "core.ingest", "routes": {"application/pdf": "core.ingest", "text/plain": "example.hash_embedder"}}}
 ```
 
-Each plugin owns its distinct vector spaces and serves one of them. Search receives every served space and encodes each query with that space's owner. Routes and defaults are stored in immutable Pipeline Plans; work keeps the plan it started with during activation and rollback. Embedding image, audio or video Parts is a separate capability.
+A plugin listed only for evaluation keeps its own segmentation and vector coverage. Evaluation work runs on separate activity capacity; a refusal, timeout or outage is recorded in the Version's diagnostics with the plugin id and never changes served readiness.
+
+Each serving plugin owns its distinct vector spaces and serves one of them. Search receives every served space and encodes each query with that space's owner. Routes, defaults and evaluation selections are stored in immutable Pipeline Plans; work keeps the plan it started with during activation and rollback. Embedding image, audio or video Parts is a separate capability.
+
+To measure an evaluation projection, send `evaluation_plugin` and `evaluation_space` together in `/v0/search`. The space must belong to that plugin and be carried by every requested Corpus. Omitted fields follow served routing. `GET /v0/corpora/{corpus_id}/vector-spaces` reports each owner's `total_segments` and fully covered `versions_covered`; different owners may cut the same documents differently.
 
 The search protocol carries at most 16 enabled vector spaces, counting served and evaluation spaces across all pinned ingestion plugins. Startup refuses a configuration above that protocol limit.
 

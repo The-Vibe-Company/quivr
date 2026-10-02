@@ -62,4 +62,8 @@ type SpaceCoverage struct {
 	GenerationRole string
 	// Segments counts current segments with a vector in the space.
 	Segments int64
+	// TotalSegments counts this owner's independent segmentation. Nil retains legacy totals.
+	TotalSegments *int64
+	// VersionsCovered counts current Versions fully covered in this space.
+	VersionsCovered int64
 }

@@ -169,6 +169,24 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 	if err != nil {
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
+	if q.EvaluationPlugin == "" {
+		servingOwners := map[string]bool{}
+		for _, sp := range spaces {
+			if sp.Role == content.SpaceServed {
+				servingOwners[sp.Owner.PluginID] = true
+			}
+		}
+		spaces = slices.DeleteFunc(spaces, func(sp plugins.SearchSpace) bool { return !servingOwners[sp.Owner.PluginID] })
+	}
+	if q.EvaluationPlugin != "" {
+		selected := slices.IndexFunc(spaces, func(sp plugins.SearchSpace) bool { return sp.ID == q.Space && sp.Owner.PluginID == q.EvaluationPlugin })
+		if selected < 0 {
+			return out, ErrUnsupported
+		}
+		// The ranker sees the requested evaluation model as this query's primary space.
+		spaces = []plugins.SearchSpace{spaces[selected]}
+		spaces[0].Role = content.SpaceServed
+	}
 	session := plugins.NewRetrievalSession(m, plugins.SearchRequest{
 		InvocationID: invocationID(), OrganizationID: scope.Organization, Configuration: s.Ranker.Configuration(),
 		Profile: q.Profile, Query: plugins.SearchQuery{Text: query, Mode: q.Mode}, Limit: q.Limit,
@@ -313,7 +331,7 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 					owner = plugins.SpaceOwner{Kind: "plugin", PluginID: c.OwnerPluginID, PluginVersion: c.OwnerPluginVersion}
 				}
 				out = append(out, plugins.SearchSpace{ID: c.ID, Owner: owner, Model: c.Model, Dimensions: c.VectorSpace.Dimensions, Metric: c.Metric,
-					Indexes: nonNil(c.Indexes), QueryModalities: nonNil(c.QueryModalities), Role: c.GenerationRole, Coverage: plugins.SpaceCoverage{Segments: c.Segments, Total: total}})
+					Indexes: nonNil(c.Indexes), QueryModalities: nonNil(c.QueryModalities), Role: c.GenerationRole, Coverage: plugins.SpaceCoverage{Segments: c.Segments, Total: ownerTotal(c, total)}})
 			}
 			continue
 		}
@@ -325,7 +343,7 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 		for j := range out {
 			if c, ok := byID[out[j].ID]; ok {
 				out[j].Coverage.Segments += c.Segments
-				out[j].Coverage.Total += total
+				out[j].Coverage.Total += ownerTotal(c, total)
 			}
 		}
 	}
@@ -375,7 +393,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		}
 		text = normalized
 	}
-	pq := Request{Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Space: c.Space, Field: c.EffectiveField(), K: fetch(c.K)}
+	pq := Request{EvaluationPlugin: q.EvaluationPlugin, Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Space: c.Space, Field: c.EffectiveField(), K: fetch(c.K)}
 	if c.Filter != nil && len(c.Filter.SourceNamespaces) > 0 {
 		pq.SourceNamespaces = c.Filter.SourceNamespaces
 		for _, r := range sv.routes {
@@ -422,6 +440,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			continue
 		}
 		seen[f.SegmentID] = true
+		f.EvaluationPlugin, f.EvaluationSpace = q.EvaluationPlugin, q.Space
 		unique = append(unique, f)
 	}
 	out := []plugins.Candidate{}
@@ -455,7 +474,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			}
 			// A vector hit on the served space counts only with its embedding
 			// coverage, as in a semantic search.
-			if c.Primitive == plugins.PrimitiveNearVector && routed[f.GenerationID].Generation.Serves(c.Space) && h.EmbeddingID == "" {
+			if c.Primitive == plugins.PrimitiveNearVector && (routed[f.GenerationID].Generation.Serves(c.Space) || q.EvaluationPlugin != "") && h.EmbeddingID == "" {
 				continue
 			}
 			if c.GroupBy == plugins.GroupByRecord {
@@ -553,4 +572,11 @@ func (s Service) EncodeQuery(ctx context.Context, org, space, text string) ([]fl
 		return nil, ErrUnavailable
 	}
 	return vector, nil
+}
+
+func ownerTotal(c content.SpaceCoverage, legacy int64) int64 {
+	if c.TotalSegments != nil {
+		return *c.TotalSegments
+	}
+	return legacy
 }

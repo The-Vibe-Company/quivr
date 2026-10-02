@@ -7366,6 +7366,8 @@ required:
 | `role` | string | yes | One of `served`, `evaluation`. |
 | `coverage` | object | yes |  |
 | `coverage.segments` | integer | yes | Minimum `0`. |
+| `coverage.total_segments` | integer |  | Current segments in this plugin's own projection; different plugins may cut the same Version differently. Minimum `0`. |
+| `coverage.versions_covered` | integer |  | Current eligible Versions whose entire projection has vectors in this space. Minimum `0`. |
 
 <details>
 <summary>Full schema</summary>
@@ -7431,6 +7433,14 @@ properties:
       segments:
         type: integer
         minimum: 0
+      total_segments:
+        type: integer
+        minimum: 0
+        description: Current segments in this plugin's own projection; different plugins may cut the same Version differently.
+      versions_covered:
+        type: integer
+        minimum: 0
+        description: Current eligible Versions whose entire projection has vectors in this space.
     required:
       - segments
 required:
@@ -9403,6 +9413,8 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
 | `profile` | string |  | A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile. Default `default`. Minimum length `1`. |
 | `limit` | integer |  | Default `10`. Minimum `1`. Maximum `50`. |
+| `evaluation_plugin` | string |  | Ingestion plugin whose independent projection to measure. Requires evaluation_space; omitted searches follow served routing. Minimum length `1`. |
+| `evaluation_space` | string |  | Vector space owned by evaluation_plugin. Both fields are required together; invalid selections return 422 unsupported_search. Minimum length `1`. |
 | `filter` | [`SearchFilter`](#searchfilter) |  |  |
 
 Example `text_search`:
@@ -9456,6 +9468,14 @@ properties:
     minimum: 1
     maximum: 50
     default: 10
+  evaluation_plugin:
+    type: string
+    minLength: 1
+    description: Ingestion plugin whose independent projection to measure. Requires evaluation_space; omitted searches follow served routing.
+  evaluation_space:
+    type: string
+    minLength: 1
+    description: Vector space owned by evaluation_plugin. Both fields are required together; invalid selections return 422 unsupported_search.
   filter:
     $ref: '#/components/schemas/SearchFilter'
 required:

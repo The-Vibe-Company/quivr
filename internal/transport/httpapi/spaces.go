@@ -64,6 +64,12 @@ func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope cor
 			item.Metric = transport.Cosine
 		}
 		item.Coverage.Segments = int(s.Segments)
+		if s.TotalSegments != nil {
+			total := int(*s.TotalSegments)
+			item.Coverage.TotalSegments = &total
+		}
+		covered := int(s.VersionsCovered)
+		item.Coverage.VersionsCovered = &covered
 		out.Items = append(out.Items, item)
 	}
 	send(w, 200, out)

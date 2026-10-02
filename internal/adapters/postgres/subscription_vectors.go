@@ -15,7 +15,7 @@ func (s ContentStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID,
 		return generation, nil, 0, err
 	}
 	var recipe string
-	err = s.Pool.QueryRow(ctx, `SELECT ss.recipe FROM projection_coverage pc JOIN segmentations ss ON (ss.organization,ss.id)=(pc.organization,pc.segmentation_id) WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=$3`, org, versionID, generation.ID).Scan(&recipe)
+	err = s.Pool.QueryRow(ctx, `SELECT ss.recipe FROM projection_coverage pc JOIN segmentations ss ON (ss.organization,ss.id)=(pc.organization,pc.segmentation_id) WHERE pc.organization=$1 AND pc.version_id=$2 AND pc.generation_id=$3 AND pc.role='served'`, org, versionID, generation.ID).Scan(&recipe)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return generation, nil, 0, nil
 	}
@@ -30,7 +30,7 @@ JOIN record_versions v ON v.organization=r.organization AND v.record_id=r.id AND
 JOIN segments sg ON (sg.organization,sg.segmentation_id)=(pc.organization,pc.segmentation_id)
 LEFT JOIN embedding_coverage ec ON ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=pc.generation_id AND ec.space_id=$5
 LEFT JOIN embedding_artifacts ea ON ea.organization=ec.organization AND ea.id=ec.artifact_id
-WHERE pc.organization=$1 AND pc.version_id=$3 AND pc.generation_id=$4
+WHERE pc.organization=$1 AND pc.version_id=$3 AND pc.generation_id=$4 AND pc.role='served'
 ORDER BY sg.part_key,sg.start_offset,sg.id`, org, corpusID, versionID, generation.ID, generation.SpaceID)
 	if err != nil {
 		return generation, nil, 0, err

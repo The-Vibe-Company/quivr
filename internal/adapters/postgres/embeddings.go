@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -100,6 +101,16 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 	}
 	if !eligible {
 		return tx.Commit(ctx)
+	}
+	// Queue and snapshot before taking the generation's shared row lock:
+	// the first evaluation snapshot may update that row. All effects still
+	// become visible only with the successful served commit below.
+	plan := ""
+	if w, ok := plugins.WorkOf(ctx); ok {
+		plan = w.Plan
+	}
+	if err = queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan); err != nil {
+		return err
 	}
 	var active bool
 	var current content.Generation

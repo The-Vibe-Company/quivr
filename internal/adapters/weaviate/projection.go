@@ -175,24 +175,33 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 		for _, p := range existing.Properties {
 			present[p.Name] = true
 		}
-		// A collection created before Source Namespace filtering or named
-		// spaces gains the property; its older objects lack a value, so their
-		// generations stay unprojected until rebuilt.
-		if !present[sourceNamespaceProperty] {
-			if _, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", filterable(sourceNamespaceProperty), nil); err != nil {
+		// A collection created before source routing, named spaces, or lexical
+		// plugin metadata gains the missing properties. Older objects lack a
+		// value, so their immutable anchors keep their original bytes.
+		properties := []struct {
+			name   string
+			config map[string]any
+		}{
+			{projectionPluginProperty, filterable(projectionPluginProperty)},
+			{sourceMediaTypeProperty, filterable(sourceMediaTypeProperty)},
+			{sourceNamespaceProperty, filterable(sourceNamespaceProperty)},
+			{lexicalProperty, searchable(lexicalProperty)},
+		}
+		for _, property := range properties {
+			if present[property.name] {
+				continue
+			}
+			if _, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", property.config, nil); err != nil {
 				return err
 			}
 		}
-		if !present[lexicalProperty] {
-			_, err = s.call(ctx, "POST", "/v1/schema/"+collection+"/properties", searchable(lexicalProperty), nil)
-		}
-		return err
+		return nil
 	}
 	if status != 404 {
 		return err
 	}
 	properties := []any{}
-	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", sourceNamespaceProperty} {
+	for _, name := range []string{"organization", "corpusId", "generationId", "segmentId", "versionId", "segmentationId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty} {
 		properties = append(properties, filterable(name))
 	}
 	for _, name := range []string{"title", "body", lexicalProperty} {
@@ -205,6 +214,15 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 
 // sourceNamespaceProperty holds the Record's Source Namespace for filtering.
 const sourceNamespaceProperty = "sourceNamespace"
+
+// projectionPluginProperty identifies the ingestion plugin that made a
+// plugin segmentation. Empty for legacy anchors projected before ownership
+// was recorded.
+const projectionPluginProperty = "projectionPlugin"
+
+// sourceMediaTypeProperty records the source Blob media type used to route a
+// plugin segmentation. Plugin recipes with no recorded type use text/plain.
+const sourceMediaTypeProperty = "sourceMediaType"
 
 // searchable declares a text property keyword search scores (BM25).
 func searchable(name string) map[string]any {
@@ -233,7 +251,7 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
 }
 
-var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", sourceNamespaceProperty, "body", "title", lexicalProperty}
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, "body", "title", lexicalProperty}
 
 type storedObject struct {
 	Properties map[string]any       `json:"properties"`
@@ -290,6 +308,14 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
+		if pluginID := content.PluginOfRecipe(seg.Recipe); pluginID != "" {
+			mediaType := v.SourceMediaType
+			if mediaType == "" {
+				mediaType = "text/plain"
+			}
+			properties[projectionPluginProperty] = pluginID
+			properties[sourceMediaTypeProperty] = mediaType
+		}
 		if g.SpacesProjected && p.Derivation.LexicalText != "" {
 			properties[lexicalProperty] = p.Derivation.LexicalText
 		}
@@ -302,6 +328,12 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 			// its generation is not source-filterable, and a rewrite would
 			// re-index it.
 			delete(properties, sourceNamespaceProperty)
+		}
+		if found && existing.Properties[projectionPluginProperty] == nil {
+			delete(properties, projectionPluginProperty)
+		}
+		if found && existing.Properties[sourceMediaTypeProperty] == nil {
+			delete(properties, sourceMediaTypeProperty)
 		}
 		if found && sameProperties(existing.Properties, properties) {
 			continue
@@ -323,6 +355,86 @@ func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
 func equal(field, value string) string {
 	return "{path:[" + quote(field) + "],operator:Equal,valueText:" + quote(value) + "}"
 }
+func notEqual(field, value string) string {
+	return "{path:[" + quote(field) + "],operator:NotEqual,valueText:" + quote(value) + "}"
+}
+func and(operands ...string) string {
+	return "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
+}
+func or(operands ...string) string {
+	return "{operator:Or,operands:[" + strings.Join(operands, ",") + "]}"
+}
+
+// projectionOwnerFilter keeps normal search on the served projection(s) of a
+// generation. Legacy anchors without ownership remain searchable. An
+// evaluation query selects one exact owner and intentionally excludes those
+// legacy anchors.
+func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string {
+	if evaluationPlugin != "" {
+		return equal(projectionPluginProperty, evaluationPlugin)
+	}
+	// NotEqual uses the inverse equality bitmap in the pinned engine, so it
+	// includes absent properties without requiring a collection null-state
+	// index. Existing collections cannot add that index during bootstrap.
+	known := map[string]bool{}
+	for _, sp := range g.Spaces {
+		if sp.OwnerPluginID != "" {
+			known[sp.OwnerPluginID] = true
+		}
+	}
+	if r := g.IngestionRouting; r != nil {
+		if r.Default != "" {
+			known[r.Default] = true
+		}
+		for _, owner := range r.Routes {
+			known[owner] = true
+		}
+	}
+	ids := make([]string, 0, len(known))
+	for owner := range known {
+		ids = append(ids, owner)
+	}
+	sort.Strings(ids)
+	legacy := []string{equal("generationId", g.ID)}
+	for _, owner := range ids {
+		legacy = append(legacy, notEqual(projectionPluginProperty, owner))
+	}
+	operands := []string{and(legacy...)}
+	if routing := g.IngestionRouting; routing != nil && routing.Default != "" {
+		mediaTypes := make([]string, 0, len(routing.Routes))
+		for mediaType := range routing.Routes {
+			mediaTypes = append(mediaTypes, mediaType)
+		}
+		sort.Strings(mediaTypes)
+		for _, mediaType := range mediaTypes {
+			operands = append(operands, and(equal(projectionPluginProperty, routing.Routes[mediaType]), equal(sourceMediaTypeProperty, mediaType)))
+		}
+		defaultOperands := []string{equal(projectionPluginProperty, routing.Default)}
+		for _, mediaType := range mediaTypes {
+			defaultOperands = append(defaultOperands, notEqual(sourceMediaTypeProperty, mediaType))
+		}
+		operands = append(operands, and(defaultOperands...))
+	} else {
+		owners := map[string]bool{}
+		for _, space := range g.Spaces {
+			if space.Role == content.SpaceServed && space.OwnerPluginID != "" {
+				owners[space.OwnerPluginID] = true
+			}
+		}
+		ownerIDs := make([]string, 0, len(owners))
+		for owner := range owners {
+			ownerIDs = append(ownerIDs, owner)
+		}
+		sort.Strings(ownerIDs)
+		for _, owner := range ownerIDs {
+			operands = append(operands, equal(projectionPluginProperty, owner))
+		}
+	}
+	if len(operands) == 1 {
+		return operands[0]
+	}
+	return or(operands...)
+}
 
 // Search queries every routed (Corpus, generation) pair in one request so hybrid
 // fusion sees a single candidate set. Routes must share one physical collection.
@@ -336,7 +448,7 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		filters = append(filters, "{operator:And,operands:["+equal("corpusId", r.CorpusID)+","+equal("generationId", r.Generation.ID)+"]}")
+		filters = append(filters, and(equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)))
 	}
 	operands := []string{equal("organization", scope.Organization), "{operator:Or,operands:[" + strings.Join(filters, ",") + "]}"}
 	// The source filter is part of the candidate query, so ranking and the

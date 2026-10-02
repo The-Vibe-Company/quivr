@@ -267,6 +267,49 @@ func TestIngestionUpgradeKeepsUnrelatedRoutes(t *testing.T) {
 	}
 }
 
+func TestIngestionEvaluationRoundTripsAcrossUpgradeAndRollback(t *testing.T) {
+	words := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	pdf := registered(t, manifest("example.pdf", "1.0.0", ingestion("example.pdf.small")))
+	evaluatorV1 := registered(t, manifest("example.evaluator", "1.0.0", ingestion("example.evaluator.small")))
+	evaluatorV2 := registered(t, manifest("example.evaluator", "2.0.0", ingestion("example.evaluator.small")))
+	routing := plugins.IngestionRouting{
+		Default: "example.words",
+		Routes:  map[string]string{"application/pdf": "example.pdf"},
+		Evaluation: map[string][]string{
+			"application/pdf": {"example.evaluator"},
+		},
+	}
+	active, members := routedPlan(t, routing, words, pdf, evaluatorV1)
+	upgrade, err := registry.PlanActivation(active, members, evaluatorV2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"ingestion-default":                                      "example.words@1.0.0",
+		"ingestion:example.evaluator":                            "example.evaluator@2.0.0",
+		"ingestion:example.pdf":                                  "example.pdf@1.0.0",
+		"ingestion:example.words":                                "example.words@1.0.0",
+		"ingestion-evaluation:application/pdf:example.evaluator": "example.evaluator@2.0.0",
+		"ingestion-route:application/pdf":                        "example.pdf@1.0.0",
+	}
+	if got := roleMap(upgrade.Roles); !reflect.DeepEqual(got, want) || !reflect.DeepEqual(upgrade.Retired, []string{evaluatorV1.ID}) {
+		t.Fatalf("evaluation upgrade roles=%v retired=%v, want %v and %s", got, upgrade.Retired, want, evaluatorV1.ID)
+	}
+	members[evaluatorV2.ID] = evaluatorV2
+	target, targetMembers := routedPlan(t, routing, words, pdf, evaluatorV1)
+	target.ID = "plan_target"
+	for id, member := range targetMembers {
+		members[id] = member
+	}
+	back, err := registry.PlanRollback(registry.Plan{ID: "plan_upgrade", Roles: upgrade.Roles}, target, members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := roleMap(back.Roles); !reflect.DeepEqual(got, roleMap(target.Roles)) || !reflect.DeepEqual(back.Retired, []string{evaluatorV2.ID}) {
+		t.Fatalf("evaluation rollback roles=%v retired=%v, want %v and %s", got, back.Retired, roleMap(target.Roles), evaluatorV2.ID)
+	}
+}
+
 func TestIngestionUpgradeCannotRemoveConfiguredContribution(t *testing.T) {
 	current := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
 	withoutIngestion := registered(t, manifest("example.words", "2.0.0", normalizer("text/plain")), "text/plain")

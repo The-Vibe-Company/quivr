@@ -17,12 +17,22 @@ import (
 func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
 	if len(pins.Ingestions()) > 0 {
 		out := []content.RegisteredSpace{}
+		evaluationOwners := map[string]bool{}
+		for _, owners := range pins.IngestionRouting().Evaluation {
+			for _, owner := range owners {
+				evaluationOwners[owner] = true
+			}
+		}
 		for _, pin := range pins.Ingestions() {
 			for _, s := range pin.EnabledSpaces() {
+				role := s.Role
+				if evaluationOwners[pin.Manifest.ID] && !pins.ServingIngestion(pin.Manifest.ID) {
+					role = content.SpaceEvaluation
+				}
 				out = append(out, content.RegisteredSpace{
 					VectorSpace: content.VectorSpace{ID: s.Key, Manifest: plugins.SpaceManifest(pin.Manifest.ID, s.ID, s.Space), Dimensions: s.Space.Dimensions},
 					Name:        s.ID, Version: s.Space.Version, OwnerPluginID: pin.Manifest.ID, OwnerPluginVersion: pin.Manifest.Version,
-					Model: s.Space.Model, Metric: s.Space.Metric, Indexes: s.Space.Indexes, QueryModalities: s.Space.QueryModalities, Role: s.Role,
+					Model: s.Space.Model, Metric: s.Space.Metric, Indexes: s.Space.Indexes, QueryModalities: s.Space.QueryModalities, Role: role,
 				})
 			}
 		}

@@ -19,9 +19,9 @@ import (
 // predicate lists work and validates activation, so they cannot drift. It
 // requires aliases r and v and parameters $1 (organization), $2, $3.
 var rebuildGapSQL = `r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND (
- NOT EXISTS(SELECT 1 FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3)
+ NOT EXISTS(SELECT 1 FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND t.role='served')
  OR EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id)
-  JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3)
+  JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3) AND tc.role='served'
   WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
    AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `
    AND NOT EXISTS(SELECT 1 FROM embedding_coverage te WHERE te.organization=ec.organization AND te.segment_id=ec.segment_id AND te.generation_id=$3)))`
@@ -154,7 +154,7 @@ func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 	if target.Spaces, err = scanSpaces(spaces); err != nil {
 		return false, err
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, op.TargetGenerationID, seg.ID)
+	tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, op.TargetGenerationID, seg.ID)
 	if err != nil {
 		return false, err
 	}

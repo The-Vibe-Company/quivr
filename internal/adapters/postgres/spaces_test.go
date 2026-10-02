@@ -174,3 +174,99 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 		t.Fatalf("hydration serves the served space: %+v %v", h, err)
 	}
 }
+
+// Independent evaluation cuts must coexist with the serving segmentation;
+// canonical hydration keeps them out of normal searches and fences withdrawal.
+func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
+	ctx := t.Context()
+	pool := rebuildAdapterPool(t, ctx)
+	store := postgres.ContentStore{Pool: pool}
+	org := fmt.Sprintf("adapter-evaluation-%d", time.Now().UnixNano())
+	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "evaluation", Name: "Evaluation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := content.Service{Repository: store, Baseline: store}
+	cmd := content.Command{Key: "one", Source: content.Source{CorpusID: c.ID, Namespace: "evaluation", RecordKey: "one"}, Content: content.Text{Kind: "text", Text: "alpha beta gamma"}}
+	receipt, err := service.Accept(ctx, scope, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _, err := store.Work(ctx, org, receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Publish(ctx, work, publication(content.Blob{Key: "fixture/evaluation-text", SHA256: "evaluation-text", Size: 16}, content.Blob{Key: "fixture/evaluation-manifest", SHA256: "evaluation-manifest", Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	v := content.Version{ID: work.VersionID, RecordID: work.RecordID, Manifest: content.ManifestFor(cmd)}
+	g, err := store.Generation(ctx, org, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, err := content.PluginSegmentation(org, v, "plugin:example.served@1.0.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluation, err := content.PluginSegmentation(org, v, "plugin:example.evaluation@1.0.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 5}, {PartKey: "body", Start: 6, End: 16}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seg := range []content.Segmentation{served, evaluation} {
+		if err = store.SaveSegmentation(ctx, org, seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = store.Promote(ctx, org, served, g); err != nil {
+		t.Fatal(err)
+	}
+	// A projection with different offsets records no served Version state.
+	space := pluginSpace("example.evaluation", "example.evaluation.space", 2, content.SpaceEvaluation)
+	all, err := store.RegisteredSpaces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.RegisterSpaces(context.Background(), all); err != nil {
+			t.Error(err)
+		}
+	})
+	if err = store.RegisterSpaces(ctx, append(all, space)); err != nil {
+		t.Fatal(err)
+	}
+	g, err = store.PrepareEvaluation(ctx, org, c.ID, []string{space.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifacts []content.Embedding
+	for i, p := range evaluation.Segments {
+		e := content.Embedding{ID: fmt.Sprintf("eval-artifact-%s-%d", v.ID, i), DerivationID: fmt.Sprintf("eval-derivation-%s-%d", v.ID, i), Organization: org, VersionID: v.ID, SegmentID: p.ID, SegmentationID: evaluation.ID, SpaceID: space.ID}
+		if err = store.SaveEmbedding(ctx, e, space.VectorSpace); err != nil {
+			t.Fatal(err)
+		}
+		artifacts = append(artifacts, e)
+	}
+	if err = store.CoverEvaluation(ctx, org, g, evaluation, artifacts); err != nil {
+		t.Fatal(err)
+	}
+	candidates := []content.Candidate{{SegmentID: served.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[1].ID, GenerationID: g.ID, EvaluationPlugin: "example.evaluation", EvaluationSpace: space.ID}}
+	got, err := store.Hydrate(ctx, scope, candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].SegmentationID != served.ID || got[2].SegmentationID != evaluation.ID || got[2].EmbeddingID != artifacts[1].ID {
+		t.Fatalf("independent coverage/hydration: %+v", got)
+	}
+	status, processing, code, err := store.VersionStatus(ctx, org, v.ID)
+	if err != nil || !status.Searchable || processing.Phase != "enrichment" || code != "" {
+		t.Fatalf("evaluation changed served state: %+v %+v %s %v", status, processing, code, err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, org, v.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.Hydrate(ctx, scope, candidates)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("withdrawn evaluation hydrated: %+v %v", got, err)
+	}
+}

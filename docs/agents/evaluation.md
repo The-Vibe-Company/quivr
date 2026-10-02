@@ -19,11 +19,21 @@ make eval args='--sets miracl-fr --compare-to main'  # also measure main, on thi
 
 The local stack needs Linux x86_64, like `make measure`; it runs the engine with only its
 core plugins pinned, core.ingest and core.retrieve. To measure an existing installation instead, pass `--api-url <url>` and put a key
-with `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
+with `corpora:read`, `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
 `QUIVR_EVAL_API_KEY`. Each run creates new Corpora and never deletes them.
 
 The report is written to `.scratch/eval/runs/<time>/report.md` and `report.json` (`--out`
 changes the folder). Downloads are cached in `.scratch/eval/cache`.
+
+## Compare an evaluation plugin
+
+On an existing installation with `ingestion.evaluation` configured, add
+`--evaluation-plugin <plugin-id> --evaluation-space <space-id>` to `--api-url`.
+Both fields are required together. The lane waits for that space to cover every
+current document, then measures its default profile beside the served default
+in all three modes on the same Corpus. Systems carry the evaluation plugin and
+space ids; scoring deduplicates by Record, so different segmentation offsets
+compare at document level. This option excludes live paid reranker evaluation.
 
 ## The public sets
 

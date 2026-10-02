@@ -72,6 +72,10 @@ var ErrProjectionMissing = errors.New("projection missing")
 type Request struct {
 	Query     string
 	CorpusIDs []string
+	// EvaluationPlugin selects one ingestion plugin's projected vectors and
+	// anchors for an evaluation query. An empty value follows the generation's
+	// normal served routing.
+	EvaluationPlugin string
 	// SourceNamespaces, when set, keeps only Records from these Source
 	// Namespaces. The projection applies it before ranking.
 	SourceNamespaces []string
@@ -225,6 +229,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if (q.Mode != "lexical" && q.Mode != "semantic" && q.Mode != "hybrid") || q.Limit < 1 || q.Limit > MaxLimit || len(q.CorpusIDs) == 0 || len(q.CorpusIDs) > 16 {
 		return out, ErrUnsupported
 	}
+	if (q.EvaluationPlugin == "") != (q.Space == "") {
+		return out, ErrUnsupported
+	}
 	seen := map[string]bool{}
 	for _, id := range q.CorpusIDs {
 		if id == "" || seen[id] {
@@ -265,7 +272,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 			return out, ErrSourceFilterUnavailable
 		}
 		// One query ranks every Corpus in one space.
-		if served != "" && g.SpaceID != served {
+		if q.EvaluationPlugin == "" && served != "" && g.SpaceID != served {
 			return out, ErrUnsupported
 		}
 		served = g.SpaceID

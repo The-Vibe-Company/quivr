@@ -120,7 +120,7 @@ func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (c
  JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id,pc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3)
  WHERE sg.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL
 	var total int64
-	if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current, org, corpusID, g.ID).Scan(&total); err != nil {
+	if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.role='served'`, org, corpusID, g.ID).Scan(&total); err != nil {
 		return g, nil, 0, err
 	}
 	out := []content.SpaceCoverage{}
@@ -136,7 +136,17 @@ func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (c
 		if g.Serves(id) {
 			c.GenerationRole = content.SpaceServed
 		}
-		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=$4)`, org, corpusID, g.ID, id).Scan(&c.Segments); err != nil {
+		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.plugin_id=$5 AND EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=$4)`, org, corpusID, g.ID, id, c.OwnerPluginID).Scan(&c.Segments); err != nil {
+			return g, nil, 0, err
+		}
+		var ownerSegments int64
+		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.plugin_id=$4`, org, corpusID, g.ID, c.OwnerPluginID).Scan(&ownerSegments); err != nil {
+			return g, nil, 0, err
+		}
+		c.TotalSegments = &ownerSegments
+		if err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT v.id) `+current+` AND pc.plugin_id=$4 AND NOT EXISTS(
+          SELECT 1 FROM segments missing WHERE missing.organization=pc.organization AND missing.segmentation_id=pc.segmentation_id AND NOT EXISTS(
+           SELECT 1 FROM embedding_coverage ec WHERE ec.organization=missing.organization AND ec.segment_id=missing.id AND ec.generation_id=$3 AND ec.space_id=$5))`, org, corpusID, g.ID, c.OwnerPluginID, id).Scan(&c.VersionsCovered); err != nil {
 			return g, nil, 0, err
 		}
 		out = append(out, c)

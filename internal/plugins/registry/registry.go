@@ -413,6 +413,7 @@ const ingestionRole = "ingestion-default"
 const legacyIngestionRole = "ingestion"
 const ingestionMembershipPrefix = "ingestion:"
 const ingestionRoutePrefix = "ingestion-route:"
+const ingestionEvaluationPrefix = "ingestion-evaluation:"
 
 // retrievalRole identifies the retrieval provider independently of its version.
 func retrievalRole(pluginID string) string { return "retrieval:" + pluginID }
@@ -433,8 +434,8 @@ func registrationOf(pin *plugins.Pin, state string) Registration {
 // FromPins derives the seed of the startup pins: one active registration per
 // pinned plugin, and a plan whose roles are the routed media types, the
 // subscription evaluators, the connector kinds, the keyed ingestion
-// memberships plus default/source routes, and the retrieval role the pins
-// resolve to. A nil set declares nothing.
+// memberships plus default/source/evaluation routes, and the retrieval role
+// the pins resolve to. A nil set declares nothing.
 func FromPins(pins *plugins.PinSet) Seed {
 	var seed Seed
 	byPin := map[*plugins.Pin]Registration{}
@@ -472,9 +473,23 @@ func planRoles(set *plugins.PinSet, byPin map[*plugins.Pin]Registration) []Assig
 	if pin := set.Ingestion(); pin != nil {
 		roles = append(roles, assign(ingestionRole, byPin[pin]))
 	}
-	for mediaType := range set.IngestionRouting().Routes {
+	routing := set.IngestionRouting()
+	for mediaType := range routing.Routes {
 		if pin := set.IngestionFor(mediaType); pin != nil {
 			roles = append(roles, assign(ingestionRouteRole(mediaType), byPin[pin]))
+		}
+	}
+	evaluationMediaTypes := sortedKeys(routing.Evaluation)
+	for _, mediaType := range evaluationMediaTypes {
+		pluginIDs := append([]string(nil), routing.Evaluation[mediaType]...)
+		sort.Strings(pluginIDs)
+		for _, pluginID := range pluginIDs {
+			for _, pin := range set.EvaluationFor(mediaType) {
+				if pin.Manifest.ID == pluginID {
+					roles = append(roles, assign(ingestionEvaluationRole(mediaType, pluginID), byPin[pin]))
+					break
+				}
+			}
 		}
 	}
 	for _, pin := range set.Retrievals() {
@@ -497,6 +512,9 @@ func assign(role string, r Registration) Assignment {
 
 func ingestionMembershipRole(pluginID string) string { return ingestionMembershipPrefix + pluginID }
 func ingestionRouteRole(mediaType string) string     { return ingestionRoutePrefix + mediaType }
+func ingestionEvaluationRole(mediaType, pluginID string) string {
+	return ingestionEvaluationPrefix + mediaType + ":" + pluginID
+}
 
 // declaredRoles lists every role a manifest can serve, sorted.
 func declaredRoles(m plugins.Manifest) []string {

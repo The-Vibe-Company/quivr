@@ -73,9 +73,11 @@ func resolveMembers(members []Registration, routing *plugins.IngestionRouting) (
 // ingestionRouting reconstructs the explicit source-media choices stored in a
 // plan. Both the canonical default and the old "ingestion" role select the
 // default; keyed membership roles only keep a plugin in the plan and do not
-// choose it for new Versions.
+// choose it for new Versions. Evaluation routes retain the media type from
+// the role and use the assignment's PluginID to remove the plugin suffix
+// safely.
 func ingestionRouting(roles []Assignment, registrations map[string]Registration) plugins.IngestionRouting {
-	routing := plugins.IngestionRouting{Routes: map[string]string{}}
+	routing := plugins.IngestionRouting{Routes: map[string]string{}, Evaluation: map[string][]string{}}
 	for _, a := range roles {
 		if !isIngestionRoutingRole(a.Role) {
 			continue
@@ -89,10 +91,25 @@ func ingestionRouting(roles []Assignment, registrations map[string]Registration)
 			routing.Default = pluginID
 		case strings.HasPrefix(a.Role, ingestionRoutePrefix):
 			routing.Routes[strings.TrimPrefix(a.Role, ingestionRoutePrefix)] = pluginID
+		case strings.HasPrefix(a.Role, ingestionEvaluationPrefix):
+			role := strings.TrimPrefix(a.Role, ingestionEvaluationPrefix)
+			suffix := ":" + pluginID
+			if pluginID == "" || !strings.HasSuffix(role, suffix) {
+				continue
+			}
+			mediaType := strings.TrimSuffix(role, suffix)
+			routing.Evaluation[mediaType] = append(routing.Evaluation[mediaType], pluginID)
 		}
 	}
 	if len(routing.Routes) == 0 {
 		routing.Routes = nil
+	}
+	if len(routing.Evaluation) == 0 {
+		routing.Evaluation = nil
+	} else {
+		for mediaType := range routing.Evaluation {
+			sort.Strings(routing.Evaluation[mediaType])
+		}
 	}
 	return routing
 }
@@ -221,14 +238,14 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	return Activation{Roles: planRoles(set, byPin), Set: set, Retired: retired}, nil
 }
 
-// IsIngestionRole recognizes keyed memberships, source routes and both
-// canonical and legacy defaults.
+// IsIngestionRole recognizes keyed memberships, source and evaluation routes,
+// and both canonical and legacy defaults.
 func IsIngestionRole(role string) bool {
-	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionMembershipPrefix) || strings.HasPrefix(role, ingestionRoutePrefix)
+	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionMembershipPrefix) || strings.HasPrefix(role, ingestionRoutePrefix) || strings.HasPrefix(role, ingestionEvaluationPrefix)
 }
 
 func isIngestionRoutingRole(role string) bool {
-	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionRoutePrefix)
+	return role == ingestionRole || role == legacyIngestionRole || strings.HasPrefix(role, ingestionRoutePrefix) || strings.HasPrefix(role, ingestionEvaluationPrefix)
 }
 
 func registrationHasIngestion(r Registration) bool {

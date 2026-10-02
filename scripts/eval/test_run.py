@@ -39,6 +39,97 @@ class TimeSummary(unittest.TestCase):
 
 
 class EvaluationSelection(unittest.TestCase):
+    def test_evaluation_search_contract_selects_owner_and_collapses_offsets(self):
+        class Client:
+            def __init__(self):
+                self.requests = []
+
+            def call(self, method, path, body=None, **kwargs):
+                self.requests.append((method, path, body))
+                return 200, {'items': [
+                    {'record_id': 'r1', 'excerpt': {'start': 0}},
+                    {'record_id': 'r1', 'excerpt': {'start': 12}},
+                    {'record_id': 'r2', 'excerpt': {'start': 0}},
+                ], 'usage': {}}
+
+        client = Client()
+        client.evaluation = {'plugin': 'plugin.eval', 'space': 'model@1'}
+        ranked, _, error = run.search(client, 'corpus', 'query', 'lexical', 'default',
+                                      {'r1': 'doc-1', 'r2': 'doc-2'})
+
+        self.assertIsNone(error)
+        self.assertEqual(ranked, ['doc-1', 'doc-2'])
+        self.assertEqual(client.requests, [
+            ('POST', '/v0/search', {'query': 'query', 'corpus_ids': ['corpus'], 'mode': 'lexical',
+                                    'profile': 'default', 'limit': 50,
+                                    'evaluation_plugin': 'plugin.eval', 'evaluation_space': 'model@1'})
+        ])
+
+    def test_evaluation_cut_reuses_corpus_and_marks_only_selected_default_searches(self):
+        class Client(run.Client):
+            def __init__(self):
+                super().__init__('http://127.0.0.1', 'test-key')
+                self.requests = []
+                self.corpora = 0
+
+            @checked_fake
+            def call(self, method, path, body=None, **kwargs):
+                self.requests.append((method, path, body))
+                if path == '/v0/corpora':
+                    self.corpora += 1
+                    return 201, {'corpus_id': 'corpus', 'name': 'Evaluation', 'effective_retrieval': {}}
+                if path == '/v0/corpora/corpus/vector-spaces':
+                    return 200, {'projection_generation_id': 'generation', 'segments': 1, 'items': [{'name': 'model', 'vector_space_id': 'model@1', 'version': '1',
+                                           'owner': {'kind': 'plugin', 'plugin_id': 'plugin.eval', 'plugin_version': '1'},
+                                           'model': 'model', 'dimensions': 2, 'metric': 'cosine', 'indexes': ['text'],
+                                           'query_modalities': ['text'], 'role': 'evaluation',
+                                           'coverage': {'segments': 1, 'versions_covered': 1}}]}
+                if path == '/v0/search/profiles':
+                    return 200, {'items': [{'name': 'default', 'full_name': 'core.retrieve/default', 'aliases': ['default'],
+                                            'provider': {'kind': 'plugin', 'plugin_id': 'core.retrieve', 'plugin_version': '0.1.0'}}]}
+                return 200, {'retrieval_profile': {'name': 'default', 'version': 'engine/default'},
+                             'items': [{'record_id': 'r1', 'version_id': 'v1', 'part_key': 'body', 'segment_id': 's1',
+                                        'segmentation_id': 'sg1', 'projection_generation_id': 'pg1', 'rank': 1,
+                                        'excerpt': {'text': 'a record', 'start': 0, 'end': 8,
+                                                    'coordinate_system': 'unicode_codepoint'},
+                                        'availability': {'state': 'retrieval_ready', 'is_current': True, 'searchable': True}},
+                                       {'record_id': 'r1', 'version_id': 'v1', 'part_key': 'body', 'segment_id': 's2',
+                                        'segmentation_id': 'sg1', 'projection_generation_id': 'pg1', 'rank': 2,
+                                        'excerpt': {'text': 'record', 'start': 15, 'end': 21,
+                                                    'coordinate_system': 'unicode_codepoint'},
+                                        'availability': {'state': 'retrieval_ready', 'is_current': True, 'searchable': True}}],
+                             'usage': {'rounds': 1, 'elapsed_ms': 0, 'paid_calls': 0, 'cost_cents': 0}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            directory = pathlib.Path(directory)
+            trec.write(directory, {'d1': {'title': '', 'text': 'a record. More record content'}}, {'q1': 'find a record'}, {'q1': {'d1': 1}})
+            client = Client()
+            options = types.SimpleNamespace(ingest_timeout=1, stall=1, paid_calls=0, live_paid=False,
+                                            evaluation={'plugin': 'plugin.eval', 'space': 'model@1'})
+            with mock.patch.object(run, 'ingest', return_value=({'r1': 'd1'}, {})), \
+                 mock.patch.object(scoring, 'score', return_value={'mean': {}, 'per_query': {}}), \
+                 mock.patch.object(run, 'compare_within'), contextlib.redirect_stdout(io.StringIO()):
+                result, = run.measure_set([client], 'tiny', directory, 'run', options)
+
+        self.assertEqual(client.corpora, 1)
+        self.assertEqual(set(result['systems']), {
+            'lexical/default', 'semantic/default', 'hybrid/default',
+            'lexical/evaluation/plugin.eval/model@1',
+            'semantic/evaluation/plugin.eval/model@1',
+            'hybrid/evaluation/plugin.eval/model@1',
+        })
+        searches = [body for method, path, body in client.requests
+                    if method == 'POST' and path == '/v0/search' and body.get('query') == 'find a record']
+        self.assertTrue(searches)
+        served = [body for body in searches if 'evaluation_plugin' not in body]
+        evaluation = [body for body in searches if 'evaluation_plugin' in body]
+        self.assertTrue(served)
+        self.assertTrue(evaluation)
+        self.assertTrue(all('evaluation_space' not in body for body in served))
+        self.assertTrue(all(body['evaluation_plugin'] == 'plugin.eval' and body['evaluation_space'] == 'model@1'
+                            for body in evaluation))
+        self.assertEqual({body['mode'] for body in evaluation}, set(run.MODES))
+
     def test_paid_admission_is_run_wide_and_missing_telemetry_stays_reserved(self):
         class Response:
             status = 200
@@ -179,7 +270,7 @@ class EvaluationSelection(unittest.TestCase):
             with self.subTest(enabled=enabled, allow_paid=allow_paid), tempfile.TemporaryDirectory() as directory:
                 directory = pathlib.Path(directory)
                 queries = {f'q{index:03d}': f'find a record {index}' for index in range(151)}
-                trec.write(directory, {'d1': {'title': '', 'text': 'a record'}}, queries, {query: {'d1': 1} for query in queries})
+                trec.write(directory, {'d1': {'title': '', 'text': 'a record. More record content'}}, queries, {query: {'d1': 1} for query in queries})
                 stack = Stack(directory)
                 baseline = Client(None, False, None)
                 current = Client(stack, enabled, directory / 'plugin.log' if enabled else None)

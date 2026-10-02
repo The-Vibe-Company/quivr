@@ -61,6 +61,24 @@ type Generation struct {
 	// refuses a request for a named space until it is rebuilt.
 	Spaces          []GenerationSpace
 	SpacesProjected bool
+	// IngestionRouting selects the served projection by source media type.
+	// Nil retains the routing of generations recorded before evaluations.
+	IngestionRouting *IngestionRouting
+}
+
+type IngestionRouting struct {
+	Default string            `json:"default"`
+	Routes  map[string]string `json:"routes,omitempty"`
+}
+
+func (r IngestionRouting) For(mediaType string) string {
+	if mediaType == "" {
+		mediaType = "text/plain"
+	}
+	if owner := r.Routes[mediaType]; owner != "" {
+		return owner
+	}
+	return r.Default
 }
 
 // GenerationSpace is one vector space of a generation and the distance its
@@ -136,6 +154,9 @@ func (g Generation) Carries(space string) bool {
 type Candidate struct {
 	SegmentID, GenerationID string
 	Score                   float64
+	// EvaluationPlugin explicitly selects a separate owner's projection.
+	EvaluationPlugin string
+	EvaluationSpace  string
 }
 type Hydrated struct {
 	RecordID, VersionID, SegmentationID string

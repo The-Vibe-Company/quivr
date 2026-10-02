@@ -127,8 +127,10 @@ func (unpinned) Pin(ctx context.Context, _, _, _ string) (context.Context, error
 func (unpinned) Release(context.Context, string, string, string) error            { return nil }
 
 type Runtime struct {
-	Client client.Client
-	Worker worker.Worker
+	EvaluationWorker worker.Worker
+	Evaluation       *processing.Evaluator
+	Client           client.Client
+	Worker           worker.Worker
 	// BackfillWorker serves backfills on their own task queue, one activity
 	// at a time, below live content processing.
 	BackfillWorker worker.Worker
@@ -186,8 +188,26 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 			return nil, err
 		}
 	}
+	var ew worker.Worker
+	if service.Evaluation != nil {
+		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
+		registerIngestionEvaluation(ew, *service.Evaluation, pins)
+		if err = ew.Start(); err != nil {
+			if cw != nil {
+				cw.Stop()
+			}
+			if bw != nil {
+				bw.Stop()
+			}
+			c.Close()
+			return nil, err
+		}
+	}
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
+		if ew != nil {
+			ew.Stop()
+		}
 		if cw != nil {
 			cw.Stop()
 		}
@@ -197,7 +217,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
+	runtime := &Runtime{EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	go runtime.dispatch(ctx)
 	return runtime, nil
 }
@@ -283,6 +303,9 @@ func heartbeating(ctx context.Context, interval time.Duration, run func() error)
 }
 
 func (r *Runtime) Close() {
+	if r.EvaluationWorker != nil {
+		r.EvaluationWorker.Stop()
+	}
 	r.Worker.Stop()
 	if r.ConnectorWorker != nil {
 		r.ConnectorWorker.Stop()

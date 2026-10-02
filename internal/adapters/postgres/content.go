@@ -362,6 +362,27 @@ func (s ContentStore) Version(ctx context.Context, org, recordID, id string) (co
 // a recorded normalizer conflict.
 func (s ContentStore) versionDiagnostics(ctx context.Context, org, id string, quarantined, enrichmentStopped bool, code string) ([]content.Diagnostic, error) {
 	out := []content.Diagnostic{}
+	rows, err := s.Pool.Query(ctx, `SELECT diagnostic FROM ingestion_evaluations WHERE organization=$1 AND version_id=$2 AND state='failed' AND diagnostic IS NOT NULL ORDER BY plugin_id,created_at`, org, id)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var raw []byte
+		var d content.Diagnostic
+		if err = rows.Scan(&raw); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err = json.Unmarshal(raw, &d); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	if enrichmentStopped {
 		reason, err := s.enrichmentReason(ctx, org, id)
 		if err != nil {

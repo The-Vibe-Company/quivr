@@ -2630,6 +2630,12 @@ type SearchProfileUsage struct {
 type SearchRequest struct {
 	CorpusIds []string `json:"corpus_ids"`
 
+	// EvaluationPlugin Ingestion plugin whose independent projection to measure. Requires evaluation_space; omitted searches follow served routing.
+	EvaluationPlugin *string `json:"evaluation_plugin,omitempty"`
+
+	// EvaluationSpace Vector space owned by evaluation_plugin. Both fields are required together; invalid selections return 422 unsupported_search.
+	EvaluationSpace *string `json:"evaluation_space,omitempty"`
+
 	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
 	Filter *SearchFilter      `json:"filter,omitempty"`
 	Limit  *int               `json:"limit,omitempty"`
@@ -2995,6 +3001,12 @@ type UploadRequest struct {
 type VectorSpace struct {
 	Coverage struct {
 		Segments int `json:"segments"`
+
+		// TotalSegments Current segments in this plugin's own projection; different plugins may cut the same Version differently.
+		TotalSegments *int `json:"total_segments,omitempty"`
+
+		// VersionsCovered Current eligible Versions whose entire projection has vectors in this space.
+		VersionsCovered *int `json:"versions_covered,omitempty"`
 	} `json:"coverage"`
 	Dimensions int               `json:"dimensions"`
 	Indexes    []string          `json:"indexes"`

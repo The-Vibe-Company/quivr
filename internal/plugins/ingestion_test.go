@@ -103,15 +103,76 @@ func TestConfigureIngestionRejectsAmbiguousOrUnknownRoutes(t *testing.T) {
 		t.Fatalf("ambiguous set selected default %s", set.Ingestion().Manifest.ID)
 	}
 	for name, routing := range map[string]plugins.IngestionRouting{
-		"ambiguous default": {Routes: map[string]string{"application/pdf": "acme.first"}},
-		"unknown default":   {Default: "acme.missing"},
-		"unknown route":     {Default: "acme.first", Routes: map[string]string{"application/pdf": "acme.missing"}},
+		"ambiguous default":                      {Routes: map[string]string{"application/pdf": "acme.first"}},
+		"unknown default":                        {Default: "acme.missing"},
+		"unknown route":                          {Default: "acme.first", Routes: map[string]string{"application/pdf": "acme.missing"}},
+		"empty evaluation media type":            {Default: "acme.first", Evaluation: map[string][]string{"": {"acme.second"}}},
+		"unknown evaluation target":              {Default: "acme.first", Evaluation: map[string][]string{"application/pdf": {"acme.missing"}}},
+		"duplicate evaluation target":            {Default: "acme.first", Evaluation: map[string][]string{"application/pdf": {"acme.second", "acme.second"}}},
+		"evaluation target is served by default": {Default: "acme.first", Evaluation: map[string][]string{"text/plain": {"acme.first"}}},
+		"evaluation target is served by route":   {Default: "acme.first", Routes: map[string]string{"application/pdf": "acme.second"}, Evaluation: map[string][]string{"application/pdf": {"acme.second"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := set.ConfigureIngestion(routing); err == nil {
 				t.Fatal("configuration unexpectedly accepted")
 			}
 		})
+	}
+}
+
+func TestIngestionEvaluationRoutingIsDefensiveAndDistinguishesServing(t *testing.T) {
+	first := writePinManifest(t, strings.ReplaceAll(embedderManifest, "acme.embedder", "acme.first"))
+	second := writePinManifest(t, strings.ReplaceAll(embedderManifest, "acme.embedder", "acme.second"))
+	set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: first, Endpoint: "http://127.0.0.1:9904", Spaces: map[string]string{"acme.first.small": "served", "acme.first.large": "evaluation"}}, {Manifest: second, Endpoint: "http://127.0.0.1:9905", Spaces: map[string]string{"acme.second.small": "served", "acme.second.large": "evaluation"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := plugins.IngestionRouting{
+		Default: "acme.first",
+		Routes:  map[string]string{"application/pdf": "acme.second"},
+		Evaluation: map[string][]string{
+			"application/pdf": {"acme.first"},
+			"text/plain":      {"acme.second"},
+		},
+	}
+	if err := set.ConfigureIngestion(routing); err != nil {
+		t.Fatal(err)
+	}
+	if got := set.EvaluationFor("application/pdf"); len(got) != 1 || got[0].Manifest.ID != "acme.first" {
+		t.Fatalf("pdf evaluation %v", got)
+	}
+	if got := set.EvaluationFor(""); len(got) != 1 || got[0].Manifest.ID != "acme.second" {
+		t.Fatalf("empty media type evaluation %v", got)
+	}
+	for _, pluginID := range []string{"acme.first", "acme.second"} {
+		if !set.ServingIngestion(pluginID) {
+			t.Fatalf("%s should be serving", pluginID)
+		}
+	}
+
+	routing.Evaluation["application/pdf"][0] = "acme.second"
+	routing.Evaluation["text/plain"] = nil
+	snapshot := set.IngestionRouting()
+	snapshot.Evaluation["application/pdf"][0] = "acme.second"
+	snapshot.Evaluation["text/plain"] = nil
+	if got := set.EvaluationFor("application/pdf"); len(got) != 1 || got[0].Manifest.ID != "acme.first" {
+		t.Fatalf("evaluation routing snapshot was not defensive: %v", got)
+	}
+	got := set.EvaluationFor("application/pdf")
+	got[0] = set.IngestionFor("application/pdf")
+	if got = set.EvaluationFor("application/pdf"); len(got) != 1 || got[0].Manifest.ID != "acme.first" {
+		t.Fatalf("evaluation accessor was not defensive: %v", got)
+	}
+
+	evaluationOnly, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: first, Endpoint: "http://127.0.0.1:9904", Spaces: map[string]string{"acme.first.small": "served"}}, {Manifest: second, Endpoint: "http://127.0.0.1:9905", Spaces: map[string]string{"acme.second.small": "served"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := evaluationOnly.ConfigureIngestion(plugins.IngestionRouting{Default: "acme.first", Evaluation: map[string][]string{"application/pdf": {"acme.second"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if evaluationOnly.ServingIngestion("acme.second") || !evaluationOnly.ServingIngestion("acme.first") {
+		t.Fatalf("serving status default=%v evaluation-only=%v", evaluationOnly.ServingIngestion("acme.first"), evaluationOnly.ServingIngestion("acme.second"))
 	}
 }
 

@@ -47,11 +47,17 @@ PHASES = ['query_encoding_ms', 'index_query_ms', 'hydration_ms', 'plugin_rounds_
 BATCH_ITEMS, BATCH_BYTES = 100, 8 << 20  # under the batch bounds of 100 entries and 10 MiB
 WARMUP_QUERIES = 3
 DEEP_LIMIT = 10
+_USE_CLIENT_EVALUATION = object()
 
 
 class Client:
     def __init__(self, base, key, timeout=60):
         self.base, self.key, self.timeout = base.rstrip('/'), key, timeout
+        # An optional evaluation selection is kept on the client so callers
+        # that issue individual searches can opt into the same request shape
+        # as a measured evaluation cut.  measure_set passes its selection
+        # explicitly, which keeps the served and evaluation cuts independent.
+        self.evaluation = None
         self.jev_log = None
         self.stack = None
         self.budget = None
@@ -126,7 +132,7 @@ def is_deep(profile):
     return profile == 'deep' or profile.startswith('deep-k')
 
 
-def measurements(sides):
+def measurements(sides, evaluation=None):
     profiles = list(dict.fromkeys(profile for side in sides for profile in side['served']))
     profiles.sort(key=lambda profile: (profile != 'default', is_deep(profile)))
     for profile in profiles:
@@ -135,6 +141,10 @@ def measurements(sides):
                 yield profile, label, configuration
         else:
             yield profile, profile, None
+    if evaluation is not None:
+        # Evaluation always uses the served profile's default configuration;
+        # it is a separate cut from the optional paid matrix above.
+        yield 'default', evaluation_label(evaluation), None
 
 
 def deep_warmups(queries, run_id):
@@ -145,6 +155,28 @@ def deep_warmups(queries, run_id):
             query += ' warmup'
         result.append(query)
     return result
+
+
+def wait_evaluation_space(client, corpus, evaluation, records, timeout):
+    """Wait until the selected evaluation space covers every ingested Record."""
+    fields = evaluation_selection(evaluation)
+    started = time.monotonic()
+    path = f'/v0/corpora/{urllib.parse.quote(corpus)}/vector-spaces'
+    while True:
+        _, result = client.call('GET', path)
+        for item in result.get('items', []):
+            owner = item.get('owner') or {}
+            owner_plugin = owner.get('plugin_id') or item.get('owner_plugin_id')
+            item_spaces = {item.get(name) for name in ('name', 'vector_space_id', 'space')} - {None, ''}
+            coverage = item.get('coverage') or {}
+            if (owner_plugin == fields['evaluation_plugin'] and fields['evaluation_space'] in item_spaces
+                    and coverage.get('versions_covered') == records):
+                return
+        elapsed = time.monotonic() - started
+        if elapsed >= timeout:
+            raise RuntimeError(f"evaluation space {fields['evaluation_plugin']}/{fields['evaluation_space']} "
+                               f"covers fewer than {records} Records after {round(elapsed)} s")
+        time.sleep(min(1, timeout - elapsed))
 
 
 def batches(commands):
@@ -217,13 +249,43 @@ def stuck(client, receipts, show=3):
     return out or 'every receipt is retrieval_ready and idle'
 
 
-def search(client, corpus, query, mode, profile, keys, limit=LIMIT):
+def evaluation_selection(selection):
+    """Return the wire fields for an evaluation selection, or no fields.
+
+    The runner uses ``plugin`` and ``space`` internally.  Accepting the wire
+    names as aliases keeps Client.evaluation useful to callers that build the
+    selection from command/API configuration.
+    """
+    if selection is None:
+        return {}
+    if isinstance(selection, dict):
+        plugin = selection.get('plugin') or selection.get('plugin_id') or selection.get('evaluation_plugin')
+        space = selection.get('space') or selection.get('space_id') or selection.get('evaluation_space')
+    else:
+        plugin = getattr(selection, 'plugin', None) or getattr(selection, 'plugin_id', None) \
+            or getattr(selection, 'evaluation_plugin', None)
+        space = getattr(selection, 'space', None) or getattr(selection, 'space_id', None) \
+            or getattr(selection, 'evaluation_space', None)
+    if not plugin or not space:
+        raise ValueError('evaluation selection requires both plugin and space')
+    return {'evaluation_plugin': plugin, 'evaluation_space': space}
+
+
+def evaluation_label(selection):
+    fields = evaluation_selection(selection)
+    return f"evaluation/{fields['evaluation_plugin']}/{fields['evaluation_space']}"
+
+
+def search(client, corpus, query, mode, profile, keys, limit=LIMIT, evaluation=_USE_CLIENT_EVALUATION):
     """(ranked doc ids, timing, error): hits deduplicated by Record, best first.
 
     timing is the client's milliseconds, with the engine's usage (elapsed_ms and its phases) when it reports them."""
     start = time.perf_counter()
+    body = {'query': query, 'corpus_ids': [corpus], 'mode': mode, 'profile': profile, 'limit': limit}
+    selected = getattr(client, 'evaluation', None) if evaluation is _USE_CLIENT_EVALUATION else evaluation
+    body.update(evaluation_selection(selected))
     try:
-        _, result = client.call('POST', '/v0/search', {'query': query, 'corpus_ids': [corpus], 'mode': mode, 'profile': profile, 'limit': limit}, attempts=1)
+        _, result = client.call('POST', '/v0/search', body, attempts=1)
     except Exception as error:  # a failed search scores 0 and is counted, never hidden
         return [], {'client_ms': (time.perf_counter() - start) * 1000}, str(error)[:200]
     usage = result.get('usage') or {}
@@ -251,11 +313,13 @@ def time_summary(timings, failures):
     return out
 
 
-def measure_set(clients, name, directory, run_id, options, allow_paid=True):
+def measure_set(clients, name, directory, run_id, options, allow_paid=True, evaluation=None):
     """One result per client, in order. With two clients (--compare-to) each query is searched on
     both, alternating which goes first, so drift on the machine weighs on both sides alike."""
     import scoring
     data = trec.load(directory)
+    if evaluation is None:
+        evaluation = getattr(options, 'evaluation', None)
     allow_paid = allow_paid and name == 'miracl-fr'
     if allow_paid and any(client.deep_enabled for client in clients):
         selected = sorted(data['queries'])[:150]
@@ -271,6 +335,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True):
         corpus = created['corpus_id']
         print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
         records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
+        if evaluation is not None:
+            wait_evaluation_space(client, corpus, evaluation, len(records), options.ingest_timeout)
         advertised = advertised_profiles(client)
         served, refused = serving_profiles(client, corpus, advertised, deep_queries[0], allow_paid=allow_paid)
         sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
@@ -279,7 +345,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True):
                               'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}})
     queries = sorted(data['queries'])
     reranking = any('deep' in side['served'] for side in sides)
-    for profile, label, configuration in measurements(sides):
+    for profile, label, configuration in measurements(sides, evaluation):
+        selected_evaluation = evaluation if evaluation is not None and label == evaluation_label(evaluation) else None
         deep = is_deep(profile)
         scored_limit = DEEP_LIMIT if deep or reranking else LIMIT
         limits = [scored_limit] if deep else [scored_limit] + [limit for limit in TIMING_LIMITS if limit != scored_limit]
@@ -296,7 +363,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True):
                 warmups = []
             for query in warmups:
                 for side in serving:
-                    search(side['client'], side['corpus'], query, mode, profile, side['records'], scored_limit)
+                    search(side['client'], side['corpus'], query, mode, profile, side['records'], scored_limit,
+                           evaluation=selected_evaluation)
             for side in serving:
                 side.update(ranking={}, errors=[], timings={limit: [] for limit in limits}, failed={limit: 0 for limit in limits},
                             attempts=[], log_begin=jev.offset(side['client'].jev_log))
@@ -304,7 +372,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True):
             for limit in limits:
                 for n, q in enumerate(queries):
                     for side in serving if n % 2 == 0 else serving[::-1]:
-                        ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, profile, side['records'], limit)
+                        ranked, timing, error = search(side['client'], side['corpus'], data['queries'][q], mode, profile,
+                                                      side['records'], limit, evaluation=selected_evaluation)
                         if limit == scored_limit:
                             side['ranking'][q] = ranked
                             side['attempts'].append(timing)
@@ -337,7 +406,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True):
                     side.update(warm_timings=[], warm_attempts=[], warm_failures=0, warm_begin=jev.offset(side['client'].jev_log))
                 for index, query in enumerate(queries):
                     for side in serving if index % 2 == 0 else serving[::-1]:
-                        _, timing, error = search(side['client'], side['corpus'], data['queries'][query], 'hybrid', profile, side['records'], DEEP_LIMIT)
+                        _, timing, error = search(side['client'], side['corpus'], data['queries'][query], 'hybrid', profile,
+                                                  side['records'], DEEP_LIMIT, evaluation=selected_evaluation)
                         side['warm_attempts'].append(timing)
                         if error:
                             side['warm_failures'] += 1
@@ -469,19 +539,29 @@ def main():
     parser.add_argument('--private-name', default='private', help='name of the private set in the report')
     parser.add_argument('--baseline', help='report.json of an earlier run to compare each system with, per query')
     parser.add_argument('--api-url', help='measure this installation instead of a local stack; key in QUIVR_EVAL_API_KEY')
+    parser.add_argument('--evaluation-plugin', help='ingestion plugin owner for an evaluation search cut (requires --evaluation-space and --api-url)')
+    parser.add_argument('--evaluation-space', help='vector space name for an evaluation search cut (requires --evaluation-plugin and --api-url)')
     parser.add_argument('--compare-to', metavar='REF', help='also measure this git revision on a second local stack, searched alternately with this checkout')
     parser.add_argument('--out', default=str(ROOT / '.scratch/eval/runs' / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     parser.add_argument('--cache', default=str(ROOT / '.scratch/eval/cache'))
     parser.add_argument('--ingest-timeout', type=int, default=5400, help='seconds for one set to become searchable with vectors')
     parser.add_argument('--stall', type=int, default=600, help='seconds without a Record gaining vectors before failing')
     options = parser.parse_args()
+    if bool(options.evaluation_plugin) != bool(options.evaluation_space):
+        parser.error('--evaluation-plugin and --evaluation-space must be provided together')
+    if (options.evaluation_plugin or options.evaluation_space) and not options.api_url:
+        parser.error('evaluation selection requires --api-url')
     typesafe_key = os.environ.pop('TYPESAFE_API_KEY', '').strip()
+    if (options.evaluation_plugin or options.evaluation_space) and typesafe_key:
+        parser.error('evaluation selection cannot be combined with paid live configuration')
     if typesafe_key:
         if options.api_url or [name.strip() for name in options.sets.split(',') if name.strip()] != ['miracl-fr']:
             parser.error('paid evaluation requires a local miracl-fr-only run')
         options.private = ''
     budget = jev.Budget() if typesafe_key else None
     options.live_paid = bool(typesafe_key)
+    options.evaluation = ({'plugin': options.evaluation_plugin, 'space': options.evaluation_space}
+                          if options.evaluation_plugin else None)
     if options.compare_to and (options.api_url or options.baseline):
         parser.error('--compare-to measures two local stacks; it excludes --api-url and --baseline')
     try:
@@ -502,6 +582,8 @@ def main():
                                           'github': {k: os.environ[k] for k in ['GITHUB_RUN_ID', 'GITHUB_REF_NAME', 'GITHUB_EVENT_NAME'] if k in os.environ},
                                           'phases_seconds': {}},
               'convention': None, 'test': None, 'baseline_system': BASELINE_SYSTEM, 'limit': LIMIT, 'sets': {}}
+    if options.evaluation:
+        report['run']['evaluation'] = dict(options.evaluation)
     if budget:
         report['run']['paid_policy'] = {'set': 'miracl-fr', 'max_queries': 150, 'candidate_count': 30,
                                        'trim_tokens': 256, 'ranking': 'noul', 'max_input_tokens': jev.MAX_RUN_INPUT_TOKENS,
@@ -518,6 +600,7 @@ def main():
             if not os.environ.get('QUIVR_EVAL_API_KEY'):
                 sys.exit('eval: --api-url needs QUIVR_EVAL_API_KEY (corpora:write, content:read, content:write, changes:read, search:query)')
             clients.append(Client(options.api_url, os.environ['QUIVR_EVAL_API_KEY']))
+            clients[-1].evaluation = options.evaluation
             clients[-1].deep_enabled = bool(typesafe_key)
             options.paid_calls = None
             report['run']['target'] = 'existing installation (--api-url)'

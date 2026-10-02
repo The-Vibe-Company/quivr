@@ -62,6 +62,11 @@ func (r spaceRegistry) VectorSpaces(_ context.Context, _ string, id string) (con
 		if space == g.SpaceID {
 			c.GenerationRole = content.SpaceServed
 		}
+		for _, projected := range g.Spaces {
+			if projected.ID == space {
+				c.OwnerPluginID = projected.OwnerPluginID
+			}
+		}
 		c.ID, c.Metric, c.QueryModalities = space, "cosine", []string{"text"}
 		c.VectorSpace.Dimensions = 2
 		out = append(out, c)
@@ -88,21 +93,31 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		"builtin":  pluginGeneration("gen-builtin", true, "space"),
 		"legacy":   pluginGeneration("gen-legacy", false, "space"),
 		"orphaned": pluginGeneration("gen-orphaned", true, "retired.space@2"),
+		"mixed":    pluginGeneration("gen-mixed", true, "space", "example.large@1"),
 	}
 	hybrid := func(space string) map[string]any {
 		return map[string]any{"primitive": "hybrid", "space": space, "query_text": "  lanterne\r\n", "k": 10}
 	}
 	for _, c := range []struct {
-		name      string
-		corpora   []string
-		request   map[string]any
-		noPlugin  bool
-		encodeErr error
-		wantErr   error
-		space     string // space the projection ranks in
-		encoded   string // what the plugin encoded
-		builtin   int    // built-in encoder calls
+		name                              string
+		corpora                           []string
+		request                           map[string]any
+		noPlugin                          bool
+		encodeErr                         error
+		wantErr                           error
+		space                             string // space the projection ranks in
+		encoded                           string // what the plugin encoded
+		builtin                           int    // built-in encoder calls
+		evaluationPlugin, evaluationSpace string
+		otherOwner                        bool
 	}{
+		{name: "explicit independent evaluation", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
+		{name: "evaluation across different served spaces", corpora: []string{"plugin", "mixed"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
+		{name: "evaluation space missing from one corpus", corpora: []string{"plugin", "builtin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, wantErr: retrieval.ErrUnsupported},
+		{name: "evaluation owner cannot join ordinary ranking", corpora: []string{"plugin"}, request: hybrid("example.large@1"), otherOwner: true, wantErr: retrieval.ErrPluginInvalid},
+		{name: "evaluation owner mismatch", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "another", evaluationSpace: "example.large@1", otherOwner: true, wantErr: retrieval.ErrUnsupported},
+		{name: "evaluation owner without space", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", wantErr: retrieval.ErrUnsupported},
+		{name: "evaluation space without owner", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationSpace: "example.large@1", wantErr: retrieval.ErrUnsupported},
 		{name: "plugin-served corpus", corpora: []string{"plugin"}, request: hybrid("example.small@1"), space: "example.small@1", encoded: "org/example.small@1/lanterne"},
 		{name: "evaluation space", corpora: []string{"plugin"}, request: map[string]any{"primitive": "near_vector", "space": "example.large@1", "query_text": "lanterne", "k": 10}, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
 		{name: "corpora not rebuilt since the built-in space", corpora: []string{"builtin", "legacy"}, request: hybrid("space"), space: "space", builtin: 1},
@@ -116,16 +131,30 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		{name: "plugin unavailable", corpora: []string{"plugin"}, request: hybrid("example.small@1"), encodeErr: errors.New("connection refused"), wantErr: retrieval.ErrUnavailable, encoded: "org/example.small@1/lanterne"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			routed := spaceRouting{}
+			for id, g := range routing {
+				routed[id] = g
+			}
+			if c.otherOwner {
+				g := pluginGeneration("gen-plugin", true, "example.small@1", "example.large@1")
+				g.Spaces[0].Role, g.Spaces[0].OwnerPluginID = content.SpaceServed, "example.first"
+				g.Spaces[1].Role, g.Spaces[1].OwnerPluginID = content.SpaceEvaluation, "example.second"
+				routed["plugin"] = g
+				mixed := routed["mixed"]
+				mixed.Spaces[0].Role, mixed.Spaces[0].OwnerPluginID = content.SpaceServed, "example.builtin"
+				mixed.Spaces[1].Role, mixed.Spaces[1].OwnerPluginID = content.SpaceEvaluation, "example.second"
+				routed["mixed"] = mixed
+			}
 			p := &fakeProjection{}
 			calls := 0
 			encoder := &pluginEncoder{err: c.encodeErr}
-			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, Routing: routing, Projection: p, Spaces: encoder,
-				Ranker: &scriptedRanker{answer: asking(c.request)}, Registry: spaceRegistry(routing),
+			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, Routing: routed, Projection: p, Spaces: encoder,
+				Ranker: &scriptedRanker{answer: asking(c.request)}, Registry: spaceRegistry(routed),
 				Content: content.Service{Repository: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}}}
 			if c.noPlugin {
 				s.Spaces = nil
 			}
-			_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: c.corpora})
+			_, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: c.corpora, EvaluationPlugin: c.evaluationPlugin, Space: c.evaluationSpace})
 			if !errors.Is(err, c.wantErr) {
 				t.Fatalf("error %v, want %v", err, c.wantErr)
 			}

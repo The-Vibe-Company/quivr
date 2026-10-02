@@ -103,6 +103,9 @@ func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (con
 		return g, err
 	}
 	g.Fields, err = retrievalFields(cfg)
+	if err == nil {
+		err = loadGenerationIngestion(ctx, s.Pool, &g)
+	}
 	return g, err
 }
 func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
@@ -285,7 +288,7 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	if digest != content.SegmentationDigest(seg) {
 		return content.ErrConflict
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
@@ -320,14 +323,14 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 // any index that starts with it. The Organization therefore comes from the
 // candidate row, a value the planner cannot see.
 var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,'')
-FROM unnest($1::text[],$2::text[],$3::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,n)
+FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,evaluation_plugin,evaluation_space,n)
 CROSS JOIN LATERAL (SELECT sg.* FROM segments sg WHERE sg.organization=c.organization AND sg.id=c.segment_id OFFSET 0) sg
 CROSS JOIN LATERAL (SELECT v.* FROM record_versions v WHERE v.organization=c.organization AND v.id=sg.version_id OFFSET 0) v
 CROSS JOIN LATERAL (SELECT r.* FROM records r WHERE r.organization=c.organization AND r.id=v.record_id OFFSET 0) r
 CROSS JOIN LATERAL (SELECT p.blob_id FROM version_parts p WHERE p.organization=c.organization AND p.version_id=sg.version_id AND p.part_key=sg.part_key OFFSET 0) p
 CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blobs b WHERE b.organization=c.organization AND b.blob_id=p.blob_id OFFSET 0) b
-CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id OFFSET 0) pc
-LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND (g.space_id=a.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',a.space_id,'role','served')))
+CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND pc.role='served') OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
+LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND (g.space_id=a.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',a.space_id,'role','served')))) OR (c.evaluation_plugin<>'' AND a.space_id=c.evaluation_space))
   WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
 WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL
 
@@ -338,11 +341,12 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []cont
 	if len(cs) == 0 {
 		return out, nil
 	}
-	orgs, segments, generations := make([]string, len(cs)), make([]string, len(cs)), make([]string, len(cs))
+	orgs, segments, generations, evaluations, spaces := make([]string, len(cs)), make([]string, len(cs)), make([]string, len(cs)), make([]string, len(cs)), make([]string, len(cs))
 	for i, c := range cs {
-		orgs[i], segments[i], generations[i] = scope.Organization, c.SegmentID, c.GenerationID
+		orgs[i], segments[i], generations[i], evaluations[i] = scope.Organization, c.SegmentID, c.GenerationID, c.EvaluationPlugin
+		spaces[i] = c.EvaluationSpace
 	}
-	rows, err := s.Pool.Query(ctx, hydrateSQL, orgs, segments, generations)
+	rows, err := s.Pool.Query(ctx, hydrateSQL, orgs, segments, generations, evaluations, spaces)
 	if err != nil {
 		return nil, err
 	}
