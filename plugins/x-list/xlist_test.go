@@ -99,7 +99,7 @@ func TestAnInstanceOfTheBuiltinKindContinuesOnThePlugin(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		f.post(fmt.Sprintf("90000000000000000%02d", i), fmt.Sprintf("Post %d", i), int64(i), nil, nil)
 	}
-	f.deleted["9000000000000000002"] = true
+	f.list(map[string]any{"delete": []string{"9000000000000000002"}})
 	in := newInstance(t, srv, `{"list_id":"77","recheck_interval_seconds":60}`)
 	in.checkpoint, in.reads, in.now = last.Checkpoint, last.ReadsToday, base.Add(3*time.Minute)
 	got := keys(in.run())

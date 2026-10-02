@@ -46,7 +46,7 @@ the local fake X API and set `allow_short_recheck`. The Railway image runs it be
   diagnostic and error with [testdata/builtin](testdata/builtin), what the
   former built-in kind returned before it was deleted. Each run starts from the
   built-in kind's checkpoint, so each run also proves the cutover;
-- certifies the plugin with `quivr plugin test` against `scripts/fake_x.py`
+- certifies the plugin with `quivr plugin test` against the shared Go binary in `tests/fakes/cmd/x`
   ([fixtures](fixtures)); CI uploads the report as `x-list-contract-report`.
 
 The goldens are frozen: a behaviour change updates them on purpose, in the same

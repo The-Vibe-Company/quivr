@@ -14,7 +14,6 @@ import (
 
 const (
 	testConsumerSecret = "x-test-consumer-secret"
-	testWebhookURL     = "https://quivr.example.com/v0/connector-webhooks/connector_x"
 	webhookConfigJSON  = `{"list_id":"77","webhook":{"enabled":true}}`
 )
 
@@ -30,9 +29,11 @@ func (in *instance) receive(method, query string, headers map[string]string, bod
 	if checkpoint == nil {
 		checkpoint = json.RawMessage("null")
 	}
+	connector := in.connector()
+	delete(connector, "webhook_url") // Fetch-only metadata is outside the receive contract.
 	raw, _ := json.Marshal(map[string]any{
 		"invocation_id": "delivery", "contribution": "connector", "organization_id": "org_a",
-		"configuration": map[string]any{"api_endpoint": in.api}, "connector": in.connector(),
+		"configuration": map[string]any{"api_endpoint": in.api}, "connector": connector,
 		"credential": map[string]any{"bearer_token": in.token, "consumer_secret": testConsumerSecret}, "checkpoint": checkpoint,
 		"now": in.now.Format(time.RFC3339), "reads_today": in.reads,
 		"request": map[string]any{"method": method, "query": query, "headers": relayed, "body_base64": base64.StdEncoding.EncodeToString(body)},
@@ -102,10 +103,8 @@ func TestADeliveredPostIsTheItemPullReturns(t *testing.T) {
 	f, srv := newFakeX(t)
 	in := newInstance(t, srv, `{"list_id":"77","backfill_since":"`+base.Add(-time.Hour).Format(time.RFC3339)+`","webhook":{"enabled":true}}`)
 	f.post("7300000000000000010", "Harbour closed", 0, []string{"7300000000000000009", "7300000000000000010"}, map[string]any{"referenced_tweets": []any{map[string]any{"type": "quoted", "id": "7300000000000000001"}}})
-	f.mu.Lock()
-	delivered := map[string]any{"data": f.posts["7300000000000000010"], "includes": map[string]any{"users": []any{map[string]any{"id": "42", "username": "newsdesk", "name": "News Desk"}}},
+	delivered := map[string]any{"data": f.state().Posts["7300000000000000010"], "includes": map[string]any{"users": []any{map[string]any{"id": "42", "username": "newsdesk", "name": "News Desk"}}},
 		"matching_rules": []any{map[string]any{"id": "1", "tag": "quivr:connector_x"}}}
-	f.mu.Unlock()
 	body, _ := json.Marshal(delivered)
 	_, out := in.receive("POST", "", map[string]string{signatureHeader: sign(testConsumerSecret, body)}, body)
 	pushed := out["items"].([]any)[0]
@@ -147,14 +146,15 @@ func TestRulesStayWithinTheLimitsAndCoverEveryMember(t *testing.T) {
 // same members changes nothing at X.
 func TestPullSetsPushUpAndResyncsIdempotently(t *testing.T) {
 	f, srv := newFakeX(t)
-	f.members = []string{"11", "22", "33"}
+	f.list(map[string]any{"members": []string{"11", "22", "33"}})
 	in := newInstance(t, srv, `{"list_id":"77","webhook":{"enabled":true,"max_rule_length":64,"resync_interval_seconds":60}}`)
-	in.webhookURL = testWebhookURL
+	in.webhookURL = in.callbackURL()
 	pages := in.run()
 	last := pages[len(pages)-1]
-	if last.Push["state"] != "active" || last.Push["poll_interval_seconds"] != 900.0 || len(f.rules) != 1 || f.rules[0].Tag != "quivr:connector_x" ||
-		f.rules[0].Value != "from:11 OR from:22 OR from:33" || len(f.webhooks) != 1 || !f.linked[f.webhooks[0].ID] || f.webhooks[0].URL != testWebhookURL {
-		t.Fatalf("push %v rules %+v webhooks %+v linked %v", last.Push, f.rules, f.webhooks, f.linked)
+	state := f.state()
+	if last.Push["state"] != "active" || last.Push["poll_interval_seconds"] != 900.0 || len(state.Rules) != 1 || state.Rules[0].Tag != "quivr:connector_x" ||
+		state.Rules[0].Value != "from:11 OR from:22 OR from:33" || len(state.Webhooks) != 1 || !state.Linked[state.Webhooks[0].ID] || state.Webhooks[0].URL != in.webhookURL {
+		t.Fatalf("push %v rules %+v webhooks %+v linked %v", last.Push, state.Rules, state.Webhooks, state.Linked)
 	}
 	f.take()
 	in.now = in.now.Add(time.Minute)
@@ -163,11 +163,12 @@ func TestPullSetsPushUpAndResyncsIdempotently(t *testing.T) {
 		t.Fatalf("a resync with the same members wrote %d times to X", writes)
 	}
 	// A member leaves and one joins: one rule replaced, nothing else.
-	f.members = []string{"11", "22", "44"}
+	f.list(map[string]any{"members": []string{"11", "22", "44"}})
 	in.now = in.now.Add(time.Minute)
 	in.run()
-	if writes := countWrites(f.take()); writes != 2 || len(f.rules) != 1 || f.rules[0].Value != "from:11 OR from:22 OR from:44" {
-		t.Fatalf("writes %d rules %+v", writes, f.rules)
+	state = f.state()
+	if writes := countWrites(f.take()); writes != 2 || len(state.Rules) != 1 || state.Rules[0].Value != "from:11 OR from:22 OR from:44" {
+		t.Fatalf("writes %d rules %+v", writes, state.Rules)
 	}
 }
 
@@ -184,31 +185,33 @@ func countWrites(requests []string) int {
 func TestPushFailuresAreReportedAndPullCarriesOn(t *testing.T) {
 	t.Run("invalidated webhook, then recovery", func(t *testing.T) {
 		f, srv := newFakeX(t)
-		f.members = []string{"11"}
+		f.list(map[string]any{"members": []string{"11"}})
 		in := newInstance(t, srv, `{"list_id":"77","webhook":{"enabled":true,"resync_interval_seconds":60}}`)
-		in.webhookURL = testWebhookURL
+		in.webhookURL = in.callbackURL()
 		in.run()
-		f.webhooks[0].Valid, f.crcFails = false, true
+		f.control("/_control/webhooks", map[string]any{"invalidate": true})
+		f.control("/_control/app", map[string]any{"crc_fails": true})
 		in.now = in.now.Add(time.Minute)
 		pages := in.run()
 		if p := pages[len(pages)-1]; p.Error != nil || p.Push["state"] != "failed" || p.Push["error_class"] != "access" || p.Push["code"] != "webhook_invalid" {
 			t.Fatalf("pages %+v", pages)
 		}
-		f.crcFails = false
+		f.control("/_control/app", map[string]any{"crc_fails": false})
 		in.now = in.now.Add(time.Minute)
-		if pages := in.run(); pages[len(pages)-1].Push["state"] != "active" || !f.webhooks[0].Valid {
+		if pages := in.run(); pages[len(pages)-1].Push["state"] != "active" || !f.state().Webhooks[0].Valid {
 			t.Fatalf("recovery %+v", pages[len(pages)-1].Push)
 		}
 	})
 	t.Run("too many members for the rule limit", func(t *testing.T) {
 		f, srv := newFakeX(t)
-		f.members = []string{"11", "22", "33", "44"}
+		members := []string{"11", "22", "33", "44"}
 		in := newInstance(t, srv, `{"list_id":"77","webhook":{"enabled":true,"max_rules":1,"max_rule_length":64}}`)
-		in.webhookURL = testWebhookURL
-		f.members = append(f.members, strings.Repeat("9", 19), strings.Repeat("8", 19), strings.Repeat("7", 19))
+		in.webhookURL = in.callbackURL()
+		members = append(members, strings.Repeat("9", 19), strings.Repeat("8", 19), strings.Repeat("7", 19))
+		f.list(map[string]any{"members": members})
 		pages := in.run()
-		if p := pages[len(pages)-1]; p.Push["state"] != "failed" || p.Push["code"] != "rule_limit_exceeded" || len(f.rules) != 0 {
-			t.Fatalf("push %v rules %+v", p.Push, f.rules)
+		if p := pages[len(pages)-1]; p.Push["state"] != "failed" || p.Push["code"] != "rule_limit_exceeded" || len(f.state().Rules) != 0 {
+			t.Fatalf("push %v rules %+v", p.Push, f.state().Rules)
 		}
 	})
 	t.Run("no public URL", func(t *testing.T) {
@@ -226,9 +229,9 @@ func TestPushFailuresAreReportedAndPullCarriesOn(t *testing.T) {
 // still bring them, and a later sweep reads them if it did not.
 func TestPullHoldsBackPostsTheWebhookMayStillDeliver(t *testing.T) {
 	f, srv := newFakeX(t)
-	f.members = []string{"42"}
+	f.list(map[string]any{"members": []string{"42"}})
 	in := newInstance(t, srv, `{"list_id":"77","webhook":{"enabled":true}}`)
-	in.webhookURL = testWebhookURL
+	in.webhookURL = in.callbackURL()
 	in.run()
 	f.post("7400000000000000001", "Older than the grace", 0, nil, nil)
 	f.post("7400000000000000002", "Just published", 50, nil, nil)
@@ -240,4 +243,21 @@ func TestPullHoldsBackPostsTheWebhookMayStillDeliver(t *testing.T) {
 	if got := keys(in.run()); fmt.Sprint(got) != "[7400000000000000002]" {
 		t.Fatalf("second sweep %v", got)
 	}
+}
+
+// callbackURL relays actual CRC requests to the plugin's receive boundary.
+func (in *instance) callbackURL() string {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, out := in.receive(r.Method, r.URL.RawQuery, nil, nil)
+		response, ok := out["response"].(map[string]any)
+		if !ok {
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", response["content_type"].(string))
+		w.WriteHeader(int(response["status"].(float64)))
+		_, _ = w.Write([]byte(response["body"].(string)))
+	}))
+	in.t.Cleanup(srv.Close)
+	return srv.URL + "/v0/connector-webhooks/connector_x"
 }

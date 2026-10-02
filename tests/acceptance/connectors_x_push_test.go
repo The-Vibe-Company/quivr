@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// x_list webhook mode against the local fake X API (scripts/fake_x.py): the
+// x_list webhook mode against the local fake X API (tests/fakes/cmd/x): the
 // fake registers the instance's webhook_url, checks it with a CRC request the
 // core relays to the plugin, and delivers signed Filtered Stream posts to it.
 // The list's posts come from a member of its own, so no other test's

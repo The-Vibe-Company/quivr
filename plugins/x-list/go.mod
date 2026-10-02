@@ -2,7 +2,10 @@ module github.com/The-Vibe-Company/quivr-v2/plugins/x-list
 
 go 1.24
 
-require github.com/The-Vibe-Company/quivr-v2/sdks/go v0.0.0
+require (
+	github.com/The-Vibe-Company/quivr-v2/sdks/go v0.0.0
+	github.com/The-Vibe-Company/quivr-v2/tests/fakes v0.0.0
+)
 
 require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
@@ -11,3 +14,5 @@ require (
 )
 
 replace github.com/The-Vibe-Company/quivr-v2/sdks/go => ../../sdks/go
+
+replace github.com/The-Vibe-Company/quivr-v2/tests/fakes => ../../tests/fakes

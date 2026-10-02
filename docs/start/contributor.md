@@ -7,6 +7,7 @@ How this repository is organised, tested and changed, for people and coding agen
 
 - [Quivr Ingestion and Retrieval](../../CONTEXT.md): the domain language: Corpus, Record, Version, Manifest and the other terms
 - [Quivr V2 — Local harness and operational baseline](../quivr-v2-local-harness.md): how `make dev` and `make verify` work
+- [X response examples](../../tests/fakes/x/fixtures/README.md): the sanitized official examples used by the X fake
 
 ## Guides
 
@@ -20,6 +21,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Triage labels](../agents/triage-labels.md): the five triage labels
 - [Runnable guide blocks](../runnable-guides.md): write guide blocks that `make verify` replays
 - [Public acceptance suite](../../tests/acceptance/README.md): the public acceptance suite and how to run it
+- [Shared provider fakes](../../tests/fakes/README.md): run shared provider fakes for Go and Python tests
 
 ## More lists
 

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// x_list acceptance polls the local fake X API (scripts/fake_x.py) that
+// x_list acceptance polls the local fake X API (tests/fakes/cmd/x) that
 // scripts/local.py serves; each test owns a list id and a Corpus in org_c.
 
 const xTestToken = "x-test-bearer-acceptance-not-real"

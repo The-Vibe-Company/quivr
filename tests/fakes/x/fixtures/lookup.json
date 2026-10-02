@@ -1,0 +1,1 @@
+{"data":[{"id":"100","text":"Example post","edit_history_tweet_ids":["100"]}],"errors":[{"value":"101","resource_id":"101","resource_type":"tweet","parameter":"ids","type":"https://api.twitter.com/2/problems/resource-not-found"}]}

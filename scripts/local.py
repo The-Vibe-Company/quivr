@@ -439,6 +439,7 @@ class Stack:
         """Stop this project's processes and containers. reset also deletes its volumes and the
         state bound to that data; generated credentials and ports are kept and nothing is
         started again (make dev initializes a fresh schema)."""
+        if hasattr(self,"fake_x"): self.fake_x.close()
         normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)
@@ -495,9 +496,9 @@ def connectors(stack):
     # Connector acquisition keeps polling on its schedule; run it after every
     # timed scenario, in its own Organization, then prove restart resumption.
     # The x_list kind (plugins/x-list, pinned with the fake's api_endpoint)
-    # polls a local fake X API served from this process.
-    import fake_x
-    fake_x.start(stack.state['fake_x_port'])
+    # polls the same Go fake binary used by the plugin unit suites.
+    from fake_api import Fake
+    stack.fake_x = Fake("x", stack.state["fake_x_port"])
     stack.tests('TestConnector')
 
 def step(name,fn,*args):

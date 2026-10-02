@@ -110,18 +110,19 @@ func TestThePluginReturnsWhatTheBuiltinKindReturned(t *testing.T) {
 					}
 					f.post(step.Post.ID, step.Post.Text, step.Post.At, step.Post.History, generic.Post)
 				case step.Media != nil:
-					f.media = append(f.media, step.Media)
+					f.control("/_control/app", map[string]any{"media": []any{step.Media}})
 				case step.Delete != "":
-					f.deleted[step.Delete] = true
+					f.list(map[string]any{"delete": []string{step.Delete}})
 				case step.Protect != "":
-					f.protected[step.Protect] = true
+					f.list(map[string]any{"protect": []string{step.Protect}})
 				case step.Fail != nil:
-					f.status, f.reset = step.Fail.Status, 0
+					reset := int64(0)
 					if step.Fail.Reset != 0 {
-						f.reset = base.Add(time.Duration(step.Fail.Reset) * time.Second).Unix()
+						reset = base.Add(time.Duration(step.Fail.Reset) * time.Second).Unix()
 					}
+					f.control("/_control/app", map[string]any{"fail": map[string]any{"status": step.Fail.Status, "reset": reset}})
 				case step.ListError != nil:
-					f.listError = *step.ListError
+					f.list(map[string]any{"list_error": *step.ListError})
 				case step.Run != nil:
 					if runs >= len(golden.Runs) || golden.Runs[runs].Step != i {
 						t.Fatalf("step %d has no captured built-in run", i)
