@@ -723,11 +723,12 @@ answer for the engine and the Contract Runner:
 | Hits served earlier in this search, each once, at most `limit` | `unserved_candidate`, `duplicate_hit`, `too_many_hits` |
 | Reported cost within the profile's `max_cost_cents` (Runner; the engine logs it) | `over_budget` |
 
-**Deployment.** A pin needs no routes; a deployment pins one retrieval
-plugin (`retrieval_conflict`), which then answers every search.
-`GET /v0/search/profiles` lists its profiles. The api refuses to start
-without one; every stack pins the first-party `core.retrieve` unless another
-is pinned.
+**Deployment.** A retrieval pin needs no routes. Several retrieval plugins
+can be pinned together; `retrieval.profiles` maps short names, including
+`default`, to full `plugin_id/profile` names. Search accepts either spelling,
+and `GET /v0/search/profiles` lists every profile, provider and aliases. A
+single plugin without a map keeps its profile names as short names. The api
+refuses to start without a retrieval plugin.
 
 **Retrieval fixtures** (`retrieval-fixture.schema.json`, a file with a
 top-level `retrieval` property) hold a `query`, `mode`, `limit`,

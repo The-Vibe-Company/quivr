@@ -76,7 +76,7 @@ func (a *API) searchProfiles(w http.ResponseWriter, scope corpus.Scope) {
 	out := transport.SearchProfileList{Items: []transport.SearchProfileDescription{}}
 	for _, p := range a.Retrieval.Profiles() {
 		latency, cost := p.MaxLatencyMS, float32(p.MaxCostCents)
-		item := transport.SearchProfileDescription{Name: p.Name, Description: optionalString(p.Description), MaxLatencyMs: &latency, MaxCostCents: &cost}
+		item := transport.SearchProfileDescription{Name: p.Name, FullName: p.FullName, Aliases: p.Aliases, Description: optionalString(p.Description), MaxLatencyMs: &latency, MaxCostCents: &cost}
 		item.Provider.Kind = transport.SearchProfileDescriptionProviderKindPlugin
 		item.Provider.PluginId, item.Provider.PluginVersion = optionalString(p.PluginID), optionalString(p.PluginVersion)
 		out.Items = append(out.Items, item)

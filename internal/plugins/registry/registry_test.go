@@ -53,7 +53,7 @@ func TestSeedMirrorsWhatThePinsResolve(t *testing.T) {
 			t.Fatalf("role %s served by %s, want the registration of %s (%s)", a.Role, a.RegistrationID, a.PluginID, want)
 		}
 	}
-	if want := []string{"connector:rss", "normalizer:application/pdf", "retrieval", "subscription:alerts"}; !reflect.DeepEqual(roles, want) {
+	if want := []string{"connector:rss", "normalizer:application/pdf", "retrieval:example.fusion_retriever", "subscription:alerts"}; !reflect.DeepEqual(roles, want) {
 		t.Fatalf("plan roles %v, want %v", roles, want)
 	}
 	if empty := registry.FromPins(nil); len(empty.Registrations) != 0 || len(empty.Roles) != 0 {
@@ -187,7 +187,6 @@ func TestActivationKeepsTheStartupRules(t *testing.T) {
 		// example.markdown would keep text/x-rst and still claim text/markdown.
 		"partial overlap": {markdownOnly, registry.ErrConflict, plugins.CodeRouteConflict},
 		"not validated":   {func() registry.Registration { r := embedderV2; r.State = registry.StateRejected; return r }(), registry.ErrNotValidated, "rejected"},
-		"adds retrieval":  {registered(t, string(must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml")))), registry.ErrConflict, plugins.CodeRetrievalConflict},
 	} {
 		_, err := registry.PlanActivation(active, members, c.target, nil)
 		if !errors.Is(err, c.want) || !strings.Contains(err.Error(), c.says) {
@@ -287,4 +286,84 @@ func must(b []byte, err error) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// Retrieval providers have independent lifecycles: upgrading one retires only
+// its old registration, and rollback restores it beside the other provider.
+// Legacy plans and startup snapshots must still preserve operator upgrades.
+func TestRetrievalPluginsActivateAndRollbackIndependently(t *testing.T) {
+	source := must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml"))
+	first := registered(t, string(source))
+	second := registered(t, strings.Replace(string(source), "example.fusion_retriever", "example.other_retriever", 1))
+	upgrade := registered(t, strings.Replace(string(source), "version: 0.1.0", "version: 0.2.0", 1))
+	active, members := plan(t, first, second)
+	next, err := registry.PlanActivation(active, members, upgrade, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(roleMap(next.Roles), map[string]string{"retrieval:example.fusion_retriever": "example.fusion_retriever@0.2.0", "retrieval:example.other_retriever": "example.other_retriever@0.1.0"}) || !reflect.DeepEqual(next.Retired, []string{first.ID}) {
+		t.Fatalf("activation %+v", next)
+	}
+	members[upgrade.ID] = upgrade
+	back, err := registry.PlanRollback(registry.Plan{ID: "new", Roles: next.Roles}, active, members, nil)
+	if err != nil || !reflect.DeepEqual(roleMap(back.Roles), roleMap(active.Roles)) || !reflect.DeepEqual(back.Retired, []string{upgrade.ID}) || len(back.Returning) != 1 || back.Returning[0].ID != first.ID {
+		t.Fatalf("rollback %+v: %v", back, err)
+	}
+	// Adding another provider does not take over the existing provider.
+	alone, aloneMembers := plan(t, first)
+	added, err := registry.PlanActivation(alone, aloneMembers, second, nil)
+	if err != nil || len(added.Roles) != 2 || len(added.Retired) != 0 {
+		t.Fatalf("addition %+v: %v", added, err)
+	}
+	// A deployment upgrading from the legacy singleton keeps an operator's
+	// activated version on restart, then can roll back to its old plan.
+	legacy := alone
+	legacy.Roles = append([]registry.Assignment(nil), alone.Roles...)
+	legacy.Roles[0].Role = "retrieval"
+	operator, _ := plan(t, upgrade)
+	operator.Roles[0].Role = "retrieval"
+	members[first.ID] = first
+	configuredPin, err := first.Pin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, err := plugins.NewPinSet([]*plugins.Pin{configuredPin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciled := registry.Reconcile(registry.FromPins(configured), map[string]string{"retrieval": first.ID}, &operator, members)
+	if reconciled.Whole || roleMap(reconciled.Roles)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.2.0" {
+		t.Fatalf("legacy reconciliation %+v", reconciled)
+	}
+	back, err = registry.PlanRollback(registry.Plan{Roles: reconciled.Roles}, legacy, members, nil)
+	if err != nil || roleMap(back.Roles)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.1.0" {
+		t.Fatalf("legacy rollback %+v: %v", back, err)
+	}
+	// The legacy singleton could be switched to a different plugin by an
+	// operator. Pinning both now must restore the original provider alongside it.
+	switched, _ := plan(t, second)
+	switched.Roles[0].Role = "retrieval"
+	both := registry.Seed{Registrations: []registry.Registration{first, second}, Roles: active.Roles}
+	for _, snapshot := range []map[string]string{{"retrieval": first.ID}, {"retrieval:example.fusion_retriever": first.ID}} {
+		reconciled = registry.Reconcile(both, snapshot, &switched, members)
+		if len(reconciled.Roles) != 2 || !reflect.DeepEqual(roleMap(reconciled.Roles), roleMap(active.Roles)) {
+			t.Fatalf("legacy provider switch followed by multiple pins with snapshot %v: %+v", snapshot, reconciled)
+		}
+	}
+	// An unchanged single-plugin configuration still preserves that override.
+	reconciled = registry.Reconcile(registry.FromPins(configured), map[string]string{"retrieval": first.ID}, &switched, members)
+	if len(reconciled.Roles) != 1 || roleMap(reconciled.Roles)["retrieval:example.other_retriever"] != "example.other_retriever@0.1.0" {
+		t.Fatalf("legacy single-provider override: %+v", reconciled)
+	}
+	// Rolling back a multi-provider plan may deliberately remove a provider.
+	// An unchanged multi-provider configuration must preserve that decision.
+	rolled, err := registry.PlanRollback(active, alone, members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRollback := registry.Plan{Roles: rolled.Roles}
+	reconciled = registry.Reconcile(both, both.Snapshot(), &afterRollback, members)
+	if reconciled.Changed || !reflect.DeepEqual(roleMap(reconciled.Roles), roleMap(alone.Roles)) {
+		t.Fatalf("unchanged multi-provider configuration undid rollback: %+v", reconciled)
+	}
 }

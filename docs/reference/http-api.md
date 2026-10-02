@@ -1283,7 +1283,7 @@ One registration with the Contract Runner's report once its check ran. Requires 
 
 Operation `activatePlugin`. Requires `plugins:admin`.
 
-Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 
 **Parameters**
 
@@ -1700,7 +1700,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 
 Operation `listSearchProfiles`. Requires `search:query`.
 
-The search profiles this deployment answers, default first, with their budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
+Every installed search profile, the profile aliased as default first, with full names, short names and budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
 
 **Responses**
 
@@ -9041,7 +9041,7 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 | `query` | string | yes | At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated. Minimum length `1`. Maximum length `8192`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
-| `profile` | string |  | A search profile this deployment answers (listSearchProfiles). The pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile. Default `default`. Pattern `^[a-z][a-z0-9_]{0,31}$`. |
+| `profile` | string |  | A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile. Default `default`. Minimum length `1`. |
 | `limit` | integer |  | Default `10`. Minimum `1`. Maximum `50`. |
 | `filter` | [`SearchFilter`](#searchfilter) |  |  |
 
@@ -9088,9 +9088,9 @@ properties:
     default: hybrid
   profile:
     type: string
-    pattern: ^[a-z][a-z0-9_]{0,31}$
+    minLength: 1
     default: default
-    description: A search profile this deployment answers (listSearchProfiles). The pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+    description: A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
   limit:
     type: integer
     minimum: 1
@@ -9139,7 +9139,7 @@ description: Candidate filter applied before ranking. Every present condition mu
 
 ### `SearchProfile`
 
-Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9162,7 +9162,7 @@ properties:
 required:
   - name
   - version
-description: Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+description: Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 ```
 
 </details>
@@ -9171,7 +9171,7 @@ description: Resolved retrieval profile identity. Name is the profile that answe
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `items` | array of [`SearchProfileDescription`](#searchprofiledescription) | yes | At least `1` items. At most `8` items. |
+| `items` | array of [`SearchProfileDescription`](#searchprofiledescription) | yes | At least `1` items. |
 
 Example `search_profiles`:
 
@@ -9180,6 +9180,10 @@ Example `search_profiles`:
   "items": [
     {
       "name": "default",
+      "full_name": "example.fusion/default",
+      "aliases": [
+        "default"
+      ],
       "description": "Keywords and vectors fused by rank.",
       "max_latency_ms": 500,
       "max_cost_cents": 0,
@@ -9205,7 +9209,6 @@ properties:
     items:
       $ref: '#/components/schemas/SearchProfileDescription'
     minItems: 1
-    maxItems: 8
 required:
   - items
 ```
@@ -9217,6 +9220,8 @@ required:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes | Minimum length `1`. |
+| `full_name` | string | yes | Full plugin/profile name, accepted directly by search. Minimum length `1`. |
+| `aliases` | array of string | yes | Configured short names that select this profile; empty for an unaliased profile. Items are unique. Each item: Minimum length `1`. |
 | `description` | string |  |  |
 | `max_latency_ms` | integer |  | Latency objective (p95 target) of one search under this profile. A slower search still answers; the hard bound is four times this value, at least 2 s and at most 9 s. Minimum `1`. |
 | `max_cost_cents` | number |  | Most a search may spend on paid calls. Minimum `0`. |
@@ -9235,6 +9240,17 @@ properties:
   name:
     type: string
     minLength: 1
+  full_name:
+    type: string
+    minLength: 1
+    description: Full plugin/profile name, accepted directly by search.
+  aliases:
+    type: array
+    items:
+      type: string
+      minLength: 1
+    uniqueItems: true
+    description: Configured short names that select this profile; empty for an unaliased profile.
   description:
     type: string
   max_latency_ms:
@@ -9265,6 +9281,8 @@ properties:
       - kind
 required:
   - name
+  - full_name
+  - aliases
   - provider
 ```
 

@@ -2473,7 +2473,7 @@ type SearchPhases struct {
 	RoutingMs       int `json:"routing_ms"`
 }
 
-// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+// SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -2481,7 +2481,12 @@ type SearchProfile struct {
 
 // SearchProfileDescription defines model for SearchProfileDescription.
 type SearchProfileDescription struct {
-	Description *string `json:"description,omitempty"`
+	// Aliases Configured short names that select this profile; empty for an unaliased profile.
+	Aliases     []string `json:"aliases"`
+	Description *string  `json:"description,omitempty"`
+
+	// FullName Full plugin/profile name, accepted directly by search.
+	FullName string `json:"full_name"`
 
 	// MaxCostCents Most a search may spend on paid calls.
 	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
@@ -2514,7 +2519,7 @@ type SearchRequest struct {
 	Limit  *int               `json:"limit,omitempty"`
 	Mode   *SearchRequestMode `json:"mode,omitempty"`
 
-	// Profile A search profile this deployment answers (listSearchProfiles). The pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+	// Profile A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
 	Profile *string `json:"profile,omitempty"`
 
 	// Query At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
@@ -2528,7 +2533,7 @@ type SearchRequestMode string
 type SearchResponse struct {
 	Items []SearchHit `json:"items"`
 
-	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+	// RetrievalProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
 
 	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.
@@ -3628,7 +3633,7 @@ type ClientInterface interface {
 
 	// ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 	ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListQuarantinedVersions performs a GET /v0/admin/quarantine (the `ListQuarantinedVersions` operationId) request.
@@ -4101,7 +4106,7 @@ type ClientInterface interface {
 
 	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
 	//
-	// The search profiles this deployment answers, default first, with their budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
+	// Every installed search profile, the profile aliased as default first, with full names, short names and budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
 	ListSearchProfiles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewSubscriptionWithBody performs a POST /v0/subscription-previews (the `PreviewSubscription` operationId) request,
@@ -4444,7 +4449,7 @@ func (c *Client) GetPluginRegistration(ctx context.Context, registrationId strin
 
 // ActivatePlugin performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 func (c *Client) ActivatePlugin(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActivatePluginRequest(c.Server, registrationId)
 	if err != nil {
@@ -5747,7 +5752,7 @@ func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONReques
 
 // ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
 //
-// The search profiles this deployment answers, default first, with their budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
+// Every installed search profile, the profile aliased as default first, with full names, short names and budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
 func (c *Client) ListSearchProfiles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListSearchProfilesRequest(c.Server)
 	if err != nil {
@@ -10051,7 +10056,7 @@ type ClientWithResponsesInterface interface {
 
 	// ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 	//
-	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+	// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error)
@@ -10638,7 +10643,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
 	//
-	// The search profiles this deployment answers, default first, with their budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
+	// Every installed search profile, the profile aliased as default first, with full names, short names and budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListSearchProfilesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSearchProfilesResponse, error)
@@ -14966,7 +14971,7 @@ func (c *ClientWithResponses) GetPluginRegistrationWithResponse(ctx context.Cont
 
 // ActivatePluginWithResponse performs a POST /v0/admin/plugins/{registration_id}/activate (the `ActivatePlugin` operationId) request.
 //
-// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
+// Make a validated registration serve every role it declares, as a new immutable Pipeline Plan that api and worker follow without restarting; the previous plan stays readable. Every other version of the same plugin leaves the plan, and so does every registration whose roles it takes over entirely. The new plan must keep the rules the engine applies at startup (one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409 registration_not_validated for a registration that is not validated or inactive. Activating the registration that is already active returns the active plan. Work already started may finish on the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the Subscription Versions created or edited from then on. Every Subscription Version keeps the version it recorded, which keeps judging it and stays draining while Subscriptions pin it, until migrateSubscriptionEvaluators moves them. Requires plugins:admin.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ActivatePluginWithResponse(ctx context.Context, registrationId string, reqEditors ...RequestEditorFn) (*ActivatePluginResponse, error) {
@@ -16051,7 +16056,7 @@ func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, bod
 
 // ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
 //
-// The search profiles this deployment answers, default first, with their budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
+// Every installed search profile, the profile aliased as default first, with full names, short names and budgets; the pinned retrieval plugin (core.retrieve unless another is pinned) declares them.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListSearchProfilesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSearchProfilesResponse, error) {

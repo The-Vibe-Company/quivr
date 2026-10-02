@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -37,6 +38,13 @@ type Ranker interface {
 	Round(ctx context.Context, request plugins.SearchRequest) ([]byte, error)
 }
 
+// ProfileRouter selects one immutable ranker and its plugin-local profile.
+// Resolve is called once per search, so all rounds use the same registration.
+type ProfileRouter interface {
+	Profiles() []Profile
+	Resolve(profile string) (Ranker, string, bool)
+}
+
 // SpaceRegistry describes the vector spaces of a Corpus's routed generation.
 type SpaceRegistry interface {
 	VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error)
@@ -57,7 +65,8 @@ type Usage struct {
 
 // Profile is one search profile a deployment answers.
 type Profile struct {
-	Name, Description string
+	Name, FullName, Description string
+	Aliases                     []string
 	// MaxLatencyMS and MaxCostCents are the plugin's declared budgets.
 	MaxLatencyMS int
 	MaxCostCents float64
@@ -67,6 +76,9 @@ type Profile struct {
 
 // Profiles lists the profiles this deployment answers, default first.
 func (s Service) Profiles() []Profile {
+	if s.ProfilesRouter != nil {
+		return s.ProfilesRouter.Profiles()
+	}
 	if s.Ranker == nil {
 		return []Profile{}
 	}
@@ -75,7 +87,7 @@ func (s Service) Profiles() []Profile {
 	out := []Profile{}
 	for _, name := range r.ProfileNames() {
 		p := r.Profiles[name]
-		out = append(out, Profile{Name: name, Description: p.Description, MaxLatencyMS: p.MaxLatencyMS, MaxCostCents: p.MaxCostCents, PluginID: m.ID, PluginVersion: m.Version})
+		out = append(out, Profile{Name: name, FullName: m.ID + "/" + name, Aliases: []string{name}, Description: p.Description, MaxLatencyMS: p.MaxLatencyMS, MaxCostCents: p.MaxCostCents, PluginID: m.ID, PluginVersion: m.Version})
 	}
 	return out
 }
@@ -90,11 +102,24 @@ func (s Service) Serves(profile string) bool {
 }
 
 func (s Service) declares(profile string) bool {
-	if s.Ranker == nil {
-		return false
-	}
-	_, ok := s.Ranker.Manifest().Contributions.Retrieval.Profiles[profile]
+	_, _, ok := s.resolveProfile(profile)
 	return ok
+}
+
+func (s Service) resolveProfile(profile string) (Ranker, string, bool) {
+	if s.ProfilesRouter != nil {
+		return s.ProfilesRouter.Resolve(profile)
+	}
+	if s.Ranker == nil {
+		return nil, "", false
+	}
+	m := s.Ranker.Manifest()
+	local := profile
+	if prefix := m.ID + "/"; strings.HasPrefix(local, prefix) {
+		local = strings.TrimPrefix(local, prefix)
+	}
+	_, ok := m.Contributions.Retrieval.Profiles[local]
+	return s.Ranker, local, ok
 }
 
 func invocationID() string {

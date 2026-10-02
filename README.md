@@ -275,10 +275,12 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
   E5) is pinned by default; the engine segments and embeds nothing itself.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
-  pinned plugin answers each search in up to three rounds, asking the engine for
+  selected plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them
   with an explanation per hit, under named profiles with a latency and cost budget
-  (`GET /v0/search/profiles`) ([Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)).
+  (`GET /v0/search/profiles`). Several retrieval plugins can be pinned together:
+  search accepts full `plugin/profile` names or short names configured in
+  `retrieval.profiles`, including `default` ([Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)).
   The first-party [core.retrieve](plugins/core-retrieve/README.md) plugin (keywords,
   vectors or both, fused with alpha 0.5) is pinned by default; the engine ranks nothing itself.
 

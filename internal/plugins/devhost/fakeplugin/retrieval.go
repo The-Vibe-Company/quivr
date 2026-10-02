@@ -76,7 +76,7 @@ func retrievalRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		}
 		hits := []any{}
 		for _, id := range ids[:min(len(ids), request.Limit)] {
-			hit := map[string]any{"segment_id": id, "score": scores[id], "explanation": "reciprocal rank fusion"}
+			hit := map[string]any{"segment_id": id, "score": scores[id], "explanation": m.ID + ": reciprocal rank fusion"}
 			switch mode {
 			case "retrieval-nondeterministic":
 				hit["explanation"] = "invocation " + request.InvocationID

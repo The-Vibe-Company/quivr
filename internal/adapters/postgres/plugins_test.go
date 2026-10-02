@@ -418,3 +418,116 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 		t.Fatalf("history %+v (%v), want the two latest plans newest first", history, err)
 	}
 }
+
+// Per-provider retrieval roles survive persistence: an upgrade drains only the
+// old provider, rollback restores it, and releasing its pinned work makes it
+// inactive while the other provider stays active.
+func TestRetrievalProvidersPersistIndependentLifecycles(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.PluginStore{Pool: pool}
+	seed := configured(t,
+		plugins.PinConfig{Manifest: "../../../plugins/core-retrieve/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9970"},
+		plugins.PinConfig{Manifest: "../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9971"},
+	)
+	first, err := store.ApplyConfiguration(ctx, seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, other := seed.Registrations[0], seed.Registrations[1]
+	if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", "search_provider_work", first.Plan); err != nil {
+		t.Fatal(err)
+	}
+	service := registry.Service{Store: store, Reach: func(context.Context, registry.Registration) error { return nil }}
+	next, err := service.Register(ctx, operatorScope, registry.Request{Key: "upgrade-search",
+		Manifest: []byte(strings.Replace(string(old.Manifest), "version: 1.0.0", "version: 1.1.0", 1)), Endpoint: old.Endpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(id, want string) {
+		t.Helper()
+		r, err := store.PluginRegistration(ctx, id)
+		if err != nil || r.State != want {
+			t.Fatalf("registration %s: %+v (%v), want %s", id, r, err, want)
+		}
+	}
+	activate := func() {
+		t.Helper()
+		p, err := service.Activate(ctx, operatorScope, next.ID)
+		if err != nil || roles(p)["retrieval:core.retrieve"] != "core.retrieve@1.1.0" || roles(p)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.1.0" {
+			t.Fatalf("activation %+v: %v", p, err)
+		}
+		check(old.ID, registry.StateDraining)
+		check(other.ID, registry.StateActive)
+	}
+	activate()
+	back, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "restore-search", Plan: first.Plan})
+	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@1.0.0" || roles(back)["retrieval:example.fusion_retriever"] != "example.fusion_retriever@0.1.0" {
+		t.Fatalf("rollback %+v: %v", back, err)
+	}
+	check(old.ID, registry.StateActive)
+	check(other.ID, registry.StateActive)
+	activate()
+	if err = store.ReleaseWork(ctx, plugins.WorkIngestion, "org_a", "search_provider_work"); err != nil {
+		t.Fatal(err)
+	}
+	check(old.ID, registry.StateInactive)
+	check(other.ID, registry.StateActive)
+}
+
+// A plan recorded before per-provider roles stays immutable and remains a
+// rollback target after startup reconciliation and an operator upgrade.
+func TestLegacyRetrievalPlanCanReconcileAndRollback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.PluginStore{Pool: pool}
+	seed := configured(t, plugins.PinConfig{Manifest: "../../../plugins/core-retrieve/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:9970"})
+	legacy := seed
+	legacy.Roles = append([]registry.Assignment(nil), seed.Roles...)
+	legacy.Roles[0].Role = "retrieval"
+	legacy.Registrations = append([]registry.Registration(nil), seed.Registrations...)
+	legacy.Registrations[0].Roles = []string{"retrieval"}
+	first, err := store.ApplyConfiguration(ctx, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := registry.Service{Store: store, Reach: func(context.Context, registry.Registration) error { return nil }}
+	old := seed.Registrations[0]
+	next, err := service.Register(ctx, operatorScope, registry.Request{Key: "upgrade-legacy-search",
+		Manifest: []byte(strings.Replace(string(old.Manifest), "version: 1.0.0", "version: 1.1.0", 1)), Endpoint: old.Endpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Activate(ctx, operatorScope, next.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyConfiguration(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	active, err := store.ActivePlan(ctx)
+	if err != nil || roles(active)["retrieval:core.retrieve"] != "core.retrieve@1.1.0" {
+		t.Fatalf("startup preserved operator upgrade: %+v (%v)", active, err)
+	}
+	back, err := service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "restore-legacy-search", Plan: first.Plan})
+	if err != nil || roles(back)["retrieval:core.retrieve"] != "core.retrieve@1.0.0" {
+		t.Fatalf("rollback to recorded singleton: %+v (%v)", back, err)
+	}
+	recorded, err := store.PipelinePlan(ctx, first.Plan)
+	if err != nil || roles(recorded)["retrieval"] != "core.retrieve@1.0.0" {
+		t.Fatalf("historical plan remained readable and unchanged: %+v (%v)", recorded, err)
+	}
+}

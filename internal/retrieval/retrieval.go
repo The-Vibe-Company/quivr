@@ -162,6 +162,8 @@ type Service struct {
 	// Ranker is the pinned retrieval plugin, normally core.retrieve: it
 	// answers every search, from the candidates the engine serves it.
 	Ranker Ranker
+	// ProfilesRouter resolves deployment names to individual retrieval plugins.
+	ProfilesRouter ProfileRouter
 	// Registry describes the vector spaces a ranker may request.
 	Registry SpaceRegistry
 	// Coverage, when set, keeps the Registry's answers for a short time.
@@ -194,7 +196,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if !scope.Allows("content:read") || !scope.Allows("search:query") {
 		return out, corpus.ErrForbidden
 	}
-	if s.Ranker == nil {
+	if s.Ranker == nil && s.ProfilesRouter == nil {
 		// The api refuses to start without a retrieval plugin.
 		return out, ErrUnavailable
 	}
@@ -207,10 +209,13 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if q.Limit == 0 {
 		q.Limit = 10
 	}
-	if !s.declares(q.Profile) {
+	ranker, local, supported := s.resolveProfile(q.Profile)
+	if !supported {
 		return out, ErrUnsupportedProfile
 	}
 	out.Profile = q.Profile
+	// Hold the concrete plugin for the entire search, including its budgets.
+	s.Ranker, q.Profile = ranker, local
 	// The whole search, authorization and routing included, runs under the
 	// profile's hard bound.
 	ctx, cancel := context.WithTimeout(ctx, s.Ranker.Manifest().Contributions.Retrieval.Profiles[q.Profile].Deadline())

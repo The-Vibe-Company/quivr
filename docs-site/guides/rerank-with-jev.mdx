@@ -37,8 +37,9 @@ plugins:
       cache_entries: 4096
 ```
 
-Keep the ingestion plugin pinned. Do not pin `core.retrieve` and `jev.rerank`
-to the retrieval role together. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
+Keep the ingestion plugin pinned. To keep `core.retrieve` beside `jev.rerank`,
+set [Search profile aliases](/reference/configuration#search-profiles), for example
+`default` to `core.retrieve/default` and `deep` to `jev.rerank/deep`. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
 when changing an existing installation.
 
 ## Search and inspect

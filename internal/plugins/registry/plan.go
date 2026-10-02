@@ -106,7 +106,7 @@ type Activation struct {
 // pin target from then on, while those pinning the version that left keep it
 // until an operator migrates them (THE-805). The result must satisfy the startup rules (one
 // normalizer per media type, one provider per connector kind, one ingestion
-// and one retrieval plugin, extension namespace ownership); a registration
+// and retrieval plugins per id, extension namespace ownership); a registration
 // target overlaps only in part is a conflict. validate adds the checks of
 // the running engine.
 func PlanActivation(active Plan, members map[string]Registration, target Registration, validate func(*plugins.PinSet) error) (Activation, error) {
@@ -131,7 +131,7 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeInvalidPin, Path: "/routes", Message: fmt.Sprintf("%s@%s would serve no role: route at least one media type to its normalizer", target.PluginID, target.Version)}}}
 	}
 	served := map[string][]string{}
-	for _, a := range active.Roles {
+	for _, a := range canonicalRoles(active.Roles) {
 		served[a.RegistrationID] = append(served[a.RegistrationID], a.Role)
 	}
 	var kept []Registration
@@ -158,25 +158,13 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	if err != nil {
 		return Activation{}, err
 	}
-	if (set.Retrieval() == nil) != !hasRole(active.Roles, retrievalRole) {
-		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeRetrievalConflict, Path: "/contributions/retrieval",
-			Message: "this activation would add or remove the retrieval role; a running search switches its retrieval plugin but only starts or stops using one after a restart, so pin it in the configuration"}}}
-	}
+
 	if validate != nil {
 		if err := validate(set); err != nil {
 			return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
 		}
 	}
 	return Activation{Roles: planRoles(set, byPin), Set: set, Retired: retired}, nil
-}
-
-func hasRole(roles []Assignment, role string) bool {
-	for _, a := range roles {
-		if a.Role == role {
-			return true
-		}
-	}
-	return false
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -255,9 +243,27 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 	for _, a := range configured.Roles {
 		want[a.Role] = a
 	}
+	snapshot = canonicalSnapshot(snapshot, registrations)
+	retrievalSnapshotCount := 0
+	for role, id := range snapshot {
+		if role == retrievalRole(registrations[id].PluginID) {
+			retrievalSnapshotCount++
+		}
+	}
 	merged := map[string]Assignment{}
-	for _, a := range active.Roles {
+	// A legacy activation could swap the singleton to another plugin. Once
+	// configuration explicitly includes that provider, restore missing
+	// configured providers beside it. Normalize both inputs first: an older
+	// process can write a singleton plan after the snapshot was migrated. A
+	// complete multi-provider snapshot preserves operator rollbacks unchanged.
+	restoreRetrieval := false
+	for _, a := range canonicalRoles(active.Roles) {
 		merged[a.Role] = a
+		if retrievalSnapshotCount == 1 && a.Role == retrievalRole(a.PluginID) {
+			if _, configured := want[a.Role]; configured {
+				restoreRetrieval = true
+			}
+		}
 	}
 	roles := map[string]bool{}
 	for role := range want {
@@ -271,7 +277,9 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 		c, configuredNow := want[role]
 		before, configuredBefore := snapshot[role]
 		if configuredNow == configuredBefore && c.RegistrationID == before {
-			continue
+			if !restoreRetrieval || role != retrievalRole(c.PluginID) || merged[role].RegistrationID != "" {
+				continue
+			}
 		}
 		current, set := merged[role]
 		if configuredNow {
@@ -305,7 +313,7 @@ func overrides(snapshot map[string]string, active, configured []Assignment) []Ov
 		want[a.Role] = a
 	}
 	var out []Override
-	for _, a := range active {
+	for _, a := range canonicalRoles(active) {
 		c := want[a.Role]
 		if a.RegistrationID != snapshot[a.Role] && a.RegistrationID != c.RegistrationID {
 			out = append(out, Override{Role: a.Role, Active: a.describe(), Configured: c.describe()})
@@ -333,4 +341,26 @@ func (s Seed) Snapshot() map[string]string {
 		m[a.Role] = a.RegistrationID
 	}
 	return m
+}
+
+// canonicalRoles reads legacy single-provider plans without rewriting them.
+func canonicalRoles(roles []Assignment) []Assignment {
+	out := append([]Assignment(nil), roles...)
+	for i := range out {
+		if out[i].Role == "retrieval" {
+			out[i].Role = retrievalRole(out[i].PluginID)
+		}
+	}
+	return out
+}
+
+func canonicalSnapshot(snapshot map[string]string, registrations map[string]Registration) map[string]string {
+	out := map[string]string{}
+	for role, id := range snapshot {
+		if role == "retrieval" {
+			role = retrievalRole(registrations[id].PluginID)
+		}
+		out[role] = id
+	}
+	return out
 }

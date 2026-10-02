@@ -86,6 +86,8 @@ type Config struct {
 	// worker refuse to start on an invalid pin or a conflict between pins; an
 	// unreachable plugin never prevents startup.
 	Plugins []plugins.PinConfig `json:"plugins"`
+	// Retrieval maps deployment short names to installed plugin/profile names.
+	Retrieval RetrievalConfig `json:"retrieval"`
 	// MonitoringFixtureEvaluator installs the deterministic fixture evaluator
 	// quivr.fixture@1 (local and CI test deployments only).
 	MonitoringFixtureEvaluator bool `json:"monitoring_fixture_evaluator"`
@@ -123,6 +125,11 @@ type Config struct {
 	// dollars, default 0) in the api: a dry run estimated above it needs
 	// confirm_cost.
 	Backfill BackfillConfig `json:"backfill"`
+}
+
+// RetrievalConfig names the search profiles selected by this deployment.
+type RetrievalConfig struct {
+	Profiles map[string]string `json:"profiles"`
 }
 
 // connectorSealer builds the Deposited Credential sealer. credential_key is
@@ -313,7 +320,7 @@ func Run(command string) error {
 	}
 	// Nor does it rank search results itself (THE-779): the api needs a
 	// pinned retrieval plugin, normally the first-party core.retrieve.
-	if command == "api" && pins.Retrieval() == nil {
+	if command == "api" && len(pins.Retrievals()) == 0 {
 		return errors.New("no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -411,7 +418,16 @@ func Run(command string) error {
 	// and records activations with the spaces they register, refusing one
 	// that breaks a startup rule of this engine.
 	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: DeploymentSpaces, Wake: make(chan struct{}, 1),
-		Validate: func(set *plugins.PinSet) error { _, err := connectors.NewRegistry(kindsOf(set)...); return err }}
+		Validate: func(set *plugins.PinSet) error {
+			if command == "api" && len(set.Retrievals()) == 0 {
+				return errors.New("the active pipeline plan requires a retrieval plugin")
+			}
+			if _, err := set.RetrievalProfiles(cfg.Retrieval.Profiles); err != nil {
+				return err
+			}
+			_, err := connectors.NewRegistry(kindsOf(set)...)
+			return err
+		}}
 	planID, resolved, err := applyPluginConfiguration(ctx, pluginRegistry, pins)
 	if err != nil {
 		return err
@@ -419,8 +435,11 @@ func Run(command string) error {
 	if resolved.Ingestion() == nil {
 		return errors.New("the active pipeline plan has no ingestion plugin: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
 	}
-	if command == "api" && resolved.Retrieval() == nil {
+	if command == "api" && len(resolved.Retrievals()) == 0 {
 		return errors.New("the active pipeline plan has no retrieval plugin: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
+	}
+	if _, err = resolved.RetrievalProfiles(cfg.Retrieval.Profiles); err != nil {
+		return err
 	}
 	if err = registry.Replace(kindsOf(resolved)...); err != nil {
 		return fmt.Errorf("pipeline plan %s: %w", planID, err)
@@ -442,7 +461,15 @@ func Run(command string) error {
 		return fmt.Errorf("alert-rule versions of earlier plans: %w", err)
 	}
 	evaluators.Store(installed)
-	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error { return registry.Replace(kindsOf(set)...) },
+	follower := &planFollower{store: pluginRegistry.Store, live: live, apply: func(set *plugins.PinSet) error {
+		if command == "api" && len(set.Retrievals()) == 0 {
+			return errors.New("the active pipeline plan requires a retrieval plugin")
+		}
+		if _, err := set.RetrievalProfiles(cfg.Retrieval.Profiles); err != nil {
+			return err
+		}
+		return registry.Replace(kindsOf(set)...)
+	},
 		followed: func(ctx context.Context, set *plugins.PinSet) {
 			installed, err := cfg.planEvaluators(ctx, pluginRegistry.Store, set, evaluators.Load())
 			if err != nil {
@@ -517,8 +544,8 @@ func Run(command string) error {
 	// The retrieval plugin, normally core.retrieve, answers every search: it
 	// requests candidates, which search serves after authorization and
 	// hydration, and ranks them. The api refuses to start without one.
-	if resolved.Retrieval() != nil {
-		search.Ranker = pluginhttp.LiveRetriever{Live: live, Started: resolved.Retrieval()}
+	if len(resolved.Retrievals()) > 0 {
+		search.ProfilesRouter = pluginhttp.LiveRetriever{Live: live, Aliases: cfg.Retrieval.Profiles}
 	}
 	// The api that served an activation follows it at once; new Corpora
 	// start on the spaces it registered.

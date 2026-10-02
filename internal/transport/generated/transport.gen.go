@@ -2473,7 +2473,7 @@ type SearchPhases struct {
 	RoutingMs       int `json:"routing_ms"`
 }
 
-// SearchProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+// SearchProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 type SearchProfile struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -2481,7 +2481,12 @@ type SearchProfile struct {
 
 // SearchProfileDescription defines model for SearchProfileDescription.
 type SearchProfileDescription struct {
-	Description *string `json:"description,omitempty"`
+	// Aliases Configured short names that select this profile; empty for an unaliased profile.
+	Aliases     []string `json:"aliases"`
+	Description *string  `json:"description,omitempty"`
+
+	// FullName Full plugin/profile name, accepted directly by search.
+	FullName string `json:"full_name"`
 
 	// MaxCostCents Most a search may spend on paid calls.
 	MaxCostCents *float32 `json:"max_cost_cents,omitempty"`
@@ -2514,7 +2519,7 @@ type SearchRequest struct {
 	Limit  *int               `json:"limit,omitempty"`
 	Mode   *SearchRequestMode `json:"mode,omitempty"`
 
-	// Profile A search profile this deployment answers (listSearchProfiles). The pinned retrieval plugin answers the profiles it declares, default among them. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+	// Profile A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
 	Profile *string `json:"profile,omitempty"`
 
 	// Query At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated.
@@ -2528,7 +2533,7 @@ type SearchRequestMode string
 type SearchResponse struct {
 	Items []SearchHit `json:"items"`
 
-	// RetrievalProfile Resolved retrieval profile identity. Name is the profile that answered (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+	// RetrievalProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
 
 	// Usage What a search answered by a retrieval plugin spent; rounds of the plugin, elapsed time, the paid calls and cost the plugin reported, and the time spent in each phase.

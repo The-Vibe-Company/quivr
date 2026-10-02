@@ -39,11 +39,11 @@ func (r RollbackRequest) Stop() bool { return r.PinnedWork == PinnedWorkStop }
 // active plan: the registrations of target serve again, every other member
 // of the active plan leaves it. The result must satisfy the rules of an
 // activation: the startup rules, the running engine's checks (validate) and
-// the same retrieval role presence. An alert-rule version that leaves the
+// profile routing. An alert-rule version that leaves the
 // plan keeps judging the Subscription Versions that pin it, like after an
 // activation.
 func PlanRollback(active, target Plan, members map[string]Registration, validate func(*plugins.PinSet) error) (Activation, error) {
-	if sameRoles(active.Roles, target.Roles) {
+	if sameRoles(canonicalRoles(active.Roles), canonicalRoles(target.Roles)) {
 		return Activation{Roles: active.Roles, Unchanged: true}, nil
 	}
 	for _, a := range target.Roles {
@@ -58,14 +58,11 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 		return Activation{}, err
 	}
 	roles := planRoles(set, byPin)
-	if !sameRoles(roles, target.Roles) {
+	if !sameRoles(roles, canonicalRoles(target.Roles)) {
 		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: CodePlanUnresolvable, Path: "/plans/" + target.ID,
 			Message: "the plan's plugins no longer resolve to the roles it recorded; activate the version you want instead"}}}
 	}
-	if hasRole(roles, retrievalRole) != hasRole(active.Roles, retrievalRole) {
-		return Activation{}, &IssueError{Kind: ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeRetrievalConflict, Path: "/contributions/retrieval",
-			Message: "this rollback would add or remove the retrieval role; a running search switches its retrieval plugin but only starts or stops using one after a restart, so pin it in the configuration"}}}
-	}
+
 	if validate != nil {
 		if err := validate(set); err != nil {
 			return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}

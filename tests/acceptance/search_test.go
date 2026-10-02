@@ -176,7 +176,7 @@ func TestLexicalScopeLimitsAndReplay(t *testing.T) {
 	// core.retrieve declares default and deep, nothing else.
 	q["profile"] = "fast"
 	request(t, "POST", "/v0/search", admin, q, 422)
-	q["profile"] = "deep"
+	q["profile"] = "core.retrieve/deep"
 	request(t, "POST", "/v0/search", admin, q, 200)
 	delete(q, "profile")
 	// The space's model refuses a query it would truncate; a lexical search encodes nothing.

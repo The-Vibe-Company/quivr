@@ -2,6 +2,8 @@
 // plugin tooling. A test binary calls MaybeRun from TestMain; when the
 // environment asks for it, the binary serves Plugin Protocol v0 instead of
 // running tests, so a manifest's run.command can point at the test binary.
+// Each process serves the identity from QUIVR_PLUGIN_MANIFEST; the same binary
+// can serve several distinct plugin IDs at separate endpoints.
 package fakeplugin
 
 import (

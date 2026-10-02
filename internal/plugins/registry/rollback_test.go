@@ -2,7 +2,6 @@ package registry_test
 
 import (
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -54,7 +53,6 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 		}
 		return p, byID
 	}
-	retriever := registered(t, string(must(os.ReadFile("../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml"))))
 	rejected := embedderV1
 	rejected.State = registry.StateRejected
 	unkept := embedderV1
@@ -66,7 +64,6 @@ func TestRollbackRestoresTheTargetsRoles(t *testing.T) {
 		want   error
 		says   string
 	}{
-		"adds retrieval":    {target: []registry.Registration{embedderV1, retriever}, want: registry.ErrConflict, says: plugins.CodeRetrievalConflict},
 		"rejected member":   {target: []registry.Registration{embedderV1}, member: &rejected, want: registry.ErrNotValidated, says: "rejected"},
 		"manifest not kept": {target: []registry.Registration{embedderV1}, member: &unkept, want: registry.ErrConflict, says: registry.CodePlanUnresolvable},
 	} {

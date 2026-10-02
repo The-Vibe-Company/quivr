@@ -43,7 +43,7 @@ Add one object per plugin to `plugins` in the configuration of every `api`, `wor
 | Normalizer | `routes`: the media types Quivr sends to it | Each is one the manifest declares, and a media type goes to one plugin only. `mode` is `required` (the default) or `optional`, which lets a `text/*` file fall back to plain text when the plugin fails. |
 | Connector | nothing | Every kind the manifest declares becomes available. A kind has one provider. The endpoint must use `https://` unless it is on loopback, because requests carry credentials. |
 | Ingestion | `spaces`: `{"<space id>": "served"}`, plus any `"evaluation"` spaces | Exactly one space is served. A deployment pins one ingestion plugin. |
-| Retrieval | nothing | A deployment pins one retrieval plugin, and it answers every search. |
+| Retrieval | nothing | Several plugins can serve searches; [Search profiles](/reference/configuration#search-profiles) maps short names to full `plugin/profile` names. |
 | Alert rule | optionally `kinds`: the alert kinds this deployment accepts | Subscriptions name the plugin by `plugin_id` and `version`. |
 
 The [configuration reference](/reference/configuration) lists every field of a pin.
@@ -72,5 +72,5 @@ Each registration shows the plugin's id, version, endpoint, manifest digest, the
 | --- | --- | --- |
 | Work waits with `plugin_unavailable` | Quivr cannot reach the plugin, or the plugin serves a different manifest than the pinned one | Start the plugin at `endpoint`. After editing `quivr-plugin.yaml`, restart the plugin and Quivr so both use the same file. |
 | Startup fails with `incompatible_plugin_api` | The manifest's `plugin_api` range does not admit the version its Contributions need | Widen the range, for example `>=0.3.0 <0.4.0` for a connector |
-| Startup fails with `kind_conflict`, `ingestion_conflict` or `retrieval_conflict` | Two pins provide the same connector kind, or a second ingestion or retrieval plugin | Keep one provider |
+| Startup fails with `kind_conflict` or `ingestion_conflict` | Two pins provide the same connector kind, or a second ingestion plugin | Keep one provider |
 | A Subscription is refused with `422 unsupported_evaluator` | No pinned alert rule has that `plugin_id` and `version` | Pin it, or fix the Subscription's `evaluator` |

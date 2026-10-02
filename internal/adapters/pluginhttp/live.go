@@ -47,27 +47,34 @@ func (l LiveIngestor) EncodeQuery(ctx context.Context, org, space, query string)
 	return l.now().EncodeQuery(ctx, org, space, query)
 }
 
-// LiveRetriever is the retrieval plugin of the active Pipeline Plan. Search
-// uses it only when the process started with a retrieval plugin; an
-// activation never adds or removes the retrieval role (registry). Should a
-// configuration applied by another process's restart remove it, the process
-// keeps Started until it restarts too.
+// LiveRetriever routes deployment profile names in one snapshot of the active
+// Pipeline Plan. The returned Retriever remains pinned for the whole search.
 type LiveRetriever struct {
 	Live    *plugins.Live
-	Started *plugins.Pin
+	Aliases map[string]string
 }
 
-var _ retrieval.Ranker = LiveRetriever{}
+var _ retrieval.ProfileRouter = LiveRetriever{}
 
-func (l LiveRetriever) now() Retriever {
-	if pin := l.Live.Set().Retrieval(); pin != nil {
-		return Retriever{Pin: pin}
+func (l LiveRetriever) Profiles() []retrieval.Profile {
+	profiles, err := l.Live.Set().RetrievalProfiles(l.Aliases)
+	if err != nil {
+		return []retrieval.Profile{}
 	}
-	return Retriever{Pin: l.Started}
+	out := make([]retrieval.Profile, 0, len(profiles))
+	for _, p := range profiles {
+		budget := p.Pin.Manifest.Contributions.Retrieval.Profiles[p.Name]
+		out = append(out, retrieval.Profile{Name: p.Name, FullName: p.FullName, Aliases: p.Aliases,
+			Description: budget.Description, MaxLatencyMS: budget.MaxLatencyMS, MaxCostCents: budget.MaxCostCents,
+			PluginID: p.Pin.Manifest.ID, PluginVersion: p.Pin.Manifest.Version})
+	}
+	return out
 }
 
-func (l LiveRetriever) Manifest() *plugins.Manifest    { return l.now().Manifest() }
-func (l LiveRetriever) Configuration() json.RawMessage { return l.now().Configuration() }
-func (l LiveRetriever) Round(ctx context.Context, request plugins.SearchRequest) ([]byte, error) {
-	return l.now().Round(ctx, request)
+func (l LiveRetriever) Resolve(profile string) (retrieval.Ranker, string, bool) {
+	p, ok := l.Live.Set().ResolveRetrievalProfile(profile, l.Aliases)
+	if !ok {
+		return nil, "", false
+	}
+	return Retriever{Pin: p.Pin}, p.Name, true
 }

@@ -131,12 +131,12 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 	// the operator response even if the transport still formats injected data.
 	pins := []*plugins.Pin{
 		{Manifest: plugins.Manifest{ID: "example.first", Version: "1.2.3", Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{}}}},
-		{Manifest: plugins.Manifest{ID: "example.second", Version: "2.0.0", Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{}}}},
+		{Manifest: plugins.Manifest{ID: "example.first", Version: "2.0.0", Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{}}}},
 	}
 	_, conflict := plugins.NewPinSet(pins)
 	var pinError *plugins.PinError
 	if !errors.As(conflict, &pinError) {
-		t.Fatalf("two retrieval plugins: %v, want a typed conflict", conflict)
+		t.Fatalf("duplicate plugin ID: %v, want a typed conflict", conflict)
 	}
 	for _, tc := range []struct {
 		code, message string
@@ -145,7 +145,7 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 	}{
 		{"invalid_plugin", "invalid plugin; schema_violation /manifest/dimensions", 422,
 			&registry.IssueError{Kind: registry.ErrInvalid, Issues: []plugins.Issue{{Code: plugins.CodeSchema, Path: "/manifest/dimensions", Message: internalErrorMarker}}}},
-		{"plugin_conflict", "plugin conflict; retrieval_conflict /plugins/1/manifest plugin=example.first@1.2.3", 409,
+		{"plugin_conflict", "plugin conflict; plugin_conflict /plugins/1/manifest plugin=example.first@1.2.3", 409,
 			&registry.IssueError{Kind: registry.ErrConflict, Issues: pinError.Issues}},
 		{"plugin_conflict", "plugin conflict; space_owner_conflict vector space example.space@1", 409,
 			&content.SpaceError{Kind: content.ErrSpaceOwner, Space: "example.space@1", Detail: internalErrorMarker}},

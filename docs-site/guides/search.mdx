@@ -102,7 +102,7 @@ Each hit carries what a citation needs:
 
 ## Choose a profile
 
-A profile names how results are found and ranked. The deployment's retrieval plugin declares them: the default `core-retrieve` answers `default` and `deep`, which ranks the same way until re-ranking is added. List them:
+A profile names how results are found and ranked. Each installed retrieval plugin declares profiles. The deployment maps short names such as `default` and `deep` to full names such as `core.retrieve/default`; see [Search profiles](/reference/configuration#search-profiles). With one plugin and no map, its existing short names keep working. List them:
 
 {/* runnable */}
 ```bash
@@ -114,7 +114,7 @@ curl -s "$QUIVR_API_URL/v0/search/profiles" -H "Authorization: Bearer $QUIVR_API
 {"names": ["default", "..."]}
 ```
 
-Pass `"profile": "deep"` in the search. An unknown profile is refused with `422 unsupported_profile`.
+Pass a configured short name such as `"profile": "deep"` or a full name such as `"profile": "core.retrieve/default"` in the search. The list includes `full_name`, `aliases` and `provider` for every profile. An unknown profile is refused with `422 unsupported_profile`.
 
 ## Search from the command line
 

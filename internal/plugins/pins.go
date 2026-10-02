@@ -19,10 +19,6 @@ const CodeKindConflict = "kind_conflict"
 // deployments segment and embed through one plugin.
 const CodeIngestionConflict = "ingestion_conflict"
 
-// CodeRetrievalConflict is a second pinned retrieval plugin: one plugin
-// answers every search of a deployment.
-const CodeRetrievalConflict = "retrieval_conflict"
-
 // ReservedEvaluatorIDs are evaluator ids the engine installs itself (the
 // deterministic test evaluator); no plugin may be pinned under them.
 var ReservedEvaluatorIDs = []string{"quivr.fixture"}
@@ -36,7 +32,7 @@ type PinSet struct {
 	evaluators  map[string]*Pin
 	connectors  map[string]*Pin
 	ingestion   *Pin
-	retrieval   *Pin
+	retrieval   []*Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of
@@ -70,7 +66,7 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 // NewPinSet routes the Contributions of pins already validated one by one
 // (LoadPin, LoadPinManifest), with the rules of LoadPins: a plugin id twice,
 // a media type routed to two plugins, a connector kind provided by two, a
-// second ingestion or retrieval plugin and a reserved evaluator id are
+// second ingestion plugin and a reserved evaluator id are
 // conflicts. Issue paths name each pin by its position.
 func NewPinSet(pins []*Pin) (*PinSet, error) {
 	set := &PinSet{normalizers: map[string]*Pin{}, evaluators: map[string]*Pin{}, connectors: map[string]*Pin{}}
@@ -113,11 +109,7 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 			}
 		}
 		if pin.Manifest.Contributions.Retrieval != nil {
-			if set.retrieval != nil {
-				issues = append(issues, Issue{Code: CodeRetrievalConflict, Path: prefix + "/manifest", PluginID: set.retrieval.Manifest.ID, PluginVersion: set.retrieval.Manifest.Version, Message: fmt.Sprintf("%s@%s already answers searches for this deployment; pin one retrieval plugin and declare several profiles in it instead", set.retrieval.Manifest.ID, set.retrieval.Manifest.Version)})
-			} else {
-				set.retrieval = pin
-			}
+			set.retrieval = append(set.retrieval, pin)
 		}
 		if c := pin.Manifest.Contributions.Connector; c != nil {
 			kinds := make([]string, 0, len(c.Kinds))
@@ -195,8 +187,8 @@ func (s *PinSet) Ingestion() *Pin {
 	return s.ingestion
 }
 
-// Retrieval returns the pinned retrieval plugin, or nil.
-func (s *PinSet) Retrieval() *Pin {
+// Retrievals lists the retrieval plugins in configuration order.
+func (s *PinSet) Retrievals() []*Pin {
 	if s == nil {
 		return nil
 	}

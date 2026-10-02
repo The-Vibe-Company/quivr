@@ -155,5 +155,5 @@ The plugins pinned in `QUIVR_CONFIG` are registered at every start. The configur
 ## Limits
 
 - A normalizer's check gives each fixture's input file by its path on the api's machine, a `file://` URL, as `quivr plugin test` does. The normalizer must run where it can read the api's temporary folder, for example on the same machine; elsewhere it is rejected, so pin it in the configuration instead.
-- An activation cannot add or remove the retrieval role; pin or unpin a retrieval plugin in the configuration.
-- An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, one ingestion and one retrieval plugin, extension namespaces, and vector spaces whose model changes without a new space version.
+- An activation replaces only the retrieval provider with the same plugin id; other retrieval providers keep serving. Configured profile aliases must still resolve in the resulting plan.
+- An activation that would break a startup rule is refused with `409 plugin_conflict`: one normalizer per media type, one provider per connector kind, one ingestion plugin and retrieval providers per plugin id, extension namespaces, and vector spaces whose model changes without a new space version.

@@ -117,3 +117,22 @@ func TestTheEngineM365BlockRefusesStartup(t *testing.T) {
 		t.Fatalf("started with an m365 block: %v", err)
 	}
 }
+
+// Search alias configuration is validated before startup opens dependencies;
+// this owns the config field wiring, beyond the PinSet's alias validation.
+func TestInvalidSearchAliasRefusesStartup(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "config.json")
+	raw, _ := json.Marshal(map[string]any{
+		"plugins":   []any{map[string]any{"manifest": "../../plugins/core-retrieve/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:1"}},
+		"retrieval": map[string]any{"profiles": map[string]string{"default": "core.retrieve/missing"}},
+	})
+	if err := os.WriteFile(config, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QUIVR_CONFIG", config)
+	for _, command := range []string{"api", "worker"} {
+		if err := Run(command); err == nil || !strings.Contains(err.Error(), "unknown profile") {
+			t.Fatalf("%s must reject the profile before dependencies: %v", command, err)
+		}
+	}
+}

@@ -95,7 +95,7 @@ The Contract Runner runs offline. It serves candidates from a normative fixture 
 </Step>
 <Step title="Pin it">
 
-A deployment pins one retrieval plugin, and it answers every search; the api refuses to start without one. Add yours to the configuration of every `api` process in place of the first-party `core-retrieve`:
+The api requires at least one retrieval plugin. You can use yours alone with the configuration below, or pin it beside `core.retrieve` and set [Search profile aliases](/reference/configuration#search-profiles) to choose which plugin answers each search:
 
 ```json QUIVR_CONFIG
 {"plugins": [

@@ -916,6 +916,8 @@
       "items": [
         {
           "name": "default",
+          "full_name": "example.fusion/default",
+          "aliases": ["default"],
           "description": "Keywords and vectors fused by rank.",
           "max_latency_ms": 500,
           "max_cost_cents": 0,

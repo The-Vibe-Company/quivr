@@ -57,7 +57,12 @@ func (cfg Config) loadPins(command string) (*plugins.PinSet, error) {
 	if len(configs) == 0 || command == "migrate" {
 		return nil, nil
 	}
-	return plugins.LoadPins(configs)
+	pins, err := plugins.LoadPins(configs)
+	if err != nil {
+		return nil, err
+	}
+	_, err = pins.RetrievalProfiles(cfg.Retrieval.Profiles)
+	return pins, err
 }
 
 // migrationPins loads the pins for `quivr migrate`, which registers the
