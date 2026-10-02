@@ -2,10 +2,14 @@
 and a worker that runs its plugin sidecars and stops with them."""
 import base64
 import importlib.util
+import json
+import os
 import pathlib
 import re
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENTRYPOINT = ROOT / 'deploy' / 'railway' / 'core-entrypoint.py'
@@ -21,6 +25,83 @@ ENV = {'QUIVR_API_KEY': 'placeholder-api-key', 'DATABASE_URL': 'postgres://place
 
 
 class CoreEntrypointTest(unittest.TestCase):
+    def test_core_processes_keep_runtime_config_without_provider_secret(self):
+        # main owns environment inheritance; sidecar_commands alone cannot see this leak.
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp) / 'runtime.json'
+            for role in ('api', 'worker', 'migrate'):
+                with self.subTest(role=role), patch.dict(os.environ, {
+                    **ENV, 'QUIVR_ROLE': role, 'QUIVR_DEMO_JEV_RERANK': '1',
+                    'TYPESAFE_API_KEY': 'fixture-typesafe-key', 'PATH': '/usr/bin',
+                }, clear=True), patch.object(core_entrypoint.pathlib, 'Path', return_value=runtime), \
+                    patch.object(core_entrypoint.os, 'umask'), \
+                    patch.object(core_entrypoint.subprocess, 'run') as migrate, \
+                    patch.object(core_entrypoint, 'supervise', return_value=0) as supervise, \
+                    patch.object(core_entrypoint.os, 'execvp', side_effect=SystemExit(0)) as inherited_exec, \
+                    patch.object(core_entrypoint.os, 'execvpe', side_effect=SystemExit(0)) as explicit_exec:
+                    with self.assertRaises(SystemExit) as stopped:
+                        core_entrypoint.main()
+                    self.assertEqual(stopped.exception.code, 0)
+                    if role == 'migrate':
+                        effective = explicit_exec.call_args.args[2] if explicit_exec.called else dict(os.environ)
+                    else:
+                        commands = supervise.call_args.args[0]
+                        core_env = next(child for name, _, _, child in commands if name == 'quivr ' + role)
+                        effective = core_env if core_env is not None else dict(os.environ)
+                        jev = [child for name, _, _, child in commands if name == 'jev-rerank']
+                        self.assertEqual(len(jev), 1 if role == 'api' else 0)
+                        if jev:
+                            self.assertEqual(jev[0]['TYPESAFE_API_KEY'], 'fixture-typesafe-key')
+                    self.assertNotIn('TYPESAFE_API_KEY', effective)
+                    self.assertEqual(effective['QUIVR_CONFIG'], str(runtime))
+                    self.assertEqual(effective['DATABASE_URL'], ENV['DATABASE_URL'])
+                    if role == 'api':
+                        migration_env = migrate.call_args.kwargs.get('env', dict(os.environ))
+                        self.assertNotIn('TYPESAFE_API_KEY', migration_env)
+                        self.assertEqual(migration_env['QUIVR_CONFIG'], str(runtime))
+                    else:
+                        migrate.assert_not_called()
+
+    def test_jev_retrieval_requires_switch_and_key_and_runs_only_on_api(self):
+        # Owns the deployment switch, process selection and secret boundary; no provider call.
+        for switch, key, enabled in [('', 'fixture-typesafe-key', False), ('0', 'fixture-typesafe-key', False),
+                                     ('true', 'fixture-typesafe-key', False), ('1', '', False),
+                                     ('1', '  ', False), ('1', 'fixture-typesafe-key', True)]:
+            with self.subTest(switch=switch, key_present=bool(key.strip())):
+                env = {**ENV, 'QUIVR_DEMO_JEV_RERANK': switch, 'TYPESAFE_API_KEY': key}
+                config = core_entrypoint.build_config(env)
+                pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
+                selected, absent = ('jev-rerank', 'core-retrieve') if enabled else ('core-retrieve', 'jev-rerank')
+                self.assertIn(selected, pins)
+                self.assertNotIn(absent, pins)
+                self.assertNotIn('TYPESAFE_API_KEY', json.dumps(config))
+                if key.strip():
+                    self.assertNotIn(key, json.dumps(config))
+                api = {name: (argv, cwd, child) for name, argv, cwd, child in core_entrypoint.sidecar_commands(env, 'api')}
+                self.assertIn(selected, api)
+                self.assertNotIn(absent, api)
+                worker = {name: child for name, _, _, child in core_entrypoint.sidecar_commands(env, 'worker')}
+                self.assertFalse({'jev-rerank', 'core-retrieve'} & worker.keys())
+                for name, (_, _, child) in api.items():
+                    if name != 'jev-rerank':
+                        self.assertNotIn('TYPESAFE_API_KEY', child)
+                if enabled:
+                    self.assertEqual(pins[selected], {
+                        'manifest': '/app/plugins/jev-rerank/quivr-plugin.yaml',
+                        'endpoint': 'http://127.0.0.1:9960',
+                        'configuration': {'candidate_count': 30, 'trim_tokens': '256',
+                                          'tokenizer_path': '/app/.scratch/tokenizer/tokenizer.json',
+                                          'ranking': 'noul', 'cache_entries': 4096}})
+                    argv, cwd, child = api[selected]
+                    self.assertEqual(argv, ['/opt/quivr-plugins/bin/python', '-m', 'jev_rerank'])
+                    self.assertEqual(cwd, '/app/plugins/jev-rerank')
+                    self.assertEqual(child['TYPESAFE_API_KEY'], key)
+                    self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9960')
+                    self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins[selected]['manifest'])
+                    self.assertFalse(set(ENV.values()) & set(child.values()))
+                else:
+                    self.assertEqual(config, core_entrypoint.build_config(ENV))
+
     def test_credential_key_is_passed_when_set(self):
         config = core_entrypoint.build_config({**ENV, 'QUIVR_CREDENTIAL_KEY': 'placeholder-credential-key'})
         self.assertEqual(config['credential_key'], 'placeholder-credential-key')

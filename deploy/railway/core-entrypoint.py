@@ -20,7 +20,7 @@ PLUGINS = [
     {'id': 'pdf-text', 'module': 'pdf_text', 'port': 9900,
      'routes': [{'media_type': 'application/pdf', 'mode': 'required'}]},
     # TYPESAFE_API_KEY lets alerts decide described alerts (https://docs.quivr.thevibecompany.co/guides/described-alerts).
-    # Only this plugin receives it, and its pin offers "described" only when it is set.
+    # Its pin offers "described" only when the key is set.
     {'id': 'alerts', 'module': 'alerts', 'port': 9910, 'secrets': ['TYPESAFE_API_KEY'], 'preview': True},
 ]
 # First-party Go connector plugins: core.Dockerfile builds every plugins/<id> with a
@@ -69,6 +69,19 @@ def described_enabled(env):
     return bool(env.get('TYPESAFE_API_KEY', '').strip())
 
 
+def runtime_connectors(env):
+    """Select one retrieval implementation for both pins and process startup."""
+    if env.get('QUIVR_DEMO_JEV_RERANK') != '1' or not described_enabled(env):
+        return CONNECTORS
+    return [c if c['id'] != 'core-retrieve' else {
+        'id': 'jev-rerank', 'module': 'jev_rerank', 'port': c['port'],
+        'api': True, 'worker': False, 'secrets': ['TYPESAFE_API_KEY'],
+        'configuration': {'candidate_count': 30, 'trim_tokens': '256',
+                          'tokenizer_path': TOKENIZER['model'], 'ranking': 'noul',
+                          'cache_entries': 4096},
+    } for c in CONNECTORS]
+
+
 def plugin_pins(env):
     pins = []
     for plugin in PLUGINS:
@@ -88,7 +101,7 @@ def connector_pins(env):
         value = c.get('configuration', {})
         return value(env) if callable(value) else value
     return [{'manifest': str(PLUGIN_ROOT / c['id'] / 'quivr-plugin.yaml'), 'endpoint': f"http://127.0.0.1:{c['port']}",
-             'configuration': configuration(c)} for c in CONNECTORS]
+             'configuration': configuration(c)} for c in runtime_connectors(env)]
 
 
 def build_config(env):
@@ -153,13 +166,13 @@ def sidecar_commands(env, role='worker'):
     plugin but the retrieval plugin, the API only the connector plugins it relays push
     deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
     that ranks its searches, and the subscription plugins it calls for previews. Its
-    environment carries only the secrets that plugin declares (alerts:
+    environment carries only the secrets that plugin declares (alerts and Jev:
     TYPESAFE_API_KEY), never the core's.
 
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
     commands = []
-    for connector in CONNECTORS:
+    for connector in runtime_connectors(env):
         if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
         if role == 'worker' and connector.get('worker') is False:
@@ -168,7 +181,13 @@ def sidecar_commands(env, role='worker'):
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
                  'QUIVR_PLUGIN_MANIFEST': str(directory / 'quivr-plugin.yaml')}
-        commands.append((connector['id'], ['/usr/local/bin/quivr-' + connector['id']], str(directory), child))
+        child.update({name: env[name] for name in connector.get('secrets', []) if env.get(name, '').strip()})
+        if 'module' in connector:
+            child['PYTHONUNBUFFERED'] = '1'
+            argv = [PLUGIN_PYTHON, '-m', connector['module']]
+        else:
+            argv = ['/usr/local/bin/quivr-' + connector['id']]
+        commands.append((connector['id'], argv, str(directory), child))
     if not plugins_enabled(env):
         return commands
     for plugin in PLUGINS:
@@ -234,17 +253,21 @@ def main():
     path = pathlib.Path('/tmp/quivr-runtime.json')
     path.write_text(json.dumps(config))
     os.environ['QUIVR_CONFIG'] = str(path)
+    # Plugin-only credentials belong to declared sidecar environments, not the engine.
+    plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ)
+                      for name in plugin.get('secrets', [])}
+    core_env = {name: value for name, value in os.environ.items() if name not in plugin_secrets}
     # Only the API applies startup migrations; failures abort before serving.
     if mode == 'api':
-        subprocess.run(['quivr', 'migrate'], check=True)
+        subprocess.run(['quivr', 'migrate'], check=True, env=core_env)
     # The worker calls every plugin but the retrieval plugin, and the API the push
     # connector plugins it relays webhook deliveries to, the ingestion plugin it encodes
     # queries with and the retrieval plugin that ranks its searches, so each runs those
     # beside itself.
     sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
     if sidecars:
-        sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, None)]))
-    os.execvp('quivr', ['quivr', mode])
+        sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, core_env)]))
+    os.execvpe('quivr', ['quivr', mode], core_env)
 
 
 if __name__ == '__main__':

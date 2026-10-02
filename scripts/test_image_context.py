@@ -2,6 +2,7 @@ import os
 import pathlib
 import tempfile
 import unittest
+import zipfile
 
 import image_context
 
@@ -120,6 +121,33 @@ class PythonImageContextTest(unittest.TestCase):
     def test_directory_copy_covers_transitive_imports(self):
         root = self.repo('COPY scripts ./scripts')
         self.assertIsNone(image_context.check_python(root, root / 'Dockerfile', 'scripts/prepare.py'))
+
+
+class PythonPluginImageContextTest(unittest.TestCase):
+    def test_python_package_installs_only_when_copied_into_its_stage(self):
+        # A tiny offline wheel exercises real pip installation, without an index or build backend.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            wheel = 'fixture_plugin-1.0-py3-none-any.whl'
+            with zipfile.ZipFile(root / wheel, 'w') as archive:
+                archive.writestr('fixture_plugin.py', 'VALUE = 1\n')
+                archive.writestr('fixture_plugin-1.0.dist-info/METADATA',
+                                 'Metadata-Version: 2.1\nName: fixture-plugin\nVersion: 1.0\n')
+                archive.writestr('fixture_plugin-1.0.dist-info/WHEEL',
+                                 'Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n')
+                archive.writestr('fixture_plugin-1.0.dist-info/RECORD', '')
+            dockerfile = root / 'Dockerfile'
+            for copied in (False, True):
+                with self.subTest(copied=copied):
+                    dockerfile.write_text('FROM python AS plugins\n'
+                                          + (f'COPY {wheel} /app/{wheel}\n' if copied else '')
+                                          + f'RUN /opt/plugins/bin/pip install --no-index /app/{wheel}\n')
+                    failure = image_context.check_python_plugins(root, dockerfile)
+                    if copied:
+                        self.assertIsNone(failure)
+                    else:
+                        self.assertIn('cannot install its Python packages', failure)
+                        self.assertIn(wheel, failure)
 
 
 if __name__ == '__main__':

@@ -11,6 +11,8 @@ deploy/railway/core.Dockerfile, and the hosted image then fails to build.
 This copies exactly the build stage's COPY sources into a temporary directory
 and builds ./cmd/quivr there. It also checks that every other stage's COPY
 source from the build context exists, such as the plugins the image bakes in.
+The Python plugins stage must install from its own COPY sources with its pip
+constraints, including optional retrieval sidecars.
 Every first-party Go connector plugin (plugins/<id> with a go.mod) must build
 the same way from exactly the COPY sources of the ``connectors`` stage.
 
@@ -105,13 +107,13 @@ def check(root, dockerfile, go):
             return (f'{dockerfile.name}: the image build stage cannot build ./cmd/quivr.\n'
                     f'{result.stderr.strip()}\n'
                     'Fix: COPY every top-level Go package the binary imports into the build stage.')
-    return check_connectors(root, dockerfile, go)
+    return check_connectors(root, dockerfile, go) or check_python_plugins(root, dockerfile)
 
 
 def materialize(root, copies, context, dockerfile):
     """Copy (source, destination) pairs into context; return the failure text or None."""
     for source, destination in copies:
-        origin, target = root / source, context / destination
+        origin, target = root / source, context / destination.lstrip('/')
         target.parent.mkdir(parents=True, exist_ok=True)
         if origin.is_dir():
             shutil.copytree(origin, target, dirs_exist_ok=True)
@@ -119,6 +121,46 @@ def materialize(root, copies, context, dockerfile):
             shutil.copy2(origin, target)
         else:
             return f'{dockerfile.name}: COPY source {source} does not exist'
+    return None
+
+
+def check_python_plugins(root, dockerfile):
+    """Install the Python sidecars from exactly the plugins stage's context and pip inputs."""
+    text = dockerfile.read_text()
+    copies = stage_copies(text, 'plugins')
+    if copies is None:
+        return None
+    selected, install = False, None
+    for words in instructions(text):
+        if words[0].upper() == 'FROM':
+            selected = len(words) >= 4 and words[-2].upper() == 'AS' and words[-1] == 'plugins'
+        elif selected and words[0].upper() == 'RUN':
+            for i, word in enumerate(words[:-1]):
+                if pathlib.PurePosixPath(word).name == 'pip' and words[i + 1] == 'install':
+                    install = words[i + 2:]
+                    if '&&' in install:
+                        install = install[:install.index('&&')]
+    if install is None:
+        return f'{dockerfile.name}: the plugins stage has no pip install command'
+    with tempfile.TemporaryDirectory() as tmp:
+        context = pathlib.Path(tmp)
+        failure = materialize(root, copies, context, dockerfile)
+        if failure:
+            return failure
+        # Absolute image paths resolve inside the copied context, never against the host.
+        args = [str(context / word.lstrip('/')) if word.startswith('/') else word for word in install]
+        environment = context / '.image-context-venv'
+        result = subprocess.run([sys.executable, '-m', 'venv', str(environment)], capture_output=True, text=True)
+        if result.returncode:
+            return f'{dockerfile.name}: cannot prepare the Python plugins environment:\n{result.stderr.strip()}'
+        python = str(environment / 'bin' / 'python')
+        result = subprocess.run([python, '-m', 'pip', 'install', *args], cwd=context, capture_output=True, text=True)
+        if result.returncode:
+            return (f'{dockerfile.name}: the plugins stage cannot install its Python packages.\n'
+                    f'{result.stderr.strip()}\nFix: COPY each package and constraint file used by pip into the plugins stage.')
+        result = subprocess.run([python, '-m', 'pip', 'check'], cwd=context, capture_output=True, text=True)
+        if result.returncode:
+            return f'{dockerfile.name}: incompatible Python plugin dependencies:\n{result.stdout.strip()}'
     return None
 
 
