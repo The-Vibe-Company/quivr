@@ -6,21 +6,22 @@ import "slices"
 type Feature string
 
 const (
-	FeatureNormalizer          Feature = "normalizer"
-	FeatureSubscription        Feature = "subscription"
-	FeatureConnector           Feature = "connector"
-	FeatureInstanceScope       Feature = "instance_scope"
-	FeatureAttachments         Feature = "attachments"
-	FeaturePush                Feature = "push"
-	FeatureIngestion           Feature = "ingestion"
-	FeatureRetrieval           Feature = "retrieval"
-	FeatureSegmentsOnly        Feature = "segments_only"
-	FeatureInputPrice          Feature = "input_price"
-	FeatureSubscriptionVectors Feature = "subscription_vectors"
-	FeatureConnectorAPI        Feature = "connector_api"
-	FeatureConnectorSignature  Feature = "connector_signature"
-	FeatureInstanceToken       Feature = "instance_token"
-	FeatureProfileCandidates   Feature = "profile_candidates"
+	FeatureNormalizer           Feature = "normalizer"
+	FeatureSubscription         Feature = "subscription"
+	FeatureConnector            Feature = "connector"
+	FeatureInstanceScope        Feature = "instance_scope"
+	FeatureAttachments          Feature = "attachments"
+	FeaturePush                 Feature = "push"
+	FeatureIngestion            Feature = "ingestion"
+	FeatureRetrieval            Feature = "retrieval"
+	FeatureSegmentsOnly         Feature = "segments_only"
+	FeatureInputPrice           Feature = "input_price"
+	FeatureSubscriptionVectors  Feature = "subscription_vectors"
+	FeatureConnectorAPI         Feature = "connector_api"
+	FeatureConnectorSignature   Feature = "connector_signature"
+	FeatureInstanceToken        Feature = "instance_token"
+	FeatureProfileCandidates    Feature = "profile_candidates"
+	FeatureProfileCandidateMode Feature = "profile_candidate_mode"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -48,6 +49,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureConnectorSignature, "0.12.0", "Connector signature freshness and replay protection", "", ""},
 	{FeatureInstanceToken, "0.12.0", "Instance-scoped bearer tokens for connector API routes", "", ""},
 	{FeatureProfileCandidates, "0.12.0", "Profile candidates, declared retrieval dependencies and shared search budgets", "", "/requires"},
+	{FeatureProfileCandidateMode, "0.13.0", "Optional search mode override for profile candidates", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

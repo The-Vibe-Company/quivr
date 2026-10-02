@@ -70,6 +70,9 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	if c.Profile.Query != "" {
 		q.Query = c.Profile.Query
 	}
+	if c.Profile.Mode != "" {
+		q.Mode = c.Profile.Mode
+	}
 	if c.Filter != nil && len(c.Filter.SourceNamespaces) > 0 {
 		q.SourceNamespaces = c.Filter.SourceNamespaces
 	}

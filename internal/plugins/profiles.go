@@ -58,6 +58,9 @@ func (s *PinSet) RetrievalProfiles(aliases map[string]string) ([]PinnedProfile, 
 		}
 	}
 	if aliases == nil && len(pins) == 1 {
+		if _, ok := pins[0].Manifest.Contributions.Retrieval.Profiles[DefaultProfile]; !ok {
+			return nil, fmt.Errorf("retrieval.profiles must map default to plugin/profile when the retrieval plugin declares no default profile")
+		}
 		aliases = map[string]string{}
 		for _, p := range out {
 			// balanced has always selected default, even if a plugin declares it.

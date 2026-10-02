@@ -376,6 +376,10 @@
               "maxLength": 8192,
               "description": "Optional replacement query text; otherwise inherits the outer query."
             },
+            "mode": {
+              "enum": ["lexical", "semantic", "hybrid"],
+              "description": "Optional search mode override, since the profile-candidate-mode feature; otherwise inherits the outer mode."
+            },
             "limit": {
               "type": "integer",
               "minimum": 1,

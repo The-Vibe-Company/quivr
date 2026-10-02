@@ -1,16 +1,16 @@
 id: jev.rerank
-version: 0.1.0
-description: Optional Jev reranking of hybrid candidates; default follows the index without a paid dependency.
+version: 1.0.0
+description: Jev reranking of core.retrieve's hybrid ranking, with an unpaid hybrid fallback.
 compatibility:
   engine: ">=0.1.0 <0.2.0"
-  plugin_api: ">=0.8.0 <0.11.0"
+  plugin_api: ">=0.13.0 <0.14.0"
+requires:
+  - plugin: core.retrieve
+    version: ">=1.1.0 <2.0.0"
+    profiles: [default]
 contributions:
   retrieval:
     profiles:
-      default:
-        description: The index ranking for the requested lexical, semantic or hybrid mode, without Jev.
-        max_latency_ms: 500
-        max_cost_cents: 0
       deep:
         description: Hybrid candidates re-ranked by pinned Jev probabilities, or hybrid order when Jev is unavailable.
         max_latency_ms: 3000

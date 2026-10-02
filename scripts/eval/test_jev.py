@@ -44,7 +44,7 @@ class RerankerHarness(unittest.TestCase):
             refused = jev.summary([{}], [{**event, 'fallback': True, 'reason': reason}])
             self.assertEqual(refused['fallback_reasons'], {'provider refused (payment)': 1})
 
-    def test_api_and_worker_replace_only_retrieval_pin_when_configuration_is_regenerated(self):
+    def test_api_and_worker_keep_normal_search_when_jev_is_configured(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = pathlib.Path(directory)
             ingestion = {'manifest': '/plugins/core-ingest/quivr-plugin.yaml', 'configuration': {'tei_url': 'http://127.0.0.1:1234'}}
@@ -58,7 +58,9 @@ class RerankerHarness(unittest.TestCase):
             jev.configure(stack)
             for name in ['config.json', 'worker.json']:
                 config = json.loads((directory / name).read_text())
-                self.assertEqual(config['plugins'], [ingestion, pin])
+                self.assertEqual(config['plugins'], [ingestion, retrieval, pin])
+                self.assertEqual(config['retrieval']['profiles'], {
+                    'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'})
                 self.assertEqual(config['listen'], '127.0.0.1:4567')
                 self.assertEqual((directory / name).stat().st_mode & 0o777, 0o600)
 

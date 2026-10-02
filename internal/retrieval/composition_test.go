@@ -124,6 +124,8 @@ func TestCompositionSharesDeadlineAndCost(t *testing.T) {
 		{"decimal allowance", 0.3, 1, 4, nil},
 		{"decimal allowance exceeded", 0.3, 1, 4, retrieval.ErrPluginInvalid},
 		{"legacy inner receives old fields", 1, 1, 4, nil},
+		{"inner mode override", 1, 1, 4, nil},
+		{"mode override requires new API", 1, 1, 1, retrieval.ErrPluginInvalid},
 		{"inner filter on legacy projection", 1, 1, 1, retrieval.ErrSourceFilterUnavailable},
 		{"outer cost includes inner", 0.4, 1, 2, retrieval.ErrPluginInvalid},
 		{"exhausted budget rejects paid final round", 0.5, 1, 4, retrieval.ErrPluginInvalid},
@@ -137,6 +139,9 @@ func TestCompositionSharesDeadlineAndCost(t *testing.T) {
 				return plugins.Manifest{ID: id, Version: "1.0.0", Compatibility: plugins.Compatibility{PluginAPI: ">=0.12.0 <0.13.0"}, Contributions: plugins.Contributions{Retrieval: &plugins.Retrieval{Profiles: map[string]plugins.RetrievalProfile{"default": {MaxLatencyMS: 2000, MaxCostCents: cost}}}}}
 			}
 			outer := &profileRanker{m: manifest("example.rerank", tc.outerMax)}
+			if tc.name == "inner mode override" {
+				outer.m.Compatibility.PluginAPI = ">=0.13.0 <0.14.0"
+			}
 			inner := &profileRanker{m: manifest("core.retrieve", tc.innerMax)}
 			if tc.name == "legacy inner receives old fields" {
 				inner.m.Compatibility.PluginAPI = ">=0.7.0 <0.13.0"
@@ -172,6 +177,9 @@ func TestCompositionSharesDeadlineAndCost(t *testing.T) {
 						expire(context.DeadlineExceeded)
 					}
 					request := map[string]any{"primitive": "profile", "profile": map[string]any{"name": "core.retrieve/default", "limit": 1}}
+					if tc.name == "inner mode override" || tc.name == "mode override requires new API" {
+						request["profile"].(map[string]any)["mode"] = "hybrid"
+					}
 					if tc.name == "inner filter on legacy projection" {
 						request["filter"] = map[string]any{"source_namespaces": []string{"public"}}
 					}
@@ -198,6 +206,13 @@ func TestCompositionSharesDeadlineAndCost(t *testing.T) {
 					}
 					if q.Query.Text != "original" || !budgetOK {
 						t.Errorf("inner request %+v; remaining %g", q, wantRemaining)
+					}
+					wantMode := "lexical"
+					if tc.name == "inner mode override" {
+						wantMode = "hybrid"
+					}
+					if q.Query.Mode != wantMode {
+						t.Errorf("inner mode %q, want %q", q.Query.Mode, wantMode)
 					}
 					return answer(map[string]any{"requests": []any{map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": 1}}, "usage": usage(innerCost)})
 				}

@@ -70,16 +70,16 @@ def described_enabled(env):
 
 
 def runtime_connectors(env):
-    """Select one retrieval implementation for both pins and process startup."""
-    if env.get('QUIVR_DEMO_JEV_RERANK') != '1' or not described_enabled(env):
+    """Keep normal search and optionally add Jev for deep searches."""
+    if env.get('QUIVR_DEMO_JEV_RERANK') != '1':
         return CONNECTORS
-    return [c if c['id'] != 'core-retrieve' else {
-        'id': 'jev-rerank', 'module': 'jev_rerank', 'port': c['port'],
+    return CONNECTORS + [{
+        'id': 'jev-rerank', 'module': 'jev_rerank', 'port': 9970,
         'api': True, 'worker': False, 'secrets': ['TYPESAFE_API_KEY'],
         'configuration': {'candidate_count': 30, 'trim_tokens': '256',
                           'tokenizer_path': TOKENIZER['model'], 'ranking': 'noul',
                           'cache_entries': 4096},
-    } for c in CONNECTORS]
+    }]
 
 
 def plugin_pins(env):
@@ -147,6 +147,8 @@ def build_config(env):
                                                 'plugins:admin', 'observability:read']}
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
+    if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
+        config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     if plugins_enabled(env):
         config['plugins'] = config.get('plugins', []) + plugin_pins(env)
         config['destinations'] = {DESTINATION_ID: {'organization': 'quivr-demo', 'url': SINK_URL,

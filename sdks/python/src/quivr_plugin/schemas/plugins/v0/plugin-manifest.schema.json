@@ -648,16 +648,13 @@
           "type": "object",
           "minProperties": 1,
           "maxProperties": 8,
-          "required": [
-            "default"
-          ],
           "propertyNames": {
             "$ref": "#/$defs/ProfileName"
           },
           "additionalProperties": {
             "$ref": "#/$defs/RetrievalProfile"
           },
-          "description": "The search profiles this plugin answers, by name; default is required and answers a search that names no profile."
+          "description": "The local search profiles this plugin answers. The deployment maps its default alias to one installed plugin/profile."
         },
         "limits": {
           "type": "object",

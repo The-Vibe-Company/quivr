@@ -1077,6 +1077,7 @@ class CandidateRequestFilter(Model):
 class CandidateRequestProfile(Model):
     name: str
     query: str | None = None
+    mode: Literal["lexical", "semantic", "hybrid"] | None = None
     limit: int
 
 

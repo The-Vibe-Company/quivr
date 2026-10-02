@@ -5,7 +5,8 @@ description: "Enable an optional paid re-ranker for deep searches, with hybrid f
 
 Use `jev.rerank` when you want to evaluate Jev over hybrid candidates. It is
 optional; installing it does not change `core.retrieve` or make `deep` the
-default. Run it as a separate Python sidecar.
+default. Jev 1.0.0 serves only `deep` and requires `core.retrieve` 1.1.x's
+`default` profile and Plugin API 0.13. Run both as separate sidecars.
 
 ## Install and pin
 
@@ -24,10 +25,13 @@ Supply `TYPESAFE_API_KEY` to this process through your secret manager or
 environment before starting it. Do not put the key in the plugin configuration.
 Without it, `deep` works in fallback mode, without a paid call.
 
-Replace the retrieval entry in your engine's [plugin pins](/plugins/pin):
+Keep `core.retrieve` running and add Jev to your engine's [plugin pins](/plugins/pin).
+This illustrative configuration maps each short name to its provider:
 
 ```yaml
 plugins:
+  - manifest: /path/to/quivr-v2/plugins/core-retrieve/quivr-plugin.yaml
+    endpoint: http://127.0.0.1:8084
   - manifest: /path/to/quivr-v2/plugins/jev-rerank/quivr-plugin.yaml
     endpoint: http://127.0.0.1:8083
     configuration:
@@ -35,25 +39,35 @@ plugins:
       trim_tokens: full
       ranking: noul
       cache_entries: 4096
+retrieval:
+  profiles:
+    default: core.retrieve/default
+    deep: jev.rerank/deep
 ```
 
-Keep the ingestion plugin pinned. To keep `core.retrieve` beside `jev.rerank`,
-set [Search profile aliases](/reference/configuration#search-profiles), for example
-`default` to `core.retrieve/default` and `deep` to `jev.rerank/deep`. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
+Keep the ingestion plugin pinned. [Search profile aliases](/reference/configuration#search-profiles)
+are required when several retrieval plugins are installed. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
 when changing an existing installation.
 
 ## Search and inspect
 
 Send your ordinary [search request](/guides/search) with `profile: deep`.
-Round 1 retrieves a hybrid shortlist, regardless of the requested mode. Round 2
+Round 1 asks the engine for `core.retrieve/default`'s hybrid shortlist,
+regardless of the requested mode. Round 2
 scores it with `jev-1.13.0`. Hit explanations show the Noul probability, and
 `usage.paid_calls` and `usage.cost_cents` report the paid work. `default` follows
 the requested search mode and never calls Jev.
 
 `re-ranker unavailable: <reason>` means hybrid order was returned, without a
 Jev probability. Missing credentials, provider errors, invalid answers and
-the paid round's 2-second deadline all fall back this way. Failed attempts
+the paid round's deadline or remaining cost allowance all fall back this way.
+The paid round gets at most 2 seconds within the engine's remaining chain
+time. Jev reports its own spend; the engine aggregates both plugins in `usage`
+and lists their full names in `usage.profiles`. Failed attempts
 without provider usage reserve an upper-bound cost, not a claimed invoice.
+
+`GET /v0/search/profiles` lists `core.retrieve/default` with alias `default`
+and `jev.rerank/deep` with alias `deep`, alongside other installed profiles.
 
 ## Tune with measurements
 

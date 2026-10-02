@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quivr-jev-rerank"
-version = "0.1.0"
+version = "1.0.0"
 description = "Optional Jev reranking of Quivr hybrid candidates"
 requires-python = ">=3.12"
 dependencies = ["quivr-plugin-sdk>=0.4.0", "tokenizers==0.23.2"]

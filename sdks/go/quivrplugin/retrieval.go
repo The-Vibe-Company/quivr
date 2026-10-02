@@ -47,6 +47,7 @@ type CandidateRequest struct {
 type ProfileCandidates struct {
 	Name  string `json:"name"`
 	Query string `json:"query,omitempty"`
+	Mode  string `json:"mode,omitempty"`
 	Limit int    `json:"limit"`
 }
 

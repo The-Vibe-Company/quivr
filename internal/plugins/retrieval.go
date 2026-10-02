@@ -12,8 +12,8 @@ import (
 // SearchRoute is the route of the retrieval Contribution.
 const SearchRoute = "/v0/contributions/retrieval/search"
 
-// DefaultProfile is the profile every retrieval plugin declares; it answers a
-// search that names no profile.
+// DefaultProfile is the deployment alias used by searches that name no profile.
+// A single plugin with a local default profile can supply it without a map.
 const DefaultProfile = "default"
 
 // Retrieval defaults and engine caps.
@@ -171,6 +171,7 @@ type CandidateRequest struct {
 type ProfileCandidates struct {
 	Name  string `json:"name"`
 	Query string `json:"query,omitempty"`
+	Mode  string `json:"mode,omitempty"`
 	Limit int    `json:"limit"`
 }
 
@@ -368,6 +369,11 @@ func requestIssues(requests []CandidateRequest, request SearchRequest, m *Manife
 			_, admitted := admitsFeature(r, FeatureProfileCandidates)
 			if !admitted || c.Profile == nil || !m.RequiresProfile(c.Profile.Name) {
 				issues = append(issues, Issue{Code: CodePluginDependency, Path: path + "/profile", Message: "profile candidates require the profile-candidates feature and a full profile name declared in requires"})
+			}
+			if c.Profile != nil && c.Profile.Mode != "" {
+				if _, admitted := admitsFeature(r, FeatureProfileCandidateMode); !admitted {
+					issues = append(issues, Issue{Code: CodePluginDependency, Path: path + "/profile/mode", Message: "profile mode requires the profile-candidate-mode feature"})
+				}
 			}
 		}
 		if c.Primitive != PrimitiveBM25 && c.Primitive != PrimitiveProfile {

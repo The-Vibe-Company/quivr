@@ -74,7 +74,7 @@ class Jev:
         self.key = key
         self.url = urllib.parse.urlsplit(url)
 
-    def judge(self, query: str, passages: dict[str, str], deadline: float) -> Result:
+    def judge(self, query: str, passages: dict[str, str], deadline: float, cost_limit: float = 1.0) -> Result:
         if time.monotonic() >= deadline:
             return Result(reason="deadline")
         if not self.slots.acquire(blocking=False):
@@ -84,7 +84,7 @@ class Jev:
 
         def run() -> None:
             try:
-                self._judge(query, passages, deadline, result)
+                self._judge(query, passages, deadline, result, cost_limit)
             except Exception:
                 result.reason = "transport failure"
             finally:
@@ -99,7 +99,7 @@ class Jev:
         return Result(paid_calls=attempted, input_tokens=attempted * MAX_TOKENS,
                       estimated_tokens=attempted * MAX_TOKENS, reason="deadline")
 
-    def _judge(self, query: str, passages: dict[str, str], deadline: float, result: Result) -> Result:
+    def _judge(self, query: str, passages: dict[str, str], deadline: float, result: Result, cost_limit: float) -> Result:
         raw = json.dumps(payload(query, passages), ensure_ascii=False, separators=(",", ":")).encode()
         if len(raw) > MAX_BYTES:
             result.reason = "request size bound"
@@ -109,7 +109,7 @@ class Jev:
             if remaining <= 0:
                 result.reason = "deadline"
                 return result
-            if result.cost_cents + MAX_TOKENS * CENTS_PER_TOKEN > 1:
+            if result.cost_cents + MAX_TOKENS * CENTS_PER_TOKEN > cost_limit:
                 result.reason = "cost bound"
                 return result
             connection_type = http.client.HTTPSConnection if self.url.scheme == "https" else http.client.HTTPConnection

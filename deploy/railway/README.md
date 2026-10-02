@@ -71,7 +71,7 @@ their steps (`GET /v0/admin/documents`), or to register and activate plugins ([S
 ## Core plugins and the rebuild after THE-777
 
 api and worker run the core.ingest plugin (`127.0.0.1:9950`, `CONNECTORS` in `core-entrypoint.py`),
-which segments and embeds with TEI; the api alone runs the selected retrieval plugin (`127.0.0.1:9960`), by default core.retrieve, which
+which segments and embeds with TEI; the api alone runs core.retrieve (`127.0.0.1:9960`), which
 ranks every search (THE-779). Neither starts without its plugin. After the first deploy with core.ingest,
 rebuild each earlier Corpus once with the operator key (later ones start on core.ingest):
 `POST /v0/corpora/{corpus_id}/rebuilds` with an `idempotency_key`, then poll the Operation.
@@ -81,15 +81,18 @@ their vectors attach at the rebuild, which re-embeds with the same model, so res
 ## Jev deep searches (optional)
 
 The core image includes [`jev.rerank`](../../plugins/jev-rerank/README.md).
-To select it, set `QUIVR_DEMO_JEV_RERANK=1` and a non-empty `TYPESAFE_API_KEY`
-identically on api and worker, then redeploy both. Both reconcile the shared plugin
+To enable it, set `QUIVR_DEMO_JEV_RERANK=1` identically on api and worker,
+then redeploy both. Set `TYPESAFE_API_KEY` on api for paid re-ranking;
+without it Jev returns the hybrid fallback. Both reconcile the shared plugin
 registry at startup; matching pins keep a worker restart from undoing the choice.
 Enable it after measuring retrieval quality for the
-deployment. It replaces core.retrieve at `127.0.0.1:9960`; the worker runs neither
+deployment. It runs at `127.0.0.1:9970` beside core.retrieve; the worker runs neither
 retrieval sidecar. This switch is independent of `QUIVR_DEMO_PLUGINS`.
 The key goes into the Jev sidecar environment, never its pin or the web bundle;
 alerts also receives it when separately enabled.
 
+The configured aliases route `default` to `core.retrieve/default` and `deep`
+to `jev.rerank/deep`; `GET /v0/search/profiles` lists both providers.
 `profile: default` keeps the requested index ranking and makes no paid call.
 `profile: deep` re-ranks 30 hybrid candidates with Noul, trims passages to 256
 tokens using core.ingest's pinned E5 tokenizer, and caches up to 4096 pairs.
@@ -100,8 +103,7 @@ See [Re-rank with Jev](https://docs.quivr.thevibecompany.co/guides/rerank-with-j
 for usage reporting, caching and fallback behavior.
 
 To turn it off, unset `QUIVR_DEMO_JEV_RERANK` or set it to `0` on api and worker, then redeploy both.
-core.retrieve is selected again. An absent or blank TypeSafe key also keeps
-core.retrieve, even with the switch on. No migration or projection rebuild is needed.
+Only core.retrieve remains pinned for retrieval. No migration or projection rebuild is needed.
 
 ## Connectors in the web app (optional)
 

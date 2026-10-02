@@ -35,7 +35,7 @@ go mod tidy
 </Step>
 <Step title="Declare your profiles">
 
-A profile is a named strategy with its budgets. Clients choose one with `profile` in `POST /v0/search`; `default` answers when they name none and is required. The sample declares two:
+A profile is a named strategy with its budgets. Clients choose one with `profile` in `POST /v0/search`; the deployment's `default` alias answers when they name none. A plugin may serve only `deep`. The sample declares two:
 
 ```yaml quivr-plugin.yaml
 id: example.fusion_retriever
@@ -133,7 +133,9 @@ in the [Plugin API history](/reference/plugin-protocol). Declare its plugin id,
 version range and local profiles in the manifest's `requires` field. Ask for
 `primitive: profile` with `profile: {name: "core.retrieve/default", limit: 10}`.
 Use the full name declared in `requires`; an optional `query` replaces your
-search's query text. The [retrieval contract](/reference/plugin-protocol#retrieval)
+search's query text. With the profile-candidate-mode feature, optional `mode`
+selects `lexical`, `semantic` or `hybrid`; omitting it inherits the outer mode.
+The [retrieval contract](/reference/plugin-protocol#retrieval)
 lists the request fields; the [manifest reference](/reference/plugin-manifest)
 lists dependency fields.
 

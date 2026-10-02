@@ -1,4 +1,4 @@
-"""Hybrid candidate selection, pair caching, and optional Noul/RRF ranking."""
+"""Re-rank core.retrieve's hybrid ranking, with pair caching and fallback."""
 from __future__ import annotations
 
 import hashlib
@@ -7,8 +7,6 @@ import os
 import threading
 import time
 from collections import OrderedDict
-
-from quivr_plugin.errors import TerminalError
 
 from .client import Jev, MODEL, RUBRIC_VERSION, Result
 
@@ -61,28 +59,11 @@ class Retriever:
         config = request.configuration
         count, trim, ranking = (str(config.get("candidate_count", 30)), str(config.get("trim_tokens", "full")), config.get("ranking", "noul"))
         if request.round == 1:
-            candidate = {"query_text": request.query.text, "k": int(count) if request.profile != "default" else request.limit}
-            mode = request.query.mode if request.profile == "default" else "hybrid"
-            if mode == "lexical":
-                candidate.update(primitive="bm25", field="source")
-            else:
-                space = next((space.id for space in request.spaces if space.role == "served"), None)
-                if space is None:
-                    raise TerminalError("no_served_space", "the searched Corpora serve no vector space", status=422)
-                candidate.update(primitive="near_vector" if mode == "semantic" else "hybrid", space=space)
-                if mode != "semantic":
-                    candidate.update(field="source", alpha=0.5, fusion="relative_score")
-            return {"requests": [candidate]}
+            return {"requests": [{"primitive": "profile", "profile": {
+                "name": "core.retrieve/default", "mode": "hybrid", "limit": int(count)}}]}
         candidates = [candidate for served in request.served for candidate in served.candidates]
-        candidates.sort(key=lambda candidate: (-candidate.score, candidate.segment_id))
-        if request.profile == "default":
-            primitive = request.served[0].request if request.served else None
-            explanation = "keywords"
-            if primitive is not None and primitive.primitive == "near_vector":
-                explanation = "vectors in " + primitive.space
-            elif primitive is not None and primitive.primitive == "hybrid":
-                explanation = f"keywords and vectors in {primitive.space}, alpha {primitive.alpha:g}, relative score fusion"
-            return self.answer(candidates, request.limit, {}, explanation, Result())
+        deadline = start + min(2.0, max(0, request.budget.remaining_time_ms / 1000 - 0.01)) if request.budget else start + 2.0
+        cost_limit = min(1.0, request.budget.remaining_cost_cents) if request.budget else 1.0
         unique = []
         for candidate in candidates:
             if any(candidate.record_id == kept.record_id and candidate.version_id == kept.version_id
@@ -111,27 +92,26 @@ class Retriever:
                 else:
                     passages[name] = candidate.text
         result = Result()
-        if passages:
-            key = os.environ.get("TYPESAFE_API_KEY", "").strip()
-            if not key:
-                result.reason = "API key not configured"
-            else:
-                try:
-                    passages = {position: self.trim(text, trim, config.get("tokenizer_path", ""), digest) for position, text in passages.items()}
-                except (OSError, ValueError, ImportError):
-                    result.reason = "tokenizer unavailable"
-                if not result.reason:
-                    result = Jev(key, os.environ.get("TYPESAFE_API_URL", "").strip() or "https://api.typesafe.ai/v1/systemone").judge(
-                        normalized, passages, start + 2.0)
-                if not result.reason:
-                    with self.lock:
-                        for position, probability in result.scores.items():
-                            scores[unique[int(position[1:])].segment_id] = probability
-                            if capacity:
-                                self.cache[keys[position]] = probability
-                                self.cache.move_to_end(keys[position])
-                        while len(self.cache) > capacity:
-                            self.cache.popitem(last=False)
+        key = os.environ.get("TYPESAFE_API_KEY", "").strip()
+        if not key:
+            result.reason = "API key not configured"
+        elif passages:
+            try:
+                passages = {position: self.trim(text, trim, config.get("tokenizer_path", ""), digest) for position, text in passages.items()}
+            except (OSError, ValueError, ImportError):
+                result.reason = "tokenizer unavailable"
+            if not result.reason:
+                result = Jev(key, os.environ.get("TYPESAFE_API_URL", "").strip() or "https://api.typesafe.ai/v1/systemone").judge(
+                    normalized, passages, deadline, cost_limit)
+            if not result.reason:
+                with self.lock:
+                    for position, probability in result.scores.items():
+                        scores[unique[int(position[1:])].segment_id] = probability
+                        if capacity:
+                            self.cache[keys[position]] = probability
+                            self.cache.move_to_end(keys[position])
+                    while len(self.cache) > capacity:
+                        self.cache.popitem(last=False)
         log.info("Jev rerank round", extra={"event": "jev_rerank", "profile": request.profile,
                  "k": int(count), "trim": trim, "ranking": ranking, "model": result.model or MODEL,
                  "rubric": RUBRIC_VERSION, "paid_calls": result.paid_calls, "cost_cents": result.cost_cents,

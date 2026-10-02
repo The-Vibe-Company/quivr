@@ -1770,14 +1770,12 @@
       "description": "Two profiles and limits of a retrieval plugin (Plugin API 0.7)."
     },
     {
-      "file": "manifests/invalid/retrieval-no-default.yaml",
+      "file": "manifests/valid/retrieval-deep-only.yaml",
       "schema": "plugin-manifest.schema.json",
-      "valid": false,
-      "schema_valid": false,
-      "errors": [
-        "schema_violation"
-      ],
-      "description": "Every retrieval plugin declares the default profile."
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A retrieval plugin may serve only deep; default is a deployment alias."
     },
     {
       "file": "manifests/invalid/retrieval-plugin-api-0.6.yaml",
@@ -2275,6 +2273,36 @@
       ],
       "request": "requests/retrieval/search-profile-budget.json",
       "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-mode.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidate-mode.json",
+      "description": "Profile candidate mode override."
+    },
+    {
+      "file": "responses/retrieval/profile-mode-invalid.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidate-mode.json",
+      "description": "Unknown profile candidate mode is refused."
+    },
+    {
+      "file": "manifests/valid/profile-candidate-mode.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A composing plugin speaking profile candidate mode."
     }
   ]
 }

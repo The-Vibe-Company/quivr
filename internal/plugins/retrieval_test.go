@@ -2,6 +2,7 @@ package plugins_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,7 @@ func TestRetrievalProfileAliases(t *testing.T) {
 		{name: "several", pins: []plugins.PinConfig{first, other}, aliases: map[string]string{"default": "example.fusion_retriever/default", "deep": "acme.other_retriever/deep", "careful": "acme.other_retriever/deep"}},
 		{name: "missing map", pins: []plugins.PinConfig{first, other}, wantError: "must map default"},
 		{name: "missing default", pins: []plugins.PinConfig{first}, aliases: map[string]string{}, wantError: "must contain default"},
+		{name: "deep-only needs default alias", pins: []plugins.PinConfig{{Manifest: filepath.Join(fixtures, "manifests/valid/retrieval-deep-only.yaml"), Endpoint: first.Endpoint}}, wantError: "must map default"},
 		{name: "unknown plugin", pins: []plugins.PinConfig{first}, aliases: map[string]string{"default": "missing/default"}, wantError: "unknown profile"},
 		{name: "unknown profile", pins: []plugins.PinConfig{first}, aliases: map[string]string{"default": "example.fusion_retriever/missing"}, wantError: "unknown profile"},
 		{name: "full alias", pins: []plugins.PinConfig{first}, aliases: map[string]string{"default": "example.fusion_retriever/default", "other/default": "example.fusion_retriever/deep"}, wantError: "short name"},

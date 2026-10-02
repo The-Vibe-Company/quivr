@@ -105,8 +105,9 @@ def configure(stack):
         path = stack.directory / name
         config = json.loads(path.read_text())
         config['plugins'] = [entry for entry in config['plugins']
-                             if not entry['manifest'].endswith('/core-retrieve/quivr-plugin.yaml')
-                             and entry['manifest'] != pin['manifest']] + [pin]
+                             if entry['manifest'] != pin['manifest']] + [pin]
+        config.setdefault('retrieval', {}).setdefault('profiles', {}).update(
+            default='core.retrieve/default', deep='jev.rerank/deep')
         path.write_text(json.dumps(config))
         path.chmod(0o600)
 

@@ -108,7 +108,7 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `contributions.retrieval` | object | no | Search, since Plugin API 0.7: answer one search in rounds. Each round the plugin either asks the core for candidates (keyword, vector on a named space, hybrid) or returns the final ranking, chosen only among candidates the core served in this search. The core keeps the index, encodes queries with each space's owner, and applies authorization, withdrawal and generation routing before serving any candidate. |
-| `contributions.retrieval.profiles` | map of object | yes | The search profiles this plugin answers, by name; default is required and answers a search that names no profile. 1 to 8 entries. |
+| `contributions.retrieval.profiles` | map of object | yes | The local search profiles this plugin answers. The deployment maps its default alias to one installed plugin/profile. 1 to 8 entries. |
 | `contributions.retrieval.profiles.<name>.description` | string | no | 1 to 1024 characters. |
 | `contributions.retrieval.profiles.<name>.max_latency_ms` | integer | yes | Latency objective (p95 target) of one whole search under this profile, every round and every candidate request included. A search that takes longer still answers; the core stops one only at the hard bound, four times this value, at least 2 s and at most 9 s, and answers search_deadline_exceeded. 50 to 10000. |
 | `contributions.retrieval.profiles.<name>.max_cost_cents` | number | yes | Most paid spend one search may report in usage.cost_cents (for example a re-ranking or rewriting API); 0 for a profile without paid calls. 0 to 100. |

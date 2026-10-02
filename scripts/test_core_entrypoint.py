@@ -62,42 +62,45 @@ class CoreEntrypointTest(unittest.TestCase):
                     else:
                         migrate.assert_not_called()
 
-    def test_jev_retrieval_requires_switch_and_key_and_runs_only_on_api(self):
+    def test_jev_adds_deep_beside_normal_search_and_runs_only_on_api(self):
         # Owns the deployment switch, process selection and secret boundary; no provider call.
         for switch, key, enabled in [('', 'fixture-typesafe-key', False), ('0', 'fixture-typesafe-key', False),
-                                     ('true', 'fixture-typesafe-key', False), ('1', '', False),
-                                     ('1', '  ', False), ('1', 'fixture-typesafe-key', True)]:
+                                     ('true', 'fixture-typesafe-key', False), ('1', '', True),
+                                     ('1', '  ', True), ('1', 'fixture-typesafe-key', True)]:
             with self.subTest(switch=switch, key_present=bool(key.strip())):
                 env = {**ENV, 'QUIVR_DEMO_JEV_RERANK': switch, 'TYPESAFE_API_KEY': key}
                 config = core_entrypoint.build_config(env)
                 pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
-                selected, absent = ('jev-rerank', 'core-retrieve') if enabled else ('core-retrieve', 'jev-rerank')
-                self.assertIn(selected, pins)
-                self.assertNotIn(absent, pins)
+                self.assertIn('core-retrieve', pins)
+                self.assertEqual('jev-rerank' in pins, enabled)
                 self.assertNotIn('TYPESAFE_API_KEY', json.dumps(config))
                 if key.strip():
                     self.assertNotIn(key, json.dumps(config))
                 api = {name: (argv, cwd, child) for name, argv, cwd, child in core_entrypoint.sidecar_commands(env, 'api')}
-                self.assertIn(selected, api)
-                self.assertNotIn(absent, api)
+                self.assertIn('core-retrieve', api)
+                self.assertEqual('jev-rerank' in api, enabled)
+                self.assertEqual(api['core-retrieve'][2]['QUIVR_PLUGIN_PORT'], '9960')
                 worker = {name: child for name, _, _, child in core_entrypoint.sidecar_commands(env, 'worker')}
                 self.assertFalse({'jev-rerank', 'core-retrieve'} & worker.keys())
                 for name, (_, _, child) in api.items():
                     if name != 'jev-rerank':
                         self.assertNotIn('TYPESAFE_API_KEY', child)
                 if enabled:
-                    self.assertEqual(pins[selected], {
+                    self.assertEqual(config['retrieval']['profiles'], {
+                        'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'})
+                    self.assertEqual(len({p['endpoint'] for p in pins.values()}), len(pins))
+                    self.assertEqual(pins['jev-rerank'], {
                         'manifest': '/app/plugins/jev-rerank/quivr-plugin.yaml',
-                        'endpoint': 'http://127.0.0.1:9960',
+                        'endpoint': 'http://127.0.0.1:9970',
                         'configuration': {'candidate_count': 30, 'trim_tokens': '256',
                                           'tokenizer_path': '/app/.scratch/tokenizer/tokenizer.json',
                                           'ranking': 'noul', 'cache_entries': 4096}})
-                    argv, cwd, child = api[selected]
+                    argv, cwd, child = api['jev-rerank']
                     self.assertEqual(argv, ['/opt/quivr-plugins/bin/python', '-m', 'jev_rerank'])
                     self.assertEqual(cwd, '/app/plugins/jev-rerank')
-                    self.assertEqual(child['TYPESAFE_API_KEY'], key)
-                    self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9960')
-                    self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins[selected]['manifest'])
+                    self.assertEqual(child.get('TYPESAFE_API_KEY'), key if key.strip() else None)
+                    self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9970')
+                    self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['jev-rerank']['manifest'])
                     self.assertFalse(set(ENV.values()) & set(child.values()))
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
