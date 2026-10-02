@@ -64,12 +64,12 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	}
 
 	// Exactly one claimant owns a due run; a released lease can be claimed again.
-	claim := func() []postgres.ConnectorRun {
+	claim := func() []connectors.ConnectorRun {
 		runs, err := store.ClaimConnectorRuns(ctx, time.Minute, 1000)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var mine []postgres.ConnectorRun
+		var mine []connectors.ConnectorRun
 		for _, r := range runs {
 			if r.Organization == scope.Organization {
 				mine = append(mine, r)

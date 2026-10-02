@@ -378,17 +378,10 @@ func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d
 	return in, tx.Commit(ctx)
 }
 
-// ConnectorRun identifies one claimed acquisition run.
-type ConnectorRun struct {
-	Organization string
-	ConnectorID  string
-	Run          int64
-}
-
 // ClaimConnectorRuns leases enabled instances whose next run is due. A lease
 // hides an instance from other dispatchers until it expires or the run ends;
 // the run sequence stays stable so a re-dispatch targets the same run.
-func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]ConnectorRun, error) {
+func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]connectors.ConnectorRun, error) {
 	rows, err := s.Pool.Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
 FROM (SELECT organization,id FROM connector_instances WHERE enabled AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
 WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence`, lease.Seconds(), limit)
@@ -396,9 +389,9 @@ WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,
 		return nil, err
 	}
 	defer rows.Close()
-	var runs []ConnectorRun
+	var runs []connectors.ConnectorRun
 	for rows.Next() {
-		var r ConnectorRun
+		var r connectors.ConnectorRun
 		if err = rows.Scan(&r.Organization, &r.ConnectorID, &r.Run); err != nil {
 			return nil, err
 		}
@@ -408,7 +401,7 @@ WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,
 }
 
 // ReleaseConnectorRun drops a lease whose run could not be dispatched.
-func (s ConnectorStore) ReleaseConnectorRun(ctx context.Context, r ConnectorRun) error {
+func (s ConnectorStore) ReleaseConnectorRun(ctx context.Context, r connectors.ConnectorRun) error {
 	_, err := s.Pool.Exec(ctx, "UPDATE connector_instances SET lease_until=NULL WHERE organization=$1 AND id=$2 AND run_sequence=$3", r.Organization, r.ConnectorID, r.Run)
 	return err
 }

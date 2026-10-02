@@ -84,13 +84,13 @@ func counter(op map[string]any, name string) float64 {
 	return n
 }
 
-// TestBackfillStarts builds a Corpus that predates the large space: 0.1.0 is
+// TestBackfillFillsWindowAndPromotesSpaces builds a Corpus that predates the large space: 0.1.0 is
 // activated with its small space alone, the Corpus ingests five articles,
 // and a rollback enables the large space again, which new Corpora carry but
 // this one does not. The dry run of a window counts only its articles and
 // prices the large space; the backfill then needs confirm_cost, starts, and
 // is paused once it has filled an article.
-func TestBackfillStarts(t *testing.T) {
+func TestBackfillFillsWindowAndPromotesSpaces(t *testing.T) {
 	operator, backfiller, endpoint, run := backfillSetup(t)
 	pinned, err := os.ReadFile(os.Getenv("QUIVR_TEST_ACTIVATION_PINNED_MANIFEST"))
 	if err != nil {
@@ -133,23 +133,14 @@ func TestBackfillStarts(t *testing.T) {
 	if paused["state"] != "paused" || counter(paused, "versions_done") >= counter(paused, "versions_in_scope") {
 		t.Fatalf("paused %v, want it paused with articles left", paused)
 	}
-}
-
-// TestBackfillResumes runs once the harness restarted the worker. The
-// backfill resumes from its checkpoint and fills the window without redoing
-// an article, while the articles before the window get no vector in the
-// large space. Promoting the large space is refused while coverage is
-// incomplete; forced, search uses it, and promoting the small space back
-// restores it.
-func TestBackfillResumes(t *testing.T) {
-	_, backfiller, _, run := backfillSetup(t)
-	corpusID := backfillCorpus(t, run)
-	// The same key and scope replay the backfill.
-	op := request(t, "POST", "/v0/admin/backfills", backfiller, backfillBody(t, corpusID, run), 202)
-	location := "/v0/operations/" + op["operation_id"].(string)
+	// The same key and scope replay the paused backfill. Workflow interruption
+	// and retry are owned by the Temporal suite; this journey owns coverage and
+	// promotion through the public API.
+	op = request(t, "POST", "/v0/admin/backfills", backfiller, backfillBody(t, corpusID, run), 202)
 	if op["state"] != "paused" {
-		t.Fatalf("after the restart %v, want it still paused", op)
+		t.Fatalf("paused replay %v", op)
 	}
+
 	request(t, "POST", location+"/resume", backfiller, map[string]any{"idempotency_key": "resume-" + run}, 202)
 	done := awaitBackfill(t, backfiller, location, func(op map[string]any) bool { return op["state"] != "running" && op["state"] != "paused" })
 	if done["state"] != "succeeded" || counter(done, "versions_in_scope") != 3 || counter(done, "versions_done") != 3 || counter(done, "versions_skipped") != 0 {

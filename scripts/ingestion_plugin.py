@@ -23,10 +23,10 @@ that the Record is quarantined rather than moved to 0.1.0 and that 0.2.0
 drains. Last (THE-783), 0.2.0 runs again as a bad release: TestRollbackStarts
 activates it and ingests through it, the step stops it, and TestRollback rolls
 back to 0.1.0 in one call, stopping the Record pinned to 0.2.0 and ingesting
-the next one through 0.1.0 alone. Then (THE-784) TestBackfillStarts builds a
+the next one through 0.1.0 alone. Then (THE-784) TestBackfillFillsWindowAndPromotesSpaces builds a
 Corpus that predates the large space and starts a backfill of a window into
-it, paused halfway; the step restarts the worker, and TestBackfillResumes
-resumes it, checks what it filled and promotes the large space and back.
+it, pauses and resumes it, checks what it filled and promotes the large space
+and back. Workflow interruption and retry are owned by Temporal workflow tests.
 Finally (THE-785) TestQuarantineReprocessIngestion reprocesses the Record
 TestRollback stopped. The stack's configuration and processes are restored
 afterwards, even on failure.
@@ -146,11 +146,8 @@ def verify(stack):
         stack.tests('^TestRollback$', activation)
         # Backfill (THE-784): a Corpus built while 0.1.0 enabled its small
         # space alone gets the large one from a paced backfill, which is
-        # paused, survives a worker restart, resumes and is promoted.
-        stack.tests('^TestBackfillStarts$', activation)
-        stack.stop_worker()
-        stack.start_worker()
-        stack.tests('^TestBackfillResumes$', activation)
+        # paused, resumes and is promoted. Workflow tests own interruption/replay.
+        stack.tests('^TestBackfillFillsWindowAndPromotesSpaces$', activation)
         # Quarantine reprocess (THE-785): the Record TestRollback stopped is
         # reprocessed through the plan now active and becomes searchable.
         stack.tests('^TestQuarantineReprocessIngestion$', activation)

@@ -54,8 +54,6 @@ func Terminal(state string) bool {
 var (
 	// ErrConflict reports an idempotency key reused with a different canonical request.
 	ErrConflict = errors.New("idempotency_conflict")
-	// ErrNoDispatch means no Operation dispatch intent is currently claimable.
-	ErrNoDispatch = errors.New("no operation dispatch")
 	// ErrNotRunning means the Operation left the running state (terminal or
 	// cancellation requested), so no further effects such as activation apply.
 	ErrNotRunning = errors.New("operation not running")

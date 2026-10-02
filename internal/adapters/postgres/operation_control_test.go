@@ -267,16 +267,18 @@ func TestRerunTerminalOperationCreatesLinkedOperation(t *testing.T) {
 	}
 	claimed := false
 	for {
-		d, err := f.store.ClaimOperation(f.ctx)
-		if errors.Is(err, operations.ErrNoDispatch) {
-			break
-		}
+		batch, err := f.store.ClaimOperations(f.ctx, 32)
 		if err != nil {
 			t.Fatal(err)
 		}
-		claimed = claimed || (d.Organization == f.org && d.OperationID == next.ID)
-		if err = f.store.OperationDispatched(f.ctx, d); err != nil {
-			t.Fatal(err)
+		if len(batch) == 0 {
+			break
+		}
+		for _, d := range batch {
+			claimed = claimed || (d.Organization == f.org && d.OperationID == next.ID)
+			if err = f.store.OperationDispatched(f.ctx, d); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if !claimed {

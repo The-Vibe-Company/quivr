@@ -2,19 +2,12 @@ package temporal
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 
-	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
@@ -28,9 +21,6 @@ const (
 	// run and is rejected while that run is still in flight, so a short lease
 	// is safe and bounds the delay after a crash between claim and start.
 	connectorLease = 30 * time.Second
-	// acquireHeartbeatTimeout bounds how long a run on a dead worker stays in
-	// flight before Temporal retries it.
-	acquireHeartbeatTimeout = 30 * time.Second
 	// acquireAttempts bounds the attempts of one run; its last attempt
 	// releases the run's plan whatever its outcome.
 	acquireAttempts = 3
@@ -38,8 +28,8 @@ const (
 
 // ConnectorScheduler claims due Connector Instance runs.
 type ConnectorScheduler interface {
-	ClaimConnectorRuns(context.Context, time.Duration, int) ([]postgres.ConnectorRun, error)
-	ReleaseConnectorRun(context.Context, postgres.ConnectorRun) error
+	ClaimConnectorRuns(context.Context, time.Duration, int) ([]connectors.ConnectorRun, error)
+	ReleaseConnectorRun(context.Context, connectors.ConnectorRun) error
 }
 
 // Connectors enables scheduled acquisition in the worker.
@@ -56,92 +46,38 @@ type AcquireInput struct {
 }
 
 func acquireWorkflowFn(ctx workflow.Context, in AcquireInput) error {
-	// Five minutes leaves room for a run storing attachments (up to 25 MB each,
-	// bounded per run by connectors.DefaultAttachmentBudget); the heartbeat
-	// timeout still retries a run whose worker died within seconds.
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 5 * time.Minute, HeartbeatTimeout: acquireHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: acquireAttempts}})
-	return workflow.ExecuteActivity(ctx, acquireActivity, in).Get(ctx, nil)
+	ctx = backgroundContext(ctx, acquireWorkflow)
+	return operationWorkflow(ctx, workflowStep(func(ctx workflow.Context) (StepProgress, error) {
+		err := workflow.ExecuteActivity(ctx, acquireActivity, in).Get(ctx, nil)
+		return StepProgress{Done: true}, err
+	}), acquireWorkflow, in)
 }
 
 func registerConnectors(w worker.Worker, c *Connectors, pins Pinner) {
 	w.RegisterWorkflowWithOptions(acquireWorkflowFn, workflow.RegisterOptions{Name: acquireWorkflow})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
-		// The run's attempts resolve its connector kind in the plan its first
-		// attempt pinned; the run's end releases it.
-		id := fmt.Sprintf("%s:%d", in.ConnectorID, in.Run)
-		pinned, err := pins.Pin(ctx, workConnectorRun, in.Organization, id)
-		if err != nil {
+		return heartbeating(ctx, stepHeartbeatTimeout/3, func() error {
+			// The run's attempts resolve its connector kind in the plan its first
+			// attempt pinned; the run's end releases it.
+			id := fmt.Sprintf("%s:%d", in.ConnectorID, in.Run)
+			pinned, err := pins.Pin(ctx, workConnectorRun, in.Organization, id)
+			if err != nil {
+				return err
+			}
+			err = c.Acquirer.Run(pinned, in.Organization, in.ConnectorID, in.Run)
+			if err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts {
+				if releaseErr := pins.Release(context.WithoutCancel(ctx), workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
+					err = releaseErr
+				}
+			}
 			return err
-		}
-		err = acquire(pinned, c, in)
-		if err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts {
-			if releaseErr := pins.Release(context.WithoutCancel(ctx), workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
-				err = releaseErr
-			}
-		}
-		return err
+		})
 	}, activity.RegisterOptions{Name: acquireActivity})
-}
-
-// acquire runs one acquisition attempt while it heartbeats.
-func acquire(ctx context.Context, c *Connectors, in AcquireInput) error {
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		ticker := time.NewTicker(acquireHeartbeatTimeout / 3)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				activity.RecordHeartbeat(ctx)
-			}
-		}
-	}()
-	return c.Acquirer.Run(ctx, in.Organization, in.ConnectorID, in.Run)
 }
 
 // acquisitionWorkflowID is stable per run, so at most one acquisition of an
 // instance is in flight: a duplicate dispatch of a running or completed run is
 // rejected; only a failed run may be started again under the same identity.
-func acquisitionWorkflowID(r postgres.ConnectorRun) string {
+func acquisitionWorkflowID(r connectors.ConnectorRun) string {
 	return fmt.Sprintf("connector:%s:%s:%d", r.Organization, r.ConnectorID, r.Run)
-}
-
-func (r *Runtime) scheduleConnectors(ctx context.Context) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		claim, cancel := context.WithTimeout(ctx, 3*time.Second)
-		runs, err := r.Connectors.Scheduler.ClaimConnectorRuns(claim, connectorLease, 20)
-		cancel()
-		if err != nil {
-			slog.Warn("connector schedule temporarily unavailable")
-		}
-		for _, run := range runs {
-			r.dispatchConnectorRun(ctx, run)
-		}
-	}
-}
-
-func (r *Runtime) dispatchConnectorRun(ctx context.Context, run postgres.ConnectorRun) {
-	start, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	_, err := r.Client.ExecuteWorkflow(start, client.StartWorkflowOptions{ID: acquisitionWorkflowID(run), TaskQueue: connectorTaskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY}, acquireWorkflow, AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run})
-	var already *serviceerror.WorkflowExecutionAlreadyStarted
-	if err == nil || errors.As(err, &already) {
-		return
-	}
-	// Release with a fresh deadline so the next tick retries instead of
-	// waiting for lease expiry.
-	release, done := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	defer done()
-	_ = r.Connectors.Scheduler.ReleaseConnectorRun(release, run)
-	slog.Warn("connector acquisition dispatch pending", "connector_id", run.ConnectorID)
 }

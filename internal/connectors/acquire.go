@@ -80,6 +80,14 @@ type Progress struct {
 	Missed bool
 }
 
+// ConnectorRun identifies one scheduled acquisition run. Its identity stays
+// stable across dispatcher leases and worker restarts.
+type ConnectorRun struct {
+	Organization string
+	ConnectorID  string
+	Run          int64
+}
+
 // RunStore persists acquisition progress.
 type RunStore interface {
 	LoadRun(ctx context.Context, org, id string) (Target, error)

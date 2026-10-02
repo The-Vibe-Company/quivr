@@ -4,7 +4,6 @@ package temporal
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
@@ -15,11 +14,8 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 
-	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
@@ -62,11 +58,11 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 	// receipt; version 2 runs it only when publication reports a routed Blob
 	// without a normalization outcome, so other content runs no extra Activity.
 	version := workflow.GetVersion(ctx, "external-normalization", workflow.DefaultVersion, 2)
-	normalize := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: normalizationActivityTimeout, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
+	normalize := workflow.WithActivityOptions(ctx, activityPolicy{Timeout: normalizationActivityTimeout, Heartbeat: stepHeartbeatTimeout, RetryInterval: 30 * time.Second}.options())
 	// The heartbeat timeout only detects an attempt nobody runs: a live
 	// attempt still ends at its 30 s start-to-close bound, and a plugin call
 	// inside it at its own deadline.
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	ctx = workflow.WithActivityOptions(ctx, activityPolicy{Timeout: 30 * time.Second, Heartbeat: stepHeartbeatTimeout, RetryInterval: 10 * time.Second}.options())
 	switch version {
 	case 1:
 		if err := workflow.ExecuteActivity(normalize, "normalize-external", input).Get(ctx, nil); err != nil {
@@ -94,7 +90,7 @@ func materializeWorkflow(ctx workflow.Context, input Input) error {
 			}
 		}
 	}
-	enrich := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: enrichmentActivityTimeout, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second}})
+	enrich := workflow.WithActivityOptions(ctx, activityPolicy{Timeout: enrichmentActivityTimeout, Heartbeat: stepHeartbeatTimeout, RetryInterval: 10 * time.Second}.options())
 	return workflow.ExecuteActivity(enrich, "enrich-e5", input).Get(ctx, nil)
 }
 
@@ -203,9 +199,6 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	runtime := &Runtime{Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	go runtime.dispatch(ctx)
-	if conns != nil {
-		go runtime.scheduleConnectors(ctx)
-	}
 	return runtime, nil
 }
 
@@ -300,57 +293,10 @@ func (r *Runtime) Close() {
 	r.Client.Close()
 }
 
-// ingestionDispatchBatch bounds outstanding leases and work per polling tick.
-const ingestionDispatchBatch = 32
-
-func (r *Runtime) dispatch(ctx context.Context) {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
-		r.dispatchOperation(attempt)
-		cancel()
-		// Give ingestion its own bounded attempt, so a slow operation start cannot
-		// consume the batch's time. This stays below the store's five-second lease.
-		attempt, cancel = context.WithTimeout(ctx, 3*time.Second)
-		r.dispatchIngestion(attempt)
-		cancel()
-	}
-}
-
-func (r *Runtime) dispatchIngestion(ctx context.Context) {
-	batch, err := r.Store.Claim(ctx, ingestionDispatchBatch)
-	if err != nil {
-		slog.Warn("outbox temporarily unavailable")
-		return
-	}
-	for _, d := range batch {
-		if ctx.Err() != nil {
-			return
-		}
-		_, err = r.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
-		var already *serviceerror.WorkflowExecutionAlreadyStarted
-		if err == nil || errors.As(err, &already) {
-			err = r.Store.Dispatched(ctx, d)
-		}
-		if err != nil {
-			// Feedback shares the batch deadline; unavailable dependencies must not
-			// extend dispatch beyond its lease or hold the next polling tick forever.
-			_ = r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable")
-			slog.Warn("ingestion dispatch pending", "receipt_id", d.ReceiptID)
-		}
-	}
-}
-
 type DispatchStore interface {
 	Claim(context.Context, int) ([]content.Dispatch, error)
 	Dispatched(context.Context, content.Dispatch) error
-	ClaimOperation(context.Context) (operations.Dispatch, error)
+	ClaimOperations(context.Context, int) ([]operations.Dispatch, error)
 	OperationDispatched(context.Context, operations.Dispatch) error
 	Progress(context.Context, string, string, string, string) error
 }

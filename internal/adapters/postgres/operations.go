@@ -332,15 +332,31 @@ func (s ContentStore) Operation(ctx context.Context, org, id string) (operations
 	return scanOperation(s.Pool.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
 }
 
-// ClaimOperation leases one undispatched Operation, mirroring the ingestion outbox.
-func (s ContentStore) ClaimOperation(ctx context.Context) (operations.Dispatch, error) {
-	var d operations.Dispatch
-	err := s.Pool.QueryRow(ctx, `UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds' WHERE (organization,operation_id)=(SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id FOR UPDATE SKIP LOCKED LIMIT 1)
-RETURNING o.organization,o.operation_id,(SELECT p.kind FROM operations p WHERE p.organization=o.organization AND p.id=o.operation_id)`).Scan(&d.Organization, &d.OperationID, &d.Kind)
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = operations.ErrNoDispatch
+// ClaimOperations leases a bounded batch of undispatched Operations. Locked
+// claims are skipped so concurrent dispatchers take disjoint work.
+func (s ContentStore) ClaimOperations(ctx context.Context, limit int) ([]operations.Dispatch, error) {
+	if limit <= 0 {
+		return nil, nil
 	}
-	return d, err
+	rows, err := s.Pool.Query(ctx, `WITH claimed AS (
+ UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds'
+ FROM (SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id,organization FOR UPDATE SKIP LOCKED LIMIT $1) pending
+ WHERE o.organization=pending.organization AND o.operation_id=pending.operation_id
+ RETURNING o.organization,o.operation_id)
+ SELECT c.organization,c.operation_id,p.kind FROM claimed c JOIN operations p ON p.organization=c.organization AND p.id=c.operation_id ORDER BY c.operation_id,c.organization`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var batch []operations.Dispatch
+	for rows.Next() {
+		var d operations.Dispatch
+		if err = rows.Scan(&d.Organization, &d.OperationID, &d.Kind); err != nil {
+			return nil, err
+		}
+		batch = append(batch, d)
+	}
+	return batch, rows.Err()
 }
 
 func (s ContentStore) OperationDispatched(ctx context.Context, d operations.Dispatch) error {
