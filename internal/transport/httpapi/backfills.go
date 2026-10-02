@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -74,11 +75,6 @@ func (a *API) requestBackfill(w http.ResponseWriter, r *http.Request, scope corp
 	}
 	estimate, op, err := a.Backfills.Request(r.Context(), scope, backfill.Request{Key: in.IdempotencyKey, CorpusID: in.CorpusID, AcceptedAfter: in.AcceptedAfter, AcceptedBefore: in.AcceptedBefore,
 		RegistrationID: in.RegistrationID, Spaces: in.Spaces, DryRun: in.DryRun, ConfirmCost: in.ConfirmCost})
-	detailed := func(status int, code string) {
-		e := apiError(status, code)
-		e.Message = err.Error()
-		send(w, status, e)
-	}
 	switch {
 	case errors.Is(err, corpus.ErrForbidden):
 		failure(w, 403, "forbidden")
@@ -93,7 +89,7 @@ func (a *API) requestBackfill(w http.ResponseWriter, r *http.Request, scope corp
 		e.Message = "the estimated cost exceeds backfill.max_cost_without_confirmation; repeat the request with confirm_cost"
 		send(w, 409, e)
 	case errors.Is(err, backfill.ErrInvalid):
-		detailed(422, "invalid_backfill")
+		failure(w, 422, "invalid_backfill")
 	case err != nil:
 		failure(w, 503, "storage_unavailable")
 	case in.DryRun:
@@ -150,7 +146,11 @@ func (a *API) promoteSpace(w http.ResponseWriter, r *http.Request, scope corpus.
 		failure(w, 404, "not_found")
 	case errors.Is(err, backfill.ErrCoverageIncomplete):
 		e := apiError(409, "coverage_incomplete")
-		e.Message = err.Error()
+		var incomplete *backfill.IncompleteError
+		if errors.As(err, &incomplete) {
+			p := incomplete.Promotion
+			e.Message = fmt.Sprintf("vector space %s lacks a vector for %d current segments in %d Corpora; backfill them, or force the promotion", boundedPublicText(p.Served, 128), p.SegmentsMissing, p.CorporaIncomplete)
+		}
 		send(w, 409, e)
 	case errors.Is(err, backfill.ErrNotEvaluation):
 		failure(w, 422, "not_evaluation_space")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -24,8 +23,8 @@ import (
 func detailed(err error) map[string]error {
 	return map[string]error{
 		"bare":        err,
-		"fmt wrap":    fmt.Errorf("%w: duplicate Part key %q", err, "a"),
-		"with detail": publicerr.WithDetail(err, "attachment exceeds %d bytes", 10),
+		"fmt wrap":    fmt.Errorf("%w: %s", err, internalErrorMarker),
+		"with detail": publicerr.WithDetail(err, internalErrorMarker),
 	}
 }
 
@@ -126,8 +125,8 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 			rec := httptest.NewRecorder()
 			monitoringFailure(rec, err)
 			var body struct {
-				Code      string
-				Retryable *bool
+				Code, Message string
+				Retryable     *bool
 			}
 			if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Retryable == nil {
 				t.Fatalf("%v (%s): undecodable failure %q", sentinel, style, rec.Body.String())
@@ -135,6 +134,7 @@ func TestMonitoringFailureCodesIgnoreDetail(t *testing.T) {
 			if rec.Code != want.status || body.Code != want.code || *body.Retryable != want.retryable {
 				t.Errorf("%v (%s): %d %q retryable=%v, want %+v", sentinel, style, rec.Code, body.Code, *body.Retryable, want)
 			}
+			assertPublicMessage(t, rec, want.code)
 		}
 	}
 }
@@ -219,8 +219,8 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 	}
 }
 
-// pluginFailure owns every plugin registry refusal's status and code; a
-// refusal that lists issues keeps them in its message.
+// pluginFailure owns every plugin registry refusal's public response,
+// including wrapped errors and structured issue reports.
 func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 	for sentinel, want := range map[error]struct {
 		status int
@@ -240,15 +240,18 @@ func TestPluginFailureCodesIgnoreDetail(t *testing.T) {
 		errors.New("connection refused"): {503, "storage_unavailable"},
 	} {
 		for style, err := range detailed(sentinel) {
-			if status, code := written(t, func(w *httptest.ResponseRecorder) { pluginFailure(w, err) }); status != want.status || code != want.code {
-				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
+			rec := httptest.NewRecorder()
+			pluginFailure(rec, err)
+			if rec.Code != want.status {
+				t.Errorf("%v (%s): status %d, want %d", sentinel, style, rec.Code, want.status)
 			}
+			assertPublicMessage(t, rec, want.code)
 		}
 	}
 	rec := httptest.NewRecorder()
-	pluginFailure(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeKindConflict, Path: "/plugins/1/manifest", Message: "connector kind rss is also provided by connector.rss@1.0.0"}}})
-	var body struct{ Code, Message string }
-	if json.Unmarshal(rec.Body.Bytes(), &body) != nil || rec.Code != 409 || body.Code != "plugin_conflict" || !strings.Contains(body.Message, "kind_conflict") {
-		t.Fatalf("a conflict names its issues: %d %s", rec.Code, rec.Body.String())
+	pluginFailure(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: []plugins.Issue{{Code: plugins.CodeKindConflict, Path: "/plugins/1/manifest", Message: internalErrorMarker}}})
+	if rec.Code != 409 {
+		t.Fatalf("conflict status %d, want 409", rec.Code)
 	}
+	assertPublicMessage(t, rec, "plugin_conflict", "plugin conflict; kind_conflict /plugins/1/manifest")
 }

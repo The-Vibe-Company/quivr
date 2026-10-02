@@ -46,9 +46,7 @@ func monitoringFailure(w http.ResponseWriter, err error) {
 		errors.Is(err, monitoring.ErrTooLarge):
 		failure(w, 422, publicCode(err, "invalid_input"))
 	case errors.Is(err, monitoring.ErrInvalidMigration):
-		e := apiError(422, "invalid_migration")
-		e.Message = err.Error()
-		send(w, 422, e)
+		failure(w, 422, "invalid_migration")
 	case errors.Is(err, monitoring.ErrInvalidExpression), errors.Is(err, monitoring.ErrInvalidEvaluatorConfiguration):
 		// The evaluator's declared schema refused the pinned expression or
 		// configuration: name the request member and the first schema issue.

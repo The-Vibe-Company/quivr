@@ -150,9 +150,7 @@ func (a *API) listQuarantine(w http.ResponseWriter, r *http.Request, scope corpu
 		failure(w, 404, "not_found")
 		return
 	case errors.Is(err, quarantine.ErrInvalid):
-		e := apiError(422, "invalid_query")
-		e.Message = err.Error()
-		send(w, 422, e)
+		failure(w, 422, "invalid_query")
 		return
 	case err != nil:
 		failure(w, 503, "storage_unavailable")
@@ -201,9 +199,7 @@ func (a *API) requestReprocess(w http.ResponseWriter, r *http.Request, scope cor
 	case errors.Is(err, quarantine.ErrInProgress):
 		failure(w, 409, quarantine.ErrInProgress.Error())
 	case errors.Is(err, quarantine.ErrInvalid):
-		e := apiError(422, quarantine.ErrInvalid.Error())
-		e.Message = err.Error()
-		send(w, 422, e)
+		failure(w, 422, quarantine.ErrInvalid.Error())
 	case err != nil:
 		failure(w, 503, "storage_unavailable")
 	case in.DryRun:

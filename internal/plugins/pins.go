@@ -81,11 +81,11 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 		id := pin.Manifest.ID
 		for _, reserved := range ReservedEvaluatorIDs {
 			if id == reserved {
-				issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("plugin id %q is reserved by the engine; choose an id of your own", id)})
+				issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", PluginID: id, PluginVersion: pin.Manifest.Version, Message: fmt.Sprintf("plugin id %q is reserved by the engine; choose an id of your own", id)})
 			}
 		}
 		if first, exists := byID[id]; exists {
-			issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("plugin %q is already pinned at /plugins/%d; pin each plugin once", id, first)})
+			issues = append(issues, Issue{Code: CodePluginConflict, Path: prefix + "/manifest", PluginID: id, PluginVersion: pins[first].Manifest.Version, Message: fmt.Sprintf("plugin %q is already pinned at /plugins/%d; pin each plugin once", id, first)})
 			continue
 		}
 		byID[id] = i
@@ -97,7 +97,7 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 		sort.Strings(mediaTypes)
 		for _, mediaType := range mediaTypes {
 			if other, exists := set.normalizers[mediaType]; exists {
-				issues = append(issues, Issue{Code: CodeRouteConflict, Path: prefix + "/routes", Message: fmt.Sprintf("media type %q is already routed to %s; route each media type to one normalizer", mediaType, other.Manifest.ID)})
+				issues = append(issues, Issue{Code: CodeRouteConflict, Path: prefix + "/routes", PluginID: other.Manifest.ID, PluginVersion: other.Manifest.Version, Message: fmt.Sprintf("media type %q is already routed to %s; route each media type to one normalizer", mediaType, other.Manifest.ID)})
 				continue
 			}
 			set.normalizers[mediaType] = pin
@@ -107,14 +107,14 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 		}
 		if pin.Manifest.Contributions.Ingestion != nil {
 			if set.ingestion != nil {
-				issues = append(issues, Issue{Code: CodeIngestionConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("%s@%s already segments and embeds for this deployment; pin one ingestion plugin and enable several of its spaces instead", set.ingestion.Manifest.ID, set.ingestion.Manifest.Version)})
+				issues = append(issues, Issue{Code: CodeIngestionConflict, Path: prefix + "/manifest", PluginID: set.ingestion.Manifest.ID, PluginVersion: set.ingestion.Manifest.Version, Message: fmt.Sprintf("%s@%s already segments and embeds for this deployment; pin one ingestion plugin and enable several of its spaces instead", set.ingestion.Manifest.ID, set.ingestion.Manifest.Version)})
 			} else {
 				set.ingestion = pin
 			}
 		}
 		if pin.Manifest.Contributions.Retrieval != nil {
 			if set.retrieval != nil {
-				issues = append(issues, Issue{Code: CodeRetrievalConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("%s@%s already answers searches for this deployment; pin one retrieval plugin and declare several profiles in it instead", set.retrieval.Manifest.ID, set.retrieval.Manifest.Version)})
+				issues = append(issues, Issue{Code: CodeRetrievalConflict, Path: prefix + "/manifest", PluginID: set.retrieval.Manifest.ID, PluginVersion: set.retrieval.Manifest.Version, Message: fmt.Sprintf("%s@%s already answers searches for this deployment; pin one retrieval plugin and declare several profiles in it instead", set.retrieval.Manifest.ID, set.retrieval.Manifest.Version)})
 			} else {
 				set.retrieval = pin
 			}
@@ -127,7 +127,7 @@ func NewPinSet(pins []*Pin) (*PinSet, error) {
 			sort.Strings(kinds)
 			for _, kind := range kinds {
 				if other, exists := set.connectors[kind]; exists {
-					issues = append(issues, Issue{Code: CodeKindConflict, Path: prefix + "/manifest", Message: fmt.Sprintf("connector kind %q is also provided by %s@%s; each kind resolves to one provider, so pin only one of them", kind, other.Manifest.ID, other.Manifest.Version)})
+					issues = append(issues, Issue{Code: CodeKindConflict, Path: prefix + "/manifest", PluginID: other.Manifest.ID, PluginVersion: other.Manifest.Version, Message: fmt.Sprintf("connector kind %q is also provided by %s@%s; each kind resolves to one provider, so pin only one of them", kind, other.Manifest.ID, other.Manifest.Version)})
 					continue
 				}
 				set.connectors[kind] = pin

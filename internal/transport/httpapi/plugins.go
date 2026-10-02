@@ -209,12 +209,11 @@ func planToTransport(plan registry.Plan) transport.PipelinePlan {
 	return out
 }
 
-// pluginFailure maps registry errors; refusals that list issues carry them
-// in the message.
+// pluginFailure maps registry errors to public codes and typed diagnostics.
 func pluginFailure(w http.ResponseWriter, err error) {
 	detailed := func(status int, code string) {
 		e := apiError(status, code)
-		e.Message = err.Error()
+		e.Message = pluginErrorMessage(err, e.Message)
 		send(w, status, e)
 	}
 	switch {
@@ -227,7 +226,7 @@ func pluginFailure(w http.ResponseWriter, err error) {
 	case errors.Is(err, registry.ErrInvalid):
 		detailed(422, "invalid_plugin")
 	case errors.Is(err, registry.ErrNotValidated):
-		detailed(409, "registration_not_validated")
+		failure(w, 409, "registration_not_validated")
 	case errors.Is(err, registry.ErrConflict):
 		detailed(409, "plugin_conflict")
 	case errors.Is(err, registry.ErrUnreachable):

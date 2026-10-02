@@ -123,6 +123,11 @@ type Issue struct {
 	Code    string `json:"code"`
 	Path    string `json:"path"`
 	Message string `json:"message"`
+	// Operator diagnostics travel separately from Message, which may include
+	// internal error text. They do not change the Plugin Protocol issue shape.
+	PluginID      string     `json:"-"`
+	PluginVersion string     `json:"-"`
+	Cause         IssueCause `json:"-"`
 }
 
 // Manifest is the effective plugin manifest: declared values plus defaults.
