@@ -8,21 +8,23 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 
 	"go.temporal.io/sdk/activity"
+	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
 const (
-	connectorTaskQueue = "quivr-connectors-v0"
-	acquireWorkflow    = "connector-acquire-v1"
-	acquireActivity    = "connector-acquire"
+	connectorTaskQueue           = "quivr-connectors-v0"
+	acquireWorkflow              = "connector-acquire-v1"
+	acquireActivity              = "connector-acquire"
+	acquirePinnedActivity        = "connector-acquire-v2"
+	releaseConnectorPlanActivity = "connector-release-plan"
 	// connectorLease only hides a claimed instance from other dispatchers
 	// until its workflow exists. A re-dispatch after expiry targets the same
 	// run and is rejected while that run is still in flight, so a short lease
 	// is safe and bounds the delay after a crash between claim and start.
 	connectorLease = 30 * time.Second
-	// acquireAttempts bounds the attempts of one run; its last attempt
-	// releases the run's plan whatever its outcome.
+	// acquireAttempts bounds acquisition only; terminal cleanup retries separately.
 	acquireAttempts = 3
 )
 
@@ -47,15 +49,47 @@ type AcquireInput struct {
 
 func acquireWorkflowFn(ctx workflow.Context, in AcquireInput) error {
 	ctx = backgroundContext(ctx, acquireWorkflow)
-	return operationWorkflow(ctx, workflowStep(func(ctx workflow.Context) (StepProgress, error) {
-		err := workflow.ExecuteActivity(ctx, acquireActivity, in).Get(ctx, nil)
+	name := acquireActivity
+	durableCleanup := workflow.GetVersion(ctx, "connector-terminal-cleanup", workflow.DefaultVersion, 1) != workflow.DefaultVersion
+	settled := ctx
+	if durableCleanup {
+		name = acquirePinnedActivity
+		opts := workflow.GetActivityOptions(ctx)
+		opts.WaitForCancellation = true
+		ctx = workflow.WithActivityOptions(ctx, opts)
+		// Request cancellation through ctx, but wait for acknowledgement (or
+		// worker-loss timeout) before releasing the plan beneath acquisition.
+		settled, _ = workflow.NewDisconnectedContext(ctx)
+	}
+	err := operationWorkflow(ctx, workflowStep(func(ctx workflow.Context) (StepProgress, error) {
+		err := workflow.ExecuteActivity(ctx, name, in).Get(settled, nil)
 		return StepProgress{Done: true}, err
 	}), acquireWorkflow, in)
+	if !durableCleanup {
+		return err
+	}
+	cleanup, _ := workflow.NewDisconnectedContext(ctx)
+	cleanup = workflow.WithActivityOptions(cleanup, activityPolicy{
+		Timeout: time.Minute, Heartbeat: stepHeartbeatTimeout, RetryInterval: 30 * time.Second,
+	}.options())
+	if releaseErr := workflow.ExecuteActivity(cleanup, releaseConnectorPlanActivity, in).Get(cleanup, nil); releaseErr != nil {
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return releaseErr
+	}
+	if err == nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
-func registerConnectors(w worker.Worker, c *Connectors, pins Pinner) {
+func registerConnectors(w worker.Registry, c *Connectors, pins Pinner) {
 	w.RegisterWorkflowWithOptions(acquireWorkflowFn, workflow.RegisterOptions{Name: acquireWorkflow})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
+	acquire := func(ctx context.Context, in AcquireInput, legacy bool) error {
 		return heartbeating(ctx, stepHeartbeatTimeout/3, func() error {
 			// The run's attempts resolve its connector kind in the plan its first
 			// attempt pinned; the run's end releases it.
@@ -65,14 +99,31 @@ func registerConnectors(w worker.Worker, c *Connectors, pins Pinner) {
 				return err
 			}
 			err = c.Acquirer.Run(pinned, in.Organization, in.ConnectorID, in.Run)
-			if err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts {
+			if legacy && (err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts) {
 				if releaseErr := pins.Release(context.WithoutCancel(ctx), workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
 					err = releaseErr
 				}
 			}
 			return err
 		})
+	}
+	// Keep the original activity's cleanup for histories that already scheduled it.
+	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
+		return acquire(ctx, in, true)
 	}, activity.RegisterOptions{Name: acquireActivity})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
+		return acquire(ctx, in, false)
+	}, activity.RegisterOptions{Name: acquirePinnedActivity})
+	w.RegisterActivityWithOptions(func(ctx context.Context, in AcquireInput) error {
+		return heartbeating(ctx, stepHeartbeatTimeout/3, func() error {
+			if err := pins.Release(ctx, workConnectorRun, in.Organization, fmt.Sprintf("%s:%d", in.ConnectorID, in.Run)); err != nil {
+				// Release is idempotent and must finish before the run closes,
+				// even if its dependency classifies a failure as non-retryable.
+				return sdktemporal.NewApplicationError("release connector plan", "ConnectorPlanRelease", err)
+			}
+			return nil
+		})
+	}, activity.RegisterOptions{Name: releaseConnectorPlanActivity})
 }
 
 // acquisitionWorkflowID is stable per run, so at most one acquisition of an

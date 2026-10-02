@@ -36,6 +36,9 @@ func TestBackgroundWorkflowRetriesInterruptedStep(t *testing.T) {
 			env := suite.NewTestWorkflowEnvironment()
 			attempts := 0
 			env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+				if info.ActivityType.Name == releaseConnectorPlanActivity {
+					return
+				}
 				if info.HeartbeatTimeout != 10*time.Second {
 					t.Errorf("heartbeat bound %v, want 10s", info.HeartbeatTimeout)
 				}
@@ -72,7 +75,8 @@ func TestBackgroundWorkflowRetriesInterruptedStep(t *testing.T) {
 				}, activity.RegisterOptions{Name: "quarantine-reprocess-step"})
 				env.ExecuteWorkflow(reprocessWorkflow, in)
 			case "connector":
-				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { return attempt() }, activity.RegisterOptions{Name: acquireActivity})
+				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { return nil }, activity.RegisterOptions{Name: releaseConnectorPlanActivity})
+				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { return attempt() }, activity.RegisterOptions{Name: acquirePinnedActivity})
 				env.ExecuteWorkflow(acquireWorkflowFn, AcquireInput{Organization: "org_a", ConnectorID: "connector_1", Run: 1})
 			}
 			if err := env.GetWorkflowError(); err != nil {
@@ -85,11 +89,11 @@ func TestBackgroundWorkflowRetriesInterruptedStep(t *testing.T) {
 	}
 }
 
-// Replay every legacy result codec, its unfinished-step timer, and a history
+// Replay every historical result codec, cancellation settlement, and a history
 // rollover. Completed activity results come from history, never fake execution.
-func TestBackgroundWorkflowReplaysLegacyHistories(t *testing.T) {
+func TestBackgroundWorkflowReplaysHistories(t *testing.T) {
 	files, err := filepath.Glob("testdata/legacy/*.json.gz")
-	if err != nil || len(files) != 5 {
+	if err != nil || len(files) != 7 {
 		t.Fatalf("legacy histories %v: %v", files, err)
 	}
 	for _, path := range files {
@@ -128,7 +132,9 @@ func TestBackgroundWorkflowReplaysLegacyHistories(t *testing.T) {
 					if err = replayer.ReplayWorkflowHistory(nil, &prefix); err != nil {
 						t.Fatalf("resume unfinished workflow task: %v", err)
 					}
-					break
+					if filepath.Base(path) != "connector-canceled.json.gz" {
+						break
+					}
 				}
 			}
 		})
@@ -144,7 +150,8 @@ func TestBackgroundWorkflowRetryBudgets(t *testing.T) {
 			env := suite.NewTestWorkflowEnvironment()
 			attempts := 0
 			if connector {
-				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { attempts++; return errors.New("store unavailable") }, activity.RegisterOptions{Name: acquireActivity})
+				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { return nil }, activity.RegisterOptions{Name: releaseConnectorPlanActivity})
+				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { attempts++; return errors.New("store unavailable") }, activity.RegisterOptions{Name: acquirePinnedActivity})
 				env.ExecuteWorkflow(acquireWorkflowFn, AcquireInput{Organization: "org_a", ConnectorID: "connector_1", Run: 1})
 				if attempts != 3 || env.GetWorkflowError() == nil {
 					t.Fatalf("attempts=%d error=%v, want terminal after 3", attempts, env.GetWorkflowError())

@@ -7,3 +7,13 @@ original backfill run ending after 400 steps, before continuing under the same
 workflow identity. Fixtures are gzip-compressed protobuf JSON histories.
 No provider APIs were called. The replay suite also cuts each history at its
 last started workflow task to exercise replay after worker interruption.
+
+THE-939 additions captured with Temporal CLI v1.9.1 / Server v1.32.0 and
+Go SDK v1.48.0, without provider APIs. connector-shared.json.gz uses the
+post-THE-924 workflow before terminal cleanup: shared-operation-policy=1,
+original acquisition activity, success. connector-canceled.json.gz uses the
+workflow-owned cleanup from this PR: its acquisition store waits on cancellation
+and a shutdown channel. Cancellation is requested while acquisition is running;
+the pin is checked before shutdown returns, then cleanup releases it before the
+workflow reports cancellation. Replay also cuts this history at every started
+workflow task, including the task between cancellation request and acknowledgement.
