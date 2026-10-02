@@ -72,7 +72,7 @@ func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 			req.Header.Set(k, v)
 		}
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		checkedAPI(t, handler).ServeHTTP(rec, req)
 		return rec
 	}
 	rec := send("POST", "/v0/connector-webhooks/connector_push?crc_token=abc", []byte("raw body"), map[string]string{"X-Signature": "sig-1", "Cookie": "session=1", "Connection": "close"})
@@ -111,7 +111,7 @@ func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 		t.Fatalf("default content type: %d %q %v", rec.Code, rec.Body.String(), rec.Header())
 	}
 	store.fail = errors.New("storage offline")
-	if rec := send("POST", "/v0/connector-webhooks/connector_push", nil, nil); rec.Code != 503 || rec.Header().Get("Retry-After") != "30" {
+	if rec := send("POST", "/v0/connector-webhooks/connector_push", nil, nil); rec.Code != 503 || rec.Header().Get("Retry-After") != "30" || rec.Header().Get("Content-Type") != "text/plain" || rec.Body.String() != "temporarily unavailable; retry later" || rec.Header().Get("Quivr-Response-Origin") != "" {
 		t.Fatalf("retry hint: %d %v", rec.Code, rec.Header())
 	}
 }

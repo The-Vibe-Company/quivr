@@ -96,7 +96,7 @@ contributions:
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Cookie", "secret=1")
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		checkedAPI(t, handler).ServeHTTP(rec, req)
 		return rec
 	}
 	path := "/v0/connectors/connector_push/api/events/news"
@@ -152,14 +152,19 @@ contributions:
 		name   string
 		err    error
 		status int
+		code   string
 	}{
-		{"rejected item", content.ErrInvalid, 422},
-		{"ingestion unavailable", errors.New("storage unavailable"), 503},
+		{"rejected item", content.ErrInvalid, 422, "item_rejected"},
+		{"ingestion unavailable", errors.New("storage unavailable"), 503, "ingestion_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			port.failures = map[string]error{port.accepted[0]: tc.err}
 			rec := send("POST", path, "push-key", raw)
-			if rec.Code != tc.status || strings.Contains(rec.Body.String(), "receipts") || len(port.accepted) != 1 {
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("engine error must be JSON: %v: %s", err, rec.Body.String())
+			}
+			if rec.Code != tc.status || body["code"] != tc.code || body["retryable"] != (tc.status == 503) || (tc.status == 503 && rec.Header().Get("Retry-After") != "30") || rec.Header().Get("Quivr-Response-Origin") != "" || strings.Contains(rec.Body.String(), "receipts") || len(port.accepted) != 1 {
 				t.Fatalf("expected %d without success receipts, got %d %s", tc.status, rec.Code, rec.Body.String())
 			}
 		})
@@ -172,13 +177,58 @@ contributions:
 	}
 	*answer = plugins.ConnectorDelivery{Verdict: "accepted", Response: plugins.ReceiveAnswer{Status: 200}, Items: []plugins.ConnectorItem{{RecordKey: "event-8", Content: json.RawMessage(`{"kind":"text","text":"invalid challenge item"}`)}}}
 	rec = send("GET", "/v0/connectors/connector_push/api/challenge", "push-key", nil)
-	if rec.Code != 500 || len(port.accepted) != 1 {
+	var challengeError map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &challengeError); err != nil {
+		t.Fatalf("challenge engine error must be JSON: %v: %s", err, rec.Body.String())
+	}
+	if rec.Code != 500 || challengeError["code"] != "challenge_has_items" || challengeError["retryable"] != false || rec.Header().Get("Quivr-Response-Origin") != "" || len(port.accepted) != 1 {
 		t.Fatalf("challenge ingested items: %d %s", rec.Code, rec.Body.String())
 	}
 	*answer = plugins.ConnectorDelivery{Verdict: "accepted", Response: plugins.ReceiveAnswer{Status: 200, ContentType: "text/plain", Body: "challenge answer"}}
 	rec = send("GET", "/v0/connectors/connector_push/api/challenge?challenge=abc", "push-key", nil)
-	if rec.Code != 200 || rec.Body.String() != "challenge answer" || len(port.accepted) != 1 || seen[len(seen)-1].Route != "challenge" {
+	if rec.Code != 200 || rec.Body.String() != "challenge answer" || rec.Header().Get("Quivr-Response-Origin") != "plugin" || len(port.accepted) != 1 || seen[len(seen)-1].Route != "challenge" {
 		t.Fatalf("GET challenge: %d %s calls=%v", rec.Code, rec.Body.String(), seen)
+	}
+	for _, response := range []struct {
+		method, media, body string
+		status              int
+	}{
+		{"POST", "text/plain", "provider rate limit", 429},
+		{"POST", "text/plain", "provider method refused", 405},
+		{"POST", "application/json", `{"provider":"refused"}`, 403},
+		{"GET", "application/json", `{"challenge":"example"}`, 200},
+	} {
+		*answer = plugins.ConnectorDelivery{Verdict: "refused", Response: plugins.ReceiveAnswer{Status: response.status, ContentType: response.media, Body: response.body}}
+		if response.method == "GET" {
+			answer.Verdict = "accepted"
+		}
+		var rec *httptest.ResponseRecorder
+		if response.method == "POST" {
+			rec = send("POST", path, "push-key", raw)
+		} else {
+			rec = send("GET", "/v0/connectors/connector_push/api/challenge", "push-key", nil)
+		}
+		if rec.Code != response.status || rec.Body.String() != response.body || rec.Header().Get("Content-Type") != response.media || rec.Header().Get("Quivr-Response-Origin") != "plugin" || len(port.accepted) != 1 {
+			t.Fatalf("plugin-defined reply changed: %d %s headers=%v", rec.Code, rec.Body.String(), rec.Header())
+		}
+	}
+	store.fail = errors.New("storage unavailable")
+	rec = send("POST", path, "push-key", raw)
+	var storageError map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &storageError); err != nil || rec.Code != 503 || storageError["code"] != "storage_unavailable" || storageError["retryable"] != true || rec.Header().Get("Retry-After") != "30" || rec.Header().Get("Quivr-Response-Origin") != "" {
+		t.Fatalf("storage engine error: %d %s headers=%v", rec.Code, rec.Body.String(), rec.Header())
+	}
+	store.fail = nil
+	*answer = plugins.ConnectorDelivery{Verdict: "accepted", Response: plugins.ReceiveAnswer{Status: 204, Body: "invalid challenge body"}}
+	rec = send("GET", "/v0/connectors/connector_push/api/challenge", "push-key", nil)
+	var invalidChallenge map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &invalidChallenge); err != nil || rec.Code != 500 || invalidChallenge["code"] != "plugin_invalid_response" || rec.Header().Get("Quivr-Response-Origin") != "" {
+		t.Fatalf("nonempty 204 challenge must be an engine error: %d %s", rec.Code, rec.Body.String())
+	}
+	answer.Response.Body = ""
+	rec = send("GET", "/v0/connectors/connector_push/api/challenge", "push-key", nil)
+	if rec.Code != 204 || rec.Body.Len() != 0 || rec.Header().Get("Quivr-Response-Origin") != "plugin" {
+		t.Fatalf("bodyless challenge: %d %s headers=%v", rec.Code, rec.Body.String(), rec.Header())
 	}
 	before := len(seen)
 	store.target.Enabled = false

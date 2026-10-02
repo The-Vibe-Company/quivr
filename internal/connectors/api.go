@@ -182,7 +182,7 @@ func (r Relay) DeliverAPI(ctx context.Context, scope corpus.Scope, id, path stri
 		return RelayAnswer{}, corpus.ErrNotFound
 	}
 	if err != nil {
-		return unavailable(), nil
+		return unavailable("storage_unavailable"), nil
 	}
 	if !target.Enabled || target.Organization != scope.Organization || !scope.Contains(target.CorpusID) {
 		return RelayAnswer{}, corpus.ErrNotFound

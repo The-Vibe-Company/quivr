@@ -74,7 +74,7 @@ func TestStatsReadsAreScopedAndNeedObservabilityRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 
 	for _, path := range []string{"/v0/admin/stats/plugins", "/v0/admin/stats/searches", "/v0/admin/stats/steps", "/v0/admin/stats/received", "/v0/admin/stats/matches", "/v0/admin/stats/top-queries"} {

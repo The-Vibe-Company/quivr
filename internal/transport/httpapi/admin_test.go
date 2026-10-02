@@ -61,7 +61,7 @@ func TestAdminDocumentsNeedObservabilityRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 
 	for _, path := range []string{"/v0/admin/documents", "/v0/admin/documents/version_1/timeline"} {

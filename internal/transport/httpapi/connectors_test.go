@@ -166,7 +166,7 @@ func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handler
+	return checkedAPI(t, handler)
 }
 
 func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {

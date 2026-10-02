@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/online"
+	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
 )
 
 const hitJSON = `{"items":[{"record_id":"rec_1","version_id":"ver_1","part_key":"body","segment_id":"seg_1","segmentation_id":"sgm_1","projection_generation_id":"gen_1","rank":1,"excerpt":{"text":"Eclipse over\nthe city","start":4,"end":24,"coordinate_system":"unicode_codepoint"},"availability":{"state":"retrieval_ready","is_current":true,"searchable":true}}],"retrieval_profile":{"name":"default","version":"v1"}}`
@@ -40,7 +41,7 @@ func server(t *testing.T, status int, body string) (*httptest.Server, *http.Requ
 	t.Helper()
 	var last http.Request
 	var payload map[string]any
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := httptest.NewServer(apicontract.Handler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		last = *r
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &payload)
@@ -51,7 +52,7 @@ func server(t *testing.T, status int, body string) (*httptest.Server, *http.Requ
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
-	}))
+	})))
 	t.Cleanup(s.Close)
 	return s, &last, &payload
 }
@@ -127,7 +128,18 @@ func TestSearchExitCodes(t *testing.T) {
 		{"unexpected", 302, ``, online.ExitFailed, []string{"quivr: HTTP 302"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, _, _ := server(t, tc.status, tc.body)
+			var s *httptest.Server
+			if tc.name == "proxy error" || tc.name == "unexpected" {
+				// These deliberately malformed intermediary responses exercise the
+				// CLI's transport fallback, not a successful Quivr API fake.
+				s = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+				}))
+				t.Cleanup(s.Close)
+			} else {
+				s, _, _ = server(t, tc.status, tc.body)
+			}
 			r := run(t, map[string]string{online.EnvAPIURL: s.URL, online.EnvAPIKey: "k"}, "search", "--corpus", "c1", "q")
 			if r.code != tc.exit || r.stdout != "" {
 				t.Fatalf("exit %d (want %d) stdout %q stderr %q", r.code, tc.exit, r.stdout, r.stderr)

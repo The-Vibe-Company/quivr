@@ -81,7 +81,7 @@ func (knownCorpora) Create(context.Context, string, corpus.CreateInput) (corpus.
 }
 func (knownCorpora) Read(_ context.Context, org, id string) (corpus.Corpus, error) {
 	if org == "org_a" && (id == "corpus_a" || id == "corpus_b") {
-		return corpus.Corpus{ID: id}, nil
+		return corpus.Corpus{ID: id, Name: "Example corpus", Retrieval: map[string]any{}}, nil
 	}
 	return corpus.Corpus{}, corpus.ErrNotFound
 }
@@ -89,7 +89,7 @@ func (knownCorpora) List(_ context.Context, _ corpus.Scope, after string, limit 
 	out := []corpus.Corpus{}
 	for _, id := range []string{"corpus_a", "corpus_b"} {
 		if id > after && len(out) < limit {
-			out = append(out, corpus.Corpus{ID: id})
+			out = append(out, corpus.Corpus{ID: id, Name: "Example corpus", Retrieval: map[string]any{}})
 		}
 	}
 	return out, nil
@@ -119,7 +119,7 @@ func changeServer(t *testing.T, journal *memoryJournal, stores ...corpus.Store) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	return server
 }

@@ -183,7 +183,7 @@ func monitoringServer(t *testing.T, configure ...func(*monitoring.Service)) *htt
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	return server
 }

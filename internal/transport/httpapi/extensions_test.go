@@ -30,7 +30,7 @@ func TestRetrievalMappingsMayAddressPluginOwnedNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	mapping := `{"idempotency_key":"k","retrieval":{"fields":[{"name":"heading_levels","source_pointer":"/extensions/acme-md.outline/data/heading_levels","type":"string_array","roles":["search"]}]}}`
 	if res, out := operationCall(t, server, "PUT", "/v0/corpora/corpus_a/retrieval", configurer, "application/json", mapping); res.StatusCode != 202 {

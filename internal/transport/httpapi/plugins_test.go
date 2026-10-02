@@ -88,7 +88,7 @@ func pluginServer(t *testing.T, store registry.Store) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	return server
 }
@@ -220,7 +220,7 @@ func TestActivePluginsNeedOnlyObservabilityRead(t *testing.T) {
 func TestPluginRegistrationAndActivationRoutes(t *testing.T) {
 	at := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
 	plan := registry.Plan{ID: "plan_1", CreatedAt: at, ActivatedAt: at, Source: registry.SourceActivation, PreviousPlanID: "plan_0"}
-	stored := registry.Registration{ID: "plugin_registration_stored", PluginID: "example.hash_embedder", State: registry.StateRegistered}
+	stored := registry.Registration{ID: "plugin_registration_stored", PluginID: "example.hash_embedder", Version: "0.1.0", Endpoint: "http://127.0.0.1:9961", ManifestDigest: "sha256:example", State: registry.StateRegistered}
 	store := &registryRows{plan: &plan, registrations: []registry.Registration{stored}}
 	server := pluginServer(t, store)
 	manifest, err := os.ReadFile("../../../sdks/go/examples/hash-embedder/quivr-plugin.yaml")

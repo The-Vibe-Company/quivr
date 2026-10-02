@@ -49,7 +49,7 @@ func TestEvaluationRetirementHTTPAuthorizationAndContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	base := "/v0/admin/subscriptions/"
 	version := "1.0.0+" + strings.Repeat("a", 122)

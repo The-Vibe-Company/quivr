@@ -181,6 +181,8 @@ type RelayAnswer struct {
 	Status      int
 	ContentType string
 	Body        string
+	// ErrorCode identifies an engine-generated failure, never a plugin reply.
+	ErrorCode string
 	// RetryAfter asks the source to retry later (a 503).
 	RetryAfter time.Duration
 	Receipts   []content.Receipt
@@ -203,8 +205,8 @@ type Relay struct {
 	Ingest   Ingestor
 }
 
-func unavailable() RelayAnswer {
-	return RelayAnswer{Status: 503, ContentType: "text/plain", Body: "temporarily unavailable; retry later", RetryAfter: RetryDelivery}
+func unavailable(code string) RelayAnswer {
+	return RelayAnswer{Status: 503, ContentType: "text/plain", Body: "temporarily unavailable; retry later", ErrorCode: code, RetryAfter: RetryDelivery}
 }
 
 // Deliver relays one request to instance id. It returns ErrNoWebhook for an
@@ -218,7 +220,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 	}
 	if err != nil {
 		slog.Warn("connector delivery failed", "connector_id", id, "code", "storage_unavailable")
-		return unavailable(), nil
+		return unavailable("storage_unavailable"), nil
 	}
 	connector, ok := r.Registry.Lookup(target.Kind)
 	receiver, pushes := connector.(Receiver)
@@ -237,9 +239,9 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 			slog.Warn("connector delivery outcome not recorded", "connector_id", id)
 		}
 		if class == ClassTransient {
-			return unavailable(), nil
+			return unavailable(code), nil
 		}
-		return RelayAnswer{Status: 500, ContentType: "text/plain", Body: "the delivery cannot be processed"}, nil
+		return RelayAnswer{Status: 500, ContentType: "text/plain", Body: "the delivery cannot be processed", ErrorCode: code}, nil
 	}
 	var err error
 	var credential json.RawMessage
@@ -266,11 +268,14 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 		return answer, nil
 	}
 	if route != "" && req.Method == "GET" {
+		if delivery.Status == 204 && delivery.Body != "" {
+			return fail(ClassSource, "plugin_invalid_response")
+		}
 		if len(delivery.Items) > 0 {
 			return fail(ClassSource, "challenge_has_items")
 		}
 		if err := r.Store.RecordDelivery(ctx, org, id, DeliveryOutcome{Accepted: true, Reads: delivery.Reads}); err != nil {
-			return unavailable(), nil
+			return unavailable("storage_unavailable"), nil
 		}
 		return answer, nil
 	}
@@ -304,7 +309,7 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 	}
 	if err := r.Store.RecordDelivery(ctx, org, id, outcome); err != nil {
 		// The items are accepted; a retried delivery replays them.
-		return unavailable(), nil
+		return unavailable("storage_unavailable"), nil
 	}
 	if route != "" {
 		if outcome.Failure != nil {

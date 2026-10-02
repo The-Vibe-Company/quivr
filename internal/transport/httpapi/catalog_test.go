@@ -69,7 +69,7 @@ func catalogServer(t *testing.T, catalog *memoryCatalog, stores ...corpus.Store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	changeCursor := getJSON(t, server, "/v0/changes?corpus_id=corpus_a", catalogReader, 200)["next_cursor"].(string)
 	return server, changeCursor
@@ -105,7 +105,7 @@ func catalogConnectors(t *testing.T) connectors.Service {
 	store := &memoryConnectors{items: map[string]connectors.Instance{}}
 	at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	for _, id := range []string{"connector_a", "connector_b"} {
-		store.items[id] = connectors.Instance{Organization: "org_a", ID: id, CorpusID: "corpus_a", Namespace: id, Kind: "fixture", Config: []byte(`{}`), Enabled: true, CreatedAt: at, Health: connectors.Health{State: connectors.HealthActive, EvaluatedAt: at}}
+		store.items[id] = connectors.Instance{Organization: "org_a", ID: id, CorpusID: "corpus_a", Namespace: id, Kind: "fixture", Config: []byte(`{}`), Enabled: true, CreatedAt: at, Interval: 5 * time.Minute, SilentAfter: 24 * time.Hour, Health: connectors.Health{State: connectors.HealthActive, EvaluatedAt: at}}
 	}
 	return connectors.Service{Store: store, Registry: registry}
 }

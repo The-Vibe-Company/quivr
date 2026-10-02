@@ -42,7 +42,7 @@ func TestUploadRouteErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			status, got := postJSON(t, handler, "/v0/uploads", adminKey, map[string]any{"size_bytes": 1, "sha256": strings.Repeat("a", 64), "media_type": "text/plain"})
+			status, got := postJSON(t, checkedAPI(t, handler), "/v0/uploads", adminKey, map[string]any{"size_bytes": 1, "sha256": strings.Repeat("a", 64), "media_type": "text/plain"})
 			if status != row.status || got["code"] != row.code || got["retryable"] != (row.status == 503) || strings.Contains(fmt.Sprint(got), "private") {
 				t.Fatalf("want %d %s without private details, got %d %v", row.status, row.code, status, got)
 			}

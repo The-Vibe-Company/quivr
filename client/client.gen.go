@@ -3783,14 +3783,14 @@ type ClientInterface interface {
 
 	// ChallengeConnectorAPI Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
 	//
 	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
 	ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PushConnectorAPIWithBody Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -3799,7 +3799,7 @@ type ClientInterface interface {
 
 	// PushConnectorAPI Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -4879,7 +4879,7 @@ func (c *Client) GetConnector(ctx context.Context, connectorId string, reqEditor
 
 // ChallengeConnectorAPI Answer a declared source challenge
 //
-// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
 //
 // Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
 func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -4896,7 +4896,7 @@ func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, 
 
 // PushConnectorAPIWithBody Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes any type of body and a specified content type.
 //
@@ -4915,7 +4915,7 @@ func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId strin
 
 // PushConnectorAPI Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -10252,7 +10252,7 @@ type ClientWithResponsesInterface interface {
 
 	// ChallengeConnectorAPIWithResponse Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+	// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -10261,7 +10261,7 @@ type ClientWithResponsesInterface interface {
 
 	// PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -10270,7 +10270,7 @@ type ClientWithResponsesInterface interface {
 
 	// PushConnectorAPIWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -12435,16 +12435,23 @@ func (r GetConnectorResponse) ContentType() string {
 	return ""
 }
 
+// ChallengeConnectorAPIResponse200Headers the declared response headers of an HTTP 200 response for ChallengeConnectorAPI
+type ChallengeConnectorAPIResponse200Headers struct {
+	QuivrResponseOrigin *string
+}
+
+// ChallengeConnectorAPIResponseDefaultHeaders the declared response headers of an HTTP default response for ChallengeConnectorAPI
+type ChallengeConnectorAPIResponseDefaultHeaders struct {
+	QuivrResponseOrigin *string
+}
+
 type ChallengeConnectorAPIResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	// JSONDefault the response for an HTTP default `application/json` response
-	JSONDefault *Error
-}
-
-// GetJSONDefault returns the response for an HTTP default `application/json` response
-func (r ChallengeConnectorAPIResponse) GetJSONDefault() *Error {
-	return r.JSONDefault
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ChallengeConnectorAPIResponse200Headers
+	// HeadersDefault the parsed response headers for an HTTP default response
+	HeadersDefault *ChallengeConnectorAPIResponseDefaultHeaders
 }
 
 // GetBody returns the raw response body bytes
@@ -12476,23 +12483,23 @@ func (r ChallengeConnectorAPIResponse) ContentType() string {
 	return ""
 }
 
+// PushConnectorAPIResponseDefaultHeaders the declared response headers of an HTTP default response for PushConnectorAPI
+type PushConnectorAPIResponseDefaultHeaders struct {
+	QuivrResponseOrigin *string
+}
+
 type PushConnectorAPIResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
 	JSON202 *ConnectorPushReceipts
-	// JSONDefault the response for an HTTP default `application/json` response
-	JSONDefault *Error
+	// HeadersDefault the parsed response headers for an HTTP default response
+	HeadersDefault *PushConnectorAPIResponseDefaultHeaders
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
 func (r PushConnectorAPIResponse) GetJSON202() *ConnectorPushReceipts {
 	return r.JSON202
-}
-
-// GetJSONDefault returns the response for an HTTP default `application/json` response
-func (r PushConnectorAPIResponse) GetJSONDefault() *Error {
-	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -15335,7 +15342,7 @@ func (c *ClientWithResponses) GetConnectorWithResponse(ctx context.Context, conn
 
 // ChallengeConnectorAPIWithResponse Answer a declared source challenge
 //
-// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+// Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -15350,7 +15357,7 @@ func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Cont
 
 // PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -15365,7 +15372,7 @@ func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.C
 
 // PushConnectorAPIWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -17501,13 +17508,26 @@ func ParseChallengeConnectorAPIResponse(rsp *http.Response) (*ChallengeConnector
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
+	case rsp.StatusCode == 200:
+		var headers ChallengeConnectorAPIResponse200Headers
+		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Quivr-Response-Origin", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.QuivrResponseOrigin = &value
 		}
-		response.JSONDefault = &dest
-
+		response.Headers200 = &headers
+	case true:
+		var headers ChallengeConnectorAPIResponseDefaultHeaders
+		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Quivr-Response-Origin", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.QuivrResponseOrigin = &value
+		}
+		response.HeadersDefault = &headers
 	}
 
 	return response, nil
@@ -17534,13 +17554,19 @@ func ParsePushConnectorAPIResponse(rsp *http.Response) (*PushConnectorAPIRespons
 		}
 		response.JSON202 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSONDefault = &dest
+	}
 
+	switch {
+	case true:
+		var headers PushConnectorAPIResponseDefaultHeaders
+		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Quivr-Response-Origin", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.QuivrResponseOrigin = &value
+		}
+		response.HeadersDefault = &headers
 	}
 
 	return response, nil

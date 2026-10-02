@@ -54,7 +54,12 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request, scope co
 		failure(w, 422, "item_rejected")
 	case err != nil:
 		failure(w, 503, "connectors_unavailable")
-	case answer.Status == 405:
+	case answer.ErrorCode != "":
+		if answer.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(answer.RetryAfter/time.Second)))
+		}
+		failure(w, answer.Status, answer.ErrorCode)
+	case answer.Allow != "":
 		w.Header().Set("Allow", answer.Allow)
 		failure(w, 405, "method_not_allowed")
 	case answer.Receipts != nil:
@@ -64,6 +69,7 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request, scope co
 		}
 		send(w, 202, transport.ConnectorPushReceipts{Receipts: receipts})
 	default:
+		w.Header().Set("Quivr-Response-Origin", "plugin")
 		if answer.ContentType != "" {
 			w.Header().Set("Content-Type", answer.ContentType)
 		} else if answer.Body != "" {

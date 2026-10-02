@@ -44,7 +44,7 @@ func (s backfillStore) BackfillEstimate(_ context.Context, _, _, key string) ([]
 		return nil, operations.BackfillEstimate{}, corpus.ErrNotFound
 	}
 	usd := 0.02
-	return canonical, operations.BackfillEstimate{EstimatedCostUSD: &usd, ConfirmationRequired: true}, nil
+	return canonical, operations.BackfillEstimate{RegistrationID: "reg", DurationBasis: "rate", EstimatedCostUSD: &usd, ConfirmationRequired: true}, nil
 }
 func (backfillStore) BackfillByKey(context.Context, string, string, string) (operations.Operation, error) {
 	return operations.Operation{}, corpus.ErrNotFound
@@ -84,7 +84,7 @@ func TestBackfillAndPromotionRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	const dry = `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":true}`
 	res, estimate := operationCall(t, server, "POST", "/v0/admin/backfills", operator, "application/json", dry)

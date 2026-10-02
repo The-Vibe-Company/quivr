@@ -8,6 +8,11 @@ import types
 import unittest
 from unittest import mock
 
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from api_contract import check_response, checked_fake
+
 import jev
 import run
 import scoring
@@ -45,7 +50,10 @@ class EvaluationSelection(unittest.TestCase):
                 pass
 
             def read(self):
-                return b'{"usage":{"paid_calls":1,"cost_cents":0}}'
+                body = {'items': [], 'retrieval_profile': {'name': 'deep', 'version': 'v1'},
+                        'usage': {'rounds': 1, 'elapsed_ms': 0, 'paid_calls': 1, 'cost_cents': 0}}
+                check_response('POST', '/v0/search', self.status, body)
+                return json.dumps(body).encode()
 
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             log = pathlib.Path(directory) / 'plugin.log'
@@ -142,23 +150,30 @@ class EvaluationSelection(unittest.TestCase):
                 self.searches = []
                 self.corpora = 0
 
+            @checked_fake
             def call(self, method, path, body=None, **kwargs):
                 if path == '/v0/corpora':
                     self.corpora += 1
-                    return 201, {'corpus_id': 'corpus'}
+                    return 201, {'corpus_id': 'corpus', 'name': 'Example corpus', 'effective_retrieval': {}}
                 if path == '/v0/search/profiles':
                     provider = {'kind': 'plugin', 'plugin_id': 'jev.rerank', 'plugin_version': '0.1.0'}
                     # The shape of SearchProfileDescription in contracts/http/v0/openapi.yaml: no version field.
-                    return 200, {'items': [{'name': 'deep', 'provider': provider}, {'name': 'default', 'provider': provider}]}
+                    return 200, {'items': [{'name': name, 'full_name': 'jev.rerank/' + name,
+                                           'aliases': [name], 'provider': provider}
+                                          for name in ['deep', 'default']]}
                 config = dict(self.stack.active) if self.stack else {}
                 self.searches.append({**body, 'configuration': config})
-                usage = {'paid_calls': int(body['profile'] == 'deep'), 'cost_cents': .1 if body['profile'] == 'deep' else 0}
+                usage = {'rounds': 1, 'elapsed_ms': 0, 'paid_calls': int(body['profile'] == 'deep'), 'cost_cents': .1 if body['profile'] == 'deep' else 0}
                 if body['profile'] == 'deep':
                     with self.jev_log.open('a') as output:
                         output.write(json.dumps({'event': 'jev_rerank', 'profile': 'deep', **usage,
                                                  'input_tokens': 100, 'pairs': config.get('candidate_count', 30),
                                                  'cache_hits': 0, 'fallback': False}) + '\n')
-                return 200, {'retrieval_profile': {'version': 'plugin:jev.rerank@0.1.0/' + body['profile']}, 'items': [{'record_id': 'r1'}], 'usage': usage}
+                return 200, {'retrieval_profile': {'name': body['profile'], 'version': 'plugin:jev.rerank@0.1.0/' + body['profile']},
+                             'items': [{'record_id': 'r1', 'version_id': 'v1', 'part_key': 'body', 'segment_id': 's1',
+                                        'segmentation_id': 'sg1', 'projection_generation_id': 'pg1', 'rank': 1,
+                                        'excerpt': {'text': 'a record', 'start': 0, 'end': 8, 'coordinate_system': 'unicode_codepoint'},
+                                        'availability': {'state': 'retrieval_ready', 'is_current': True, 'searchable': True}}], 'usage': usage}
 
         for enabled, allow_paid in [(False, True), (True, True), (True, False)]:
             with self.subTest(enabled=enabled, allow_paid=allow_paid), tempfile.TemporaryDirectory() as directory:

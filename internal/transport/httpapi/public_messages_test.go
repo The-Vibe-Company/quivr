@@ -19,6 +19,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 )
 
@@ -119,7 +120,7 @@ func checkRefusedRoute(t *testing.T, method, path, body string, status int, code
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	apicontract.Handler(t, handler).ServeHTTP(rec, req)
 	if rec.Code != status {
 		t.Fatalf("%s %s: %d %s, want status %d", method, path, rec.Code, rec.Body.String(), status)
 	}

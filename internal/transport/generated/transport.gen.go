@@ -7787,19 +7787,34 @@ type ChallengeConnectorAPIResponseObject interface {
 	VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error
 }
 
-type ChallengeConnectorAPI200TextResponse string
+type ChallengeConnectorAPI200ResponseHeaders struct {
+	QuivrResponseOrigin *string
+}
+
+type ChallengeConnectorAPI200TextResponse struct {
+	Body    string
+	Headers ChallengeConnectorAPI200ResponseHeaders
+}
 
 func (response ChallengeConnectorAPI200TextResponse) VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error {
 
 	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.QuivrResponseOrigin != nil {
+		w.Header().Set("Quivr-Response-Origin", fmt.Sprint(*response.Headers.QuivrResponseOrigin))
+	}
 	w.WriteHeader(200)
 
-	_, err := w.Write([]byte(fmt.Sprint(response)))
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
 	return err
+}
+
+type ChallengeConnectorAPIdefaultResponseHeaders struct {
+	QuivrResponseOrigin *string
 }
 
 type ChallengeConnectorAPIdefaultJSONResponse struct {
 	Body       Error
+	Headers    ChallengeConnectorAPIdefaultResponseHeaders
 	StatusCode int
 }
 
@@ -7810,6 +7825,9 @@ func (response ChallengeConnectorAPIdefaultJSONResponse) VisitChallengeConnector
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.QuivrResponseOrigin != nil {
+		w.Header().Set("Quivr-Response-Origin", fmt.Sprint(*response.Headers.QuivrResponseOrigin))
+	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err
@@ -7839,8 +7857,13 @@ func (response PushConnectorAPI202JSONResponse) VisitPushConnectorAPIResponse(w 
 	return err
 }
 
+type PushConnectorAPIdefaultResponseHeaders struct {
+	QuivrResponseOrigin *string
+}
+
 type PushConnectorAPIdefaultJSONResponse struct {
 	Body       Error
+	Headers    PushConnectorAPIdefaultResponseHeaders
 	StatusCode int
 }
 
@@ -7851,6 +7874,9 @@ func (response PushConnectorAPIdefaultJSONResponse) VisitPushConnectorAPIRespons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.QuivrResponseOrigin != nil {
+		w.Header().Set("Quivr-Response-Origin", fmt.Sprint(*response.Headers.QuivrResponseOrigin))
+	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err

@@ -109,7 +109,7 @@ func newAPI(t *testing.T, port *acceptancePort) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handler
+	return checkedAPI(t, handler)
 }
 
 // verifiedBlobs verifies Blob IDs prefixed "verified".

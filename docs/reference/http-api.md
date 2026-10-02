@@ -1028,7 +1028,7 @@ Operation `pushConnectorAPI`. Requires `connector:push`.
 
 Push data to a declared source route
 
-Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer. The legacy connector-webhooks route keeps its existing behavior.
+Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). Requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. The legacy connector-webhooks route keeps its existing behavior.
 
 **Parameters**
 
@@ -1044,7 +1044,7 @@ Resolve a named POST route from the instance kind's manifest (Plugin API 0.11). 
 | Status | Body | Description |
 | --- | --- | --- |
 | `202` | `application/json` [`ConnectorPushReceipts`](#connectorpushreceipts) | Items accepted for ingestion; poll each Receipt through the normal API. |
-| `default` | `application/json` [`Error`](#error) | Structured engine error, or the plugin's refusal answer. |
+| `default` | `application/json` [`Error`](#error)<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | Structured engine error, or the plugin's refusal answer. |
 
 #### `GET /v0/connectors/{connector_id}/api/{path}`
 
@@ -1052,7 +1052,7 @@ Operation `challengeConnectorAPI`. Requires `connector:push`.
 
 Answer a declared source challenge
 
-Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Only quivr_key authentication is supported in this version.
+Resolve a declared GET route with the same connector:push key authorization, scope, request limits and deadline as POST. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Only quivr_key authentication is supported in this version.
 
 **Parameters**
 
@@ -1065,8 +1065,8 @@ Resolve a declared GET route with the same connector:push key authorization, sco
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `text/plain` string | The plugin's synchronous challenge answer. |
-| `default` | `application/json` [`Error`](#error) | Structured engine error, or the plugin's refusal answer. |
+| `200` | `text/plain` string<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | The plugin's synchronous challenge answer. |
+| `default` | `application/json` [`Error`](#error)<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | Structured engine error, or the plugin's refusal answer. |
 
 #### `GET /v0/connectors/{connector_id}`
 

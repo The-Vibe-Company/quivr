@@ -46,7 +46,7 @@ func TestSearchUsesRoutedProfileDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	defer server.Close()
 	res, body := operationCall(t, server, "POST", "/v0/search", observer, "application/json", `{"query":"library","corpus_ids":["corpus_a"],"profile":"deep"}`)
 	if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining < 8*time.Second || routing.remaining > 9*time.Second {
@@ -74,7 +74,7 @@ func TestSearchProfilesExposeDeploymentNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	defer server.Close()
 	body := getJSON(t, server, "/v0/search/profiles", observer, 200)
 	items := body["items"].([]any)

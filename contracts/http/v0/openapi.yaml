@@ -1553,6 +1553,7 @@ paths:
       schema: {type: string, maxLength: 8192}
     post:
       operationId: pushConnectorAPI
+      x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [4XX]}
       summary: Push data to a declared source route
       description: >-
         Resolve a named POST route from the instance kind's manifest (Plugin API 0.11).
@@ -1566,7 +1567,12 @@ paths:
         including withdrawals; the accepted plugin answer is replaced. An empty delivery returns
         an empty receipts array. A rejected item returns 422 item_rejected; other items may already
         be accepted, so retrying their stable revisions replays the same receipts. Transient failures
-        return 503 with Retry-After. A refused plugin verdict returns its declared refusal answer.
+        return 503 with Retry-After. Engine-generated failures return the JSON Error envelope
+        with the engine's error code and no Quivr-Response-Origin header.
+        A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged,
+        marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response
+        variant (x-quivr-plugin-response), even when its status overlaps an engine response;
+        the engine response schemas below apply to responses without that header.
         The legacy connector-webhooks route keeps its existing behavior.
       x-required-permissions: [connector:push]
       requestBody:
@@ -1585,16 +1591,27 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+          headers:
+            Quivr-Response-Origin:
+              description: Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged.
+              schema: {type: string, enum: [plugin]}
     get:
       operationId: challengeConnectorAPI
+      x-quivr-plugin-response: {header: Quivr-Response-Origin, value: plugin, statuses: [2XX, 4XX]}
       summary: Answer a declared source challenge
       description: >-
         Resolve a declared GET route with the same connector:push key authorization, scope,
         request limits and deadline as POST. Only synchronous provider challenges are supported;
         a GET answer carrying ingestion items is rejected before ingestion. Reads and management
-        stay on the normal API. The plugin's challenge answer is returned unchanged. A bodyless
+        stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status,
+        content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header
+        selects the plugin-defined response variant (x-quivr-plugin-response), including provider
+        JSON or text challenges and statuses that overlap engine errors. Engine-generated failures
+        have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless
         challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods
-        return 405 with Allow. Only quivr_key authentication is supported in this version.
+        return 405 with Allow. A 204 challenge must have an empty response body; a plugin answer
+        combining 204 with a nonempty body returns 500 plugin_invalid_response.
+        Only quivr_key authentication is supported in this version.
       x-required-permissions: [connector:push]
       responses:
         '200':
@@ -1602,11 +1619,19 @@ paths:
           content:
             text/plain:
               schema: {type: string}
+          headers:
+            Quivr-Response-Origin:
+              description: Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged.
+              schema: {type: string, enum: [plugin]}
         default:
           description: Structured engine error, or the plugin's refusal answer.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+          headers:
+            Quivr-Response-Origin:
+              description: Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged.
+              schema: {type: string, enum: [plugin]}
   /v0/connector-webhooks/{connector_id}:
     get:
       operationId: relayConnectorChallenge

@@ -95,7 +95,7 @@ func operationServer(t *testing.T, store *memoryOperations) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 	return server
 }
